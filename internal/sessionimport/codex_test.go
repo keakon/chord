@@ -238,8 +238,8 @@ func TestConvertCodexRollout_UnsupportedToolKeepsSourceCall(t *testing.T) {
 	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_un" || msgs[2].Content != "some result" {
 		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}
-	if report.UnsupportedToolCalls != 1 {
-		t.Fatalf("UnsupportedToolCalls=%d, want 1", report.UnsupportedToolCalls)
+	if report.KeptSourceToolCalls != 1 {
+		t.Fatalf("KeptSourceToolCalls=%d, want 1", report.KeptSourceToolCalls)
 	}
 	if report.ToolEntriesRendered != 2 {
 		t.Fatalf("ToolEntriesRendered=%d, want 2", report.ToolEntriesRendered)
@@ -282,8 +282,8 @@ func TestConvertCodexRollout_MalformedArgumentsWrapToValidJSON(t *testing.T) {
 	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_malformed" || msgs[2].Content != "some result" {
 		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}
-	if report.UnsupportedToolCalls != 1 {
-		t.Fatalf("UnsupportedToolCalls=%d, want 1", report.UnsupportedToolCalls)
+	if report.KeptSourceToolCalls != 1 {
+		t.Fatalf("KeptSourceToolCalls=%d, want 1", report.KeptSourceToolCalls)
 	}
 }
 
@@ -348,7 +348,7 @@ func TestConvertCodexRollout_KeepsMappedToolsStructured(t *testing.T) {
 	if len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "shell" || msgs[2].Role != message.RoleTool {
 		t.Fatalf("msgs=%+v", msgs)
 	}
-	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 0 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.KeptSourceToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -466,7 +466,7 @@ func TestConvertCodexRollout_MapsKnownToolAndKeepsUnknownSourceCall(t *testing.T
 	if msgs[4].Role != message.RoleTool || msgs[4].ToolCallID != "call_dynamic" || msgs[4].Content != "dynamic result" {
 		t.Fatalf("unmapped tool result not linked: %+v", msgs[4])
 	}
-	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 2 || report.UnsupportedToolCalls != 1 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 2 || report.KeptSourceToolCalls != 1 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -498,7 +498,7 @@ func TestConvertCodexRollout_RealisticFixtureReportAndLineage(t *testing.T) {
 	if report.SourceSessionID != "realistic-session" {
 		t.Fatalf("SourceSessionID=%q", report.SourceSessionID)
 	}
-	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 2 || report.UnsupportedToolCalls != 1 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 2 || report.KeptSourceToolCalls != 1 {
 		t.Fatalf("tool stats=%+v", report)
 	}
 	if report.SkippedStatusEvents != 1 || report.SkippedDuplicates != 2 {
@@ -612,7 +612,7 @@ func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToEdit(t *testing.T) {
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_patch" || !strings.Contains(msgs[2].Content, "Success") {
 		t.Fatalf("tool result not linked: %+v", msgs[2])
 	}
-	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 0 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.KeptSourceToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -696,7 +696,7 @@ func TestConvertCodexRollout_ExecCommandConvertsToShell(t *testing.T) {
 	if msgs[2].ToolStatus != message.ToolStatusSuccess {
 		t.Fatalf("tool status=%q, want success", msgs[2].ToolStatus)
 	}
-	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 0 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.KeptSourceToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 	if report.CodexExecScripts != 1 {
@@ -762,10 +762,10 @@ func TestConvertCodexRollout_ExecUnmappableNestedToolKeepsSourceCall(t *testing.
 	// write_stdin drives an interactive session Chord does not keep, so the call
 	// has no mapping — but it still ran, so the source `exec` call and its result
 	// stay in the trajectory.
-	input := "const r = await tools.write_stdin({session_id:35265,yield_time_ms:1000,max_output_tokens:12000,chars:\"\"});\ntext(JSON.stringify(r));"
+	input := "const r = await tools.write_stdin({session_id:481,yield_time_ms:2500,max_output_tokens:8000,chars:\"\"});\ntext(JSON.stringify(r));"
 	data := codexExecRollout(t, input,
 		"Script completed\nWall time 1.0 seconds\nOutput:\n",
-		"{\"session_id\":35265,\"output\":\"more\"}",
+		"{\"session_id\":481,\"output\":\"more\"}",
 	)
 
 	var report ImportReport
@@ -778,10 +778,10 @@ func TestConvertCodexRollout_ExecUnmappableNestedToolKeepsSourceCall(t *testing.
 	}
 	wantArgs, _ := json.Marshal(map[string]string{"input": input})
 	assertCodexImportedToolCall(t, msgs[1], "exec", string(wantArgs))
-	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_exec" || msgs[2].Content != "{\"session_id\":35265,\"output\":\"more\"}" {
+	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_exec" || msgs[2].Content != "{\"session_id\":481,\"output\":\"more\"}" {
 		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}
-	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 1 {
+	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 1 || report.KeptSourceToolCalls != 1 {
 		t.Fatalf("report=%+v", report)
 	}
 	if report.CodexExecScripts != 1 {
@@ -811,7 +811,7 @@ func TestConvertCodexRollout_ExecWithMultipleNestedCallsKeepsSourceCall(t *testi
 	if msgs[2].Role != message.RoleTool || msgs[2].Content != "/tmp\nfile.go\n" {
 		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}
-	if report.StructuredToolCalls != 0 || report.UnsupportedToolCalls != 1 {
+	if report.StructuredToolCalls != 0 || report.KeptSourceToolCalls != 1 {
 		t.Fatalf("report=%+v", report)
 	}
 	if report.CodexExecScripts != 0 {
@@ -838,7 +838,7 @@ func TestConvertCodexRollout_CollaborationToolKeepsSourceCall(t *testing.T) {
 	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_agent" || msgs[2].Content != "agent finished" {
 		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}
-	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 1 {
+	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 1 || report.KeptSourceToolCalls != 1 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -864,13 +864,13 @@ func TestConvertCodexRollout_WebSearchEndRestoresAsToolCall(t *testing.T) {
 	if msgs[2].Role != "assistant" || msgs[2].Content != "done" {
 		t.Fatalf("trailing assistant message lost: %+v", msgs[2])
 	}
-	if report.StructuredToolCalls != 0 || report.UnsupportedToolCalls != 1 || report.SkippedStatusEvents != 1 {
+	if report.StructuredToolCalls != 0 || report.KeptSourceToolCalls != 1 || report.SkippedStatusEvents != 1 {
 		t.Fatalf("report=%+v", report)
 	}
 }
 
 func TestCodexNormalizeSearchArgsUseCurrentToolSchema(t *testing.T) {
-	grepRaw := codexNormalizeGrepArgs(map[string]any{
+	grepRaw := normalizeImportedGrepArgs(map[string]any{
 		"pattern": "TODO",
 		"path":    "internal",
 		"glob":    "**/*.go",
@@ -891,7 +891,7 @@ func TestCodexNormalizeSearchArgsUseCurrentToolSchema(t *testing.T) {
 		t.Fatalf("grep args=%#v", grepArgs)
 	}
 
-	globRaw := codexNormalizeGlobArgs(map[string]any{
+	globRaw := normalizeImportedGlobArgs(map[string]any{
 		"pattern": "**/*.go",
 		"path":    ".",
 	})
@@ -913,7 +913,7 @@ func TestCodexNormalizeSearchArgsUseCurrentToolSchema(t *testing.T) {
 // otherwise so the Chord card header shows the command's first line — the same
 // view a live call produces, with no import marker for user or model.
 func TestCodexNormalizeShellArgsOmitsSynthesizedDescription(t *testing.T) {
-	raw := codexNormalizeShellArgs(map[string]any{"command": "ls -la"})
+	raw := normalizeImportedShellArgs(map[string]any{"command": "ls -la"})
 	var args map[string]any
 	if err := json.Unmarshal(raw, &args); err != nil {
 		t.Fatalf("unmarshal shell args: %v", err)
@@ -925,7 +925,7 @@ func TestCodexNormalizeShellArgsOmitsSynthesizedDescription(t *testing.T) {
 		t.Fatalf("command lost: %#v", args)
 	}
 
-	withDesc := codexNormalizeShellArgs(map[string]any{"command": "ls -la", "description": "list files"})
+	withDesc := normalizeImportedShellArgs(map[string]any{"command": "ls -la", "description": "list files"})
 	var descArgs map[string]any
 	if err := json.Unmarshal(withDesc, &descArgs); err != nil {
 		t.Fatalf("unmarshal shell args: %v", err)
@@ -939,7 +939,7 @@ func TestCodexNormalizeShellArgsOmitsSynthesizedDescription(t *testing.T) {
 // recorded no reason: the stand-in names the gap rather than the import, so
 // the card header reads as a structural fact and carries no provenance.
 func TestCodexNormalizeDeleteArgsUsesNeutralReasonFallback(t *testing.T) {
-	raw := codexNormalizeDeleteArgs(map[string]any{"paths": []any{"a.txt"}})
+	raw := normalizeImportedDeleteArgs(map[string]any{"paths": []any{"a.txt"}})
 	var args map[string]any
 	if err := json.Unmarshal(raw, &args); err != nil {
 		t.Fatalf("unmarshal delete args: %v", err)
@@ -951,7 +951,7 @@ func TestCodexNormalizeDeleteArgsUsesNeutralReasonFallback(t *testing.T) {
 		t.Fatalf("reason leaked import provenance: %#v", args)
 	}
 
-	withReason := codexNormalizeDeleteArgs(map[string]any{"paths": []any{"a.txt"}, "reason": "stale artifact"})
+	withReason := normalizeImportedDeleteArgs(map[string]any{"paths": []any{"a.txt"}, "reason": "stale artifact"})
 	var reasonArgs map[string]any
 	if err := json.Unmarshal(withReason, &reasonArgs); err != nil {
 		t.Fatalf("unmarshal delete args: %v", err)
@@ -979,7 +979,7 @@ func TestCodexNormalizeExecCommandArgsOmitsSynthesizedDescription(t *testing.T) 
 }
 
 func TestCodexNormalizeShellArgsUseCurrentToolSchema(t *testing.T) {
-	raw := codexNormalizeShellArgs(map[string]any{
+	raw := normalizeImportedShellArgs(map[string]any{
 		"cmd":     "go test ./...",
 		"workdir": "/tmp",
 		"timeout": 30,
@@ -1000,7 +1000,7 @@ func TestCodexNormalizeShellArgsUseCurrentToolSchema(t *testing.T) {
 		t.Fatalf("shell args=%#v", args)
 	}
 
-	fractional := codexNormalizeShellArgs(map[string]any{
+	fractional := normalizeImportedShellArgs(map[string]any{
 		"command": "sleep 2",
 		"timeout": 1.5,
 	})

@@ -210,7 +210,7 @@ func convertClaudeTranscript(data []byte, reasoningMode string, report *ImportRe
 		}
 		// A call with no Chord mapping is still replayed as a tool call, so it
 		// is counted apart from the mapped ones but stays in the trajectory.
-		report.UnsupportedToolCalls += unsupportedToolCalls
+		report.KeptSourceToolCalls += unsupportedToolCalls
 		for _, m := range msg {
 			if m.Role == claudeRoleAssistant {
 				structured := len(m.ToolCalls) - unsupportedToolCalls
@@ -746,38 +746,25 @@ func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Me
 
 func convertClaudeToolCall(block claudeContentBlock) (message.ToolCall, bool) {
 	name := strings.TrimSpace(block.Name)
-	switch name {
-	case "Bash", "Shell", tools.NameShell:
-		if norm := normalizeClaudeBashArgs(block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: tools.NameShell, Args: norm}, false
+	args := block.Input
+	// Claude's Bash records its timeout in milliseconds, one of the wall-clock
+	// units the shell candidates read, so it is converted to the seconds the
+	// shared argument normalizer expects before the mapping.
+	if importedToolClosestIs(name, tools.NameShell) {
+		if parsed, ok := parseImportedToolArgs(args); ok {
+			if out, err := json.Marshal(importedShellTimeoutToSeconds(parsed)); err == nil {
+				args = out
+			}
 		}
-	case "Read", tools.NameRead:
-		if norm := normalizeClaudeReadArgs(block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: tools.NameRead, Args: norm}, false
-		}
-	case "Write", tools.NameWrite:
-		if norm := normalizeClaudeWriteArgs(block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: tools.NameWrite, Args: norm}, false
-		}
-	case "Delete", "Remove", tools.NameDelete:
-		if norm := normalizeClaudeDeleteArgs(block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: tools.NameDelete, Args: norm}, false
-		}
-	case "AskUserQuestion", tools.NameQuestion:
-		// Claude asks with the same questions Chord does, so the call imports
-		// as the question it was whenever its choices can be read; otherwise it
-		// stays the source call (see normalizeImportedQuestionArgs).
-		if chordName, norm, ok := resolveImportedTool(name, block.Input); ok {
-			return message.ToolCall{ID: block.ID, Name: chordName, Args: norm}, false
-		}
-	case "Edit", "MultiEdit", "Update", tools.NameEdit, tools.NameApplyPatch:
-		// Claude's edit family is decided by what the call recorded: a
-		// before/after pair (or MultiEdit's batch) is Chord's own replacement,
-		// while an Update carrying a patch envelope becomes apply_patch rather
-		// than a replacement tool forced to take patch arguments.
-		if chordName, norm, ok := resolveImportedTool(name, block.Input); ok {
-			return message.ToolCall{ID: block.ID, Name: chordName, Args: norm}, false
-		}
+	}
+	// The shared table reads the recorded arguments, not the source's
+	// vocabulary: a call whose values say shell, read, write, delete, an edit,
+	// a patch, grep, glob or question imports as the Chord tool that does the
+	// same work; a call the table cannot read stays the source call it was,
+	// since nothing invented from partial arguments is better than the
+	// original (see resolveImportedTool).
+	if chordName, norm, ok := resolveImportedTool(name, args); ok {
+		return message.ToolCall{ID: block.ID, Name: chordName, Args: norm}, false
 	}
 	if name == "" {
 		name = "unknown"
@@ -791,98 +778,6 @@ func convertClaudeToolCall(block claudeContentBlock) (message.ToolCall, bool) {
 		return message.ToolCall{ID: block.ID, Name: name, Args: json.RawMessage(`{}`)}, true
 	}
 	return message.ToolCall{ID: block.ID, Name: name, Args: block.Input}, true
-}
-
-func normalizeClaudeBashArgs(raw json.RawMessage) json.RawMessage {
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return nil
-	}
-	command := claudePickString(args, "command")
-	if command == "" {
-		return nil
-	}
-	result := map[string]any{"command": command}
-	// Claude's Bash records its own description, the only subject the call
-	// ever had, so it carries over verbatim. Without one the Chord header
-	// shows the command's first line like a live call; a synthesized
-	// placeholder would read as import bookkeeping to user and model alike.
-	if description := claudePickString(args, "description"); description != "" {
-		result["description"] = description
-	}
-	b, _ := json.Marshal(result)
-	return b
-}
-
-func normalizeClaudeReadArgs(raw json.RawMessage) json.RawMessage {
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return nil
-	}
-	path := claudePickString(args, "file_path", "path")
-	if path == "" {
-		return nil
-	}
-	result := map[string]any{"path": path}
-	if offset := claudePickFloat(args, "offset", "start_line"); offset > 0 {
-		result["offset"] = int(offset)
-	}
-	if limit := claudePickFloat(args, "limit"); limit > 0 {
-		result["limit"] = int(limit)
-	}
-	b, _ := json.Marshal(result)
-	return b
-}
-
-func claudePickString(m map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func claudePickStringList(m map[string]any, keys ...string) []string {
-	for _, key := range keys {
-		v, ok := m[key]
-		if !ok {
-			continue
-		}
-		switch t := v.(type) {
-		case string:
-			if s := strings.TrimSpace(t); s != "" {
-				return []string{s}
-			}
-		case []any:
-			out := make([]string, 0, len(t))
-			for _, item := range t {
-				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-					out = append(out, strings.TrimSpace(s))
-				}
-			}
-			if len(out) > 0 {
-				return out
-			}
-		}
-	}
-	return nil
-}
-
-func claudePickFloat(m map[string]any, keys ...string) float64 {
-	for _, key := range keys {
-		switch v := m[key].(type) {
-		case float64:
-			if v > 0 {
-				return v
-			}
-		case int:
-			if v > 0 {
-				return float64(v)
-			}
-		}
-	}
-	return 0
 }
 
 func renderClaudeUnsupportedMessage(env claudeTranscriptEnvelope, role string) message.Message {
@@ -901,39 +796,6 @@ func renderClaudeUnsupportedMessage(env claudeTranscriptEnvelope, role string) m
 		fields = append(fields, "Content:", content)
 	}
 	return message.Message{Role: message.RoleAssistant, Content: renderImportedFallbackBlock(claudeUnsupportedTranscriptHeader(role), fields...), Provenance: importedClaudeProvenance()}
-}
-
-func normalizeClaudeWriteArgs(raw json.RawMessage) json.RawMessage {
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return nil
-	}
-	path := claudePickString(args, "path", "file_path", "file")
-	content := claudePickString(args, "content", "text")
-	if path == "" {
-		return nil
-	}
-	result := map[string]any{"path": path, "content": content}
-	b, _ := json.Marshal(result)
-	return b
-}
-
-func normalizeClaudeDeleteArgs(raw json.RawMessage) json.RawMessage {
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return nil
-	}
-	paths := claudePickStringList(args, "paths", "path", "file_path", "file")
-	if len(paths) == 0 {
-		return nil
-	}
-	reason := claudePickString(args, "reason")
-	if reason == "" {
-		reason = deleteReasonFallback
-	}
-	result := map[string]any{"paths": paths, "reason": reason}
-	b, _ := json.Marshal(result)
-	return b
 }
 
 func rawContentString(raw json.RawMessage) string {

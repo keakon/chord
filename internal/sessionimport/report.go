@@ -26,10 +26,10 @@ type ImportReport struct {
 	// analyzed down to a single known nested call.
 	CodexExecScripts int `json:"codex_exec_scripts,omitempty"`
 
-	// Downgrade/fallback statistics. A tool call with no Chord mapping is kept
-	// under its source name and arguments instead of being downgraded, so only
-	// the call side has a counter: there is no separate downgraded-result count.
-	UnsupportedToolCalls    int `json:"unsupported_tool_calls,omitempty"`
+	// Unmapped-call accounting. A tool call whose recorded values no Chord
+	// tool takes stays the source call it was, under the source name and
+	// arguments, so only the call side has a counter.
+	KeptSourceToolCalls     int `json:"kept_source_tool_calls,omitempty"`
 	MissingToolDeclarations int `json:"missing_tool_declarations,omitempty"`
 	MissingToolCallIDs      int `json:"missing_tool_call_ids,omitempty"`
 

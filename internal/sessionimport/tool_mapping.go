@@ -2,6 +2,7 @@ package sessionimport
 
 import (
 	"encoding/json"
+	"maps"
 	"strings"
 
 	"github.com/keakon/chord/internal/tools"
@@ -89,6 +90,22 @@ func importedToolClosestIs(sourceName, target string) bool {
 	return len(candidates) > 0 && candidates[0] == target
 }
 
+// importedShellTimeoutToSeconds rewrites the millisecond `timeout` that
+// Claude's Bash and OpenCode's bash record into the seconds the shared
+// argument normalizer expects. Feeding the source value straight through
+// would be multiplied by a thousand again, leaving the imported call a
+// deadline it never ran with.
+func importedShellTimeoutToSeconds(args map[string]any) map[string]any {
+	ms := codexPickFloat(args, "timeout")
+	if ms <= 0 {
+		return args
+	}
+	out := make(map[string]any, len(args))
+	maps.Copy(out, args)
+	out["timeout"] = ms / 1000
+	return out
+}
+
 func normalizeImportedToolName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
@@ -112,6 +129,10 @@ func parseImportedToolArgs(raw json.RawMessage) (map[string]any, bool) {
 	return args, true
 }
 
+// normalizeImportedToolArgs reads a source call's recorded arguments into the
+// argument shape of the Chord tool it was mapped to. All three importers come
+// through here, so each normalizer accepts the spellings every source uses
+// (`cmd`/`command`, `file_path`/`filePath`) instead of one per importer.
 func normalizeImportedToolArgs(chordName string, args map[string]any) json.RawMessage {
 	switch chordName {
 	case tools.NameEdit:
@@ -119,17 +140,17 @@ func normalizeImportedToolArgs(chordName string, args map[string]any) json.RawMe
 	case tools.NameApplyPatch:
 		return normalizeApplyPatchArgs(args)
 	case tools.NameShell:
-		return codexNormalizeShellArgs(args)
+		return normalizeImportedShellArgs(args)
 	case tools.NameRead:
-		return codexNormalizeReadArgs(args)
+		return normalizeImportedReadArgs(args)
 	case tools.NameWrite:
-		return codexNormalizeWriteArgs(args)
+		return normalizeImportedWriteArgs(args)
 	case tools.NameDelete:
-		return codexNormalizeDeleteArgs(args)
+		return normalizeImportedDeleteArgs(args)
 	case tools.NameGrep:
-		return codexNormalizeGrepArgs(args)
+		return normalizeImportedGrepArgs(args)
 	case tools.NameGlob:
-		return codexNormalizeGlobArgs(args)
+		return normalizeImportedGlobArgs(args)
 	case tools.NameQuestion:
 		return normalizeImportedQuestionArgs(args)
 	default:
@@ -336,4 +357,17 @@ func pickImportedBool(args map[string]any, keys ...string) *bool {
 		}
 	}
 	return nil
+}
+
+// importedPickRequiredString returns the first of the given keys whose value
+// is a string, reporting presence rather than non-emptiness: a present but
+// empty value is the value the source wrote and carries over as it was, while
+// a missing one leaves the call unreadable rather than inventing a value.
+func importedPickRequiredString(args map[string]any, keys ...string) (string, bool) {
+	for _, k := range keys {
+		if v, ok := args[k].(string); ok {
+			return v, true
+		}
+	}
+	return "", false
 }

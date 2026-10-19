@@ -10,10 +10,10 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// assertClaudeUnsupportedToolCall asserts that a Claude tool call with no Chord
+// assertClaudeKeptSourceToolCall asserts that a Claude tool call with no Chord
 // mapping stayed a tool call under the source name, with the source arguments
 // verbatim and no importer metadata folded in.
-func assertClaudeUnsupportedToolCall(t *testing.T, msg message.Message, wantName string, wantArgs string) {
+func assertClaudeKeptSourceToolCall(t *testing.T, msg message.Message, wantName string, wantArgs string) {
 	t.Helper()
 	if msg.Role != message.RoleAssistant {
 		t.Fatalf("role=%q, want assistant", msg.Role)
@@ -126,7 +126,7 @@ func TestConvertClaudeTranscript_MapsBashAndReadTools(t *testing.T) {
 	if len(msgs[3].ToolCalls) != 1 || msgs[3].ToolCalls[0].Name != "read" {
 		t.Fatalf("Read not restored as tool card: %+v", msgs[3])
 	}
-	if report.StructuredToolCalls != 2 || report.Claude == nil || report.Claude.StructuredToolCalls != 2 || report.UnsupportedToolCalls != 0 {
+	if report.StructuredToolCalls != 2 || report.Claude == nil || report.Claude.StructuredToolCalls != 2 || report.KeptSourceToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -134,12 +134,20 @@ func TestConvertClaudeTranscript_MapsBashAndReadTools(t *testing.T) {
 // A mapped Bash call must look like a live Chord shell call: the source
 // description survives, and a call without one stays without one so the card
 // header shows the command's first line instead of an import marker.
-func TestNormalizeClaudeBashArgsOmitsSynthesizedDescription(t *testing.T) {
-	raw := normalizeClaudeBashArgs(json.RawMessage(`{"command":"pwd"}`))
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		t.Fatalf("unmarshal bash args: %v", err)
+func TestMapClaudeBashKeepsOnlyTheRecordedDescription(t *testing.T) {
+	mapped := func(raw string) map[string]any {
+		t.Helper()
+		_, norm, ok := resolveImportedTool("Bash", json.RawMessage(raw))
+		if !ok {
+			t.Fatalf("bash did not map: %s", raw)
+		}
+		var args map[string]any
+		if err := json.Unmarshal(norm, &args); err != nil {
+			t.Fatalf("unmarshal bash args: %v", err)
+		}
+		return args
 	}
+	args := mapped(`{"command":"pwd"}`)
 	if _, ok := args["description"]; ok {
 		t.Fatalf("synthesized a description the source never had: %#v", args)
 	}
@@ -147,25 +155,73 @@ func TestNormalizeClaudeBashArgsOmitsSynthesizedDescription(t *testing.T) {
 		t.Fatalf("command lost: %#v", args)
 	}
 
-	withDesc := normalizeClaudeBashArgs(json.RawMessage(`{"command":"pwd","description":"print cwd"}`))
-	var descArgs map[string]any
-	if err := json.Unmarshal(withDesc, &descArgs); err != nil {
-		t.Fatalf("unmarshal bash args: %v", err)
-	}
+	descArgs := mapped(`{"command":"pwd","description":"print cwd"}`)
 	if descArgs["description"] != "print cwd" {
 		t.Fatalf("source description dropped: %#v", descArgs)
 	}
 }
 
-// A mapped delete call must satisfy Chord's schema even when the source
-// recorded no reason: the stand-in names the gap rather than the import, so
-// the card header reads as a structural fact and carries no provenance.
-func TestNormalizeClaudeDeleteArgsUsesNeutralReasonFallback(t *testing.T) {
-	raw := normalizeClaudeDeleteArgs(json.RawMessage(`{"path":"a.txt"}`))
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		t.Fatalf("unmarshal delete args: %v", err)
+// A mapped write call carries the content the source recorded: a present but
+// empty value is the truncation the source wrote and imports as Chord's own
+// empty write, while a write that named no content at all stays the source
+// call it was rather than taking an invented one.
+func TestMapClaudeWriteCarriesAPresentEmptyContent(t *testing.T) {
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"write files"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_empty","name":"Write","input":{"file_path":"a.txt","content":""}},{"type":"tool_use","id":"toolu_missing","name":"Write","input":{"file_path":"b.txt"}}]}}
+{"uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_empty","content":"ok"},{"type":"tool_result","tool_use_id":"toolu_missing","content":"ok"}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
+	if len(msgs) != 4 || len(msgs[1].ToolCalls) != 2 {
+		t.Fatalf("msgs=%+v", msgs)
+	}
+	if msgs[1].ToolCalls[0].Name != "write" {
+		t.Fatalf("empty write not mapped: %+v", msgs[1].ToolCalls[0])
+	}
+	var emptyArgs struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &emptyArgs); err != nil {
+		t.Fatalf("unmarshal write args: %v", err)
+	}
+	if emptyArgs.Path != "a.txt" || emptyArgs.Content != "" {
+		t.Fatalf("write args=%#v, want the recorded empty content", emptyArgs)
+	}
+	kept := msgs[1].ToolCalls[1]
+	if kept.Name != "Write" {
+		t.Fatalf("contentless write no longer the source call: %q", kept.Name)
+	}
+	want, _ := json.Marshal(map[string]any{"file_path": "b.txt"})
+	if strings.TrimSpace(string(kept.Args)) != string(want) {
+		t.Fatalf("contentless write args=%s, want the source arguments verbatim %s", kept.Args, want)
+	}
+	if report.StructuredToolCalls != 1 || report.KeptSourceToolCalls != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
+// TestMapClaudeDeleteUsesNeutralReasonFallback pins that a mapped delete call
+// satisfies Chord's schema even when the source recorded no reason: the
+// stand-in names the gap rather than the import, so the card header reads as a
+// structural fact and carries no provenance.
+func TestMapClaudeDeleteUsesNeutralReasonFallback(t *testing.T) {
+	mapped := func(raw string) map[string]any {
+		t.Helper()
+		_, norm, ok := resolveImportedTool("Delete", json.RawMessage(raw))
+		if !ok {
+			t.Fatalf("delete did not map: %s", raw)
+		}
+		var args map[string]any
+		if err := json.Unmarshal(norm, &args); err != nil {
+			t.Fatalf("unmarshal delete args: %v", err)
+		}
+		return args
+	}
+	args := mapped(`{"path":"a.txt"}`)
 	if args["reason"] != deleteReasonFallback {
 		t.Fatalf("reason=%v, want the neutral stand-in %q", args["reason"], deleteReasonFallback)
 	}
@@ -173,11 +229,7 @@ func TestNormalizeClaudeDeleteArgsUsesNeutralReasonFallback(t *testing.T) {
 		t.Fatalf("reason leaked import provenance: %#v", args)
 	}
 
-	withReason := normalizeClaudeDeleteArgs(json.RawMessage(`{"path":"a.txt","reason":"stale artifact"}`))
-	var reasonArgs map[string]any
-	if err := json.Unmarshal(withReason, &reasonArgs); err != nil {
-		t.Fatalf("unmarshal delete args: %v", err)
-	}
+	reasonArgs := mapped(`{"path":"a.txt","reason":"stale artifact"}`)
 	if reasonArgs["reason"] != "stale artifact" {
 		t.Fatalf("source reason dropped: %#v", reasonArgs)
 	}
@@ -226,7 +278,7 @@ func TestConvertClaudeTranscript_MapsAskUserQuestionToQuestion(t *testing.T) {
 	if !reflect.DeepEqual(args.Questions[0], want) {
 		t.Fatalf("question=%+v, want %+v", args.Questions[0], want)
 	}
-	if report.UnsupportedToolCalls != 0 || report.StructuredToolCalls != 1 {
+	if report.KeptSourceToolCalls != 0 || report.StructuredToolCalls != 1 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -249,8 +301,8 @@ func TestConvertClaudeTranscript_KeepsAskUserQuestionWhenLabelsCannotIdentifyOpt
 	if len(msgs) != 3 {
 		t.Fatalf("msgs=%+v, want user + tool card + result", msgs)
 	}
-	assertClaudeUnsupportedToolCall(t, msgs[1], "AskUserQuestion", input)
-	if report.UnsupportedToolCalls != 1 || report.StructuredToolCalls != 0 {
+	assertClaudeKeptSourceToolCall(t, msgs[1], "AskUserQuestion", input)
+	if report.KeptSourceToolCalls != 1 || report.StructuredToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -272,11 +324,11 @@ func TestConvertClaudeTranscript_UnsupportedToolKeepsSourceCall(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("msgs=%+v, want user + tool card + result", msgs)
 	}
-	assertClaudeUnsupportedToolCall(t, msgs[1], "WebSearch", `{"query":"golang"}`)
+	assertClaudeKeptSourceToolCall(t, msgs[1], "WebSearch", `{"query":"golang"}`)
 	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "toolu_unknown" || msgs[2].Content != "12 hits" {
 		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}
-	if report.UnsupportedToolCalls != 1 || report.StructuredToolCalls != 0 {
+	if report.KeptSourceToolCalls != 1 || report.StructuredToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -296,8 +348,8 @@ func TestConvertClaudeTranscript_UnsupportedToolWithoutInputKeepsCall(t *testing
 	if len(msgs) != 2 {
 		t.Fatalf("msgs=%+v, want user + tool card", msgs)
 	}
-	assertClaudeUnsupportedToolCall(t, msgs[1], "TodoWrite", "{}")
-	if report.UnsupportedToolCalls != 1 || report.StructuredToolCalls != 0 {
+	assertClaudeKeptSourceToolCall(t, msgs[1], "TodoWrite", "{}")
+	if report.KeptSourceToolCalls != 1 || report.StructuredToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -364,7 +416,7 @@ func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing
 	if _, exists := updateArgs["path"]; exists || !strings.Contains(updatePatch, "*** Update File:d.txt") || !strings.Contains(updatePatch, "-old") || !strings.Contains(updatePatch, "+new") {
 		t.Fatalf("update args=%#v", updateArgs)
 	}
-	if report.StructuredToolCalls != 4 || report.UnsupportedToolCalls != 0 || report.Claude == nil || report.Claude.StructuredToolCalls != 4 {
+	if report.StructuredToolCalls != 4 || report.KeptSourceToolCalls != 0 || report.Claude == nil || report.Claude.StructuredToolCalls != 4 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -396,7 +448,7 @@ func TestConvertClaudeTranscript_MultiEditEmptyReplacementConvertsToDeletionBatc
 	if args.Path != "b.txt" || len(args.Edits) != 1 || !strings.Contains(args.Edits[0].OldString, "remove me") || args.Edits[0].NewString != "" {
 		t.Fatalf("args=%#v", args)
 	}
-	if report.StructuredToolCalls != 1 || report.UnsupportedToolCalls != 0 {
+	if report.StructuredToolCalls != 1 || report.KeptSourceToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }

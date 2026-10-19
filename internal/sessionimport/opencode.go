@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"path/filepath"
 	"strings"
 
@@ -101,7 +100,7 @@ func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportRepo
 		}
 		if toolRenderedCount > 0 {
 			report.ToolEntriesRendered += toolRenderedCount
-			report.UnsupportedToolCalls += unsupportedToolCount
+			report.KeptSourceToolCalls += unsupportedToolCount
 			report.StructuredToolCalls += structuredToolCalls
 			report.StructuredToolResults += structuredToolResults
 		}
@@ -479,7 +478,7 @@ func openCodeStructuredToolMessages(part map[string]any) (call message.Message, 
 	}
 	args := openCodeToolArgs(part)
 	if importedToolClosestIs(name, tools.NameShell) {
-		args = openCodeShellArgsToSeconds(args)
+		args = importedShellTimeoutToSeconds(args)
 	}
 	rawArgs, err := json.Marshal(args)
 	if err != nil {
@@ -494,21 +493,6 @@ func openCodeStructuredToolMessages(part map[string]any) (call message.Message, 
 	// rather than mixing one with the other.
 	callMsg, resultMsg := openCodeToolMessages(name, callID, rawArgs, part)
 	return callMsg, resultMsg, true, false
-}
-
-// openCodeShellArgsToSeconds rewrites the millisecond timeout OpenCode records
-// into the seconds the shared argument normalizer expects. Feeding the source
-// value straight through would multiply it by a thousand again and leave the
-// imported call carrying a deadline it never ran with.
-func openCodeShellArgsToSeconds(args map[string]any) map[string]any {
-	ms := codexPickFloat(args, "timeout")
-	if ms <= 0 {
-		return args
-	}
-	out := make(map[string]any, len(args))
-	maps.Copy(out, args)
-	out["timeout"] = ms / 1000
-	return out
 }
 
 func openCodeToolMessages(name, callID string, args json.RawMessage, part map[string]any) (message.Message, *message.Message) {

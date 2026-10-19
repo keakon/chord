@@ -143,8 +143,8 @@ func TestConvertOpenCodeExport_KeepsUnmappedToolCallsVerbatim(t *testing.T) {
 	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 2 {
 		t.Fatalf("structured tool counts = %d/%d, want 0/2", report.StructuredToolCalls, report.StructuredToolResults)
 	}
-	if report.UnsupportedToolCalls != 2 {
-		t.Fatalf("UnsupportedToolCalls=%d, want 2", report.UnsupportedToolCalls)
+	if report.KeptSourceToolCalls != 2 {
+		t.Fatalf("KeptSourceToolCalls=%d, want 2", report.KeptSourceToolCalls)
 	}
 	if report.ReasoningBlocksSkipped != 1 {
 		t.Fatalf("ReasoningBlocksSkipped=%d, want 1", report.ReasoningBlocksSkipped)
@@ -228,8 +228,8 @@ func TestConvertOpenCodeExport_KeepsCurrentSchemaToolCalls(t *testing.T) {
 	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 3 {
 		t.Fatalf("structured tool counts = %d/%d, want 1/3", report.StructuredToolCalls, report.StructuredToolResults)
 	}
-	if report.UnsupportedToolCalls != 2 {
-		t.Fatalf("UnsupportedToolCalls=%d, want 2", report.UnsupportedToolCalls)
+	if report.KeptSourceToolCalls != 2 {
+		t.Fatalf("KeptSourceToolCalls=%d, want 2", report.KeptSourceToolCalls)
 	}
 }
 
@@ -253,8 +253,8 @@ func TestConvertOpenCodeExport_MappedToolWithForeignArgsKeepsSourceCall(t *testi
 	}
 	assertOpenCodeToolCall(t, msgs[0], "call-read", "read", `{"filename":"README.md"}`)
 	assertOpenCodeToolResult(t, msgs[1], "call-read", "contents", message.ToolStatusSuccess)
-	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 1 {
-		t.Fatalf("counts = %d/%d/%d, want 0/1/1", report.StructuredToolCalls, report.StructuredToolResults, report.UnsupportedToolCalls)
+	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 1 || report.KeptSourceToolCalls != 1 {
+		t.Fatalf("counts = %d/%d/%d, want 0/1/1", report.StructuredToolCalls, report.StructuredToolResults, report.KeptSourceToolCalls)
 	}
 }
 
@@ -280,8 +280,8 @@ func TestConvertOpenCodeExport_ToolPartMissingNameStaysText(t *testing.T) {
 	if !hasWarning(report.Warnings, "tool part missing name; imported as text") {
 		t.Fatalf("warnings=%q, want a missing-name warning", report.Warnings)
 	}
-	if report.ToolEntriesRendered != 1 || report.UnsupportedToolCalls != 1 {
-		t.Fatalf("counts = %d/%d, want 1/1", report.ToolEntriesRendered, report.UnsupportedToolCalls)
+	if report.ToolEntriesRendered != 1 || report.KeptSourceToolCalls != 1 {
+		t.Fatalf("counts = %d/%d, want 1/1", report.ToolEntriesRendered, report.KeptSourceToolCalls)
 	}
 }
 
@@ -309,8 +309,8 @@ func TestConvertOpenCodeExport_UnfinishedToolCallKeepsCallWithoutResult(t *testi
 	if report.StructuredToolResults != 0 {
 		t.Fatalf("StructuredToolResults=%d, want 0", report.StructuredToolResults)
 	}
-	if report.StructuredToolCalls != 1 || report.UnsupportedToolCalls != 1 {
-		t.Fatalf("call counts = %d/%d, want 1/1", report.StructuredToolCalls, report.UnsupportedToolCalls)
+	if report.StructuredToolCalls != 1 || report.KeptSourceToolCalls != 1 {
+		t.Fatalf("call counts = %d/%d, want 1/1", report.StructuredToolCalls, report.KeptSourceToolCalls)
 	}
 }
 
@@ -365,8 +365,8 @@ func TestConvertOpenCodeExport_ConvertsKnownToolParts(t *testing.T) {
 	if report.StructuredToolCalls != 2 || report.StructuredToolResults != 3 {
 		t.Fatalf("structured tool counts = %d/%d, want 2/3", report.StructuredToolCalls, report.StructuredToolResults)
 	}
-	if report.UnsupportedToolCalls != 1 {
-		t.Fatalf("UnsupportedToolCalls=%d, want 1", report.UnsupportedToolCalls)
+	if report.KeptSourceToolCalls != 1 {
+		t.Fatalf("KeptSourceToolCalls=%d, want 1", report.KeptSourceToolCalls)
 	}
 }
 
@@ -615,8 +615,8 @@ func TestConvertOpenCodeExport_CamelCaseEditArgsMapToChordEdit(t *testing.T) {
 	if report.StructuredToolCalls != 1 {
 		t.Fatalf("StructuredToolCalls=%d, want 1", report.StructuredToolCalls)
 	}
-	if report.UnsupportedToolCalls != 0 {
-		t.Fatalf("UnsupportedToolCalls=%d, want 0", report.UnsupportedToolCalls)
+	if report.KeptSourceToolCalls != 0 {
+		t.Fatalf("KeptSourceToolCalls=%d, want 0", report.KeptSourceToolCalls)
 	}
 }
 
@@ -646,8 +646,8 @@ func TestConvertOpenCodeExport_EditWithoutLocationStaysSourceCall(t *testing.T) 
 	}
 	assertOpenCodeToolCall(t, msgs[0], "call-1", "edit", `{"filePath":"/repo/a.go"}`)
 	assertOpenCodeToolResult(t, msgs[1], "call-1", "ok", message.ToolStatusSuccess)
-	if report.StructuredToolCalls != 0 || report.UnsupportedToolCalls != 1 {
-		t.Fatalf("call counts = %d/%d, want 0/1", report.StructuredToolCalls, report.UnsupportedToolCalls)
+	if report.StructuredToolCalls != 0 || report.KeptSourceToolCalls != 1 {
+		t.Fatalf("call counts = %d/%d, want 0/1", report.StructuredToolCalls, report.KeptSourceToolCalls)
 	}
 }
 

@@ -928,8 +928,8 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 				tc := turn.ToolCalls[item.callID]
 				tr := turn.ToolResults[item.callID]
 
-				chordName, normArgs, reason := codexResolveChordTool(tc)
-				keep := reason == ""
+				chordName, normArgs, mapped := codexResolveChordTool(tc)
+				keep := mapped
 				if tr != nil {
 					if res, ok := parseCodexExecResult(tr.Output); ok && res.yielded() {
 						// A yielded exec has no outcome: its cell keeps running in
@@ -950,7 +950,7 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 					// original call. The model reads the preserved form as the
 					// action it was — completed or still running.
 					chordName, normArgs = codexImportedToolCall(tc)
-					report.UnsupportedToolCalls++
+					report.KeptSourceToolCalls++
 				} else {
 					report.StructuredToolCalls++
 				}
@@ -1037,7 +1037,7 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 		}
 	}
 	report.ToolEntriesRendered = report.StructuredToolCalls + report.StructuredToolResults +
-		report.UnsupportedToolCalls + report.MissingToolDeclarations
+		report.KeptSourceToolCalls + report.MissingToolDeclarations
 
 	return filtered
 }
@@ -1077,51 +1077,52 @@ func validateImportedCodexMessages(msgs []message.Message, report *ImportReport)
 // ---------------------------------------------------------------------------
 
 // codexResolveChordTool maps a Codex tool call onto a real Chord tool and its
-// normalized arguments, returning a non-empty reason when it cannot.
+// normalized arguments, reporting whether a mapping exists.
 //
 // A Codex tool call is not directly replayable: the current CLI emits one
 // freeform `exec` tool that orchestrates the real work as nested calls, so the
 // mapping has to come from the analyzed script (tc.ExecScript), and Codex's
 // multi-agent tools live in a namespace Chord does not have. Anything that does
-// not resolve to exactly one known Chord tool stays an imported note rather than
-// a fabricated call the provider never declared.
-func codexResolveChordTool(tc *codexToolCall) (chordName string, args json.RawMessage, reason string) {
+// not resolve to exactly one known Chord tool keeps the source tool call, under
+// the name and arguments it was issued with, rather than a fabricated call the
+// provider never declared.
+func codexResolveChordTool(tc *codexToolCall) (chordName string, args json.RawMessage, mapped bool) {
 	if codexIsExecToolName(tc.Name) {
 		return codexResolveExecTool(tc)
 	}
 	if strings.EqualFold(strings.TrimSpace(tc.Namespace), codexCollaborationNamespace) {
-		return "", nil, "codex collaboration tool has no Chord equivalent"
+		return "", nil, false
 	}
 	resolved, normalized, ok := resolveImportedTool(tc.Name, tc.Arguments)
 	if !ok {
-		return "", nil, "no Chord tool takes these arguments"
+		return "", nil, false
 	}
-	return resolved, normalized, ""
+	return resolved, normalized, true
 }
 
 // codexResolveExecTool maps the single nested call of an `exec` script onto the
 // Chord tool that performed the same work.
-func codexResolveExecTool(tc *codexToolCall) (string, json.RawMessage, string) {
+func codexResolveExecTool(tc *codexToolCall) (string, json.RawMessage, bool) {
 	if tc.ExecScript == nil {
-		return "", nil, "codex exec script is not a single known nested call"
+		return "", nil, false
 	}
 	switch tc.ExecScript.Nested {
 	case codexNestedExecCommand:
 		args := codexNormalizeExecCommandArgs(tc.ExecScript.Args)
 		if args == nil {
-			return "", nil, "codex exec_command arguments are incomplete"
+			return "", nil, false
 		}
-		return tools.NameShell, args, ""
+		return tools.NameShell, args, true
 	case codexNestedApplyPatch:
 		args := normalizeApplyPatchArgs(map[string]any{"input": tc.ExecScript.Input})
 		if args == nil {
-			return "", nil, "codex apply_patch input is not a patch envelope"
+			return "", nil, false
 		}
-		return tools.NameApplyPatch, args, ""
+		return tools.NameApplyPatch, args, true
 	default:
 		// write_stdin drives an interactive session Chord does not keep, and any
 		// other nested tool is not one Chord declares.
-		return "", nil, "codex exec nested tool has no Chord equivalent"
+		return "", nil, false
 	}
 }
 
@@ -1161,7 +1162,7 @@ func buildImportedApplyPatchEnvelope(path, patch string) string {
 	return "*** Begin Patch\n*** Update File: " + path + "\n" + strings.TrimRight(patch, "\r\n") + "\n*** End Patch"
 }
 
-func codexNormalizeShellArgs(args map[string]any) json.RawMessage {
+func normalizeImportedShellArgs(args map[string]any) json.RawMessage {
 	cmd := codexPickString(args, "cmd", "command")
 	if cmd == "" {
 		return nil
@@ -1185,7 +1186,7 @@ func codexNormalizeShellArgs(args map[string]any) json.RawMessage {
 	return b
 }
 
-func codexNormalizeReadArgs(args map[string]any) json.RawMessage {
+func normalizeImportedReadArgs(args map[string]any) json.RawMessage {
 	path := codexPickString(args, "path", "file_path", "filePath", "file")
 	if path == "" {
 		return nil
@@ -1201,10 +1202,13 @@ func codexNormalizeReadArgs(args map[string]any) json.RawMessage {
 	return b
 }
 
-func codexNormalizeWriteArgs(args map[string]any) json.RawMessage {
+func normalizeImportedWriteArgs(args map[string]any) json.RawMessage {
 	path := codexPickString(args, "path", "file_path", "filePath", "file")
-	content := codexPickString(args, "content", "data", "text")
-	if path == "" || content == "" {
+	if path == "" {
+		return nil
+	}
+	content, ok := importedPickRequiredString(args, "content", "data", "text")
+	if !ok {
 		return nil
 	}
 	result := map[string]any{"path": path, "content": content}
@@ -1212,7 +1216,7 @@ func codexNormalizeWriteArgs(args map[string]any) json.RawMessage {
 	return b
 }
 
-func codexNormalizeDeleteArgs(args map[string]any) json.RawMessage {
+func normalizeImportedDeleteArgs(args map[string]any) json.RawMessage {
 	paths := codexPickStringList(args, "paths", "path", "file_path", "file")
 	if len(paths) == 0 {
 		return nil
@@ -1226,7 +1230,7 @@ func codexNormalizeDeleteArgs(args map[string]any) json.RawMessage {
 	return b
 }
 
-func codexNormalizeGrepArgs(args map[string]any) json.RawMessage {
+func normalizeImportedGrepArgs(args map[string]any) json.RawMessage {
 	pattern := codexPickString(args, "pattern", "query", "regex")
 	if pattern == "" {
 		return nil
@@ -1242,7 +1246,7 @@ func codexNormalizeGrepArgs(args map[string]any) json.RawMessage {
 	return b
 }
 
-func codexNormalizeGlobArgs(args map[string]any) json.RawMessage {
+func normalizeImportedGlobArgs(args map[string]any) json.RawMessage {
 	patterns := codexPickStringList(args, "patterns", "pattern", "glob")
 	if len(patterns) == 0 {
 		return nil
