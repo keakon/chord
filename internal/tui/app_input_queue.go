@@ -191,10 +191,29 @@ func (m *Model) handleInputQueueResult(result agent.InputQueueOperationResultEve
 		}
 	}
 	m.applyInputQueueSnapshot(m.agent.InputQueueSnapshot())
-	if action.kind == "release" || action.kind == "submit" && m.inputQueue.snapshot != nil && m.inputQueue.snapshot.State != nil && m.inputQueue.snapshot.State.Gate.Mode == recovery.FollowupGatePaused {
+	if action.kind == "release" && m.followupGatePaused() || action.kind == "submit" && m.submittedInputWaitsForResume(action) {
 		return m.enqueueToast("Queue remains paused; use /queue resume when ready", "info")
 	}
 	return nil
+}
+
+// submittedInputWaitsForResume reports whether the input just committed cannot
+// start because the follow-up gate is paused. Ordinary (next-request) inputs
+// bypass the gate, so a paused gate is not news for them; announcing it on
+// every send made an idle session look blocked while the message ran normally.
+func (m *Model) submittedInputWaitsForResume(action inputQueueAction) bool {
+	if action.draft.DeliveryPolicy != recovery.InputDeliveryAfterCompletion {
+		return false
+	}
+	return m.followupGatePaused()
+}
+
+// followupGatePaused reports whether the live queue snapshot still holds the
+// follow-up gate. A release normalizes the gate, so the state observed when
+// the operation started cannot decide whether the pause notice is stale.
+func (m *Model) followupGatePaused() bool {
+	snapshot := m.inputQueue.snapshot
+	return snapshot != nil && snapshot.State != nil && snapshot.State.Gate.Mode == recovery.FollowupGatePaused
 }
 
 func (m *Model) editManagedDraft(draft queuedDraft) tea.Cmd {

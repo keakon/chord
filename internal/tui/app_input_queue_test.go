@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
@@ -50,6 +52,94 @@ func TestInputQueueLateHoldPreservesComposer(t *testing.T) {
 	m.handleInputQueueResult(agent.InputQueueOperationResultEvent{Target: backend.InputDeliveryTarget(), OperationID: op, Result: agent.InputQueueCommitted, ItemRevision: 2})
 	if m.input.Value() != "new draft" || m.inputQueue.editing != nil {
 		t.Fatal("late hold replaced or rebound new draft")
+	}
+}
+
+func TestInputQueuePausedToastOnlyWhenTheSubmittedInputWaits(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		policy recovery.InputDeliveryPolicy
+		want   bool
+	}{
+		{name: "ordinary input bypasses the gate", policy: recovery.InputDeliveryNextRequest},
+		{name: "follow-up waits for resume", policy: recovery.InputDeliveryAfterCompletion, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &pausedQueueAgent{}
+			backend.snapshot = &agent.InputQueueSnapshot{
+				Target:      backend.InputDeliveryTarget(),
+				ViewVersion: 1,
+				State: &recovery.InputDeliveryState{
+					Revision: 1,
+					Gate:     recovery.FollowupGate{Mode: recovery.FollowupGatePaused, Reason: recovery.FollowupPredecessorFailed},
+				},
+			}
+			m := NewModel(backend)
+			m.applyInputQueueSnapshot(backend.snapshot)
+			m.submitManagedDraft(queuedDraft{ID: "draft", Content: "sample", DeliveryPolicy: tc.policy})
+			var op string
+			for id := range m.inputQueue.pending {
+				op = id
+			}
+			m.handleInputQueueResult(agent.InputQueueOperationResultEvent{Target: backend.InputDeliveryTarget(), OperationID: op, Result: agent.InputQueueCommitted})
+
+			toasts := inputQueueToasts(m)
+			announced := slices.ContainsFunc(toasts, func(msg string) bool { return strings.Contains(msg, "Queue remains paused") })
+			if announced != tc.want {
+				t.Fatalf("paused toast = %v, want %v (toasts=%q)", announced, tc.want, toasts)
+			}
+		})
+	}
+}
+
+type pausedQueueAgent struct {
+	sessionControlAgent
+	snapshot *agent.InputQueueSnapshot
+}
+
+func (a *pausedQueueAgent) InputQueueSnapshot() *agent.InputQueueSnapshot { return a.snapshot }
+
+func inputQueueToasts(m Model) []string {
+	var toasts []string
+	if m.activeToast != nil {
+		toasts = append(toasts, m.activeToast.Message)
+	}
+	for _, item := range m.toastQueue {
+		toasts = append(toasts, item.Message)
+	}
+	return toasts
+}
+
+func TestInputQueueReleaseToastReflectsGateAfterOperation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		gate string
+		want bool
+	}{
+		{name: "running gate skips the pause notice", gate: recovery.FollowupGateRunning},
+		{name: "paused gate keeps the pause notice", gate: recovery.FollowupGatePaused, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &pausedQueueAgent{}
+			backend.snapshot = &agent.InputQueueSnapshot{
+				Target:      backend.InputDeliveryTarget(),
+				ViewVersion: 1,
+				State: &recovery.InputDeliveryState{
+					Revision: 1,
+					Gate:     recovery.FollowupGate{Mode: tc.gate},
+				},
+			}
+			m := NewModel(backend)
+			m.applyInputQueueSnapshot(backend.snapshot)
+			op := m.nextInputQueueOperation(inputQueueAction{kind: "release", draft: queuedDraft{ID: "draft", InputID: "input"}})
+			m.handleInputQueueResult(agent.InputQueueOperationResultEvent{Target: backend.InputDeliveryTarget(), OperationID: op, Result: agent.InputQueueCommitted})
+
+			toasts := inputQueueToasts(m)
+			announced := slices.ContainsFunc(toasts, func(msg string) bool { return strings.Contains(msg, "Queue remains paused") })
+			if announced != tc.want {
+				t.Fatalf("paused toast = %v, want %v (toasts=%q)", announced, tc.want, toasts)
+			}
+		})
 	}
 }
 
