@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -49,6 +50,40 @@ func TestModelDrivenCheckpointSummaryKeepsModelTextAndNeutralizesHeadings(t *tes
 	body := section[:next]
 	if strings.Count(body, "\n## ") > 0 {
 		t.Fatalf("model text escaped its section:\n%s", body)
+	}
+}
+
+// The model-driven checkpoint renders ## User Constraints from the runtime
+// correction evidence. When the session's original request is itself a
+// correction, the anchors' Original request line is the canonical copy and the
+// section must not repeat it.
+func TestModelDrivenCheckpointOmitsOriginalRequestConstraintCopy(t *testing.T) {
+	a := &MainAgent{}
+	request := "must not change the public API"
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: request},
+		{Role: message.RoleUser, Content: "fix the failing test"},
+	}
+	bundle := modelDrivenBarrierSnapshot{
+		snapshot:        snapshot,
+		originalRequest: request,
+		evidenceItems:   []evidenceItem{buildUserCorrectionEvidence("message 1 (user)", request)},
+	}
+	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"}}
+	summary := a.buildModelDrivenCheckpointSummary(bundle, snapshot, len(snapshot), req)
+
+	if count := strings.Count(summary, request); count != 1 {
+		t.Fatalf("checkpoint carries the original request %d times, want only the anchor copy:\n%s", count, summary)
+	}
+	section, ok := checkpointfmt.Section(compactionSummaryBody(summary), checkpointfmt.UserConstraintsHeading)
+	if !ok {
+		t.Fatalf("checkpoint missing the %s section:\n%s", checkpointfmt.UserConstraintsHeading, summary)
+	}
+	if strings.Contains(section, request) {
+		t.Fatalf("user constraints repeat the original request:\n%s", section)
+	}
+	if !strings.Contains(section, "No preserved user constraints") {
+		t.Fatalf("empty user constraints must keep the explicit placeholder:\n%s", section)
 	}
 }
 

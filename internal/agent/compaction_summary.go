@@ -109,9 +109,15 @@ type compactionInput struct {
 	RecentTail       []message.Message
 	RecentTailAnchor string
 	SessionAnchors   compactionAnchors
-	GoalAnchor       string
-	DecisionAnchor   string
-	ProgressAnchor   string
+	// OriginalRequestSource is the full-text source hash of the session's
+	// original request. The original request is carried verbatim in the session
+	// anchors, so a derived rendering of it (the User Constraints section)
+	// skips evidence from this source instead of repeating a truncated copy.
+	// Empty when the original request is unknown.
+	OriginalRequestSource string
+	GoalAnchor            string
+	DecisionAnchor        string
+	ProgressAnchor        string
 	// PriorCheckpoint is the durable body of the most recent checkpoint inside
 	// the archived head (see latestPriorCheckpointBody). It is surfaced to the
 	// summarizer as a protected section it must fold in rather than rely on the
@@ -765,6 +771,12 @@ func renderEvidenceKindForFallback(input *compactionInput, kind evidenceKind, em
 	var lines []string
 	for _, item := range input.EvidenceItems {
 		if item.Kind != kind {
+			continue
+		}
+		// The original request is carried verbatim in the session anchors'
+		// Original request line; rendering the same source again as a constraint
+		// excerpt repeats one instruction in two truncated forms.
+		if input.OriginalRequestSource != "" && item.RequestSource == input.OriginalRequestSource {
 			continue
 		}
 		lines = append(lines, "- "+strings.ReplaceAll(item.Excerpt, "\n", " "))

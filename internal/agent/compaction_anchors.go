@@ -170,13 +170,47 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 		next.OriginalRequest = anchorLine(originalRequest, compactAnchorsRequestChars)
 	}
 
+	// The original request is carried verbatim as the anchors' Original request
+	// line, and the constraint window derives a shorter excerpt of the same
+	// message. Keeping both repeats one instruction in two truncated forms, so
+	// the derived copy is dropped from the active list while the request line
+	// stays available to supersession matching: a later contradictory
+	// instruction still retires it into SupersededConstraints instead of
+	// co-existing with it. The direction is active until such a contradiction
+	// retired it, whether the derived copy came from an earlier checkpoint or
+	// from this window's evidence.
+	originalSource := checkpointRequestSource(originalRequest)
+	originalBasis := strings.TrimSpace(next.OriginalRequest)
+	if originalBasis == "" {
+		originalBasis = originalRequest
+	}
+	originalConstraint := anchorLine(originalBasis, compactAnchorsConstraintChars)
+	originalKey := anchorDedupKey(originalConstraint)
+	virtualOriginal := ""
+	if originalConstraint != "" && !slices.ContainsFunc(previous.SupersededConstraints, func(line string) bool {
+		return anchorDedupKey(line) == originalKey
+	}) {
+		next.Constraints = slices.DeleteFunc(next.Constraints, func(line string) bool {
+			return anchorDedupKey(line) == originalKey
+		})
+		virtualOriginal = originalConstraint
+	}
+
 	seen := make(map[string]struct{}, len(next.Constraints)+len(evidenceItems))
 	for _, constraint := range next.Constraints {
 		seen[anchorDedupKey(constraint)] = struct{}{}
 	}
+	if virtualOriginal != "" {
+		seen[originalKey] = struct{}{}
+	}
 	for _, item := range constraintEvidenceInTimeOrder(evidenceItems) {
 		line := anchorLine(item.Excerpt, compactAnchorsConstraintChars)
 		if line == "" {
+			continue
+		}
+		if originalSource != "" && item.RequestSource == originalSource {
+			// The original request itself: already carried as the Original
+			// request line, kept only for supersession matching.
 			continue
 		}
 		key := anchorDedupKey(line)
@@ -190,6 +224,11 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 		if superseded := supersededConstraintMatch(line, next.Constraints); superseded >= 0 {
 			next.SupersededConstraints = append(next.SupersededConstraints, next.Constraints[superseded])
 			next.Constraints = slices.Delete(next.Constraints, superseded, superseded+1)
+		}
+		if virtualOriginal != "" && supersededConstraintMatch(line, []string{virtualOriginal}) >= 0 {
+			next.SupersededConstraints = append(next.SupersededConstraints, virtualOriginal)
+			virtualOriginal = ""
+			delete(seen, originalKey)
 		}
 		seen[key] = struct{}{}
 		next.Constraints = append(next.Constraints, line)

@@ -345,6 +345,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		}
 		if inputErr == nil {
 			input.EvidenceItems = evidenceItems
+			input.OriginalRequestSource = checkpointRequestSource(originalRequest)
 			summaryText = buildStructuredFallbackSummary(pathutil.AbbreviateHome(absHistoryPath), input, summarizeErr, keyFiles, todos, subAgents)
 		} else {
 			summaryMode = message.CompactionSummaryModeTruncateOnly

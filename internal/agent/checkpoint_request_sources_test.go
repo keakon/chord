@@ -22,8 +22,40 @@ func TestCheckpointRequestProjectionPreservesCollidingSources(t *testing.T) {
 	}
 	msg := requestDedupFixture(current, older, older, "Earlier instruction")
 	got := projectCheckpointRequests([]message.Message{msg})[0].Content
-	if got != msg.Content {
+	// The older text is this session's original request, not the current one: its
+	// evidence excerpt points at the Original request anchor and no copy is
+	// attributed to the current request.
+	if strings.Contains(got, checkpointSameRequestPointer) || !strings.Contains(got, "Excerpt: "+checkpointOriginalRequestPointer) {
 		t.Fatal("folded an independently sourced excerpt into the current request")
+	}
+	if !strings.Contains(got, compactAnchorsRequestLabel+"\n- "+anchorLine(older, compactAnchorsRequestChars)) {
+		t.Fatal("dropped the independently sourced Original request anchor")
+	}
+	// Only the excerpt field of the original request's row changes: its ID,
+	// classification, and recovery pointers must survive the fold.
+	folded := buildUserCorrectionEvidence("message 1 (user)", older)
+	id := evidenceItemID(folded)
+	rowOf := func(body string) string {
+		_, rest, ok := strings.Cut(body, "Evidence ID: "+id)
+		if !ok {
+			t.Fatalf("missing evidence row %s", id)
+		}
+		if end := strings.Index(rest, "\nEvidence ID: "); end >= 0 {
+			rest = rest[:end]
+		}
+		return rest
+	}
+	beforeHead, _, _ := strings.Cut(rowOf(msg.Content), "\nExcerpt:")
+	afterRow := rowOf(got)
+	afterHead, afterTail, foldedExcerpt := strings.Cut(afterRow, "\nExcerpt:")
+	if beforeHead != afterHead {
+		t.Fatalf("fold rewrote fields before the excerpt:\nbefore=%q\nafter=%q", beforeHead, afterHead)
+	}
+	if !strings.Contains(beforeHead, "Evidence Kind: ") || !strings.Contains(beforeHead, "Recovery:") {
+		t.Fatalf("row lost its classification or recovery pointer: %q", beforeHead)
+	}
+	if !foldedExcerpt || !strings.HasPrefix(afterTail, " "+checkpointOriginalRequestPointer) {
+		t.Fatalf("row excerpt=%q, want pointer %q", afterTail, checkpointOriginalRequestPointer)
 	}
 	oldItem := buildUserCorrectionEvidence("message 1", older)
 	newItem := buildUserCorrectionEvidence("message 2", current)
@@ -172,8 +204,12 @@ func TestCheckpointRequestSourcesRuntimeBuilders(t *testing.T) {
 	}
 	projected := projectCheckpointRequests([]message.Message{msg})[0].Content
 	if strings.Count(projected, request) != 1 ||
-		strings.Contains(projected, checkpointfmt.UserConstraintsHeading) ||
 		strings.Contains(projected, retainedRecentMessagesHeading) {
 		t.Fatalf("runtime builder produced repeated instruction blocks:\n%s", projected)
+	}
+	// The current request is the only correction, so the folded section keeps
+	// its empty placeholder instead of repeating the request excerpt.
+	if section, ok := checkpointfmt.Section(projected, checkpointfmt.UserConstraintsHeading); !ok || strings.Contains(section, request) {
+		t.Fatalf("user constraints repeated the folded request:\n%s", projected)
 	}
 }

@@ -57,7 +57,10 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	markTypedClaimsInvalidated(req, bundle.evidenceItems)
 	headSnapshot := snapshot[:headSplit]
 	anchor := resolveLatestUserRequestAnchor(snapshot)
-	constraints := renderEvidenceKindForFallback(&compactionInput{EvidenceItems: bundle.evidenceItems}, evidenceUserCorrection, "- No preserved user constraints.")
+	constraints := renderEvidenceKindForFallback(&compactionInput{
+		EvidenceItems:         bundle.evidenceItems,
+		OriginalRequestSource: checkpointRequestSource(bundle.originalRequest),
+	}, evidenceUserCorrection, "- No preserved user constraints.")
 	completed := renderModelStateList(req.Args.Completed, "(none reported by the model)")
 	// Completed work is the primary readable home for facts that are already
 	// done. Do not repeat an identical item in decisions or open issues; keep

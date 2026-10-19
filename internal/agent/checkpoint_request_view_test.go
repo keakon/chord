@@ -61,6 +61,41 @@ func TestCheckpointRequestProjectionPreservesDurableCarryAndCorrections(t *testi
 	}
 }
 
+// The original request's evidence row keeps its ID and classification but not a
+// second truncated excerpt: the anchors' Original request line is the canonical
+// copy. A row from the current request keeps the current-request pointer.
+func TestCheckpointRequestProjectionFoldsOriginalRequestEvidenceExcerpt(t *testing.T) {
+	original := strings.Repeat("Do not change the existing output contract. ", 30)
+	msg := requestDedupFixture("continue the parser work", original, original, "Earlier objective")
+	projected := projectCheckpointRequests([]message.Message{msg})[0].Content
+	if !strings.Contains(projected, compactAnchorsRequestLabel+"\n- "+anchorLine(original, compactAnchorsRequestChars)) {
+		t.Fatal("folded the canonical Original request anchor")
+	}
+	evidence := projected[strings.Index(projected, message.CompactionEvidenceTag):]
+	if !strings.Contains(evidence, "Excerpt: "+checkpointOriginalRequestPointer) {
+		t.Fatalf("original request evidence excerpt not folded:\n%s", evidence)
+	}
+	if strings.Contains(evidence, requesttrim.TextSnippet(original, compactUserConstraintExcerptChars)) {
+		t.Fatal("kept a second excerpt of the original request")
+	}
+	if !strings.Contains(evidence, "sample tool error output") {
+		t.Fatal("rewrote an independent evidence row")
+	}
+
+	// When the current request is the original request, the anchors' request line
+	// is folded into Current User Request, so the evidence row must keep pointing
+	// there instead of at the removed original-request line.
+	short := "Do not change the output contract."
+	same := requestDedupFixture(short, short, short, short)
+	sameProjected := projectCheckpointRequests([]message.Message{same})[0].Content
+	if strings.Contains(sameProjected, checkpointOriginalRequestPointer) {
+		t.Fatal("original-request pointer must not shadow the current-request pointer")
+	}
+	if strings.Count(sameProjected, checkpointSameRequestPointer) != 1 {
+		t.Fatalf("want one current-request pointer:\n%s", sameProjected)
+	}
+}
+
 func TestCheckpointRequestProjectionConservativeCases(t *testing.T) {
 	for _, kind := range []string{"ordinary", "malformed", "generic", "truncated", "different"} {
 		t.Run(kind, func(t *testing.T) {

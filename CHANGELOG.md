@@ -103,6 +103,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - A tool card with no dedicated card entry no longer folds down to a bare tool name. An imported Codex `exec` script or an MCP tool whose arguments are all content-sized — a multi-line script, a JSON object — shows the first argument’s opening line on the folded header, the way a shell card previews a multi-line command; expanding the card still shows every argument in full under its own label.
 
+- Compaction checkpoints no longer repeat the session's first request three times. When that message is itself a constraint, the verbatim Original request anchor is the only copy: the standing-constraint and user-constraints excerpts are dropped, and the evidence row points to the anchor instead of repeating its excerpt. The evidence-row fold also applies to checkpoints written earlier.
+
 ## 0.8.2 - 2026-10-11
 
 ### Highlights

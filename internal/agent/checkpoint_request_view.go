@@ -73,6 +73,10 @@ func checkpointRequestBody(body string, sources map[string]string) string {
 
 const checkpointSameRequestPointer = "See Current User Request."
 
+// checkpointOriginalRequestPointer names the anchors' Original request line,
+// which is the canonical copy of the excerpt folded out of an evidence row.
+const checkpointOriginalRequestPointer = "See Original request."
+
 // Request-local folding removes repeated instruction blocks altogether.
 // Evidence rows retain their classification and ID, with a short excerpt
 // reference. Full-source provenance is required for every lossy rendering.
@@ -85,7 +89,8 @@ func deduplicateCheckpointRequest(body string, sources map[string]string) string
 	source := checkpointRequestSource(request)
 	body = deduplicateAnchoredRequest(body, request, source, sources)
 	body = deduplicateUserConstraintRequest(body, request, source, sources)
-	return deduplicateEvidenceRequestExcerpt(body, request, source, sources)
+	body = deduplicateEvidenceRequestExcerpt(body, request, source, sources)
+	return deduplicateOriginalRequestEvidenceExcerpt(body, source, sources)
 }
 
 func checkpointRequestText(body string) (string, bool) {
@@ -203,14 +208,58 @@ func deduplicateUserConstraintRequest(body, request, source string, sources map[
 // Evidence rewriting is confined to complete, runtime-rendered instruction
 // rows in the evidence region. Matching quoted text elsewhere is untouched.
 func deduplicateEvidenceRequestExcerpt(body, request, source string, sources map[string]string) string {
-	start := strings.Index(body, message.CompactionEvidenceTag)
-	if start < 0 {
-		return body
-	}
 	var excerpt strings.Builder
 	excerpt.WriteString("Excerpt:\n")
 	writeEvidenceExcerptBlock(&excerpt, requesttrim.TextSnippet(request, compactUserConstraintExcerptChars))
 	rendered := strings.TrimSuffix(excerpt.String(), "\n")
+	return rewriteCheckpointEvidenceRows(body, func(row, id string) (string, bool) {
+		if sources[checkpointEvidenceSourcePrefix+id] != source || !instructionEvidenceRow(row) {
+			return row, false
+		}
+		p := strings.Index(row, "\n"+rendered)
+		if p < 0 {
+			return row, false
+		}
+		after := p + 1 + len(rendered)
+		if after != len(row) && row[after] != '\n' {
+			return row, false
+		}
+		replacement := "Excerpt: " + checkpointSameRequestPointer
+		if len(replacement) >= len(rendered) {
+			return row, false
+		}
+		return row[:p+1] + replacement + row[after:], true
+	})
+}
+
+// deduplicateOriginalRequestEvidenceExcerpt folds the verbatim excerpt of the
+// session's original request into a pointer when the request is already carried
+// as the anchors' Original request line. The row keeps its ID, classification,
+// and recovery pointers; only the second truncated copy of the same message is
+// dropped. Rows from the current request are left to
+// deduplicateEvidenceRequestExcerpt, whose pointer names the section that
+// actually survives (the anchors' Original request line is folded away when the
+// current request is the same message).
+func deduplicateOriginalRequestEvidenceExcerpt(body, currentSource string, sources map[string]string) string {
+	originalSource := sources[checkpointOriginalRequestSource]
+	if originalSource == "" || originalSource == currentSource {
+		return body
+	}
+	return rewriteCheckpointEvidenceRows(body, func(row, id string) (string, bool) {
+		if sources[checkpointEvidenceSourcePrefix+id] != originalSource || !instructionEvidenceRow(row) {
+			return row, false
+		}
+		return foldFencedEvidenceExcerpt(row, "Excerpt: "+checkpointOriginalRequestPointer)
+	})
+}
+
+// rewriteCheckpointEvidenceRows rewrites each evidence row of the
+// [Context Evidence] region. rewrite reports false to leave a row untouched.
+func rewriteCheckpointEvidenceRows(body string, rewrite func(row, id string) (string, bool)) string {
+	start := strings.Index(body, message.CompactionEvidenceTag)
+	if start < 0 {
+		return body
+	}
 	region := body[start:]
 	var rows []int
 	for offset := 0; offset < len(region); {
@@ -234,20 +283,43 @@ func deduplicateEvidenceRequestExcerpt(body, request, source string, sources map
 		row := region[pos:end]
 		idLine, _, _ := strings.Cut(row, "\n")
 		id := strings.TrimPrefix(idLine, "Evidence ID: ")
-		if sources[checkpointEvidenceSourcePrefix+id] == source && instructionEvidenceRow(row) {
-			if p := strings.Index(row, "\n"+rendered); p >= 0 {
-				after := p + 1 + len(rendered)
-				if after == len(row) || row[after] == '\n' {
-					replacement := "Excerpt: " + checkpointSameRequestPointer
-					if len(replacement) < len(rendered) {
-						row = row[:p+1] + replacement + row[after:]
-					}
-				}
-			}
+		if rewritten, changed := rewrite(row, id); changed {
+			row = rewritten
 		}
 		out.WriteString(row)
 	}
 	return body[:start] + out.String()
+}
+
+// foldFencedEvidenceExcerpt replaces the fenced excerpt block that ends an
+// evidence row with a shorter pointer. Every excerpt is rendered as the row's
+// last field with a column-0 backtick fence chosen longer than any run inside
+// it, so the first line carrying the same fence closes the block; whatever
+// follows belongs to later rows and is preserved.
+func foldFencedEvidenceExcerpt(row, pointer string) (string, bool) {
+	const prefix = "\nExcerpt:\n"
+	start := strings.Index(row, prefix)
+	if start < 0 {
+		return row, false
+	}
+	block := row[start+len(prefix):]
+	lineEnd := strings.Index(block, "\n")
+	if lineEnd < 0 {
+		return row, false
+	}
+	fence := strings.TrimSuffix(block[:lineEnd], "text")
+	if fence == "" || strings.Trim(fence, "`") != "" {
+		return row, false
+	}
+	closeAt := strings.Index(block[lineEnd+1:], "\n"+fence+"\n")
+	if closeAt < 0 {
+		return row, false
+	}
+	after := lineEnd + 1 + closeAt + len("\n"+fence+"\n")
+	if len(pointer) >= len(prefix)+after {
+		return row, false
+	}
+	return row[:start+1] + pointer + row[start+len(prefix)+after:], true
 }
 
 func instructionEvidenceRow(row string) bool {

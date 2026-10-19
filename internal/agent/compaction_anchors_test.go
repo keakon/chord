@@ -2,12 +2,14 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -373,6 +375,65 @@ func TestCompactionDraftEmbedsAndInheritsSessionAnchors(t *testing.T) {
 	}
 	if len(secondAnchors.Constraints) == 0 || !strings.Contains(secondAnchors.Constraints[0], "不要改动公开 API") {
 		t.Fatalf("Constraints = %v, want the first-round constraint inherited", secondAnchors.Constraints)
+	}
+}
+
+// TestCompactionDraftFoldsDerivedRequestConstraint is the reported scenario
+// end to end: the first user message is itself a correction, the summarizer is
+// unavailable, and the checkpoint must keep exactly one verbatim copy of it.
+// The anchors carry the request line, so Standing constraints and the
+// structured-fallback User Constraints section must not repeat it.
+func TestCompactionDraftFoldsDerivedRequestConstraint(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.globalConfig.Context.Compaction.Profile = config.CompactionProfileArchival
+	a.SetProviderModelRef("sample/compact-model")
+	a.SetModelSwitchFactory(func(string, []string, string) (*llm.Client, string, int, error) {
+		providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+			Type: "stub",
+			Models: map[string]config.ModelConfig{
+				"compact-model": {Limit: config.ModelLimit{Context: 16384, Output: 2048}},
+			},
+		}, []string{"test-key"})
+		client := llm.NewClient(providerCfg, &countingCompactionProvider{err: errors.New("sample summarize failure")}, "compact-model", 2048, "")
+		return client, "compact-model", 16384, nil
+	})
+
+	request := strings.Repeat("不要改动公开 API，必须保持现有行为。", 40)
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: request},
+		{Role: message.RoleAssistant, Content: "a1"},
+		{Role: message.RoleUser, Content: "继续处理剩下的问题"},
+		{Role: message.RoleAssistant, Content: "a2"},
+	}
+	a.resetRuntimeEvidenceFromMessages(snapshot)
+	evidenceItems := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
+
+	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1,
+		compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
+		request, evidenceItems, a.captureCompactionArchiveMeta())
+	if err != nil {
+		t.Fatalf("produceCompactionDraftAsync: %v", err)
+	}
+	if draft.SummaryMode != message.CompactionSummaryModeStructuredFallback {
+		t.Fatalf("summary mode = %q, want the structured fallback", draft.SummaryMode)
+	}
+	if len(draft.NewMessages) == 0 {
+		t.Fatalf("unexpected draft: %+v", draft)
+	}
+	anchors := latestCompactionAnchors(draft.NewMessages)
+	if anchors.OriginalRequest != anchorLine(request, compactAnchorsRequestChars) {
+		t.Fatalf("OriginalRequest = %q, want the verbatim request line", anchors.OriginalRequest)
+	}
+	if len(anchors.Constraints) != 0 {
+		t.Fatalf("Constraints = %v, want the derived request copy folded out", anchors.Constraints)
+	}
+	section, ok := checkpointfmt.Section(compactionSummaryBody(draft.NewMessages[0].Content), checkpointfmt.UserConstraintsHeading)
+	if !ok {
+		t.Fatalf("fallback checkpoint missing the %s section:\n%s", checkpointfmt.UserConstraintsHeading, draft.NewMessages[0].Content)
+	}
+	if section != "- No preserved user constraints." {
+		t.Fatalf("%s = %q, want the placeholder instead of the request copy", checkpointfmt.UserConstraintsHeading, section)
 	}
 }
 
