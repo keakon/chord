@@ -1043,6 +1043,23 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 			if inferFinishReason {
 				applyInferredFinishReason(&resp, len(resp.ToolCalls) > 0)
 			}
+			if resp.StopReason == "" {
+				// A gateway that terminates with [DONE] but never classifies the
+				// stream leaves an empty stop reason. Tool calls finalized above
+				// were delivered before [DONE] closed the stream, so they keep
+				// the reason the Responses path infers and still run; a call-free
+				// reply has nothing to replay but its text, which downstream
+				// delivery would read as a failed work even though it already
+				// reached the screen, so it is preserved as an interrupted reply
+				// and continued; infer_finish_reason is the opt-in for gateways
+				// whose [DONE] can be trusted as a normal stop.
+				if len(resp.ToolCalls) > 0 {
+					resp.StopReason = "tool_calls"
+				} else if partial := markInterruptedTextResponse(&resp); partial != nil {
+					log.Warnf("openai stream ended with [DONE] without finish_reason; preserving %d bytes of text as interrupted", len(partial.Content))
+					return partial, nil
+				}
+			}
 			return &resp, nil
 		}
 

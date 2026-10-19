@@ -239,6 +239,55 @@ func TestParseOpenAISSEStream_InterruptedTextDropsPartialToolAndReasoning(t *tes
 	}
 }
 
+func TestParseOpenAISSEStream_DoneWithoutFinishReasonIsNotNormalSuccess(t *testing.T) {
+	// A gateway can send a usage-only chunk and [DONE] without ever emitting
+	// finish_reason. Returning an empty stop reason made delivery mark the turn
+	// failed although the text was complete; the text must survive as an
+	// interrupted reply instead.
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"delivered answer"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "delivered answer" || resp.StopReason != "interrupted" {
+		t.Fatalf("resp = %#v, want interrupted text", resp)
+	}
+}
+
+func TestParseOpenAISSEStream_DoneWithoutFinishReasonKeepsToolCalls(t *testing.T) {
+	// The same gateway can stream tool calls and then [DONE] without
+	// finish_reason. [DONE] closes the stream, so the finalized calls are
+	// complete; dropping them would discard an action the gateway delivered
+	// while the reply is continued, so they keep the `tool_calls` reason the
+	// Responses path infers for the same shape.
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"checking"}}]}`,
+		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read","arguments":"{\"path\":\"/repo/README.md\"}"}}]}}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n")
+
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
+	if err != nil {
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
+	}
+	if resp == nil || resp.StopReason != "tool_calls" {
+		t.Fatalf("resp = %#v, want stop_reason tool_calls", resp)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "Read" {
+		t.Fatalf("tool calls = %#v, want the streamed Read call kept", resp.ToolCalls)
+	}
+	if resp.Content != "checking" {
+		t.Fatalf("content = %q, want the streamed text kept", resp.Content)
+	}
+}
+
 func TestParseOpenAISSEStreamOptions_InferFinishReasonStop(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"final answer"}}]}`,
