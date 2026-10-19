@@ -57,6 +57,33 @@ func assertCodexImportedToolCall(t *testing.T, msg message.Message, wantName str
 	}
 }
 
+// assertCodexImportedExecCall checks the preserved `exec` call still carries
+// the whole source input and nothing derived in its place.
+func assertCodexImportedExecCall(t *testing.T, msg message.Message, wantInput string) map[string]any {
+	t.Helper()
+	if msg.Role != message.RoleAssistant || len(msg.ToolCalls) != 1 {
+		t.Fatalf("tool call=%+v, want one preserved exec call", msg.ToolCalls)
+	}
+	call := msg.ToolCalls[0]
+	if call.Name != "exec" {
+		t.Fatalf("tool name=%q, want exec", call.Name)
+	}
+	if !json.Valid(call.Args) {
+		t.Fatalf("tool args is not valid JSON: %s", call.Args)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(call.Args, &args); err != nil {
+		t.Fatalf("unmarshal tool args: %v", err)
+	}
+	if args["input"] != wantInput {
+		t.Fatalf("input=%#v, want the source script preserved", args["input"])
+	}
+	if _, ok := args["summary"]; ok {
+		t.Fatalf("args=%#v, want no generated field replacing the source", args)
+	}
+	return args
+}
+
 func TestConvertCodexRollout_IgnoresItemJSONL(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-01-01T00:00:00Z","item":{"type":"EventMsg","session_id":"sess-1","role":"user","content":"hi"}}
 {"timestamp":"2026-01-01T00:00:01Z","item":{"type":"ResponseItem","role":"assistant","content":"hello"}}
@@ -990,8 +1017,10 @@ func TestConvertCodexRollout_ExecUnmappableNestedToolKeepsSourceCall(t *testing.
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
 	}
-	wantArgs, _ := json.Marshal(map[string]string{"input": input})
-	assertCodexImportedToolCall(t, msgs[1], "exec", string(wantArgs))
+	args := assertCodexImportedExecCall(t, msgs[1], input)
+	if len(args) != 1 {
+		t.Fatalf("args=%#v, want only the recorded input", args)
+	}
 	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_exec" || msgs[2].Content != "{\"session_id\":481,\"output\":\"more\"}" {
 		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}
@@ -1020,8 +1049,10 @@ func TestConvertCodexRollout_ExecWithMultipleNestedCallsKeepsSourceCall(t *testi
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
 	}
-	wantArgs, _ := json.Marshal(map[string]string{"input": input})
-	assertCodexImportedToolCall(t, msgs[1], "exec", string(wantArgs))
+	args := assertCodexImportedExecCall(t, msgs[1], input)
+	if args["commands"] != "pwd\nls" {
+		t.Fatalf("commands=%#v", args["commands"])
+	}
 	if msgs[2].Role != message.RoleTool || msgs[2].Content != "/tmp\nfile.go\n" {
 		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}

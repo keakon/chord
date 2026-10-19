@@ -1380,10 +1380,25 @@ func codexImportedToolCall(tc *codexToolCall) (string, json.RawMessage) {
 	}
 	if tc.ExecInput != "" {
 		// A freeform custom tool carries its whole program as one string
-		// parameter, which is the shape the source sent. ExecScript, when it
-		// exists, is analyzed from this same input, so there is nothing left
-		// to fall back to here.
-		args, err := json.Marshal(map[string]string{"input": tc.ExecInput})
+		// parameter, which is the shape the source sent. The input always
+		// stays: it is what the card shows, because a cell that reaches this
+		// point has no Chord tool to render it under.
+		payload := map[string]any{"input": tc.ExecInput}
+		// Derived here rather than carried on the call: only a cell that
+		// reaches this point lists its commands, and a cell that mapped to a
+		// Chord tool never reads them.
+		if commands := codexExecCommands(tc.ExecInput); len(commands) > 0 {
+			// One command per line, so the card lists the batch instead of
+			// encoding it as a JSON array. A single string keeps this on the
+			// tool's existing multi-line argument path; the TUI renders a
+			// list-shaped argument of its own (grep paths, delete paths)
+			// with its own comma-joined form, which a raw array would
+			// collide with. "commands" sorts before "input", so the folded
+			// header previews the first command rather than the array
+			// declaration the script opens with.
+			payload["commands"] = strings.Join(commands, "\n")
+		}
+		args, err := json.Marshal(payload)
 		if err == nil {
 			return name, args
 		}
@@ -1395,6 +1410,11 @@ func codexImportedToolCall(tc *codexToolCall) (string, json.RawMessage) {
 // cannot dominate the transcript.
 const codexImportedNoteMaxBytes = 4000
 
+// codexImportedTruncatedSuffix marks a field cut to the imported-note budget.
+// It is a named constant because budget accounting has to subtract its length
+// before calling the truncator.
+const codexImportedTruncatedSuffix = "\n...[truncated]"
+
 // codexTruncateImportedText cuts text to a byte budget without splitting a
 // UTF-8 rune, so an imported fallback never carries an invalid byte sequence.
 func codexTruncateImportedText(s string, limit int) string {
@@ -1405,7 +1425,7 @@ func codexTruncateImportedText(s string, limit int) string {
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return s[:cut] + "\n...[truncated]"
+	return s[:cut] + codexImportedTruncatedSuffix
 }
 
 func codexOrphanedToolResultFallback(tr *codexToolResult) message.Message {

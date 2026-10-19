@@ -44,11 +44,11 @@ const codexConstDeclPrefix = "const "
 const codexMaxJSSafeInteger = 1<<53 - 1
 
 // Nested tool names this importer understands. Codex exposes far more (MCP
-// tools, skills, image helpers); anything else is kept as the source exec call
-// rather than guessed at.
+// tools, skills, image helpers); anything else — including `write_stdin`, which
+// drives an interactive session Chord does not keep — is kept as the source
+// exec call rather than guessed at.
 const (
 	codexNestedExecCommand = "exec_command"
-	codexNestedWriteStdin  = "write_stdin"
 	codexNestedApplyPatch  = "apply_patch"
 )
 
@@ -77,6 +77,7 @@ type codexNestedCallSite struct {
 	argSrc    string
 	argStart  int
 	siteStart int // offset of "tools." in the raw source
+	siteEnd   int // offset just past the closing parenthesis
 }
 
 // codexExecScan is one pass over an `exec` script: every nested call site it can
@@ -169,6 +170,420 @@ func parseCodexExecScript(input string) (codexExecScript, bool) {
 		return script, true
 	}
 	return codexExecScript{}, false
+}
+
+// codexExecCommands lists the command literals of an `exec` cell that stays in
+// its recorded form, so the card can list a batch one command per line instead
+// of leaving the reader to pick them out of the JavaScript. It runs
+// independently of parseCodexExecScript: a multi-call cell fails the
+// single-call proof but still has a countable, listable shape. Returning nil
+// means the cell is only its source text, which is always preserved and always
+// shown.
+func codexExecCommands(input string) []string {
+	code, ok := codexStripExecPragma(input)
+	if !ok {
+		return nil
+	}
+	scan, ok := codexScanExecScript(code)
+	if !ok {
+		return nil
+	}
+	if commands, ok := codexCommandArrayCommands(scan); ok {
+		return commands
+	}
+	if commands, ok := codexPromiseAllCommands(code, scan); ok {
+		return commands
+	}
+	return codexSequentialCommands(scan)
+}
+
+// codexCommandArrayCommands resolves the `const cmds = [...]` form whose
+// elements feed exec_command calls. The declaration is parsed as a literal
+// array, so an element that is not a string (a template, a call, a spread)
+// rejects the whole list rather than naming a command the script never sent.
+func codexCommandArrayCommands(scan codexExecScan) ([]string, bool) {
+	if len(scan.sites) == 0 {
+		return nil, false
+	}
+	firstSite := scan.sites[0].siteStart
+	for _, site := range scan.sites {
+		if site.name != codexNestedExecCommand {
+			return nil, false
+		}
+		if site.siteStart < firstSite {
+			firstSite = site.siteStart
+		}
+	}
+	for offset := 0; offset < len(scan.skeleton); {
+		idx := strings.Index(scan.skeleton[offset:], codexConstDeclPrefix)
+		if idx < 0 {
+			return nil, false
+		}
+		idx += offset
+		offset = idx + len(codexConstDeclPrefix)
+		if idx > 0 && isJSIdentPart(scan.skeleton[idx-1]) {
+			continue
+		}
+		nameStart := codexSkipJSSpace(scan.skeleton, offset)
+		nameEnd := codexSkipJSIdent(scan.skeleton, nameStart)
+		name := scan.skeleton[nameStart:nameEnd]
+		if name == "" || !isJSIdentifier(name) {
+			continue
+		}
+		// The array must be declared before the call that consumes it.
+		if idx >= firstSite {
+			return nil, false
+		}
+		// A reassignment would make the recorded array stale; a const cannot
+		// legally be reassigned, but the list still checks rather than
+		// trusting the declaration form.
+		if codexNameReassigned(scan, nameEnd, name) {
+			return nil, false
+		}
+		array, ok := codexConstStringArray(scan, nameEnd)
+		if !ok {
+			continue
+		}
+		if !codexIdentConsumedAsCommands(scan.skeleton, name) {
+			continue
+		}
+		return codexBoundExecCommands(array), true
+	}
+	return nil, false
+}
+
+// codexConstStringArray parses the literal array assigned right after the
+// identifier ending at nameEnd. It reads the declaration from the skeleton,
+// which has the same byte offsets as the source but blanks string and comment
+// bodies, then parses the raw array with the literal evaluator.
+func codexConstStringArray(scan codexExecScan, nameEnd int) ([]string, bool) {
+	assign := codexSkipJSTrivia(scan.raw, nameEnd)
+	if assign < 0 || assign >= len(scan.raw) || scan.raw[assign] != '=' {
+		return nil, false
+	}
+	if assign+1 < len(scan.raw) && scan.raw[assign+1] == '=' {
+		return nil, false
+	}
+	open := codexSkipJSTrivia(scan.raw, assign+1)
+	if open < 0 || open >= len(scan.raw) || scan.raw[open] != '[' {
+		return nil, false
+	}
+	_, next, ok := codexExtractDelimited(scan.raw, open, '[', ']')
+	if !ok {
+		return nil, false
+	}
+	// A lone array literal ends the declaration; anything else (a spread, a
+	// concatenation, a call) is an expression the list cannot evaluate.
+	if !codexLoneInitializerEnd(scan.raw[next:]) {
+		return nil, false
+	}
+	value, ok := parseCodexJSValue(scan.raw[open:next])
+	if !ok {
+		return nil, false
+	}
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return nil, false
+	}
+	commands := make([]string, 0, len(items))
+	for _, item := range items {
+		command, ok := item.(string)
+		if !ok {
+			return nil, false
+		}
+		commands = append(commands, command)
+	}
+	return commands, true
+}
+
+// codexIdentConsumedAsCommands reports whether the declared array variable is
+// actually used as the command source: mapped (`.map(`), iterated (`of`/`in`),
+// or indexed into a `cmd:` property. A string array that never reaches
+// exec_command is not a command list, and the list leaves the cell raw.
+func codexIdentConsumedAsCommands(skeleton, name string) bool {
+	for offset := 0; offset < len(skeleton); {
+		idx := strings.Index(skeleton[offset:], name)
+		if idx < 0 {
+			return false
+		}
+		idx += offset
+		offset = idx + len(name)
+		if idx > 0 && isJSIdentPart(skeleton[idx-1]) {
+			continue
+		}
+		if offset < len(skeleton) && isJSIdentPart(skeleton[offset]) {
+			continue
+		}
+		rest := strings.TrimLeft(skeleton[offset:], " \t\r\n")
+		if strings.HasPrefix(rest, ".map") {
+			after := strings.TrimLeft(rest[len(".map"):], " \t\r\n")
+			if strings.HasPrefix(after, "(") {
+				return true
+			}
+		}
+		before := strings.TrimRight(skeleton[:idx], " \t\r\n")
+		if strings.HasSuffix(before, " of") || strings.HasSuffix(before, " in") ||
+			strings.HasSuffix(before, "cmd:") {
+			return true
+		}
+	}
+	return false
+}
+
+// codexPromiseAllCommands resolves a Promise.all whose argument is an array
+// literal of direct exec_command calls. The array and each element are walked
+// with the same JavaScript-aware scanners as the single-call proof; a dynamic
+// element or an extra expression rejects the list.
+func codexPromiseAllCommands(code string, scan codexExecScan) ([]string, bool) {
+	const token = "Promise.all"
+	for offset := 0; offset < len(scan.skeleton); {
+		idx := strings.Index(scan.skeleton[offset:], token)
+		if idx < 0 {
+			return nil, false
+		}
+		idx += offset
+		offset = idx + len(token)
+		if idx > 0 && isJSIdentPart(scan.skeleton[idx-1]) {
+			continue
+		}
+		if offset < len(scan.skeleton) && isJSIdentPart(scan.skeleton[offset]) {
+			continue
+		}
+		// A conditional or nested Promise.all may not run, and then the
+		// number of calls it would issue is not a fact about this cell.
+		if codexSiteGuarded(scan.skeleton, idx) || codexSiteNested(scan.skeleton, idx) {
+			return nil, false
+		}
+		open := codexSkipJSTrivia(code, offset)
+		if open < 0 || open >= len(code) || code[open] != '(' {
+			return nil, false
+		}
+		argSrc, _, ok := codexExtractParens(code, open)
+		if !ok {
+			return nil, false
+		}
+		leading := len(argSrc) - len(strings.TrimLeft(argSrc, " \t\r\n"))
+		if leading >= len(argSrc) || argSrc[leading] != '[' {
+			// Promise.all(cmds.map(...)) is resolved by the const array path.
+			return nil, false
+		}
+		inner, end, ok := codexExtractDelimited(argSrc, leading, '[', ']')
+		if !ok || strings.TrimSpace(argSrc[end:]) != "" {
+			return nil, false
+		}
+		items, ok := codexSplitTopLevelList(inner)
+		if !ok || len(items) == 0 {
+			return nil, false
+		}
+		commands := make([]string, 0, len(items))
+		for _, item := range items {
+			command, ok := codexPromiseCommand(item)
+			if !ok {
+				return nil, false
+			}
+			commands = append(commands, command)
+		}
+		return codexBoundExecCommands(commands), true
+	}
+	return nil, false
+}
+
+// codexPromiseCommand resolves one array element of a Promise.all literal to
+// its command. The element must be exactly one exec_command call (optionally
+// awaited) with a literal argument object and a string cmd.
+func codexPromiseCommand(item string) (string, bool) {
+	trimmed := strings.TrimSpace(item)
+	if strings.HasPrefix(trimmed, "await") && (len(trimmed) == len("await") || !isJSIdentPart(trimmed[len("await")])) {
+		trimmed = strings.TrimSpace(trimmed[len("await"):])
+	}
+	itemScan, ok := codexScanExecScript(trimmed)
+	if !ok || len(itemScan.sites) != 1 || itemScan.sites[0].name != codexNestedExecCommand {
+		return "", false
+	}
+	site := itemScan.sites[0]
+	if strings.TrimSpace(trimmed[:site.siteStart]) != "" || strings.TrimSpace(trimmed[site.siteEnd:]) != "" {
+		return "", false
+	}
+	return codexExecCommandFromSite(site)
+}
+
+// codexSequentialCommands resolves several top-level exec_command calls that
+// run one after another. Control flow is rejected because a branch or loop
+// makes the call count depend on runtime state.
+func codexSequentialCommands(scan codexExecScan) []string {
+	if len(scan.sites) < 2 {
+		return nil
+	}
+	for _, word := range []string{
+		"if", "else", "for", "while", "do", "switch", "try", "catch",
+		"function", "setTimeout", "yield_control", "notify", "exit", "ALL_TOOLS",
+	} {
+		if tokenIsCodeWord(scan.skeleton, word) {
+			return nil
+		}
+	}
+	for _, fragment := range []string{
+		"=>", ".map(", ".forEach(", "Promise.all", "store(", "load(",
+		"?", "&&", "||",
+	} {
+		if strings.Contains(scan.skeleton, fragment) {
+			return nil
+		}
+	}
+	commands := make([]string, 0, len(scan.sites))
+	for _, site := range scan.sites {
+		if site.name != codexNestedExecCommand {
+			return nil
+		}
+		if codexSiteGuarded(scan.skeleton, site.siteStart) || codexSiteNested(scan.skeleton, site.siteStart) {
+			return nil
+		}
+		command, ok := codexExecCommandFromSite(site)
+		if !ok {
+			return nil
+		}
+		commands = append(commands, command)
+	}
+	return codexBoundExecCommands(commands)
+}
+
+// codexExecCommandFromSite resolves the cmd string of one exec_command call.
+func codexExecCommandFromSite(site codexNestedCallSite) (string, bool) {
+	value, ok := parseCodexJSValue(strings.TrimSpace(site.argSrc))
+	if !ok {
+		return "", false
+	}
+	args, ok := value.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	command, ok := args["cmd"].(string)
+	if !ok || command == "" {
+		return "", false
+	}
+	return command, true
+}
+
+// codexExecCommandsOmittedMark is the shortest line that still tells a reader
+// the command list was cut. Reserving its length while choosing the fitting
+// prefix guarantees an overflow always has room for a signal.
+const codexExecCommandsOmittedMark = "… more commands"
+
+// codexBoundExecCommands keeps the command list inside the imported-note
+// budget. When the whole list does not fit, the fitting prefix is kept and the
+// cut is always signalled: a command that crosses the budget is cut on a rune
+// boundary with the shared truncation marker, and the remaining commands
+// become one counting line. A short fallback line replaces the count when even
+// the count would not fit, so the list never reads as complete when it is not.
+func codexBoundExecCommands(commands []string) []string {
+	total := 0
+	for _, command := range commands {
+		total += len(command)
+	}
+	out := make([]string, 0, len(commands))
+	if total <= codexImportedNoteMaxBytes {
+		return append(out, commands...)
+	}
+	fit := 0
+	used := 0
+	for fit < len(commands) && used+len(commands[fit])+len(codexExecCommandsOmittedMark) <= codexImportedNoteMaxBytes {
+		used += len(commands[fit])
+		fit++
+	}
+	out = append(out, commands[:fit]...)
+	budget := codexImportedNoteMaxBytes - used
+	if fit == len(commands)-1 {
+		return append(out, codexTruncateImportedText(commands[fit], budget-len(codexImportedTruncatedSuffix)))
+	}
+	rest := len(commands) - fit - 1
+	marker := "… " + codexCountLabel(rest, "more command", "more commands")
+	if limit := budget - len(marker) - len(codexImportedTruncatedSuffix); limit > 0 {
+		out = append(out, codexTruncateImportedText(commands[fit], limit))
+		return append(out, marker)
+	}
+	marker = "… " + codexCountLabel(rest+1, "more command", "more commands")
+	if len(marker) > budget {
+		marker = codexExecCommandsOmittedMark
+	}
+	return append(out, marker)
+}
+
+// codexCountLabel renders an English "<n> <noun>" label, switching to the
+// plural form for every count but one so a one-command batch or a
+// one-character write never reads as a number the noun does not match. It
+// mirrors the TUI's own count wording without the importer depending on a
+// rendering package.
+func codexCountLabel(n int, singular, plural string) string {
+	if n == 1 {
+		return "1 " + singular
+	}
+	return strconv.Itoa(n) + " " + plural
+}
+
+// codexSplitTopLevelList splits a comma-separated list (the inside of an array
+// literal) at top-level commas. Strings, templates, comments, regex literals
+// and nested brackets are skipped, so a comma inside a command does not split
+// an element. A trailing comma is allowed; an empty element is not.
+func codexSplitTopLevelList(src string) ([]string, bool) {
+	var items []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(src); {
+		switch {
+		case codexHasPrefixAt(src, i, "//"):
+			end := strings.IndexByte(src[i:], '\n')
+			if end < 0 {
+				i = len(src)
+			} else {
+				i += end
+			}
+		case codexHasPrefixAt(src, i, "/*"):
+			end := strings.Index(src[i+2:], "*/")
+			if end < 0 {
+				return nil, false
+			}
+			i += end + 4
+		case src[i] == '\'' || src[i] == '"' || src[i] == '`':
+			next := codexSkipJSString(src, i)
+			if next < 0 {
+				return nil, false
+			}
+			i = next
+		case src[i] == '/' && codexRegexStartsAt(src, i):
+			next := codexSkipJSRegex(src, i)
+			if next < 0 {
+				return nil, false
+			}
+			i = next
+		case src[i] == '(' || src[i] == '[' || src[i] == '{':
+			depth++
+			i++
+		case src[i] == ')' || src[i] == ']' || src[i] == '}':
+			if depth == 0 {
+				return nil, false
+			}
+			depth--
+			i++
+		case src[i] == ',' && depth == 0:
+			item := strings.TrimSpace(src[start:i])
+			if item == "" {
+				return nil, false
+			}
+			items = append(items, item)
+			start = i + 1
+			i++
+		default:
+			i++
+		}
+	}
+	if depth != 0 {
+		return nil, false
+	}
+	last := strings.TrimSpace(src[start:])
+	if last != "" {
+		items = append(items, last)
+	}
+	return items, len(items) > 0
 }
 
 // tokenIsCodeWord reports whether word appears in the skeleton as a whole
@@ -363,7 +778,23 @@ func codexScanExecScript(code string) (codexExecScan, bool) {
 			}
 			skeleton.WriteString(strings.Repeat(" ", end-i))
 			i = end
-		case code[i] == '\'' || code[i] == '"' || code[i] == '`':
+		case code[i] == '`':
+			end, substitutions, ok := codexSkipJSTemplate(code, i)
+			if !ok {
+				return codexExecScan{}, false
+			}
+			// The literal body is data, but a ${...} body is code. A nested
+			// call there runs only when the interpolation evaluates, which the
+			// walk cannot attribute, so any site inside one fails the scan.
+			for _, substitution := range substitutions {
+				subScan, ok := codexScanExecScript(code[substitution[0]:substitution[1]])
+				if !ok || len(subScan.sites) > 0 {
+					return codexExecScan{}, false
+				}
+			}
+			skeleton.WriteString(strings.Repeat(" ", end-i))
+			i = end
+		case code[i] == '\'' || code[i] == '"':
 			next := codexSkipJSString(code, i)
 			if next < 0 {
 				return codexExecScan{}, false
@@ -437,11 +868,11 @@ func codexScanToolsMember(s string, start int, scan *codexExecScan, skeleton *st
 		skeleton.WriteString(strings.Repeat(" ", blank))
 		return start + blank, true
 	}
-	argSrc, _, ok := codexExtractParens(s, call)
+	argSrc, end, ok := codexExtractParens(s, call)
 	if !ok {
 		return 0, false
 	}
-	scan.sites = append(scan.sites, codexNestedCallSite{name: name, argSrc: argSrc, argStart: call + 1, siteStart: start})
+	scan.sites = append(scan.sites, codexNestedCallSite{name: name, argSrc: argSrc, argStart: call + 1, siteStart: start, siteEnd: end})
 	// The argument source stays part of the walk, so a nested call inside it is
 	// counted as a second site instead of being missed.
 	skeleton.WriteString(codexBlankNonCode(s[start : call+1]))
@@ -531,6 +962,38 @@ func codexSkipJSString(s string, i int) int {
 	return -1
 }
 
+// codexSkipJSTemplate returns the index just past a template literal starting
+// at i together with the byte ranges of its ${...} substitution bodies, or
+// ok=false when the literal never terminates. The literal body is data, so the
+// caller blanks it in the skeleton; every substitution body is code the caller
+// must walk on its own, because a nested call there runs only when the
+// interpolation evaluates and the outer walk cannot attribute it.
+func codexSkipJSTemplate(s string, i int) (int, [][2]int, bool) {
+	var substitutions [][2]int
+	for j := i + 1; j < len(s); j++ {
+		switch s[j] {
+		case '\\':
+			j++
+		case '`':
+			return j + 1, substitutions, true
+		case '$':
+			if j+1 >= len(s) || s[j+1] != '{' {
+				continue
+			}
+			// The braces delimit the expression, so the shared delimited walk
+			// can find the closing one through nested strings, comments and
+			// regexes instead of stopping at the first `}` it meets.
+			_, next, ok := codexExtractDelimited(s, j+1, '{', '}')
+			if !ok {
+				return 0, nil, false
+			}
+			substitutions = append(substitutions, [2]int{j + 2, next - 1})
+			j = next - 1
+		}
+	}
+	return 0, nil, false
+}
+
 // codexRegexStartsAt reports whether the slash at i opens a regex literal
 // rather than dividing. JavaScript decides lexically: a slash right after a
 // value (identifier, closing paren or bracket) divides, one after an operator,
@@ -601,6 +1064,17 @@ func codexSkipJSRegex(s string, i int) int {
 // and the index just past the closing parenthesis, skipping strings and comments
 // so a parenthesis inside a command does not close the call early.
 func codexExtractParens(s string, open int) (string, int, bool) {
+	return codexExtractDelimited(s, open, '(', ')')
+}
+
+// codexExtractDelimited returns the source between the matching bracket pair
+// starting at open and the index just past the closing byte. It uses the same
+// string, comment and regex skipping as the rest of the walk, so a bracket
+// inside a command, a regex or a comment does not close the range early.
+func codexExtractDelimited(s string, open int, openByte, closeByte byte) (string, int, bool) {
+	if open < 0 || open >= len(s) || s[open] != openByte {
+		return "", 0, false
+	}
 	depth := 0
 	for i := open; i < len(s); {
 		switch {
@@ -622,10 +1096,16 @@ func codexExtractParens(s string, open int) (string, int, bool) {
 				return "", 0, false
 			}
 			i = next
-		case s[i] == '(':
+		case s[i] == '/' && codexRegexStartsAt(s, i):
+			next := codexSkipJSRegex(s, i)
+			if next < 0 {
+				return "", 0, false
+			}
+			i = next
+		case s[i] == openByte:
 			depth++
 			i++
-		case s[i] == ')':
+		case s[i] == closeByte:
 			depth--
 			if depth == 0 {
 				return s[open+1 : i], i + 1, true
@@ -705,7 +1185,7 @@ func codexExecStringBinding(scan codexExecScan, argStart int, name string) (stri
 		// adjacent-string concatenation), a ternary, or a call — is an
 		// expression the proof cannot evaluate, so fail closed and keep the
 		// source call rather than binding a partial or wrong value.
-		if !codexInitIsLoneString(init[end:]) {
+		if !codexLoneInitializerEnd(init[end:]) {
 			continue
 		}
 		value, ok := parseCodexJSValue(init[:end])
@@ -724,13 +1204,13 @@ func codexExecStringBinding(scan codexExecScan, argStart int, name string) (stri
 	return "", false
 }
 
-// codexInitIsLoneString reports whether the tail after a string literal is only
+// codexLoneInitializerEnd reports whether the tail after a literal is only
 // whitespace, comments, and an optional terminating semicolon — that is, the
-// const initializer was a single string literal, not an expression. It returns
+// const initializer was a single literal value, not an expression. It returns
 // true at end of input too, where no semicolon closes the declaration. Any
-// other token (a second string, an operator, an identifier) means the value is
+// other token (a second literal, an operator, an identifier) means the value is
 // not a single provable literal and the binding must be rejected.
-func codexInitIsLoneString(tail string) bool {
+func codexLoneInitializerEnd(tail string) bool {
 	for i := 0; i < len(tail); {
 		c := tail[i]
 		switch {

@@ -83,6 +83,10 @@ type codexToolCall struct {
 	// ExecInput is the raw freeform `exec` input: JavaScript source text, not
 	// JSON. ExecScript is that source analyzed down to the single nested call
 	// it provably makes, or nil when the script is not provably one call.
+	// A cell that stays in its recorded form lists its command literals on the
+	// card, but that list is derived from ExecInput where it is rendered, not
+	// carried here: only a cell with no Chord mapping needs it, and the
+	// analysis is not free.
 	ExecInput  string
 	ExecScript *codexExecScript
 

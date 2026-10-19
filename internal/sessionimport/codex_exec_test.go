@@ -1,8 +1,10 @@
 package sessionimport
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // `exec` inputs shaped like the ones a Codex rollout records. Codex emits raw
@@ -69,7 +71,7 @@ func TestParseCodexExecScript(t *testing.T) {
 			wantOK: true,
 			checker: func(t *testing.T, got codexExecScript) {
 				t.Helper()
-				if got.Nested != codexNestedWriteStdin {
+				if got.Nested != "write_stdin" {
 					t.Fatalf("Nested=%q", got.Nested)
 				}
 				if got.Args["session_id"] != float64(481) || got.Args["chars"] != "" {
@@ -488,5 +490,230 @@ func TestParseCodexExecResult(t *testing.T) {
 				t.Fatalf("succeeded()=%v want %v", got.succeeded(), want)
 			}
 		})
+	}
+}
+
+func TestCodexExecCommands(t *testing.T) {
+	batch := `const cmds = [
+  "go build ./...",
+  "go test ./internal/sessionimport"
+];
+const rs = await Promise.all(cmds.map(cmd => tools.exec_command({cmd, workdir:"/repo"})));
+for (let i=0;i<rs.length;i++) text(rs[i].output);`
+	parallel := `const results = await Promise.all([
+  tools.exec_command({cmd:"git status",workdir:"/repo"}),
+  tools.exec_command({cmd:"git log",workdir:"/repo"})
+]);
+text(results.length);`
+	sequential := `const a = await tools.exec_command({cmd:"pwd"});
+const b = await tools.exec_command({cmd:"ls"});`
+
+	tests := []struct {
+		name         string
+		input        string
+		wantCommands []string
+	}{
+		{
+			name:         "const string array batch",
+			input:        batch,
+			wantCommands: []string{"go build ./...", "go test ./internal/sessionimport"},
+		},
+		{
+			name:         "promise all literal",
+			input:        parallel,
+			wantCommands: []string{"git status", "git log"},
+		},
+		{
+			name:         "sequential commands",
+			input:        sequential,
+			wantCommands: []string{"pwd", "ls"},
+		},
+		{
+			// write_stdin has no Chord tool, and its arguments are already in the
+			// source line the card shows, so the cell gains no fields at all.
+			name:  "write_stdin poll",
+			input: `const r = await tools.write_stdin({session_id:14922,chars:"",yield_time_ms:30000,max_output_tokens:6000}); text(r.output);`,
+		},
+		{
+			name:  "write_stdin input",
+			input: `const r = await tools.write_stdin({session_id:29611,chars:"y\n",yield_time_ms:1000,max_output_tokens:3000}); text(r.output);`,
+		},
+		{
+			name:  "single exec_command keeps the mapped path",
+			input: `const r = await tools.exec_command({cmd:"pwd"}); text(r.output);`,
+		},
+		{
+			name:  "apply_patch keeps the mapped path",
+			input: `await tools.apply_patch("*** Begin Patch\n*** End Patch");`,
+		},
+		{
+			name:  "unused string array",
+			input: `const cmds = ["a", "b"]; text(cmds[0]);`,
+		},
+		{
+			name:  "non-string array element",
+			input: `const cmds = ["a", 1]; const rs = await Promise.all(cmds.map(cmd => tools.exec_command({cmd})));`,
+		},
+		{
+			name:  "template array element",
+			input: "const cmds = [\"a\", `b ${dir}`]; const rs = await Promise.all(cmds.map(cmd => tools.exec_command({cmd})));",
+		},
+		{
+			name:  "promise all with a dynamic element",
+			input: `const rs = await Promise.all([tools.exec_command({cmd:"pwd"}), tools.exec_command({cmd:dir})]);`,
+		},
+		{
+			name:  "guarded promise all",
+			input: `flag && Promise.all([tools.exec_command({cmd:"pwd"})]);`,
+		},
+		{
+			name:  "branching sequential commands",
+			input: `if (ready) { await tools.exec_command({cmd:"pwd"}); } else { await tools.exec_command({cmd:"ls"}); }`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := codexExecCommands(tt.input)
+			if len(tt.wantCommands) == 0 {
+				if got != nil {
+					t.Fatalf("commands=%q, want nil (source only)", got)
+				}
+				return
+			}
+			if strings.Join(got, "\x00") != strings.Join(tt.wantCommands, "\x00") {
+				t.Fatalf("commands=%q, want %q", got, tt.wantCommands)
+			}
+		})
+	}
+}
+
+func TestCodexImportedExecCallKeepsSourceAndCommands(t *testing.T) {
+	input := `const cmds = [
+  "go build ./...",
+  "go test ./internal/sessionimport"
+];
+const rs = await Promise.all(cmds.map(cmd => tools.exec_command({cmd})));
+text(rs.length);`
+	tc := &codexToolCall{
+		Name:      "exec",
+		ExecInput: input,
+	}
+	name, args := codexImportedToolCall(tc)
+	if name != "exec" {
+		t.Fatalf("name=%q, want exec", name)
+	}
+	if !json.Valid(args) {
+		t.Fatalf("args is not valid JSON: %s", args)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(args, &payload); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	if payload["input"] != input {
+		t.Fatalf("input=%#v, want the source script preserved", payload["input"])
+	}
+	// The card lists a batch one command per line, so the payload carries a
+	// single newline-joined string rather than a JSON array the TUI would have
+	// to decode and re-render. Nothing replaces the source: a cell with no
+	// provable command list keeps the input alone, and the header previews it.
+	if payload["commands"] != "go build ./...\ngo test ./internal/sessionimport" {
+		t.Fatalf("commands=%#v", payload["commands"])
+	}
+	if len(payload) != 2 {
+		t.Fatalf("payload=%#v, want only input and commands", payload)
+	}
+
+	rawOnly := &codexToolCall{Name: "exec", ExecInput: `text("hello");`}
+	_, args = codexImportedToolCall(rawOnly)
+	if !json.Valid(args) {
+		t.Fatalf("args is not valid JSON: %s", args)
+	}
+	payload = nil
+	if err := json.Unmarshal(args, &payload); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	if payload["input"] != `text("hello");` || len(payload) != 1 {
+		t.Fatalf("payload=%#v", payload)
+	}
+}
+
+func TestCodexBoundExecCommandsAlwaysSignalsACut(t *testing.T) {
+	many := append([]string{strings.Repeat("a", codexImportedNoteMaxBytes-20)}, make([]string, 104)...)
+	for i := 1; i < len(many); i++ {
+		many[i] = "x"
+	}
+	tests := []struct {
+		name       string
+		commands   []string
+		wantMarker string
+		wantLast   string
+	}{
+		{
+			name:       "cut command is followed by more commands",
+			commands:   []string{strings.Repeat("a", codexImportedNoteMaxBytes-10), "tail command"},
+			wantMarker: "1 more command",
+		},
+		{
+			name:     "cut command is the last command",
+			commands: []string{strings.Repeat("a", codexImportedNoteMaxBytes-20), "tail command that does not fit"},
+		},
+		{
+			name:     "counting line does not fit",
+			commands: many,
+			wantLast: codexExecCommandsOmittedMark,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := codexBoundExecCommands(tc.commands)
+			total := 0
+			hasSuffix := false
+			for _, command := range got {
+				total += len(command)
+				if strings.HasSuffix(command, codexImportedTruncatedSuffix) {
+					hasSuffix = true
+				}
+			}
+			if total > codexImportedNoteMaxBytes {
+				t.Fatalf("content bytes=%d, want <= %d", total, codexImportedNoteMaxBytes)
+			}
+			if tc.wantLast != "" {
+				if len(got) == 0 || got[len(got)-1] != tc.wantLast {
+					t.Fatalf("commands=%q, want last line %q", got, tc.wantLast)
+				}
+				return
+			}
+			if !hasSuffix {
+				t.Fatalf("commands=%q, want a truncation suffix", got)
+			}
+			if tc.wantMarker != "" && !strings.Contains(got[len(got)-1], tc.wantMarker) {
+				t.Fatalf("last line=%q, want marker %q", got[len(got)-1], tc.wantMarker)
+			}
+		})
+	}
+}
+
+func TestCodexBoundExecCommandsBudgetAndUTF8(t *testing.T) {
+	long := strings.Repeat("中", codexImportedNoteMaxBytes)
+	got := codexBoundExecCommands([]string{long, "second", "third"})
+	if len(got) != 2 {
+		t.Fatalf("commands=%q, want a truncated first command and one remainder line", got)
+	}
+	if !utf8.ValidString(got[0]) {
+		t.Fatalf("truncated command is not valid UTF-8: %q", got[0])
+	}
+	if !strings.HasSuffix(got[0], codexImportedTruncatedSuffix) {
+		t.Fatalf("truncated command=%q", got[0])
+	}
+	if !strings.Contains(got[1], "2 more commands") {
+		t.Fatalf("remainder line=%q", got[1])
+	}
+	total := 0
+	for _, command := range got {
+		total += len(command)
+	}
+	if total > codexImportedNoteMaxBytes {
+		t.Fatalf("content bytes=%d, want <= %d", total, codexImportedNoteMaxBytes)
 	}
 }
