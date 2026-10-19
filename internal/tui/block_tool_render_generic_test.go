@@ -100,3 +100,22 @@ func TestFirstSentenceSplitsOnCommonDelimiters(t *testing.T) {
 		}
 	}
 }
+
+func TestGenericToolHeaderUsesSummaryAsSubject(t *testing.T) {
+	keys, vals := parseToolArgs("{\"summary\":\"Run the checks\",\"commands\":\"build\\nlint\",\"input\":\"script body\\nsecond line\"}")
+	mainPart, grayPart, bodyKeys := genericToolHeaderParts(keys, vals)
+	if mainPart != "Run the checks" {
+		t.Fatalf("mainPart=%q", mainPart)
+	}
+	if grayPart != "" {
+		t.Fatalf("grayPart=%q, want no option group", grayPart)
+	}
+	if !slices.Equal(bodyKeys, []string{"commands", "input"}) {
+		t.Fatalf("bodyKeys=%v", bodyKeys)
+	}
+	// A multi-line argument stays newline-separated so the card renders one
+	// entry per line instead of folding it onto a single line.
+	if vals["commands"] != "build\nlint" {
+		t.Fatalf("commands=%q", vals["commands"])
+	}
+}

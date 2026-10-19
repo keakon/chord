@@ -826,6 +826,10 @@ var genericToolSubjectKeys = map[string]bool{
 	"url": true, "uri": true, "name": true, "id": true, "key": true, "ref": true,
 	"command": true, "cmd": true, "query": true, "pattern": true, "target": true,
 	"title": true, "repo": true, "message": true, "text": true, "prompt": true,
+	// summary is the conventional name for a one-line description of what a
+	// call did, so a tool carrying one leads its header with it instead of
+	// burying the text in the option group.
+	"summary": true,
 }
 
 // isGenericToolHeaderScalar reports whether a value can sit on a header line at

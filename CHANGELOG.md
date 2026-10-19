@@ -48,6 +48,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The first-run `prevent_sleep` prompt now defaults to No on macOS, Linux, and Windows; existing saved settings are unchanged.
 - Question decision cards keep the original question and answers fully visible without folding, with separate lines for the question, selections, and option descriptions.
 
+- A tool card whose arguments carry a top-level `summary` now leads with it as the header subject instead of burying it in the option group.
+
 ### Fixes
 
 - Replayed tool-call arguments no longer reach OpenAI Responses endpoints raw when they are malformed or empty. History conversion now applies the same sanitized placeholder the other providers use, so a history entry with corrupt arguments — for example an imported call whose source rollout recorded a truncated arguments string — cannot fail the whole request on resume.
