@@ -91,7 +91,7 @@ func (b *Block) renderDeliveryCard(width int) []string {
 		if path := deliveryDisplayPath(f, b.displayWorkingDir); path != "" {
 			appendStyledWrappedBody(&body, currentStyles.DimStyle, toolFieldBodyIndent, path, contentWidth)
 		}
-		actions, hits := fileActionRows(max(1, contentWidth-len(deliveryActionLead)), -1)
+		actions, hits := wrapActionButtons(deliveryActionButtons(), max(1, contentWidth-len(deliveryActionLead)))
 		base := len(body)
 		for action, hit := range hits {
 			b.deliveryHits = append(b.deliveryHits, deliveryCardHit{
@@ -139,7 +139,6 @@ func (m *Model) activateDeliveryCard(block *Block, line, column int) (tea.Cmd, b
 		for i, f := range m.fileViewer.files {
 			if f.ID == hit.fileID {
 				m.fileViewer.selected = i
-				m.fileViewer.action = hit.action
 				return tea.Batch(open, m.activateFileAction(hit.action)), true
 			}
 		}

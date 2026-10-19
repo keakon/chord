@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/filedelivery"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tui/filepreview"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestFileViewerLateResultAfterSelection(t *testing.T) {
@@ -96,6 +97,24 @@ func TestFileViewerWrappedLineNavigation(t *testing.T) {
 		t.Fatal("unwrapped mode retained visual offset")
 	}
 }
+
+// Previewing the file already on screen only reloads it, so the viewer footer
+// drops that button while showing content and keeps a key on each action it
+// still offers.
+func TestFileViewerShowsActionKeysAndDropsSelfPreview(t *testing.T) {
+	m := Model{width: 80, height: 24}
+	m.fileViewer = fileViewerState{open: true, showing: true, files: []message.DeliveredFile{{DisplayName: "sample.txt"}}, lines: []string{"hello"}}
+	plain := terminaltext.StripANSI(m.renderFileViewerOverlay())
+	if strings.Contains(plain, "[Preview]") || strings.Contains(plain, "Enter Preview") {
+		t.Fatalf("preview mode still offers to preview itself:\n%s", plain)
+	}
+	for _, want := range []string{"[o Open]", "[a Open with]", "[p Copy path]"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("footer is missing %q:\n%s", want, plain)
+		}
+	}
+}
+
 func clickFileViewerRow(m *Model, row, column int) tea.Cmd {
 	rect := centeredRect(m.ensureLayout().area, m.renderFileViewerOverlay())
 	return m.handleFileViewerMouse(tea.MouseClickMsg{X: rect.Min.X + currentStyles.DirectoryBorderStyle.GetBorderLeftSize() + currentStyles.DirectoryBorderStyle.GetPaddingLeft() + column, Y: rect.Min.Y + currentStyles.DirectoryBorderStyle.GetBorderTopSize() + currentStyles.DirectoryBorderStyle.GetPaddingTop() + row, Button: tea.MouseLeft})
@@ -134,7 +153,8 @@ func TestFileViewerLayoutBoundsAndHitTargets(t *testing.T) {
 		for _, hit := range p.hits {
 			if hit.kind == fileHitAction {
 				actions++
-				if !strings.Contains(p.rows[hit.row], "["+fileActions[hit.index]+"]") {
+				button := "[" + fileActionKeys[hit.index] + " " + fileActions[hit.index] + "]"
+				if !strings.Contains(p.rows[hit.row], button) {
 					t.Fatal("action has no matching button")
 				}
 			}
@@ -191,11 +211,19 @@ func TestFileViewerDesktopVersionAndChooserFeedback(t *testing.T) {
 		m.fileViewer = fileViewerState{open: true, owner: m.imageViewerOwner(), files: []message.DeliveredFile{file}}
 		batch := m.fileDesktopAction(action, "app")().(tea.BatchMsg)
 		result := batch[0]().(fileDesktopResult)
-		m.handleFileDesktopResult(result)
+		cmd := m.handleFileDesktopResult(result)
 		if !strings.Contains(m.fileViewer.note, "changed since delivery") {
 			t.Fatalf("missing version notice: %s", m.fileViewer.note)
 		}
-		if service.chooser && (!strings.Contains(m.fileViewer.note, "chooser closed") || strings.Contains(m.fileViewer.note, "No associated")) {
+		// The forwarding receipt is a toast now, so the dialog keeps only the
+		// content state it was already showing.
+		if cmd == nil {
+			t.Fatal("forwarded request produced no toast")
+		}
+		if strings.Contains(m.fileViewer.note, "handed to the system") || strings.Contains(m.fileViewer.note, "chooser closed") {
+			t.Fatalf("forwarded request stayed in the dialog: %s", m.fileViewer.note)
+		}
+		if service.chooser && strings.Contains(m.fileViewer.note, "No associated") {
 			t.Fatal("chooser completion misreported as empty associations")
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,7 +24,6 @@ type fileViewerState struct {
 	checkout                string
 	checkoutGeneration      uint64
 	linkLines               []int
-	action                  int
 	open                    bool
 	owner                   imageViewerOwner
 	prevMode                Mode
@@ -274,12 +274,12 @@ func (m *Model) handleFileViewerKey(msg tea.KeyMsg) tea.Cmd {
 	case "m":
 		v.markdown = !v.markdown
 		return m.prepareFileViewer()
-	case "tab":
-		v.action = (v.action + 1) % len(fileActions)
-	case "shift+tab":
-		v.action = (v.action + len(fileActions) - 1) % len(fileActions)
 	case "enter":
-		return m.activateFileAction(v.action)
+		// Enter opens the selected file from the list. While content is showing
+		// there is no primary action left: the footer names the key for each.
+		if !v.showing {
+			return m.activateFileAction(fileActionPreview)
+		}
 	case "r":
 		return m.prepareFileViewer()
 	case "/", "g":
@@ -289,8 +289,10 @@ func (m *Model) handleFileViewerKey(msg tea.KeyMsg) tea.Cmd {
 		m.searchFileViewer(1)
 	case "N":
 		m.searchFileViewer(-1)
-	case "p":
-		return writeClipboardCmd(deliveryPath(v.files[v.selected], m.deliverySessionDir()), "File path copied")
+	case "p", "o", "a":
+		// The direct keys are the viewer's footer buttons; both routes go
+		// through activateFileAction so they run the same action.
+		return m.activateFileAction(slices.Index(fileActionKeys, key))
 	case "y":
 		if !v.showing || v.raw == nil {
 			return nil
@@ -299,10 +301,6 @@ func (m *Model) handleFileViewerKey(msg tea.KeyMsg) tea.Cmd {
 			return tea.Batch(writeClipboardCmd(string(v.raw), "Loaded source copied"), m.enqueueToast("Copied source contains file escape control characters", "warn"))
 		}
 		return writeClipboardCmd(string(v.raw), "Loaded source copied")
-	case "o":
-		return m.fileDesktopAction("open", "")
-	case "a":
-		return m.fileDesktopAction("associations", "")
 	}
 	return nil
 }
@@ -414,9 +412,11 @@ func (m *Model) handleFileDesktopResult(result fileDesktopResult) tea.Cmd {
 	if !v.open || result.owner != m.imageViewerOwner() || result.generation != v.generation || v.files[v.selected].ID != result.fileID {
 		return nil
 	}
-	if result.err != nil {
+	var toast tea.Cmd
+	switch {
+	case result.err != nil:
 		v.note = result.err.Error()
-	} else if result.action == "associations" {
+	case result.action == "associations":
 		v.apps = result.apps
 		v.appIndex = 0
 		v.note = "System application query completed"
@@ -426,17 +426,31 @@ func (m *Model) handleFileDesktopResult(result fileDesktopResult) tea.Cmd {
 		if len(result.apps) == 0 {
 			v.note = "No associated applications returned"
 		}
-	} else {
+	default:
+		// Forwarding to the system is acknowledged with a toast, not a line
+		// that stays in the dialog: the note row carries content state
+		// (loading, version changes, errors, search), not action receipts.
 		v.apps = nil
-		v.note = "Open request handed to the system"
-		if result.action == "chooser" {
-			v.note = "System application chooser closed"
-		}
+		v.note = ""
+		toast = m.enqueueToast(fileDesktopReceipt(result.action), "info")
 	}
 	if result.note != "" {
-		v.note = result.note + " · " + v.note
+		if v.note == "" {
+			v.note = result.note
+		} else {
+			v.note = result.note + " · " + v.note
+		}
 	}
-	return nil
+	return toast
+}
+
+// fileDesktopReceipt names what a forwarded desktop request did, for the toast
+// that acknowledges it.
+func fileDesktopReceipt(action string) string {
+	if action == "chooser" {
+		return "System application chooser closed"
+	}
+	return "Open request handed to the system"
 }
 
 type fileDesktopSlowMsg struct {

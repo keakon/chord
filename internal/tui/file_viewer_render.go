@@ -39,7 +39,8 @@ func (m *Model) fileViewerWidth() int {
 	return max(1, m.width-6-currentStyles.DirectoryBorderStyle.GetHorizontalFrameSize())
 }
 func (m *Model) fileViewerBodyHeight() int {
-	actions, _ := fileActionRows(m.fileViewerWidth(), m.fileViewer.action)
+	buttons, _ := viewerActionButtons(m.fileViewer.showing)
+	actions, _ := wrapActionButtons(buttons, m.fileViewerWidth())
 	extra := 1 + len(actions) // status and action rows
 	if m.fileViewer.inputMode != "" || m.fileViewer.showing {
 		extra++
@@ -229,9 +230,10 @@ func (m *Model) fileViewerLayout() fileViewerPresentation {
 		p.rows = append(p.rows, "")
 	}
 	p.rows = append(p.rows, fileLabel(v.note))
-	actions, hits := fileActionRows(width, v.action)
+	buttons, indexes := viewerActionButtons(v.showing)
+	actions, hits := wrapActionButtons(buttons, width)
 	for i, h := range hits {
-		p.hits = append(p.hits, fileViewerHit{kind: fileHitAction, row: len(p.rows) + h[0], start: h[1], end: min(width, h[2]), index: i})
+		p.hits = append(p.hits, fileViewerHit{kind: fileHitAction, row: len(p.rows) + h[0], start: h[1], end: min(width, h[2]), index: indexes[i]})
 	}
 	p.rows = append(p.rows, actions...)
 	if v.inputMode != "" {

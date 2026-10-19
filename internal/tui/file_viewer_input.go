@@ -4,29 +4,66 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 )
 
+// fileActions is the canonical action set. The delivery card lists all four for
+// every file, and the file viewer lists the ones that do something for its
+// current state; both index into this slice, so the same action runs whichever
+// surface the reader used.
 var fileActions = []string{"Preview", "Open", "Open with", "Copy path"}
+
+const (
+	fileActionPreview = iota
+	fileActionOpen
+	fileActionOpenWith
+	fileActionCopyPath
+)
+
+// fileActionKeys are the direct keys that run fileActions in the file viewer.
+// Preview belongs to the list's Enter: once content is showing it would only
+// reload the file already on screen, so the viewer drops that button.
+var fileActionKeys = []string{"Enter", "o", "a", "p"}
 
 func (m *Model) activateFileAction(index int) tea.Cmd {
 	switch index {
-	case 0:
+	case fileActionPreview:
 		return m.prepareFileViewer()
-	case 1:
+	case fileActionOpen:
 		return m.fileDesktopAction("open", "")
-	case 2:
+	case fileActionOpenWith:
 		return m.fileDesktopAction("associations", "")
-	case 3:
+	case fileActionCopyPath:
 		return writeClipboardCmd(deliveryPath(m.fileViewer.files[m.fileViewer.selected], m.deliverySessionDir()), "File path copied")
 	}
 	return nil
 }
-func fileActionRows(width, selected int) ([]string, [][3]int) {
+
+// viewerActionButtons returns the file viewer's footer buttons for the current
+// state, paired with the fileActions index each one runs.
+func viewerActionButtons(showing bool) (buttons []string, indexes []int) {
+	for i, label := range fileActions {
+		if showing && i == fileActionPreview {
+			continue
+		}
+		buttons = append(buttons, "["+fileActionKeys[i]+" "+label+"]")
+		indexes = append(indexes, i)
+	}
+	return buttons, indexes
+}
+
+// deliveryActionButtons returns the delivery card's per-file buttons.
+func deliveryActionButtons() []string {
+	buttons := make([]string, len(fileActions))
+	for i, label := range fileActions {
+		buttons[i] = "[" + label + "]"
+	}
+	return buttons
+}
+
+// wrapActionButtons lays bracketed buttons out on rows that fit width and
+// returns each button's [row, start, end] cell range, in the same order.
+func wrapActionButtons(buttons []string, width int) ([]string, [][3]int) {
 	rows := []string{""}
 	var hits [][3]int
-	for i, label := range fileActions {
-		button := "[" + label + "]"
-		if i == selected {
-			button = ">" + button
-		}
+	for _, button := range buttons {
 		if len(rows[len(rows)-1])+len(button)+1 > width && rows[len(rows)-1] != "" {
 			rows = append(rows, "")
 		}
@@ -60,7 +97,6 @@ func (m *Model) handleFileViewerMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 		switch hit.kind {
 		case fileHitAction:
-			m.fileViewer.action = hit.index
 			return m.activateFileAction(hit.index)
 		case fileHitApplication:
 			if hit.index >= 0 && hit.index < len(m.fileViewer.apps) {
