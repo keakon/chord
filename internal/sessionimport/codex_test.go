@@ -726,6 +726,103 @@ func TestConvertCodexRollout_ExecFailureMarksResultError(t *testing.T) {
 	}
 }
 
+func TestConvertCodexRollout_ShellFailureMarksResultError(t *testing.T) {
+	// A `go test` that failed: the exit status lives in the header, not in the
+	// body, so an importer that only strips the header would report success.
+	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"test-session"}}
+{"timestamp":"2026-05-09T04:43:49Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run the tests"}]}}
+{"timestamp":"2026-05-09T04:43:52Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"go test ./...\",\"workdir\":\"/tmp/project\"}","call_id":"call_sh"}}
+{"timestamp":"2026-05-09T04:43:53Z","type":"response_item","payload":{"type":"function_call_output","output":"Chunk ID: 8902b5\nWall time: 0.0000 seconds\nProcess exited with code 1\nOriginal token count: 4\nOutput:\nFAIL\n","call_id":"call_sh"}}
+`)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	if name := msgs[1].ToolCalls[0].Name; name != tools.NameShell {
+		t.Fatalf("tool name=%q, want shell", name)
+	}
+	if msgs[2].ToolStatus != message.ToolStatusError {
+		t.Fatalf("tool status=%q, want error", msgs[2].ToolStatus)
+	}
+	if msgs[2].Content != "FAIL\n" {
+		t.Fatalf("result envelope not stripped: %q", msgs[2].Content)
+	}
+}
+
+func TestConvertCodexRollout_SettledShellKeepsItsBody(t *testing.T) {
+	// A successful command keeps the output it printed, header removed, and
+	// stays a successful result.
+	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"test-session"}}
+{"timestamp":"2026-05-09T04:43:49Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"list files"}]}}
+{"timestamp":"2026-05-09T04:43:52Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"call_sh"}}
+{"timestamp":"2026-05-09T04:43:53Z","type":"response_item","payload":{"type":"function_call_output","output":"Command: /bin/zsh -lc 'ls'\nChunk ID: 119250\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 3\nOutput:\na.go\nb.go\n","call_id":"call_sh"}}
+`)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if msgs[2].ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("tool status=%q, want success", msgs[2].ToolStatus)
+	}
+	if msgs[2].Content != "a.go\nb.go\n" {
+		t.Fatalf("result=%q, want the command's own output", msgs[2].Content)
+	}
+}
+
+func TestConvertCodexRollout_YieldedShellKeepsItsEnvelope(t *testing.T) {
+	// write_stdin polled a process that is still running. There is no outcome
+	// to import, and the session id in the header names the continuation, so
+	// the envelope stays verbatim.
+	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"test-session"}}
+{"timestamp":"2026-05-09T04:43:49Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"keep reading"}]}}
+{"timestamp":"2026-05-09T04:43:52Z","type":"response_item","payload":{"type":"function_call","name":"write_stdin","arguments":"{\"session_id\":481}","call_id":"call_in"}}
+{"timestamp":"2026-05-09T04:43:53Z","type":"response_item","payload":{"type":"function_call_output","output":"Chunk ID: 1919aa\nWall time: 10.0000 seconds\nProcess running with session ID 481\nOriginal token count: 2\nOutput:\npartial","call_id":"call_in"}}
+`)
+	const envelope = "Chunk ID: 1919aa\nWall time: 10.0000 seconds\nProcess running with session ID 481\nOriginal token count: 2\nOutput:\npartial"
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if msgs[2].ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("tool status=%q, want success", msgs[2].ToolStatus)
+	}
+	if msgs[2].Content != envelope {
+		t.Fatalf("result=%q, want the envelope verbatim", msgs[2].Content)
+	}
+}
+
+func TestConvertCodexRollout_FileContentIsNotDecodedAsShellEnvelope(t *testing.T) {
+	// A file can quote the header lines. Only the tools that write the
+	// envelope may be decoded as one, or reading a log would rewrite its text.
+	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"test-session"}}
+{"timestamp":"2026-05-09T04:43:49Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"read the log"}]}}
+{"timestamp":"2026-05-09T04:43:52Z","type":"response_item","payload":{"type":"function_call","name":"read_file","arguments":"{\"path\":\"run.log\"}","call_id":"call_r"}}
+{"timestamp":"2026-05-09T04:43:53Z","type":"response_item","payload":{"type":"function_call_output","output":"Wall time: 0.1000 seconds\nProcess exited with code 1\nOutput:\nrecorded earlier\n","call_id":"call_r"}}
+`)
+	const content = "Wall time: 0.1000 seconds\nProcess exited with code 1\nOutput:\nrecorded earlier\n"
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if msgs[2].ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("tool status=%q, want success", msgs[2].ToolStatus)
+	}
+	if msgs[2].Content != content {
+		t.Fatalf("result=%q, want the file's own text", msgs[2].Content)
+	}
+}
+
 func TestConvertCodexRollout_ExecApplyPatchConvertsToApplyPatch(t *testing.T) {
 	input := "const patch = \"*** Begin Patch\\n*** Update File: a.txt\\n@@\\n-old\\n+new\\n*** End Patch\";\ntext(await tools.apply_patch(patch));"
 	data := codexExecRollout(t, input,

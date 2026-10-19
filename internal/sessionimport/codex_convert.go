@@ -991,6 +991,25 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 						if !res.succeeded() {
 							status = message.ToolStatusError
 						}
+					} else if codexHasShellEnvelope(tc.Name) {
+						// The function-call shell tools carry the same kind of
+						// header, with the exit status on its own line. A live
+						// Chord shell reports a non-zero exit as a failed
+						// result, so an imported one has to as well; otherwise a
+						// failed build reads back as a success and the model
+						// trusts output the command never produced. A result
+						// that is still running keeps its header: the session id
+						// in it names the continuation the source recorded, and
+						// the call stays mapped to `shell` because running the
+						// command is what that tool does — the rest of the
+						// output belongs to a later `write_stdin` record, not to
+						// this result.
+						if res, ok := parseCodexShellResult(content); ok && res.Settled {
+							content = res.Output
+							if res.ExitCode != 0 {
+								status = message.ToolStatusError
+							}
+						}
 					}
 					out = append(out, message.Message{
 						Role:       message.RoleTool,

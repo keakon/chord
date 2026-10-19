@@ -58,6 +58,8 @@
 
 - 导入 Codex 会话现在会显示真正执行的工具，而不是一张转义后的脚本文本卡。导入器会把每条代码模式 `exec` 输入（原始 JavaScript）解析到它可证明只发起的唯一一次 `tools.exec_command(...)` 或 `tools.apply_patch(...)` 嵌套调用，映射为 `shell` 或 `apply_patch`，并保留命令、工作目录与补丁正文；控制流、非 const 绑定或表达式初值（拼接、`?:` 三元、相邻字符串）以及首行 `// @exec:` pragma 不合法的输入都无法通过这个证明。无法映射的调用——`write_stdin`、`collaboration` 命名空间、一次发起多个调用的脚本、会话结束时仍在运行的脚本单元——保持为源头的工具调用，用原名和原参数，轨迹里仍然记着实际发生过的事。`Script completed` 结果信封会被剥掉，脚本失败则记为错误结果。
 
+- 导入的 Codex shell 结果现在会沿用记录下来的退出状态，失败的命令不再被读成成功。`exec_command`、`write_stdin` 和旧版 `shell` 工具把 `Process exited with code N` 写在独立的 `Output:` 行之上的头部里，位于命令自身输出之外，现在会读取这一行：非零状态把结果标为失败，与 live 的 Chord shell 报告方式一致；头部（回显的命令、chunk id、耗时、token 数）会被剥掉，正文就是命令自己的输出。进程仍在运行的结果保持头部原样，因为其中的 session id 指向源头记下的续读；只有这三个工具会这样解码，某个返回文件内容的工具即使正文里恰好引用了同样的头部也不会被改写。
+
 - 恢复会话时，历史中只要有一条没有文本的消息，就不会再报 `Missing required parameter: '…output[…].text'`。工具没有输出是合法历史——导入的 Codex `exec` 脚本、Claude 工具结果、OpenCode 工具输出都可能没有输出——但这类消息以空文本块发出去会被 provider 拒绝，导致模型池里每个模型都起不来这一轮。现在导入的空结果会保留为和 live 调用相同的“无输出”文本——按配对调用的工具名与结果状态生成：成功的 shell 调用读作 `(shell completed with no output)`，失败沿用 live 路径的通用错误行,取消沿用它的 `Cancelled` 行——空 assistant 文本块在发送前被标注，一条空结果不再拖垮整轮请求。
 
 - 导入 Claude 会话现在保留未映射工具调用的原始参数，不再包一层导入器元数据，卡片显示的是源头发起的调用本身——`WebSearch` 带着它的 query，而不是 `{unsupported, source, reason, arguments}` 记账字段。有 Chord 映射的工具名（`Bash`、`Read`、`Write`、`Edit`、`MultiEdit`、`Update` 等）仍转换为对应的 Chord 工具。
