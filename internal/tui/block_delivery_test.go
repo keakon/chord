@@ -272,8 +272,8 @@ func TestDeliveryCardButtonDoesNotDoubleLoad(t *testing.T) {
 		if hit.action != 3 { // Copy path; it does not load content.
 			continue
 		}
-		cmd := m.activateDeliveryCard(block, hit.line, hit.start)
-		if cmd == nil {
+		cmd, handled := m.activateDeliveryCard(block, hit.line, hit.start)
+		if !handled || cmd == nil {
 			t.Fatal("copy-path button did not dispatch")
 		}
 		if m.fileViewer.showing {
@@ -288,4 +288,113 @@ func TestDeliveryCardButtonDoesNotDoubleLoad(t *testing.T) {
 }
 func deliveryTestApps() []desktop.Application {
 	return []desktop.Application{{ID: "app", Name: "Example"}}
+}
+
+// A click that misses every delivery button is not the card's action: the body
+// is prose about the files, and the card's own hint says "click a button".
+// Treating a miss as "show me this delivery" turned the whole card into an
+// invisible button, so a reader could not start a text selection on it.
+func TestDeliveryCardClickMissesButtonsStartsSelection(t *testing.T) {
+	block := deliveryTestBlock("/project", deliveryTestFile("f1", "notes.md", "session note", "/project/notes.md"))
+	m := clickBlockLineContaining(t, block, 80, 24, "session note")
+
+	if m.fileViewer.open {
+		t.Fatal("click on the card body opened the file view")
+	}
+	if !m.hasMouseSelection() {
+		t.Fatal("click on the card body did not start a text selection")
+	}
+}
+
+// Pressing a rendered button still acts, even though the card body no longer
+// does.
+func TestDeliveryCardButtonClickOpensFileView(t *testing.T) {
+	block := deliveryTestBlock("/project", deliveryTestFile("f1", "notes.md", "session note", "/project/notes.md"))
+	m := clickBlockLineContaining(t, block, 80, 24, "file(s) delivered")
+
+	for _, hit := range block.deliveryHits {
+		if hit.action != 0 { // Preview
+			continue
+		}
+		m.Update(tea.MouseClickMsg{X: hit.start, Y: m.viewport.offset + hit.line, Button: tea.MouseLeft})
+		if !m.fileViewer.open {
+			t.Fatal("preview button did not open the file view")
+		}
+		return
+	}
+	t.Fatal("no Preview hit recorded")
+}
+
+// A compaction checkpoint carries the files delivered before it, but it is still
+// a prose card: clicking it must start a text selection, not open a preview.
+// The block used to be routed to the delivery card purely because
+// DeliveredFiles was non-empty, so every click in the summary opened the file
+// view instead of selecting.
+func TestCompactionSummaryClickStartsSelectionNotDelivery(t *testing.T) {
+	content := "[Context Summary]\n\nSummary body text\n"
+	block := &Block{
+		ID:                   1,
+		Type:                 BlockCompactionSummary,
+		Content:              content,
+		CompactionSummaryRaw: content,
+		DeliveredFiles:       []message.DeliveredFile{deliveryTestFile("f1", "notes.md", "", "/project/notes.md")},
+	}
+	m := clickBlockLineContaining(t, block, 80, 24, "Summary body text")
+
+	if m.fileViewer.open {
+		t.Fatal("click on the compaction summary opened the file view")
+	}
+	if !m.hasMouseSelection() {
+		t.Fatal("click on the compaction summary did not start a text selection")
+	}
+}
+
+// Enter keeps the checkpoint's earlier deliveries reachable: the card advertises
+// "(Enter)", and the mouse no longer opens them. A refactor that applied the
+// render gate to the keyboard path too would strand those files.
+func TestCompactionSummaryEnterOpensEarlierDeliveries(t *testing.T) {
+	content := "[Context Summary]\n\nSummary body text\n"
+	block := &Block{
+		ID:                   1,
+		Type:                 BlockCompactionSummary,
+		Content:              content,
+		CompactionSummaryRaw: content,
+		DeliveredFiles:       []message.DeliveredFile{deliveryTestFile("f1", "notes.md", "", "/project/notes.md")},
+	}
+	m := NewModelWithSize(nil, 80, 24)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(block)
+	m.layout = m.generateLayout(m.width, m.height)
+	_ = m.viewport.Render("", nil, -1, -1, "")
+	m.focusedBlockID = block.ID
+
+	cmd := m.normalActivation()
+
+	if cmd == nil || !m.fileViewer.open {
+		t.Fatal("Enter on the checkpoint did not open its earlier deliveries")
+	}
+}
+
+// clickBlockLineContaining lays out a model whose viewport holds block alone,
+// left-clicks the first rendered line containing target, and returns the model.
+func clickBlockLineContaining(t *testing.T, block *Block, width, height int, target string) *Model {
+	t.Helper()
+	m := NewModelWithSize(nil, width, height)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(block)
+	m.layout = m.generateLayout(m.width, m.height)
+	lines := block.Render(m.viewport.width, "")
+	_ = m.viewport.Render("", nil, -1, -1, "")
+	line := -1
+	for i, l := range lines {
+		if strings.Contains(terminaltext.StripANSI(l), target) {
+			line = i
+			break
+		}
+	}
+	if line < 0 {
+		t.Fatalf("no rendered line contains %q in %#v", target, lines)
+	}
+	m.Update(tea.MouseClickMsg{X: 2, Y: m.viewport.offset + line, Button: tea.MouseLeft})
+	return &m
 }

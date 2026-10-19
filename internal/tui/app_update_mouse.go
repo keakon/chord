@@ -649,8 +649,10 @@ func (m *Model) handleViewportMouseClick(mouse tea.Mouse, hits mouseHitZones) te
 	if block == nil {
 		return nil
 	}
-	if len(block.DeliveredFiles) > 0 {
-		return m.activateDeliveryCard(block, lineInBlock, hits.viewportCol)
+	if block.rendersDeliveryCard() {
+		if cmd, handled := m.activateDeliveryCard(block, lineInBlock, hits.viewportCol); handled {
+			return cmd
+		}
 	}
 	col := clampCol(hits.viewportCol, m.viewport.width)
 	if cmd, handled := m.handleViewportSelectionClick(mouse, block, lineInBlock, col); handled {

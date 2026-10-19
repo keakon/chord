@@ -111,23 +111,39 @@ func (b *Block) renderDeliveryCard(width int) []string {
 	return b.renderToolCardWithIgnoredArgs(style, cardWidth, deliveryCardTitle(b), body, metrics.toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
-func (m *Model) activateDeliveryCard(block *Block, line, column int) tea.Cmd {
-	for _, hit := range block.deliveryHits {
-		if line == hit.line && column >= hit.start && column < hit.end {
-			// A button press names its own action, so the view opens on the list
-			// and the action runs against it. Auto-previewing here would load the
-			// file twice: once for the viewer and once for the pressed action.
-			open := m.openDeliveryFileList(block.DeliveredFiles)
-			for i, f := range m.fileViewer.files {
-				if f.ID == hit.fileID {
-					m.fileViewer.selected = i
-					m.fileViewer.action = hit.action
-					return tea.Batch(open, m.activateFileAction(hit.action))
-				}
-			}
-			return open
-		}
+// rendersDeliveryCard reports whether this block draws the delivery card
+// surface. The renderer and the click handler share it so the two cannot drift:
+// a click is the delivery action only when the card the reader sees actually
+// carries the delivery buttons.
+func (b *Block) rendersDeliveryCard() bool {
+	if b == nil {
+		return false
 	}
-	// A click that missed every button still means "show me this delivery".
-	return m.openDeliveryFiles(block.DeliveredFiles)
+	return b.Type == BlockToolCall && len(b.DeliveredFiles) > 0 && b.ResultDone && !b.IsError
+}
+
+// activateDeliveryCard runs the action of the delivery button under the click
+// and reports whether the click hit one. A miss is not handled here: the card
+// body is prose about the files, and its own hint says "click a button", so it
+// falls through to the caller's normal click handling and keeps text selection.
+// Enter remains the whole-card action.
+func (m *Model) activateDeliveryCard(block *Block, line, column int) (tea.Cmd, bool) {
+	for _, hit := range block.deliveryHits {
+		if line != hit.line || column < hit.start || column >= hit.end {
+			continue
+		}
+		// A button press names its own action, so the view opens on the list
+		// and the action runs against it. Auto-previewing here would load the
+		// file twice: once for the viewer and once for the pressed action.
+		open := m.openDeliveryFileList(block.DeliveredFiles)
+		for i, f := range m.fileViewer.files {
+			if f.ID == hit.fileID {
+				m.fileViewer.selected = i
+				m.fileViewer.action = hit.action
+				return tea.Batch(open, m.activateFileAction(hit.action)), true
+			}
+		}
+		return open, true
+	}
+	return nil, false
 }
