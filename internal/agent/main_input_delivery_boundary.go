@@ -81,6 +81,10 @@ func (a *MainAgent) settleDeliveryWork(workID, outcome string) {
 				state.Gate.Mode, state.Gate.Reason = recovery.FollowupGatePaused, reason
 			}
 		}
+		// A failure only pauses the queue to protect follow-ups queued behind
+		// it; with none waiting the pause would outlive its cause and block
+		// later follow-ups until an unexplained /queue resume.
+		normalizeFollowupGate(state)
 		return nil
 	}
 	op.finish = func() {

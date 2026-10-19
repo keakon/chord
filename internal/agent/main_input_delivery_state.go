@@ -56,6 +56,38 @@ func selectDeliveryInputs(state *recovery.InputDeliveryState, allowFollowup bool
 	return nil
 }
 
+// normalizeFollowupGate clears a pause that no longer withholds anything. A
+// paused gate exists to keep after-completion inputs from starting (and to
+// leave edit-held ones alone), so once neither is queued the pause is dead
+// state: it would keep the queue reporting itself paused and make the next
+// follow-up wait for a resume that releases nothing. Explicit user pauses and
+// session-level pauses record intent outside the queue and are left alone.
+//
+// A working-directory pause is left alone for the opposite reason: it reports
+// a mismatch that only /queue resume with the original directory active can
+// acknowledge, and the waiter test below cannot see it — the input it holds
+// back may be an ordinary one, which bypasses the gate — so normalizing it
+// here would only be undone by the next claim.
+func normalizeFollowupGate(state *recovery.InputDeliveryState) {
+	if state == nil || state.Gate.Mode != recovery.FollowupGatePaused {
+		return
+	}
+	switch state.Gate.Reason {
+	case recovery.FollowupPredecessorFailed, recovery.FollowupPredecessorCancelled, recovery.FollowupOutcomeUnknown, recovery.FollowupEditHold:
+	default:
+		return
+	}
+	if len(state.EditHolds) > 0 {
+		return
+	}
+	for _, input := range state.Inputs {
+		if input.Stage == recovery.PendingInputStageQueued && input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion {
+			return
+		}
+	}
+	state.Gate = recovery.FollowupGate{Mode: recovery.FollowupGateRunning}
+}
+
 func deliveryInputForEdit(state *recovery.InputDeliveryState, id string, revision uint64) (*recovery.PendingInput, error) {
 	if state != nil {
 		for i := range state.Inputs {

@@ -188,6 +188,11 @@ func (a *MainAgent) handleDeliveryOperation(op *deliveryOperation) {
 }
 
 func (a *MainAgent) applyDeliveryOperation(op *deliveryOperation, state *recovery.InputDeliveryState) error {
+	// Normalize before the operation so a new submit reserves its predecessor
+	// against the gate that will actually govern it, and after it so deleting
+	// or releasing the last waiting input does not leave a dead pause behind.
+	normalizeFollowupGate(state)
+	defer normalizeFollowupGate(state)
 	_, target := op.identity()
 	if target != a.InputDeliveryTarget() {
 		return fmt.Errorf("input target changed; refresh the input queue")

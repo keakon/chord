@@ -211,6 +211,7 @@ func (a *MainAgent) handleDeliveryCommitted(commit deliveryCommit) {
 		return
 	}
 	a.delivery.inflight = nil
+	published := false
 	if a.currentRecoveryOwnership() != commit.owner {
 		a.emitDeliveryResult(commit.op, InputQueueUnknown, fmt.Errorf("input queue session changed; refresh its state"))
 		a.delivery.owner = nil
@@ -266,13 +267,20 @@ func (a *MainAgent) handleDeliveryCommitted(commit deliveryCommit) {
 			if commit.op.control != nil && commit.op.control.Action == InputQueueResume && commit.op.resumeAllowed != nil && commit.op.resumeAllowed() {
 				a.resumePendingUserDrain()
 			}
+			// The TUI decides its notice from the snapshot it can read when this
+			// result arrives, so publish the settled gate before the result. A
+			// later publish would leave the reader racing the agent's event loop.
+			a.publishInputDelivery()
+			published = true
 			a.emitDeliveryResult(commit.op, InputQueueCommitted, nil)
 			if commit.op.finish != nil {
 				commit.op.finish()
 			}
 		}
 	}
-	a.publishInputDelivery()
+	if !published {
+		a.publishInputDelivery()
+	}
 	a.startNextDeliveryOperation()
 	if a.delivery.inflight == nil && len(a.delivery.pending) == 0 && a.delivery.persistenceError == nil && a.turn == nil && a.compactionState.readyDraft != nil {
 		a.applyReadyDraft()
