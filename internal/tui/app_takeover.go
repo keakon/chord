@@ -387,11 +387,28 @@ func (m *Model) restoreTakeoverPendingInputs() {
 	}
 	m.takeover.status = reader.CurrentSessionPauseStatus()
 	m.takeover.sourceFrozen = false
+	// The session-switch handler drops the waiting mailbox rows, and restore
+	// replays them through MailboxQueuedEvent before that switch, so the rows
+	// must be re-projected here or a stopped job's result stays invisible until
+	// some later mailbox event re-adds it. The reader is optional so a backend
+	// without it still restores the pending inputs below.
+	if mailboxReader, ok := m.agent.(interface {
+		WaitingSubAgentMailboxMessages() []agent.SubAgentMailboxMessage
+	}); ok {
+		for _, msg := range mailboxReader.WaitingSubAgentMailboxMessages() {
+			m.upsertQueuedMailbox(msg)
+		}
+	}
 	owners := make(map[string]string)
 	for _, sub := range m.agent.GetSubAgents() {
 		owners[sub.TaskID] = sub.InstanceID
 	}
 	for _, p := range reader.PendingSessionInputs() {
+		// A durable-queue input (it carries a delivery policy) is projected by
+		// applyInputQueueSnapshot below, the only path that renders its policy,
+		// gate, and edit-hold state. Projecting it here as well would list it
+		// twice: once as an unmanaged local copy and once as the managed draft
+		// that owns it.
 		if p.OwnerTaskID == identity.MainAgentID && p.DeliveryPolicy != "" {
 			continue
 		}
@@ -411,6 +428,10 @@ func (m *Model) restoreTakeoverPendingInputs() {
 	}
 	m.queueSyncEnabled = len(m.queuedDrafts) > 0
 	m.applyInputQueueSnapshot(m.agent.InputQueueSnapshot())
+	// This is the re-projection point the rebuild's drop was recorded for. An
+	// unchanged snapshot will not arrive again, so the flag must not outlive it
+	// and keep the ViewVersion guard disabled for the rest of the run.
+	m.inputQueue.projectionStale = false
 }
 
 // takeoverElapsedSuffix renders how long this runtime has been waiting. It is

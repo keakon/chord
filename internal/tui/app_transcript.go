@@ -151,6 +151,12 @@ func (m *Model) rebuildViewportFromMessagesPreservingActivity(reason string, pre
 	m.preserveAttachmentsOnNextRebuild = false
 	m.preserveComposerStateOnNextRebuild = false
 	if !preserveComposer {
+		// The rebuild drops the managed drafts projected from the durable queue.
+		// restoreTakeoverPendingInputs re-projects them below, but only when it
+		// can see a snapshot the ViewVersion guard will accept; flag the drop so
+		// an unchanged snapshot is still re-projected instead of leaving the
+		// queue invisible until some unrelated operation raises the version.
+		m.inputQueue.projectionStale = true
 		m.queuedDrafts = nil
 		m.agentComposerStates = nil
 		m.editingQueuedDraftID = ""

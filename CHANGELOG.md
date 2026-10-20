@@ -52,6 +52,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Queued requests and waiting background results no longer disappear after a session restore. A next-request input typed while the previous turn was still running is written to the conversation history when the session shuts down, so a forced restart shows the request instead of an empty queue that only came back on the next send; the restored composer re-projects the inputs that stay queued, and a stopped job's waiting result is rebuilt after the switch instead of staying invisible until some later mailbox event.
+
 - The info panel's git section no longer counts a partially staged file twice. A file that has both staged and unstaged content was reported under both the staged (`+`) and changed (`!`) counts, so the two numbers overlapped and their sum could exceed the number of affected files. Staged and changed are now disjoint: a path with any staged content counts once as staged, otherwise once as changed, and unmerged paths are reported separately as conflicts (`~`) instead of inflating both.
 
 - Replayed tool-call arguments no longer reach OpenAI Responses endpoints raw when they are malformed or empty. History conversion now applies the same sanitized placeholder the other providers use, so a history entry with corrupt arguments — for example an imported call whose source rollout recorded a truncated arguments string — cannot fail the whole request on resume.

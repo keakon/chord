@@ -129,6 +129,11 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		return a.shutdownTimeoutError(timeout)
 	}
 
+	// Queued next-request inputs become durable user messages while the persist
+	// loop still admits writes, so a restart replays them in the conversation
+	// history instead of leaving an empty queue the user cannot see.
+	a.commitNextRequestInputsToTranscript()
+
 	// Stop persistence admission and wait for the loop to drain.
 	// The persist loop may be started outside Run (tests), so don't gate the wait
 	// on the main event loop start flag. Closing the queue is itself an

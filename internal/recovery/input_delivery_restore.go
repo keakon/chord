@@ -9,6 +9,14 @@ import (
 // ReconcileInputDelivery never grants permission to execute. In particular,
 // transcript presence proves append, not whether a request reached a provider.
 // The returned candidate must be saved before accepting further operations.
+//
+// A row whose input already reached the transcript is kept, not retired.
+// Retiring a claimed row would erase the evidence prepareInputDeliveryRequest
+// uses to refuse a live turn that lost its execution permit — turning "permit
+// unknown" into "nothing to deliver" — and a started row is the durable record
+// of an interrupted work whose outcome is unknown. Skipping consumed work is
+// the explicit queue resume's job; settlement and the shutdown commit retire
+// rows on their own paths.
 func ReconcileInputDelivery(state *InputDeliveryState, transcript []message.Message) *InputDeliveryState {
 	out := state.Clone()
 	if out == nil {

@@ -27,6 +27,12 @@ type inputQueueUI struct {
 	pending  map[string]inputQueueAction
 	sequence uint64
 	editing  *queuedDraft
+	// projectionStale records that the queued drafts derived from snapshot were
+	// dropped without a newer snapshot arriving — a session-restore rebuild
+	// clears them while the durable queue is unchanged. The next snapshot at the
+	// same ViewVersion must still be re-projected, otherwise the queue stays
+	// invisible until an unrelated operation raises the version.
+	projectionStale bool
 }
 
 func (m *Model) nextInputQueueOperation(action inputQueueAction) string {
@@ -84,9 +90,10 @@ func (m *Model) applyInputQueueSnapshot(snapshot *agent.InputQueueSnapshot) {
 		m.inputQueue.pending = nil
 		m.inputQueue.editing = nil
 	}
-	if previous != nil && sameInputQueueBinding(previous.Target, snapshot.Target) && snapshot.ViewVersion <= previous.ViewVersion {
+	if previous != nil && sameInputQueueBinding(previous.Target, snapshot.Target) && snapshot.ViewVersion <= previous.ViewVersion && !m.inputQueue.projectionStale {
 		return
 	}
+	m.inputQueue.projectionStale = false
 	m.inputQueue.snapshot = snapshot.Clone()
 	retained := m.queuedDrafts[:0]
 	for _, draft := range m.queuedDrafts {

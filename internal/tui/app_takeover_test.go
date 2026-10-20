@@ -29,6 +29,9 @@ type takeoverAgentStub struct {
 func (s *takeoverAgentStub) UseSessionPauseEventPreparer()                          { s.preparerInstalled = true }
 func (s *takeoverAgentStub) CurrentSessionPauseStatus() recovery.SessionPauseStatus { return s.status }
 func (s *takeoverAgentStub) PendingSessionInputs() []recovery.PendingInput          { return s.pending }
+func (s *takeoverAgentStub) WaitingSubAgentMailboxMessages() []agent.SubAgentMailboxMessage {
+	return nil
+}
 func (s *takeoverAgentStub) ResumePausedSession(_ context.Context, sid string, id recovery.TransferIdentity) error {
 	s.resumeCount++
 	s.resumeIdentity = id

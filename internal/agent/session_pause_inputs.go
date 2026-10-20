@@ -272,6 +272,25 @@ func (a *MainAgent) PendingSessionInputs() []recovery.PendingInput {
 	return inputs
 }
 
+// WaitingSubAgentMailboxMessages is the main-agent view of the mailbox messages
+// still waiting for the next request, in delivery order. Restore replays them
+// through MailboxQueuedEvent before the session-restore rebuild, and the TUI
+// clears that queue when the switch starts; this reader lets the rebuild
+// re-project the waiting rows instead of losing them for the rest of the run.
+//
+// Only the in-memory queues are read. A waiting message that spilled to the
+// durable spool under memory pressure is not in either queue, so its row is not
+// re-projected after a switch; the message itself stays in the mailbox log and
+// is delivered with the next request.
+func (a *MainAgent) WaitingSubAgentMailboxMessages() []SubAgentMailboxMessage {
+	a.subAgentMailboxIDsMu.Lock()
+	defer a.subAgentMailboxIDsMu.Unlock()
+	waiting := make([]SubAgentMailboxMessage, 0, len(a.subAgentInbox.urgent)+len(a.subAgentInbox.normal))
+	waiting = append(waiting, a.subAgentInbox.urgent...)
+	waiting = append(waiting, a.subAgentInbox.normal...)
+	return waiting
+}
+
 func (a *MainAgent) handlePausedSessionInput(content string, parts []message.ContentPart, inputID, requestID string, order int64) bool {
 	if !a.sessionExecutionPaused() {
 		return false

@@ -6,6 +6,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -126,6 +129,62 @@ func IsUnsupportedAfterCompletionInput(content string) bool {
 		return true
 	}
 	return false
+}
+
+// commitNextRequestInputsToTranscript writes queued next-request inputs as
+// durable user messages at shutdown. A next-request input is the one the user
+// expects to go out on the next send, so leaving it only in the queue file
+// makes it invisible after a restart: the transcript is where the user looks
+// for what they already wrote. The queue rows are then retired so the restored
+// session shows the request once, in history, instead of twice.
+//
+// The queue is retired before the messages are written, the same order
+// claimDeliveryInputs uses: the durable queue row must be gone before the
+// transcript row exists. Retiring after the write would leave a failed save
+// with the request in both places, and restore does not drop a queued row whose
+// input already reached the transcript, so the next send would run it twice.
+func (a *MainAgent) commitNextRequestInputsToTranscript() {
+	state := a.delivery.committed
+	if state == nil {
+		return
+	}
+	var pending []recovery.PendingInput
+	for _, input := range state.Inputs {
+		if input.Stage != recovery.PendingInputStageQueued || input.DeliveryPolicy != recovery.InputDeliveryNextRequest {
+			continue
+		}
+		if slices.Contains(state.EditHolds, input.InputID) {
+			// An edit hold means the input is mid-edit in another session; writing
+			// a half-finished draft into history would surface a request the user
+			// never approved.
+			continue
+		}
+		pending = append(pending, input)
+	}
+	if len(pending) == 0 {
+		return
+	}
+	sort.Slice(pending, func(i, j int) bool { return pending[i].Sequence < pending[j].Sequence })
+	owner := a.currentRecoveryOwnership()
+	if owner == nil || owner.manager == nil {
+		log.Warnf("cannot commit queued next-request inputs to history: no recovery manager")
+		return
+	}
+	committed := state.Clone()
+	for _, input := range pending {
+		committed.Inputs = slices.DeleteFunc(committed.Inputs, func(candidate recovery.PendingInput) bool { return candidate.InputID == input.InputID })
+	}
+	committed.Revision++
+	saved, err := owner.manager.SaveInputDelivery(state.Revision, committed)
+	if err != nil {
+		log.Warnf("failed to retire committed next-request inputs from the durable queue error=%v", err)
+		return
+	}
+	a.delivery.committed = saved
+	for _, input := range pending {
+		a.recordCommittedUserMessage(message.Message{Role: message.RoleUser, InputID: input.InputID, InputRequestID: input.RequestID, Content: input.Content, Parts: cloneContentParts(input.Parts)})
+	}
+	log.Infof("committed %d queued next-request input(s) to session history at shutdown", len(pending))
 }
 
 // A queued request must not produce the aggregate idle that ACP uses to settle
