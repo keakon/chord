@@ -43,6 +43,83 @@ func TestExtractPlainByColumns(t *testing.T) {
 		res := extractPlainByColumns(text, 0, len(terminaltext.StripANSI(text)))
 		assert.Equal(t, "- if test.API(url) || test.Model(param) || other.config == \"value\" {", res)
 	})
+
+	// 而[0,2) 且[2,4) 是[4,6) 单[6,8) 点[8,10) 开[10,12) 关[12,14) 。[14,16)
+	t.Run("start col inside a wide rune matches highlight rounding", func(t *testing.T) {
+		text := "而且是单点开关。"
+		// Drag started on the right half of 是 (col 5): the highlight begins at
+		// 单, so the copy must not include 是.
+		res := extractPlainByColumns(text, 5, 14)
+		assert.Equal(t, "单点开关", res)
+		startByte, endByte := findColumnByteOffsets(text, 5, 14)
+		assert.Equal(t, "单点开关", text[startByte:endByte])
+	})
+
+	t.Run("end col inside a wide rune keeps the straddling rune", func(t *testing.T) {
+		text := "而且是单点开关。"
+		// End on the right half of 开 (col 11): highlight and copy both keep it.
+		res := extractPlainByColumns(text, 6, 11)
+		assert.Equal(t, "单点开", res)
+		startByte, endByte := findColumnByteOffsets(text, 6, 11)
+		assert.Equal(t, "单点开", text[startByte:endByte])
+	})
+
+	t.Run("start col at a wide rune boundary keeps the rune", func(t *testing.T) {
+		text := "而且是单点开关。"
+		res := extractPlainByColumns(text, 4, 14)
+		assert.Equal(t, "是单点开关", res)
+	})
+}
+
+func TestExtractSelectionTextWideRuneStartMatchesHighlight(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	v := NewViewport(120, 40)
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "而且是单点开关。"}
+	v.AppendBlock(block)
+	_ = v.Render("", nil, -1, -1, "")
+
+	lines := block.Render(v.width, "")
+	targetLine := -1
+	var line string
+	for i := range lines {
+		if strings.Contains(terminaltext.StripANSI(lines[i]), "单点开关") {
+			targetLine, line = i, lines[i]
+			break
+		}
+	}
+	if targetLine < 0 {
+		t.Fatal("content line not rendered")
+	}
+	plain := terminaltext.StripANSI(line)
+	base := 0
+	if idx := strings.Index(plain, "而"); idx > 0 {
+		base = selectionPlainTextWidth(plain[:idx])
+	}
+
+	for _, tc := range []struct {
+		name             string
+		startCol, endCol int
+	}{
+		{"start inside a wide rune, ending before the tail", base + 5, base + 14},
+		{"start inside a wide rune, ending at the line width", base + 5, selectionPlainTextWidth(plain)},
+		{"start on a wide rune boundary", base + 4, base + 14},
+		{"end inside a wide rune", base + 6, base + 11},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := v.ExtractSelectionText(SelectionRange{
+				StartBlockID: block.ID, StartLine: targetLine, StartCol: tc.startCol,
+				EndBlockID: block.ID, EndLine: targetLine, EndCol: tc.endCol,
+			})
+			startByte, endByte := findColumnByteOffsets(line, tc.startCol, tc.endCol)
+			if startByte < 0 || endByte <= startByte {
+				t.Fatalf("findColumnByteOffsets(%d,%d) selected nothing", tc.startCol, tc.endCol)
+			}
+			want := strings.TrimSpace(terminaltext.StripANSI(line[startByte:endByte]))
+			if got != want {
+				t.Fatalf("copy = %q, want the highlighted %q", got, want)
+			}
+		})
+	}
 }
 
 func TestExtractSelectionTextTabExpandedColumnsMatchViewportRender(t *testing.T) {

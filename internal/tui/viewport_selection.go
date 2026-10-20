@@ -124,12 +124,7 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 				absEnd = min(max(eC, prefixAdjust), lineWidth)
 			}
 			if absStart < absEnd {
-				segment := extractPlainByColumns(plain, absStart, absEnd)
-				if i == sIdx && i == eIdx && lineIdx == sL && lineIdx == eL && segment != "" {
-					if plainSegmentWidth := selectionPlainTextWidth(segment); absEnd-absStart > plainSegmentWidth {
-						segment = extractPlainByColumns(plain, absStart, min(lineWidth, absEnd+1))
-					}
-				}
+				segment := selectedColumns(line, absStart, absEnd)
 				segment = strings.TrimRight(segment, " ")
 				if segment != "" {
 					if sb.Len() > 0 {
@@ -310,6 +305,22 @@ func decodeUTF8(s string) (rune, int) {
 	return r, size
 }
 
+// selectedColumns returns the visible text between two columns of a rendered
+// line, sharing the highlight's boundary rounding for wide runes and tabs.
+func selectedColumns(line string, startCol, endCol int) string {
+	startByte, endByte := findColumnByteOffsets(line, startCol, endCol)
+	if startByte < 0 {
+		return ""
+	}
+	if endByte < 0 {
+		endByte = len(line)
+	}
+	if endByte < startByte {
+		return ""
+	}
+	return terminaltext.StripANSI(line[startByte:endByte])
+}
+
 func extractPlainByColumns(s string, startCol, endCol int) string {
 	plain := terminaltext.StripANSI(s)
 	if startCol < 0 {
@@ -318,12 +329,13 @@ func extractPlainByColumns(s string, startCol, endCol int) string {
 	if endCol < startCol {
 		endCol = startCol
 	}
+	// Round the start up like findColumnByteOffsets when it falls inside a rune.
 	col := 0
 	var b strings.Builder
 	for _, r := range plain {
 		w := selectionRuneWidthAtCol(r, col)
 		nextCol := col + w
-		if nextCol > startCol && col < endCol {
+		if col >= startCol && col < endCol {
 			b.WriteRune(r)
 		}
 		col = nextCol
