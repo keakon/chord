@@ -76,6 +76,61 @@ func shouldContinueRetryMode(retryCount, maxAttempts int, lastErr error, hardCap
 	return isAllKeysCoolingError(lastErr) || isConcurrentRequestLimit429(lastErr)
 }
 
+// withheldTerminalFailureBudget bounds additional rounds and backoff after a
+// relay rejection. It does not interrupt provider I/O already in progress.
+// Tests can shorten the window without waiting for production cooldowns.
+var withheldTerminalFailureBudget = 2 * maxCoolingWait
+
+// terminalPoolFailureKeepsRetrying permits another round for relay rejections
+// only when a sibling remains retriable.
+func terminalPoolFailureKeepsRetrying(provider *ProviderConfig, err error, retriableSiblings int) bool {
+	return retriableSiblings > 0 && relayScopedRequestRejection(provider, err)
+}
+
+// relayScopedRequestRejection separates an untrusted relay's parameter refusal
+// from structural or client-contract failures.
+func relayScopedRequestRejection(provider *ProviderConfig, err error) bool {
+	if providerTrustsHTTP400(provider) {
+		return false
+	}
+	if IsContextLengthExceeded(err) {
+		return false
+	}
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil {
+		return false
+	}
+	switch apiErr.StatusCode {
+	case 400, 422:
+	default:
+		return false
+	}
+	// An explicit code can accompany a structural defect, so check both.
+	return hasExplicitRequestOrParamSignal(apiErr) &&
+		!hasResponsesClientContractSignal(apiErr) &&
+		!hasTerminalStructural400Signal(apiErr)
+}
+
+// requestDefect identifies failures to return after an unsuccessful full round.
+// Replay echoes and endpoint statuses are target-scoped and stay out.
+func requestDefect(provider *ProviderConfig, err error) bool {
+	if _, echo := errors.AsType[*ReplayEvidenceEchoError](err); echo {
+		return false
+	}
+	if relayScopedRequestRejection(provider, err) {
+		return false
+	}
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil {
+		return false
+	}
+	switch apiErr.StatusCode {
+	case 400, 422:
+		return providerTrustsHTTP400(provider) || hasTerminalNonRetriable400Signal(apiErr)
+	}
+	return false
+}
+
 // clampCoolingWait bounds one reported cooling window to cap. cap <= 0 keeps
 // the reported window as-is; a zero or negative window still becomes the 1s
 // floor so a round never spins without pausing.

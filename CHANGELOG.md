@@ -52,6 +52,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- A gateway's parameter-specific `400` or `422` rejection no longer prevents another retry round while a sibling model is rate-limited or overloaded. Recovery rounds and backoff have a time budget independent of model order; provider requests already in progress are not interrupted by that budget. Every model still gets a chance to succeed in the current round. If the whole round fails and includes a request defect, Chord returns that defect without starting another round; if all attempted models report context-length errors, it returns for context recovery.
+
 - Queued requests and waiting background results no longer disappear after a session restore. A next-request input typed while the previous turn was still running is written to the conversation history when the session shuts down, so a forced restart shows the request instead of an empty queue that only came back on the next send; the restored composer re-projects the inputs that stay queued, and a stopped job's waiting result is rebuilt after the switch instead of staying invisible until some later mailbox event.
 
 - The info panel's git section no longer counts a partially staged file twice. A file that has both staged and unstaged content was reported under both the staged (`+`) and changed (`!`) counts, so the two numbers overlapped and their sum could exceed the number of affected files. Staged and changed are now disjoint: a path with any staged content counts once as staged, otherwise once as changed, and unmerged paths are reported separately as conflicts (`~`) instead of inflating both.

@@ -167,6 +167,15 @@ func emitRetryError(cb StreamCallback, err error, provider, model, maskedKey, ac
 	})
 }
 
+// providerLogName returns a stable provider name for diagnostics, including the
+// round-end paths that may not have a provider attached to the last error.
+func providerLogName(provider *ProviderConfig) string {
+	if provider == nil {
+		return "<unknown>"
+	}
+	return provider.Name()
+}
+
 // retryErrorFields resolves the display identity a retry error about key
 // carries: the provider name plus the OAuth account metadata when available.
 func retryErrorFields(provider *ProviderConfig, key string) (providerName, accountID, email string) {

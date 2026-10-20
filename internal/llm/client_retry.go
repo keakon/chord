@@ -16,16 +16,50 @@ type streamRoundAttemptSummary struct {
 	attemptedTargets             int
 	contextLengthExceededTargets int
 	lastContextLengthErr         error
+	retriableTargets             int
+	lastRelayRejectionErr        error
+	lastRelayRejectionProvider   *ProviderConfig
+	// Request defects prevent another round only after every target has failed.
+	requestDefectTargets      int
+	lastRequestDefectErr      error
+	lastRequestDefectProvider *ProviderConfig
 }
 
 func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) {
-	if s == nil || !result.hadRequestAttempt {
+	if s == nil {
+		return
+	}
+	if !result.hadRequestAttempt {
+		// A cooling target never reached the wire, but its sibling can recover
+		// once the window passes; it still counts as a retriable sibling when
+		// deciding whether to withhold a relay-scoped terminal rejection.
+		if isAllKeysCoolingError(result.lastErr) {
+			s.retriableTargets++
+		}
 		return
 	}
 	s.attemptedTargets++
 	if IsContextLengthExceeded(result.lastErr) {
 		s.contextLengthExceededTargets++
 		s.lastContextLengthErr = result.lastErr
+		// Context length is request-scoped: the round-level all-attempted check
+		// turns it into compaction recovery, and it is never a retriable sibling.
+		return
+	}
+	if result.lastErr == nil {
+		return
+	}
+	if !isTerminalModelPoolFailureForProvider(result.lastErrProvider, result.lastErr) {
+		s.retriableTargets++
+		return
+	}
+	if requestDefect(result.lastErrProvider, result.lastErr) {
+		s.requestDefectTargets++
+		s.lastRequestDefectErr = result.lastErr
+		s.lastRequestDefectProvider = result.lastErrProvider
+	} else if relayScopedRequestRejection(result.lastErrProvider, result.lastErr) {
+		s.lastRelayRejectionErr = result.lastErr
+		s.lastRelayRejectionProvider = result.lastErrProvider
 	}
 }
 
@@ -67,6 +101,12 @@ func (c *Client) completeStreamWithRetry(
 	var lastErr error
 	var lastErrProvider *ProviderConfig
 	var pendingRoundWait roundCoolingWait
+	// withheldTerminalSince is set when a relay-scoped terminal rejection was
+	// withheld to give a retriable sibling time to recover, so the wait stays
+	// bounded by withheldTerminalFailureBudget across rounds.
+	var withheldTerminalSince time.Time
+	var withheldTerminalErr error
+	var withheldTerminalProvider *ProviderConfig
 	// pendingRollbackReason is non-empty while preserved partial output is
 	// still on screen across targets and rounds. On any non-cancel exit the
 	// preserved text must leave the screen: the turn failed, so a dangling
@@ -138,6 +178,9 @@ func (c *Client) completeStreamWithRetry(
 		if err := abortIfCancelled(); err != nil {
 			return nil, err
 		}
+		if withheldTerminalErr != nil && time.Since(withheldTerminalSince) >= withheldTerminalFailureBudget {
+			return nil, withheldTerminalErr
+		}
 		// Publish the upcoming target before waiting: the preceding round's last
 		// failed target is no longer the model this request is preparing to use.
 		startDisplayRef := providerModelRef(startProvider, startModelID)
@@ -151,6 +194,11 @@ func (c *Client) completeStreamWithRetry(
 			delay := roundRetryDelay(startProvider.GetRetryDelay(retryCount), pendingRoundWait.sleep)
 			if waitingForCooling {
 				delay = pendingRoundWait.sleep
+			}
+			if withheldTerminalErr != nil {
+				delay = min(delay, max(0, withheldTerminalFailureBudget-time.Since(withheldTerminalSince)))
+			}
+			if waitingForCooling {
 				recovery := pendingRoundWait.recovery
 				log.Infof("waiting for API keys to cool before next LLM request round attempt=%v delay=%v recovery_in=%v error=%v", round+1, delay, recovery, lastErr)
 				if cb != nil {
@@ -187,6 +235,12 @@ func (c *Client) completeStreamWithRetry(
 					emitStreamStatusDelta(cb, status)
 				}
 			}
+			if err := abortIfCancelled(); err != nil {
+				return nil, err
+			}
+			if withheldTerminalErr != nil && time.Since(withheldTerminalSince) >= withheldTerminalFailureBudget {
+				return nil, withheldTerminalErr
+			}
 			if delay > 0 {
 				select {
 				case <-time.After(delay):
@@ -199,6 +253,12 @@ func (c *Client) completeStreamWithRetry(
 				case <-executiongate.FromContext(ctx).Frozen():
 					return nil, &executiongate.ErrSessionPaused{}
 				}
+			}
+			if err := abortIfCancelled(); err != nil {
+				return nil, err
+			}
+			if withheldTerminalErr != nil && time.Since(withheldTerminalSince) >= withheldTerminalFailureBudget {
+				return nil, withheldTerminalErr
 			}
 		}
 		pendingRoundWait = roundCoolingWait{}
@@ -358,8 +418,30 @@ func (c *Client) completeStreamWithRetry(
 			}
 			log.Warnf("model pool exhausted with no usable keys; retrying full pool provider=%v model=%v had_request_attempt=%v error=%v", startProvider.Name(), startModelID, roundHadRequestAttempt, lastErr)
 		}
-		if isTerminalModelPoolFailureForProvider(lastErrProvider, lastErr) {
+		if roundAttemptSummary.requestDefectTargets > 0 {
+			log.Infof("request defect ended the round despite retriable siblings provider=%v error=%v request_defect_targets=%v retriable_targets=%v", providerLogName(roundAttemptSummary.lastRequestDefectProvider), roundAttemptSummary.lastRequestDefectErr, roundAttemptSummary.requestDefectTargets, roundAttemptSummary.retriableTargets)
+			return nil, roundAttemptSummary.lastRequestDefectErr
+		}
+		if isTerminalModelPoolFailureForProvider(lastErrProvider, lastErr) && !relayScopedRequestRejection(lastErrProvider, lastErr) {
 			return nil, lastErr
+		}
+		if roundAttemptSummary.lastRelayRejectionErr != nil {
+			withheldTerminalErr = roundAttemptSummary.lastRelayRejectionErr
+			withheldTerminalProvider = roundAttemptSummary.lastRelayRejectionProvider
+			if !terminalPoolFailureKeepsRetrying(withheldTerminalProvider, withheldTerminalErr, roundAttemptSummary.retriableTargets) {
+				return nil, withheldTerminalErr
+			}
+			if withheldTerminalSince.IsZero() {
+				withheldTerminalSince = time.Now()
+			}
+		}
+		// A transient-only later round must not erase an earlier relay rejection
+		// or restart its recovery budget.
+		if withheldTerminalErr != nil {
+			if time.Since(withheldTerminalSince) >= withheldTerminalFailureBudget {
+				return nil, withheldTerminalErr
+			}
+			log.Infof("relay rejection withheld while sibling recovery budget remains provider=%v error=%v budget_left=%v", providerLogName(withheldTerminalProvider), withheldTerminalErr, withheldTerminalFailureBudget-time.Since(withheldTerminalSince))
 		}
 		retryCount = nextRetryCount(retryCount, roundHadRequestAttempt, roundHadUsableReply, lastErr, hardCap)
 	} // end attempts loop
