@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/externalsupervisor"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
@@ -15,7 +16,16 @@ import (
 // TestMain protects fallback callers that do not receive a PathLocator from
 // reading or writing the user's Chord directories. Full agent fixtures use
 // explicit per-project locators so independent tests can run concurrently.
+//
+// Before any of that, it lets this test binary serve as the external worker's
+// lifecycle supervisor: a supervised worker re-executes the running
+// executable, which under `go test` is this binary. Intercepting ahead of the
+// testing framework keeps that path identical to production — no test-only
+// entrypoint and no override hook in the code under test.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == externalsupervisor.CommandName {
+		os.Exit(externalsupervisor.Run(os.Args[2:]))
+	}
 	root, err := os.MkdirTemp("", "chord-agent-tests-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

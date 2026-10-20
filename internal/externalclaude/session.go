@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/keakon/chord/internal/externalsupervisor"
 )
 
 const (
@@ -32,6 +34,27 @@ type ProcessConfig struct {
 	// MaxLineBytes bounds one stdout JSON line. Zero uses 16 MiB.
 	MaxLineBytes int
 	KillGrace    time.Duration
+	// Supervisor runs the process under an independent lifecycle supervisor.
+	// Nil keeps it in Chord's own process table, which cannot clean it up once
+	// Chord is killed.
+	Supervisor *SupervisorConfig
+}
+
+// SupervisorConfig opts a managed process into its own supervisor process. The
+// supervisor starts the process on Chord's behalf and is the only reason the
+// process group can still be torn down after Chord disappears.
+type SupervisorConfig struct {
+	// Command starts the supervisor. Empty resolves to the running Chord
+	// executable, so a supervisor is always the build that spawned it.
+	Command []string
+	// RunID is the identity this launch was persisted under before it started.
+	// The supervisor names the receipt after it, so recovery looks up exactly
+	// this run instead of matching receipts by time and arguments. Empty
+	// generates a fresh ID.
+	RunID string
+	// ReceiptDir is where the supervisor leaves a lifecycle receipt for the
+	// run. Empty disables the receipt.
+	ReceiptDir string
 }
 
 // Session owns one running Claude Code process and its stdout event stream.
@@ -39,8 +62,11 @@ type Session struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	stdinMu sync.Mutex
-	stdout  *os.File
-	stderr  *os.File
+	stdout  io.ReadCloser
+	stderr  io.ReadCloser
+	// sup owns the process when it runs under an independent supervisor; the
+	// Session then keeps only the business pipes and the lifecycle channel.
+	sup *externalsupervisor.Supervisor
 
 	events   chan Event
 	done     chan struct{}
@@ -62,6 +88,15 @@ type Session struct {
 // Start launches the process and begins streaming events. The caller must
 // consume Events until it closes.
 func Start(cfg ProcessConfig) (*Session, error) {
+	if cfg.Supervisor != nil {
+		return startSupervised(cfg)
+	}
+	return startDirect(cfg)
+}
+
+// startDirect keeps the process in Chord's own process table. Nothing can then
+// clean it up after Chord is killed, so production workers use startSupervised.
+func startDirect(cfg ProcessConfig) (*Session, error) {
 	command := strings.TrimSpace(cfg.Command)
 	if command == "" {
 		command = "claude"
@@ -238,6 +273,10 @@ func (s *Session) Terminate() {
 	s.stopScanning()
 	s.terminateOnce.Do(func() {
 		_ = s.stdin.Close()
+		if s.sup != nil {
+			s.terminateSupervised()
+			return
+		}
 		_ = terminateGroup(s.cmd)
 		go func() {
 			defer close(s.cleanupDone)
@@ -320,6 +359,10 @@ func stopRequestID() string {
 }
 
 func (s *Session) wait() {
+	if s.sup != nil {
+		s.waitSupervised()
+		return
+	}
 	s.waitErr = s.cmd.Wait()
 	close(s.exited)
 	_ = s.stdin.Close()
@@ -343,6 +386,9 @@ func (s *Session) wait() {
 // ProcessEnded reports whether the process group is known to be gone after Wait.
 func (s *Session) ProcessEnded() bool {
 	<-s.done
+	if s.sup != nil {
+		return s.sup.GroupGone()
+	}
 	return !processGroupAlive(s.cmd)
 }
 

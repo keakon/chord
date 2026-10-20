@@ -7,7 +7,7 @@ The current backend is Claude Code's `stream-json` mode.
 ## Requirements
 
 - Install the Claude Code CLI and sign in, or provide API credentials through `backend.env`.
-- Unix is required. The process runs in the subagent's working directory; Chord manages its process group and exit.
+- Unix is required. The process runs in the subagent's working directory; each worker's process group belongs to a dedicated supervisor process, and Chord keeps only the business pipes.
 - The managed transport targets the Claude Code `stream-json` protocol, not one pinned release; no version is checked or gated at launch.
 
 ## Configuration
@@ -127,7 +127,7 @@ backend:
 
 - The external model call does not use Chord model pools or key rotation and does not produce Chord usage statistics.
 - Chord sends `interrupt`, closes input, and gives the CLI a short grace period to flush its transcript and exit before terminating the process group. Existing changes are not rolled back; tools without a receipt show an unknown outcome.
-- If Chord is forcibly killed, its external process group may keep running. Inspect and stop any remaining CLI and child processes before delegating the task again. Resume checks do not clean up orphaned processes.
+- Every external worker is backed by a dedicated supervisor process that owns its process group. If Chord is forcibly killed, the supervisor sees the lifecycle channel close and tears that group down, leaving a minimal lifecycle receipt under `external-supervisor/` in the state directory; a run Chord settled itself deletes its receipt. If Chord and the supervisor are killed together nothing guarantees cleanup, so such a receipt has to be checked by run id. Resume checks do not clean up orphaned processes.
 - Pause is not supported. Stop and restart the task instead.
 - Only one input runs at a time. Incoming messages are durably queued; messages received after sealing run in a new attempt on the same task after the old process exits and settles. Targeted messages to completed tasks resume their session. Cancelled tasks must be delegated again.
 - Hooks, skills, and compaction do not apply to the external process. Result contracts do: the declared `result_schema` is delivered to the process as part of its role instructions at initialization, and the final answer must be a single JSON object satisfying it. An answer that is not a JSON object, or that misses what the schema requires, fails the task with the violations named.

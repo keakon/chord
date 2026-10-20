@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/externalclaude"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -167,6 +169,10 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 		OnStderr: func(line string) {
 			log.Warnf("external agent stderr instance=%v line=%v", w.instanceID, externalclaude.RedactDiagnostic(line, env))
 		},
+		// The process runs under its own supervisor: Chord can be killed
+		// mid-task, and only a process that outlives it can still tear the
+		// worker's process group down.
+		Supervisor: &externalclaude.SupervisorConfig{ReceiptDir: w.supervisorReceiptDir()},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start external agent: %w", err)
@@ -208,6 +214,27 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 	w.setResultError(nil)
 	initialized = true
 	return session, nil
+}
+
+// supervisorReceiptDir is where a supervisor leaves the minimal lifecycle
+// receipt of a cleanup Chord never saw. Chord deletes the receipt of every run
+// it settles itself, so what remains is the evidence of a run that outlived it.
+func (w *externalWorker) supervisorReceiptDir() string {
+	if w == nil || w.parent == nil {
+		return ""
+	}
+	locator := w.parent.pathLocator
+	if locator == nil {
+		var err error
+		if locator, err = config.DefaultPathLocator(); err != nil {
+			return ""
+		}
+	}
+	stateDir := strings.TrimSpace(locator.StateDir)
+	if stateDir == "" {
+		return ""
+	}
+	return filepath.Join(stateDir, "external-supervisor")
 }
 
 func (w *externalWorker) ensureSessionID() error {

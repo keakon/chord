@@ -180,7 +180,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVar(&flagWorktreeResetBranch, "reset-branch", false,
 		"Reset an existing branch that no worktree has checked out to HEAD instead of refusing to recreate it (only with --worktree)")
 
-	rootCmd.AddCommand(newMCPCmd(), newTakeoverCmd(), newAuthCmd(), newConfigCmd(), newHeadlessCmd(), newACPCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd(), newSessionsCmd())
+	rootCmd.AddCommand(newMCPCmd(), newTakeoverCmd(), newAuthCmd(), newConfigCmd(), newHeadlessCmd(), newACPCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd(), newSessionsCmd(), newExternalSupervisorCmd())
 	return rootCmd
 }
 
