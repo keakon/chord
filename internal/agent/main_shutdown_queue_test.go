@@ -223,6 +223,9 @@ func TestRestoredSessionShowsCommittedNextRequestInHistoryOnly(t *testing.T) {
 	// The shutdown commit is what moves the row out of the queue and into
 	// history; run it directly so this test only exercises the restart side.
 	a.commitNextRequestInputsToTranscript()
+	// The commit's transcript row is written by the async persist loop; the
+	// restart below reads the session file from disk, so drain the loop first.
+	a.flushPersist()
 
 	// A fresh agent restores from disk exactly like a new process would.
 	b := newTestMainAgentForRestore(t, projectRoot, sessionDir)
