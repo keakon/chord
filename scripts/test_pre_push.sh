@@ -52,6 +52,10 @@ for checkout in "$fixture" "$test_root/worktree"; do
     echo "pre-push changed the checkout or index" >&2
     exit 1
   }
+  grep -q "deps-check" "$make_log" || {
+    echo "pre-push hook did not run the dependency audit (deps-check)" >&2
+    exit 1
+  }
 done
 
 # A release-tag fast path is allowed only when the release script provides
