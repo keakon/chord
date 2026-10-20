@@ -20,6 +20,9 @@ func (a *MainAgent) initializeInputDelivery() {
 }
 
 func (a *MainAgent) deferDeliverySessionSwitch(resume func()) bool {
+	if a.deferExternalSessionSwitch(resume) {
+		return true
+	}
 	if a.delivery.navigationReady {
 		a.delivery.navigationReady = false
 		return false

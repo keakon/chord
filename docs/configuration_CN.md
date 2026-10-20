@@ -1312,6 +1312,8 @@ mcp:
 - `.md`：YAML frontmatter 加 Markdown 正文，正文作为 system prompt。
 - `.yaml` / `.yml`：普通 YAML 文档，通过 `prompt` 或 `system_prompt` 配置 system prompt。
 
+`mode: subagent` 的角色也可以交给外部 coding agent 进程执行，见[外部 coding agent 子 Agent](./external-agents_CN.md)。
+
 Markdown agent 示例：
 
 ```markdown

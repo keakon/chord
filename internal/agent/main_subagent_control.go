@@ -76,17 +76,33 @@ func (a *MainAgent) releaseSubAgentSlot(sub *SubAgent) {
 	if sub == nil {
 		return
 	}
-	sub.semMu.Lock()
-	if !sub.semHeld {
-		sub.semMu.Unlock()
+	a.releaseRuntimeSlot(sub)
+}
+
+// releaseRuntimeSlot returns a worker's runtime slot, whichever backend owns
+// it. The slot flags are taken under the runtime's own lock so a concurrent
+// release is a no-op rather than a double release.
+func (a *MainAgent) releaseRuntimeSlot(rt subAgentRuntime) {
+	if rt == nil {
 		return
 	}
-	borrowed := sub.semBorrowed
-	bypassed := sub.semBypassed
-	sub.semHeld = false
-	sub.semBorrowed = false
-	sub.semBypassed = false
-	sub.semMu.Unlock()
+	if w, ok := rt.(*externalWorker); ok && w.started.Load() {
+		select {
+		case <-w.done:
+		default:
+			return
+		}
+		w.promptMu.Lock()
+		ended := w.processEnded
+		w.promptMu.Unlock()
+		if !ended {
+			return
+		}
+	}
+	held, borrowed, bypassed := rt.releaseSlot()
+	if !held {
+		return
+	}
 	if bypassed {
 		a.orchestrationMetrics.releaseRuntimeBypass()
 		a.governor.releaseBypassRuntime()
@@ -281,6 +297,9 @@ func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID
 	record, err := a.canCallerControlTask(callerAgentID, callerTaskID, taskID)
 	if err != nil {
 		return tools.TaskHandle{}, err
+	}
+	if record.ExternalSession != nil {
+		return a.sendMessageToExternalTask(record, callerAgentID, callerTaskID, messageText, kind, trigger)
 	}
 	if isTerminalSubAgentState(SubAgentState(strings.TrimSpace(record.State))) && !record.SettlementDurable {
 		record, err = a.retryTaskSettlementDurability(taskID)
@@ -652,6 +671,9 @@ func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, st
 	if record == nil {
 		return nil, "", false, fmt.Errorf("missing task record")
 	}
+	if record.ExternalSession != nil {
+		return nil, "", false, fmt.Errorf("external tasks require the external worker resume path")
+	}
 	if a.shuttingDown.Load() || a.admissionPaused.Load() {
 		return nil, "", false, fmt.Errorf("cannot reactivate task during shutdown or session transition")
 	}
@@ -660,12 +682,12 @@ func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, st
 	if taskID == "" {
 		return nil, "", false, fmt.Errorf("missing task ID")
 	}
-	if sub, activation, leader := a.subs.beginTaskActivation(taskID); sub != nil {
-		return sub, "", false, nil
+	if rt, activation, leader := a.subs.beginTaskActivation(taskID); rt != nil {
+		return asSubAgent(rt), "", false, nil
 	} else if !leader {
 		select {
 		case <-activation.done:
-			return activation.sub, activation.previousAgentID, false, activation.err
+			return asSubAgent(activation.runtime), activation.previousAgentID, false, activation.err
 		case <-a.parentCtx.Done():
 			return nil, "", false, a.parentCtx.Err()
 		}
@@ -955,6 +977,27 @@ func (a *MainAgent) stopSubAgentNow(callerAgentID, callerTaskID, taskID, reason 
 	if _, err := a.canCallerControlTask(callerAgentID, callerTaskID, taskID); err != nil {
 		return tools.TaskHandle{}, err
 	}
+	if worker, ok := a.subs.runtimeByTaskID(taskID).(*externalWorker); ok && worker != nil {
+		reasonText := blankToDefault(reason, "stopped by main agent")
+		cascadeFailures := a.cancelDescendantTasks(worker.instanceID, worker.taskID)
+		a.emitActivity(worker.instanceID, ActivityIdle, "")
+		a.handleSubAgentCloseRequestedEvent(Event{
+			Type:     EventSubAgentCloseRequested,
+			SourceID: worker.instanceID,
+			Payload: &SubAgentCloseRequestedPayload{
+				Reason:       reasonText,
+				ClosedReason: "stopped by main agent",
+				FinalState:   SubAgentStateCancelled,
+			},
+		})
+		a.saveRecoverySnapshot()
+		return tools.TaskHandle{
+			Status:  "cancelled",
+			TaskID:  worker.taskID,
+			AgentID: worker.instanceID,
+			Message: appendCascadeFailures("worker stopped", cascadeFailures),
+		}, nil
+	}
 	sub := a.subAgentByTaskID(taskID)
 	if sub == nil {
 		record := a.taskRecordByTaskID(taskID)
@@ -1149,6 +1192,14 @@ func (a *MainAgent) handleSubAgentSendMessageEvent(evt Event) {
 	if a.pause.restored && a.sessionExecutionPaused() {
 		a.queuePausedFollowup(payload)
 		return
+	}
+	if rec := a.taskRecordByTaskID(payload.TaskID); rec != nil && rec.ExternalSession != nil {
+		for _, part := range payload.Parts {
+			if part.Type != "text" {
+				a.respondPausedFollowup(payload, tools.TaskHandle{}, fmt.Errorf("external subagents accept text input only"))
+				return
+			}
+		}
 	}
 	handle, err := a.sendMessageToSubAgentNow(payload.CallerAgentID, payload.CallerTaskID, payload.TaskID, payload.Message, payload.Kind)
 	a.respondPausedFollowup(payload, handle, err)

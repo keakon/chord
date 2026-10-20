@@ -235,27 +235,26 @@ func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxID
 	return b.String()
 }
 
-// runningSubAgentStallReason reports why a live Running worker is suspected of
-// stalling, or "" while it is healthy. It compares the worker's activity
-// heartbeat — refreshed on state transitions AND real progress (LLM request
-// issue, stream deltas, tool results, response handling) — against the wall
-// clock, so a busy worker that merely stays in Running is never flagged, while
-// one that has produced no state change and no activity for the full threshold
-// is. Only slot holders are coordination-tracked work.
-func runningSubAgentStallReason(sub *SubAgent, now time.Time) string {
-	if sub == nil {
+// runningRuntimeStallReason reports why a live Running runtime is suspected of
+// stalling, or "" while it is healthy. It works through the shared runtime
+// interface so an external coding-agent worker is watched under the same
+// threshold as a SubAgent. It compares the worker's activity heartbeat —
+// refreshed on state transitions AND real progress — against the wall clock, so
+// a busy worker that merely stays in Running is never flagged, while one that
+// has produced no state change and no activity for the full threshold is. Only
+// slot holders are coordination-tracked work.
+func runningRuntimeStallReason(rt subAgentRuntime, now time.Time) string {
+	if rt == nil || !rt.slotHeld() {
 		return ""
 	}
-	if held, _ := sub.slotState(); !held {
-		return ""
-	}
-	// A worker sleeping out an API key cooldown is silent by design: the wait
+	// A SubAgent sleeping out an API key cooldown is silent by design: the wait
 	// has a known end and the request resumes on its own, so reporting it as a
-	// suspected stall would send the owner chasing healthy work.
-	if !sub.llmCoolingWaitDeadline().IsZero() {
+	// suspected stall would send the owner chasing healthy work. External
+	// workers have no Chord LLM cooldown.
+	if sub := asSubAgent(rt); sub != nil && !sub.llmCoolingWaitDeadline().IsZero() {
 		return ""
 	}
-	if now.Sub(sub.StateChangedAt()) > coordinationSnapshotStallAfter {
+	if now.Sub(rt.StateChangedAt()) > coordinationSnapshotStallAfter {
 		return "running with no recent state/progress update"
 	}
 	return ""
@@ -298,17 +297,16 @@ func (a *MainAgent) updateSubAgentStallMarkers() {
 			continue
 		}
 		reason := ""
-		if sub := a.subs.subAgents[rec.LatestInstanceID]; sub != nil {
-			state := sub.State()
-			switch state {
+		if rt := a.subs.runtimeLocked(rec.LatestInstanceID); rt != nil {
+			switch rt.State() {
 			case SubAgentStateWaitingMain:
 				reason = ""
 			case SubAgentStateWaitingDescendant:
-				if len(a.outstandingJoinChildTaskIDsLocked(sub.taskID)) == 0 && now.Sub(sub.StateChangedAt()) > coordinationSnapshotStallAfter {
+				if len(a.outstandingJoinChildTaskIDsLocked(rt.TaskID())) == 0 && now.Sub(rt.StateChangedAt()) > coordinationSnapshotStallAfter {
 					reason = "waiting_descendant without active child progress"
 				}
 			case SubAgentStateRunning:
-				reason = runningSubAgentStallReason(sub, now)
+				reason = runningRuntimeStallReason(rt, now)
 			}
 		}
 		if rec.SuspectedStallReason != reason {

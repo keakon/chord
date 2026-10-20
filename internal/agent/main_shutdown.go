@@ -209,15 +209,21 @@ func (a *MainAgent) shutdownTimeoutError(timeout time.Duration) error {
 }
 
 func (a *MainAgent) waitForSubAgents(remaining func() time.Duration) {
-	subs := a.subs.snapshotSubAgents()
-	for _, sub := range subs {
+	for _, runtime := range a.subs.snapshotRuntimes() {
 		wait := remaining()
 		if wait <= 0 {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), wait)
-		if err := sub.waitDone(ctx); err != nil {
-			log.Warnf("SubAgent did not stop within shutdown budget agent_id=%v error=%v", sub.instanceID, err)
+		switch worker := runtime.(type) {
+		case *SubAgent:
+			if err := worker.waitDone(ctx); err != nil {
+				log.Warnf("SubAgent did not stop within shutdown budget agent_id=%v error=%v", worker.instanceID, err)
+			}
+		case *externalWorker:
+			if err := worker.waitDone(ctx); err != nil {
+				log.Warnf("external worker did not stop within shutdown budget agent_id=%v error=%v", worker.instanceID, err)
+			}
 		}
 		cancel()
 	}
@@ -257,12 +263,18 @@ func (a *MainAgent) cancelActiveWork() {
 	}
 
 	a.subs.mu.RLock()
-	for _, sub := range a.subs.subAgents {
-		tools.StopAllJobsForAgent(sub.instanceID, "terminated on client exit")
-		sub.cancel()
-		sub.closeLLMClient()
-	}
+	runtimes := a.subs.snapshotRuntimesLocked()
 	a.subs.mu.RUnlock()
+	for _, rt := range runtimes {
+		tools.StopAllJobsForAgent(rt.InstanceID(), "terminated on client exit")
+		switch worker := rt.(type) {
+		case *SubAgent:
+			worker.cancel()
+			worker.closeLLMClient()
+		case *externalWorker:
+			worker.teardown()
+		}
+	}
 
 	if stoppedBackground := tools.StopAllJobsForShutdown(); stoppedBackground > 0 {
 		log.Infof("terminated background objects for shutdown count=%v instance=%v", stoppedBackground, a.instanceID)

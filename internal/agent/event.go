@@ -38,6 +38,7 @@ const (
 	EventSubAgentProgressUpdated = "subagent_progress_updated"
 	EventSubAgentSendMessage     = "subagent_send_message"
 	EventSubAgentStop            = "subagent_stop"
+	eventExternalNavigationReady = "external_navigation_ready"
 	EventAgentLog                = "agent_log"                 // Informational log from SubAgent (e.g. buffer overflow warning)
 	EventSubAgentRequestBoundary = "subagent_request_boundary" // SubAgent LLM request finished; apply deferred routing changes
 	EventJobFinished             = tools.EventBackgroundObjectFinished

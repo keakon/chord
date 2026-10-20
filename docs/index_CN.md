@@ -32,6 +32,7 @@
 ## 扩展与集成
 
 - [扩展与定制](./customization_CN.md)：配置角色、技能、代码诊断和外部工具
+- [外部 coding agent 子 Agent](./external-agents_CN.md)：让子 Agent 运行在外部 coding agent 进程中
 - [Hooks](./hooks_CN.md)：自动通知、检查和处理工具结果
 - [项目记忆](./project-memory_CN.md)：沉淀可跨会话复用、便于审阅的项目记忆
 - [Headless 集成](./headless_CN.md)：从脚本或其他界面控制 Chord

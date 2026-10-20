@@ -18,9 +18,7 @@ import (
 
 // SwitchRole switches the MainAgent to the named role and emits RoleChangedEvent.
 // It is the single entry point shared by the TUI and the headless control plane,
-// so it enforces what switchRole cannot: the target must be a main-mode agent
-// definition. A SubAgent-only config is rejected with "role %q is not
-// available"; an unknown name fails inside switchRole with "unknown role %q".
+// the target must be an internal main-mode agent definition.
 // RoleChangedEvent is emitted only after a successful switch.
 // SwitchRole is goroutine-safe: the switch runs synchronously on the caller's
 // goroutine, then RoleChangedEvent is posted to the TUI output channel and
@@ -31,9 +29,6 @@ func (a *MainAgent) SwitchRole(role string) error {
 		return err
 	}
 	defer finish()
-	if cfg, ok := a.agentConfigs[role]; ok && cfg != nil && cfg.IsSubAgent() {
-		return fmt.Errorf("role %q is not available", role)
-	}
 	if err := a.switchRole(role, false); err != nil {
 		log.Warnf("SwitchRole failed role=%v error=%v", role, err)
 		return err
@@ -52,13 +47,13 @@ func (a *MainAgent) AvailableRoles() []string {
 	}
 	names := make([]string, 0, len(a.agentConfigs))
 	for _, name := range []string{"builder", "planner"} {
-		if cfg, ok := a.agentConfigs[name]; ok && cfg != nil && !cfg.IsSubAgent() {
+		if cfg, ok := a.agentConfigs[name]; ok && cfg != nil && !cfg.IsSubAgent() && !cfg.IsExternalBackend() {
 			names = append(names, name)
 		}
 	}
 	custom := make([]string, 0, len(a.agentConfigs))
 	for name, cfg := range a.agentConfigs {
-		if name == "builder" || name == "planner" || cfg == nil || cfg.IsSubAgent() {
+		if name == "builder" || name == "planner" || cfg == nil || cfg.IsSubAgent() || cfg.IsExternalBackend() {
 			continue
 		}
 		custom = append(custom, name)
@@ -85,7 +80,7 @@ func (a *MainAgent) AvailableAgents() []string {
 	}
 
 	names := make([]string, 0, len(a.agentConfigs))
-	if cfg, ok := a.agentConfigs["builder"]; ok && cfg != nil && !cfg.IsSubAgent() && cfg.Name != activeName {
+	if cfg, ok := a.agentConfigs["builder"]; ok && cfg != nil && !cfg.IsSubAgent() && !cfg.IsExternalBackend() && cfg.Name != activeName {
 		names = append(names, "builder")
 	}
 	others := make([]string, 0, len(a.agentConfigs))
@@ -93,7 +88,7 @@ func (a *MainAgent) AvailableAgents() []string {
 		if name == "builder" || cfg == nil {
 			continue
 		}
-		if cfg.IsSubAgent() || name == activeName {
+		if cfg.IsSubAgent() || cfg.IsExternalBackend() || name == activeName {
 			continue
 		}
 		others = append(others, name)

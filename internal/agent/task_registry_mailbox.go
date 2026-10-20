@@ -84,7 +84,7 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 	rec.LastUpdatedTurn = currentTurn
 	rec.UpdatedAt = now
 	rec.LifecycleRevision++
-	if live := a.subs.subAgents[rec.LatestInstanceID]; live == nil {
+	if live := a.subs.runtimeLocked(rec.LatestInstanceID); live == nil {
 		rec.RuntimeParked = true
 	}
 	a.subs.taskRecords[taskID] = rec

@@ -99,9 +99,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	log.Errorf("SubAgent error error=%v source=%v", err, evt.SourceID)
 
 	var emitCalls, persistCalls, discardCalls []PendingToolCall
-	a.subs.mu.RLock()
-	sub := a.subs.subAgents[evt.SourceID]
-	a.subs.mu.RUnlock()
+	sub := a.subs.subAgent(evt.SourceID)
 	if sub != nil {
 		emitCalls, persistCalls = sub.drainPendingToolFailureSets(err)
 		emitCalls, discardCalls = splitPendingCallsByDeclaredTools(sub.ctxMgr, emitCalls)

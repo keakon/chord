@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -97,43 +98,53 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 	a.subs.mu.RLock()
 	sessionEpoch := a.subs.sessionEpoch
 	reasons := a.pendingOwnerReasonsLocked()
-	infos := make([]SubAgentInfo, 0, len(a.subs.subAgents)+len(a.subs.taskRecords))
-	seenTasks := make(map[string]struct{}, len(a.subs.subAgents))
-	for _, sub := range a.subs.subAgents {
+	live := a.subs.snapshotRuntimesLocked()
+	infos := make([]SubAgentInfo, 0, len(live)+len(a.subs.taskRecords))
+	seenTasks := make(map[string]struct{}, len(live))
+	for _, runtime := range live {
 		selectedRef := ""
 		runningRef := ""
-		client, modelName := sub.llmSnapshot()
-		if client != nil {
-			selectedRef = client.PrimaryModelRef()
-			if v := client.ActiveVariant(); v != "" {
-				selectedRef += "@" + v
+		modelName := ""
+		if sub, ok := runtime.(*SubAgent); ok {
+			client, name := sub.llmSnapshot()
+			modelName = name
+			if client != nil {
+				selectedRef = client.PrimaryModelRef()
+				if v := client.ActiveVariant(); v != "" {
+					selectedRef += "@" + v
+				}
+				runningRef = formatModelRefForNotification(client.RunningModelRef(), selectedRef, client.ActiveVariant())
 			}
-			runningRef = formatModelRefForNotification(client.RunningModelRef(), selectedRef, client.ActiveVariant())
 		}
-		state := sub.State()
-		summary := sub.LastSummary()
-		artifact := sub.LastArtifact()
-		ownerAgentID, ownerTaskID, depth, _ := sub.ownerSnapshot()
+		state := runtime.State()
+		summary := runtime.LastSummary()
+		artifact := runtime.LastArtifact()
+		ownerAgentID, ownerTaskID, depth, _ := runtime.OwnerSnapshot()
+		backend := ""
+		if _, ok := runtime.(*externalWorker); ok {
+			backend = config.BackendKindClaudeCode
+		}
 		infos = append(infos, SubAgentInfo{
-			InstanceID:       sub.instanceID,
-			TaskID:           sub.taskID,
+			InstanceID:       runtime.InstanceID(),
+			TaskID:           runtime.TaskID(),
 			OwnerAgentID:     ownerAgentID,
 			OwnerTaskID:      ownerTaskID,
 			Depth:            depth,
-			AgentDefName:     sub.agentDefName,
-			TaskDesc:         sub.taskDesc,
+			AgentDefName:     runtime.AgentDefName(),
+			TaskDesc:         runtime.TaskDescription(),
 			ModelName:        modelName,
-			Persistence:      sub.PersistenceHealth(),
+			Backend:          backend,
+			Persistence:      runtime.PersistenceHealth(),
 			SelectedRef:      selectedRef,
 			RunningRef:       runningRef,
 			State:            string(state),
-			Color:            sub.color,
+			Color:            runtime.ColorCode(),
 			LastSummary:      summary,
-			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(sub.instanceID),
+			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(runtime.InstanceID()),
 			LastArtifact:     artifact,
 		})
-		applyAwaitingOwnerReason(&infos[len(infos)-1], a.subs.taskRecords[sub.taskID], reasons)
-		seenTasks[sub.taskID] = struct{}{}
+		applyAwaitingOwnerReason(&infos[len(infos)-1], a.subs.taskRecords[runtime.TaskID()], reasons)
+		seenTasks[runtime.TaskID()] = struct{}{}
 	}
 	for taskID, rec := range a.subs.taskRecords {
 		if rec == nil || !rec.RuntimeParked || strings.TrimSpace(rec.LatestInstanceID) == "" {
@@ -172,6 +183,11 @@ func (a *MainAgent) parkedSubAgentInfo(rec *DurableTaskRecord) SubAgentInfo {
 		artifact = tools.NormalizeArtifactRef(rec.LastArtifactRefs[0])
 	}
 	selectedRef := a.restoredSubAgentModelRef(rec)
+	backend := ""
+	if rec.ExternalSession != nil {
+		backend = rec.ExternalSession.Backend
+		selectedRef = ""
+	}
 	return SubAgentInfo{
 		InstanceID:       rec.LatestInstanceID,
 		TaskID:           rec.TaskID,
@@ -182,6 +198,7 @@ func (a *MainAgent) parkedSubAgentInfo(rec *DurableTaskRecord) SubAgentInfo {
 		TaskDesc:         rec.TaskDesc,
 		Persistence:      rec.Persistence,
 		SelectedRef:      selectedRef,
+		Backend:          backend,
 		RunningRef:       restoredRunningModelRef(rec, selectedRef),
 		State:            rec.State,
 		LastSummary:      rec.LastSummary,
@@ -236,6 +253,9 @@ func (a *MainAgent) GetMessagesForTarget(conversation ConversationTarget) []mess
 	if target.sub != nil {
 		return target.sub.GetMessages()
 	}
+	if target.external != nil {
+		return target.external.messageSnapshot()
+	}
 	if target.parked || target.settled {
 		manager := a.recoveryManager()
 		msgs, err := loadTaskHistoryMessages(manager, target.task, loadToolActivityStarted(manager))
@@ -259,6 +279,10 @@ func (a *MainAgent) ContinueFromContextForTarget(conversation ConversationTarget
 	target, ok := a.resolveConversationTarget(conversation)
 	if !ok {
 		a.emitToTUI(ToastEvent{Message: "Conversation is no longer available; retry the action", Level: "warn", AgentID: conversation.AgentID})
+		return
+	}
+	if target.external != nil || target.task != nil && target.task.ExternalSession != nil {
+		a.SendUserMessageToTarget(conversation, "Continue from the existing context.")
 		return
 	}
 	if target.settled {

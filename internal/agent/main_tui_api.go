@@ -135,13 +135,17 @@ func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, con
 		a.emitToTUI(ToastEvent{Message: "Conversation is no longer available; retry the message", Level: "warn", AgentID: conversation.AgentID})
 		return
 	}
-	if target.settled {
+	if target.settled && target.task.ExternalSession == nil {
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s has finished; delegate it again to send it a follow-up", target.task.TaskID), Level: "warn", AgentID: target.task.LatestInstanceID})
 		return
 	}
 	if a.sessionExecutionPaused() && target.task != nil {
 		// The owner loop persists the explicit follow-up with the restored
 		// checkpoint before it reopens admission for the addressed worker.
+		a.sendEvent(Event{Type: EventSubAgentSendMessage, Payload: &SubAgentSendMessagePayload{TaskID: target.task.TaskID, Message: content, Kind: "follow_up"}})
+		return
+	}
+	if target.external != nil || target.task != nil && target.task.ExternalSession != nil {
 		a.sendEvent(Event{Type: EventSubAgentSendMessage, Payload: &SubAgentSendMessagePayload{TaskID: target.task.TaskID, Message: content, Kind: "follow_up"}})
 		return
 	}
@@ -210,6 +214,7 @@ func (a *MainAgent) acceptRawUserMessage(content string, parts []message.Content
 
 // SendUserMessageWithParts enqueues a multi-part user message (text + images).
 func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
+	conversation := a.focusedConversationTarget()
 	var content strings.Builder
 	for _, part := range parts {
 		if part.Type == "text" {
@@ -218,6 +223,17 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 	}
 	if IsTUILocalOnlySlashCommand(content.String()) {
 		a.sendSessionInput(content.String(), parts, "")
+		return
+	}
+	if target, ok := a.resolveConversationTarget(conversation); ok &&
+		(target.external != nil || target.task != nil && target.task.ExternalSession != nil) {
+		for _, part := range parts {
+			if part.Type != "text" {
+				a.emitToTUI(ToastEvent{Message: "External subagents accept text input only", Level: "warn", AgentID: target.task.LatestInstanceID})
+				return
+			}
+		}
+		a.SendUserMessageToTarget(conversation, content.String())
 		return
 	}
 	if a.sessionExecutionPaused() {
@@ -404,9 +420,10 @@ func (a *MainAgent) SetAgentConfigs(configs map[string]*config.AgentConfig) {
 		currentRole = strings.TrimSpace(a.activeConfig.Name)
 	}
 	a.agentConfigs = configs
+	a.activeConfig = nil
 	selectedRole := ""
 	if currentRole != "" {
-		if cfg, ok := configs[currentRole]; ok && cfg != nil {
+		if cfg, ok := configs[currentRole]; ok && cfg != nil && !cfg.IsSubAgent() && !cfg.IsExternalBackend() {
 			a.activeConfig = cfg
 			selectedRole = cfg.Name
 		} else {
@@ -414,7 +431,7 @@ func (a *MainAgent) SetAgentConfigs(configs map[string]*config.AgentConfig) {
 		}
 	}
 	if selectedRole == "" {
-		if builderCfg, ok := configs["builder"]; ok && builderCfg != nil {
+		if builderCfg, ok := configs["builder"]; ok && builderCfg != nil && !builderCfg.IsSubAgent() && !builderCfg.IsExternalBackend() {
 			a.activeConfig = builderCfg
 			selectedRole = builderCfg.Name
 		}

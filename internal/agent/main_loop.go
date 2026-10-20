@@ -234,6 +234,10 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleSubAgentSendMessageEvent(evt)
 	case EventSubAgentStop:
 		a.handleSubAgentStopEvent(evt)
+	case eventExternalNavigationReady:
+		if ready, ok := evt.Payload.(externalNavigationReady); ok && ready.epoch == a.recoverySessionEpoch() {
+			ready.resume()
+		}
 	case EventSubAgentLifecycleSweep:
 		if !a.admissionPaused.Load() {
 			// The periodic sweep is also the reclaim/retry net for owned
@@ -815,6 +819,14 @@ func (a *MainAgent) shouldEmitSubAgentStreaming(agentID string) bool {
 	}
 	if focused := a.focusedAgent.Load(); focused != nil {
 		return focused.instanceID == agentID
+	}
+	a.focusedTaskMu.RLock()
+	focusedTaskID := a.focusedTaskID
+	a.focusedTaskMu.RUnlock()
+	if focusedTaskID != "" {
+		if worker, ok := a.subs.runtimeByTaskID(focusedTaskID).(*externalWorker); ok {
+			return worker.instanceID == agentID
+		}
 	}
 	return false
 }

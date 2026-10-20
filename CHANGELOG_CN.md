@@ -19,6 +19,8 @@
 
 ### 新功能
 
+- 子 Agent 可以运行在外部 Claude Code 进程上，主 Agent 仍使用 Chord 内部运行时。在子 Agent 定义中设置 `backend.kind: claude-code`，Chord 保留任务记录、完成邮箱和工具授权；完成后可以发送定向消息继续外部会话，进程或输入结果未知时不自动重放。支持 Unix 上较新的 Claude Code 版本，不锁定单一版本；不支持外部 hooks、MCP 或插件。
+
 - 原生 Gemini 接口支持显式启用跨请求续传与固定目标断流恢复；工具等待最终确认后执行，多次请求的计费与上下文窗口分别统计。
 
 - Responses provider 新增两个兼容开关，用于拒绝 Chord 显式缓存字段的网关：`compat.responses.send_prompt_cache_options` 省略顶层 `prompt_cache_options`，`compat.responses.send_prompt_cache_breakpoint` 省略 `prompt_cache_breakpoint` 标记（同时省略只用于选择断点策略的顶层字段）。否则，GPT-5.6 及之后的模型别名落在这类网关上时每个请求都会失败。

@@ -81,6 +81,9 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 	if !ok {
 		return fmt.Errorf("unknown role %q", roleName)
 	}
+	if cfg == nil || cfg.IsSubAgent() || cfg.IsExternalBackend() {
+		return fmt.Errorf("role %q is not available", roleName)
+	}
 
 	// Resolve and validate the role's model before committing any role state,
 	// so a model failure leaves the agent fully unchanged (role, history, and

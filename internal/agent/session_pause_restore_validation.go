@@ -31,7 +31,7 @@ func (a *MainAgent) validatePausedSessionRestore(loaded *loadedSessionState) err
 	}
 	if role := strings.TrimSpace(loaded.ActiveRole); role != "" && a.agentConfigs != nil {
 		cfg := a.agentConfigs[role]
-		if cfg == nil || cfg.IsSubAgent() {
+		if cfg == nil || cfg.IsSubAgent() || cfg.IsExternalBackend() {
 			return fmt.Errorf("restore_failed: saved main role %q is unavailable", role)
 		}
 	}

@@ -48,6 +48,10 @@ type SidebarEntry struct {
 	LastSummary         string
 	UrgentCount         int
 	LastArtifact        tools.ArtifactRef
+	// External marks a worker whose transcript and tool execution live in an
+	// external coding-agent process; it must not be labeled as a healthy Chord
+	// transcript.
+	External bool
 }
 
 // Sidebar displays active SubAgent status in a narrow panel to the left of
@@ -160,6 +164,7 @@ func (s *Sidebar) Update(subAgents []agent.SubAgentInfo, focusedID, mainRole str
 			AwaitingOwnerReason: info.AwaitingOwnerReason,
 			UrgentCount:         info.UrgentInboxCount,
 			LastArtifact:        info.LastArtifact,
+			External:            info.Backend != "",
 		}
 		if existing, ok := existingByID[info.InstanceID]; ok {
 			entry.EditedFiles = existing.EditedFiles

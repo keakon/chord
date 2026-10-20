@@ -131,7 +131,7 @@ type FocusedModelStateProvider interface {
 type SessionController interface {
 	ListSessionSummaries() ([]SessionSummary, error)
 	GetSessionSummary() *SessionSummary
-	DeleteSession(sessionID string) error
+	DeleteSession(sessionID string) ([]string, error)
 	ExportSession(format, path string)
 	ResumeSession()
 	ResumeSessionID(sessionID string)

@@ -96,8 +96,8 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 	if !ok || payload == nil {
 		return
 	}
-	sub := a.subAgentByID(evt.SourceID)
-	if sub == nil {
+	rt := a.subs.runtime(evt.SourceID)
+	if rt == nil {
 		return
 	}
 	finalState := payload.FinalState
@@ -111,6 +111,14 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 	closedReason := strings.TrimSpace(payload.ClosedReason)
 	if closedReason == "" {
 		closedReason = reason
+	}
+	if worker, ok := rt.(*externalWorker); ok {
+		a.closeExternalWorker(worker, finalState, reason, closedReason, payload.Completion)
+		return
+	}
+	sub := asSubAgent(rt)
+	if sub == nil {
+		return
 	}
 	statusState := finalState
 	if isTerminalSubAgentState(finalState) {

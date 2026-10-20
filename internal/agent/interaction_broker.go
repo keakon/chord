@@ -29,10 +29,10 @@ type interactionBroker struct {
 	// loop exits so in-flight awaits unblock with ErrAgentShutdown.
 	stoppingCh <-chan struct{}
 
-	confirmFlowMu sync.Mutex
-	confirmMapMu  sync.Mutex
-	confirmCh     map[string]chan ConfirmResponse
-	confirmStart  map[string]time.Time
+	confirmFlow  chan struct{}
+	confirmMapMu sync.Mutex
+	confirmCh    map[string]chan ConfirmResponse
+	confirmStart map[string]time.Time
 	// confirmTargets maps requestID -> the walltime owner captured at
 	// registration (agent id + the session ledger/generation it belongs to).
 	// It lives next to confirmCh/confirmStart under confirmMapMu so a concurrent
@@ -57,6 +57,7 @@ type interactionBroker struct {
 
 func newInteractionBroker(stoppingCh <-chan struct{}) *interactionBroker {
 	b := &interactionBroker{
+		confirmFlow:    make(chan struct{}, 1),
 		stoppingCh:     stoppingCh,
 		confirmCh:      make(map[string]chan ConfirmResponse),
 		confirmStart:   make(map[string]time.Time),
@@ -121,8 +122,21 @@ func (b *interactionBroker) settleHandoff(requestID string) {
 
 // beginConfirmFlow serializes confirm flows; the caller must pair it with
 // endConfirmFlow (typically via defer).
-func (b *interactionBroker) beginConfirmFlow() { b.confirmFlowMu.Lock() }
-func (b *interactionBroker) endConfirmFlow()   { b.confirmFlowMu.Unlock() }
+func (b *interactionBroker) beginConfirmFlow(ctx context.Context) error {
+	select {
+	case b.confirmFlow <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-b.confirmFlow
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.stoppingCh:
+		return ErrAgentShutdown
+	}
+}
+func (b *interactionBroker) endConfirmFlow() { <-b.confirmFlow }
 
 // registerConfirm creates and registers a buffered response channel for the
 // given requestID, recording the wait start. The caller must

@@ -38,6 +38,61 @@ const (
 	taskResumeByDescendantMailbox taskResumeTrigger = "descendant_mailbox"
 )
 
+// ExternalTaskSession addresses a task executed by an external coding-agent
+// backend. Backend is the adapter name ("claude-code"); SessionID is the
+// external session Chord pinned.
+type ExternalTaskSession struct {
+	Backend      string                    `json:"backend,omitempty"`
+	SessionID    string                    `json:"session_id,omitempty"`
+	WorkDir      string                    `json:"work_dir,omitempty"`
+	WorkDirState WorkDirState              `json:"work_dir_state"`
+	Prompt       string                    `json:"prompt,omitempty"`
+	Command      string                    `json:"command,omitempty"`
+	LaunchArgs   []string                  `json:"launch_args,omitempty"`
+	EnvKeys      []string                  `json:"env_keys,omitempty"`
+	ProcessEnded bool                      `json:"process_ended"`
+	Inputs       []externalTaskInput       `json:"inputs,omitempty"`
+	Baseline     *externalCheckoutBaseline `json:"baseline,omitempty"`
+}
+
+type externalTaskInput struct {
+	ID      string                   `json:"id"`
+	Content string                   `json:"content"`
+	State   string                   `json:"state"`
+	Mailbox *message.MailboxMetadata `json:"mailbox,omitempty"`
+}
+
+const (
+	externalInputCompleted = "completed"
+	externalInputQueued    = "queued"
+)
+
+func cloneExternalTaskSession(session *ExternalTaskSession) *ExternalTaskSession {
+	if session == nil {
+		return nil
+	}
+	out := *session
+	out.LaunchArgs = slices.Clone(session.LaunchArgs)
+	out.EnvKeys = slices.Clone(session.EnvKeys)
+	out.Inputs = slices.Clone(session.Inputs)
+	for i := range out.Inputs {
+		if session.Inputs[i].Mailbox != nil {
+			mailbox := *session.Inputs[i].Mailbox
+			out.Inputs[i].Mailbox = &mailbox
+		}
+	}
+	if session.Baseline != nil {
+		baseline := *session.Baseline
+		out.Baseline = &baseline
+	}
+	out.Backend = strings.TrimSpace(out.Backend)
+	out.SessionID = strings.TrimSpace(out.SessionID)
+	if out.Backend == "" && out.SessionID == "" {
+		return nil
+	}
+	return &out
+}
+
 type DurableTaskRecord struct {
 	// Immutable UI evidence rebuilt from canonical history; never serialized.
 	skillSnapshot        *parkedSkillSnapshot
@@ -71,22 +126,25 @@ type DurableTaskRecord struct {
 	// the budget spans attempts: the loop they converge is exactly the one that
 	// crosses attempts. EscalationMailboxID names the mailbox whose answer zeroes
 	// the count (see buildTaskRecordFromSub).
-	EscalationCount      int                 `json:"escalation_count,omitempty"`
-	EscalationMailboxID  string              `json:"escalation_mailbox_id,omitempty"`
-	LastCompletion       *CompletionEnvelope `json:"last_completion,omitempty"`
-	PendingCompletion    *CompletionEnvelope `json:"pending_completion,omitempty"`
-	SuspectedStallReason string              `json:"suspected_stall_reason,omitempty"`
-	Persistence          PersistenceHealth   `json:"persistence"`
-	RuntimeParked        bool                `json:"runtime_parked,omitempty"`
-	CreatedTurn          uint64              `json:"created_turn,omitempty"`
-	LastUpdatedTurn      uint64              `json:"last_updated_turn,omitempty"`
-	CreatedAt            time.Time           `json:"created_at"`
-	UpdatedAt            time.Time           `json:"updated_at"`
-	ClosedReason         string              `json:"closed_reason,omitempty"`
-	Attempt              uint64              `json:"attempt,omitempty"`
-	LifecycleRevision    uint64              `json:"lifecycle_revision,omitempty"`
-	LatestSettlement     *TaskSettlement     `json:"latest_settlement,omitempty"`
-	SettlementDurable    bool                `json:"settlement_durable,omitempty"`
+	EscalationCount     int                 `json:"escalation_count,omitempty"`
+	EscalationMailboxID string              `json:"escalation_mailbox_id,omitempty"`
+	LastCompletion      *CompletionEnvelope `json:"last_completion,omitempty"`
+	PendingCompletion   *CompletionEnvelope `json:"pending_completion,omitempty"`
+	// ExternalSession addresses a task executed by an external coding-agent
+	// backend. Chord owns the session id; the external CLI owns the transcript.
+	ExternalSession      *ExternalTaskSession `json:"external_session,omitempty"`
+	SuspectedStallReason string               `json:"suspected_stall_reason,omitempty"`
+	Persistence          PersistenceHealth    `json:"persistence"`
+	RuntimeParked        bool                 `json:"runtime_parked,omitempty"`
+	CreatedTurn          uint64               `json:"created_turn,omitempty"`
+	LastUpdatedTurn      uint64               `json:"last_updated_turn,omitempty"`
+	CreatedAt            time.Time            `json:"created_at"`
+	UpdatedAt            time.Time            `json:"updated_at"`
+	ClosedReason         string               `json:"closed_reason,omitempty"`
+	Attempt              uint64               `json:"attempt,omitempty"`
+	LifecycleRevision    uint64               `json:"lifecycle_revision,omitempty"`
+	LatestSettlement     *TaskSettlement      `json:"latest_settlement,omitempty"`
+	SettlementDurable    bool                 `json:"settlement_durable,omitempty"`
 }
 
 func durableTaskRegistryPath(sessionDir string) string {
@@ -135,6 +193,7 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.LastArtifactRefs = tools.NormalizeArtifactRefs(out.LastArtifactRefs)
 	out.LastCompletion = normalizeCompletionEnvelope(out.LastCompletion)
 	out.PendingCompletion = normalizeCompletionEnvelope(out.PendingCompletion)
+	out.ExternalSession = cloneExternalTaskSession(out.ExternalSession)
 	out.SuspectedStallReason = strings.TrimSpace(out.SuspectedStallReason)
 	out.Persistence.State = normalizePersistenceHealthState(out.Persistence.State)
 	out.Persistence.LastError = strings.TrimSpace(out.Persistence.LastError)
@@ -1057,9 +1116,10 @@ func taskInstanceHistoryIDs(rec *DurableTaskRecord) []string {
 
 func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 	a.subs.mu.RLock()
-	liveInfos := make([]SubAgentInfo, 0, len(a.subs.subAgents))
-	seenTaskIDs := make(map[string]struct{}, len(a.subs.subAgents))
-	for _, sub := range a.subs.subAgents {
+	live := a.subs.subAgentsLocked()
+	liveInfos := make([]SubAgentInfo, 0, len(live))
+	seenTaskIDs := make(map[string]struct{}, len(live))
+	for _, sub := range live {
 		if sub == nil {
 			continue
 		}

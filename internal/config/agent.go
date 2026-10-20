@@ -42,6 +42,7 @@ type AgentConfig struct {
 	Color        string           `json:"color,omitempty" yaml:"color,omitempty"`
 	Permission   yaml.Node        `json:"-" yaml:"permission"`
 	MCP          MCPConfig        `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+	Backend      *BackendConfig   `json:"backend,omitempty" yaml:"backend,omitempty"`
 	Delegation   DelegationConfig `json:"delegation" yaml:"delegation,omitempty"`
 	Prompt       string           `json:"-" yaml:"prompt,omitempty"`
 	PromptAlt    string           `json:"-" yaml:"system_prompt,omitempty"`
@@ -349,6 +350,9 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 	}
 
 	cfg.poolOrder = append([]string(nil), cfg.ModelPools...)
+	if err := validateAgentBackend(path, cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -573,6 +577,9 @@ func ResolveAgentModelPools(agents map[string]*AgentConfig, globalPools map[stri
 		if cfg == nil {
 			continue
 		}
+		if cfg.IsExternalBackend() {
+			continue
+		}
 		if len(cfg.Models) > 0 {
 			continue
 		}
@@ -617,6 +624,9 @@ func ResolveAgentModelPools(agents map[string]*AgentConfig, globalPools map[stri
 func ValidateResolvedAgentModelPools(agents map[string]*AgentConfig) error {
 	for agentName, cfg := range agents {
 		if cfg == nil {
+			continue
+		}
+		if cfg.IsExternalBackend() {
 			continue
 		}
 		if len(cfg.ModelPools) > 0 {

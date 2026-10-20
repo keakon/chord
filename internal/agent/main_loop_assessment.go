@@ -119,7 +119,7 @@ func (a *MainAgent) hasOpenTodos() bool {
 }
 
 func (a *MainAgent) hasActiveSubAgents() bool {
-	for _, sub := range a.subs.snapshotSubAgents() {
+	for _, sub := range a.subs.snapshotRuntimes() {
 		if sub == nil {
 			continue
 		}
@@ -135,8 +135,11 @@ func (a *MainAgent) hasActiveSubAgents() bool {
 func (a *MainAgent) hasActiveSubAgentWork() bool {
 	a.subs.mu.RLock()
 	defer a.subs.mu.RUnlock()
-	for _, sub := range a.subs.subAgents {
-		if sub != nil && (sub.State() == SubAgentStateRunning || sub.hasPendingUserInput()) {
+	for _, runtime := range a.subs.snapshotRuntimesLocked() {
+		if runtime.State() == SubAgentStateRunning {
+			return true
+		}
+		if sub, ok := runtime.(*SubAgent); ok && sub.hasPendingUserInput() {
 			return true
 		}
 	}
@@ -419,13 +422,13 @@ func (a *MainAgent) openTodoContinuationLines() []string {
 
 // activeSubAgentContinuationLines returns formatted lines for active subagents.
 func (a *MainAgent) activeSubAgentContinuationLines() []string {
-	subs := a.subs.snapshotSubAgents()
+	subs := a.subs.snapshotRuntimes()
 	lines := make([]string, 0, len(subs))
 	for _, sub := range subs {
 		if sub == nil {
 			continue
 		}
-		id := sub.instanceID
+		id := sub.InstanceID()
 		state := sub.State()
 		switch state {
 		case SubAgentStateCompleted, SubAgentStateFailed, SubAgentStateCancelled, SubAgentStateIdle:

@@ -123,6 +123,8 @@ Which roles a delegating agent may reach is a permission decision too: `delegate
 
 `complete` delivers the result inline (`result`) or as an artifact reference (`result_ref`, typically the ResultRef from `save_artifact`). Chord validates the delivered payload against the contract before accepting the completion: a violation is handed back to the worker with the offending paths and one corrected attempt. If the next delivery still violates the contract, the task fails, the rejection text names up to 20 violations, and the task settlement keeps the machine-readable diagnostics. A `result_ref` whose content cannot be read back fails immediately, since a retry cannot repair the store. Without `result_schema`, delegation behaves as before.
 
+An agent that runs on an external backend has no `complete` tool, so the contract travels a different path with the same rules: it is delivered to the external process as part of its role instructions at initialization, and its final answer must be a single JSON object satisfying the schema. A final answer that is not a JSON object, or that does not satisfy the schema, fails the task with the violations named; there is no in-process correction turn, so retry the delegation if the external agent needs another attempt.
+
 ### Escalation
 
 `escalate` is the SubAgent-side way to ask its owner for help, and a required `kind` says which of two things it means:

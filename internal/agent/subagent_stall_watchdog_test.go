@@ -377,7 +377,7 @@ func TestCoolingWaitHoldsLivenessChecksForSilentRequest(t *testing.T) {
 	if _, armed := sub.llmSilenceWatchdogDeadline(); !armed {
 		t.Fatal("silence watchdog not armed for an in-flight request")
 	}
-	if got := runningSubAgentStallReason(sub, time.Now()); got == "" {
+	if got := runningRuntimeStallReason(sub, time.Now()); got == "" {
 		t.Fatal("stale in-flight worker not flagged before the cooling wait is recorded")
 	}
 
@@ -398,7 +398,7 @@ func TestCoolingWaitHoldsLivenessChecksForSilentRequest(t *testing.T) {
 	if sub.handleLLMSilenceIfDue() {
 		t.Fatal("silence watchdog escalated a request that is sleeping out a key cooldown")
 	}
-	if got := runningSubAgentStallReason(sub, time.Now()); got != "" {
+	if got := runningRuntimeStallReason(sub, time.Now()); got != "" {
 		t.Fatalf("stall reason during a cooling wait = %q, want empty", got)
 	}
 	a.dispatch(Event{Type: EventSubAgentLifecycleSweep})
@@ -414,7 +414,7 @@ func TestCoolingWaitHoldsLivenessChecksForSilentRequest(t *testing.T) {
 	if !sub.llmCoolingWaitDeadline().IsZero() {
 		t.Fatal("a past cooling deadline must not keep the grace window open")
 	}
-	if got := runningSubAgentStallReason(sub, time.Now()); got == "" {
+	if got := runningRuntimeStallReason(sub, time.Now()); got == "" {
 		t.Fatal("stall detection did not resume after the cooling wait ended")
 	}
 
@@ -479,7 +479,7 @@ func TestCoolingWaitSurvivesProductionStreamReducerWiring(t *testing.T) {
 	if !got.Equal(coolingUntil) {
 		t.Fatalf("recorded cooling deadline = %v, want %v", got, coolingUntil)
 	}
-	if reason := runningSubAgentStallReason(sub, time.Now()); reason != "" {
+	if reason := runningRuntimeStallReason(sub, time.Now()); reason != "" {
 		t.Fatalf("stall reason after a cooling status through production wiring = %q, want empty", reason)
 	}
 }

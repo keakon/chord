@@ -351,7 +351,7 @@ func (a *MainAgent) agentModelPoolSwitchInFlight(agentName string) bool {
 	}
 	a.subs.mu.RLock()
 	defer a.subs.mu.RUnlock()
-	for _, sub := range a.subs.subAgents {
+	for _, sub := range a.subs.subAgentsLocked() {
 		if sub == nil || sub.agentDefName != agentName {
 			continue
 		}

@@ -676,7 +676,7 @@ func (a *MainAgent) notifyMainRoutingChanged(reason string) {
 func (a *MainAgent) notifySubAgentRoutingChanged(agentName, reason string) {
 	a.subs.mu.RLock()
 	var targets []*SubAgent
-	for _, sub := range a.subs.subAgents {
+	for _, sub := range a.subs.subAgentsLocked() {
 		if sub != nil && sub.agentDefName == agentName {
 			targets = append(targets, sub)
 		}
@@ -852,7 +852,7 @@ func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *
 	}
 	a.subs.mu.RLock()
 	var targets []*SubAgent
-	for _, sub := range a.subs.subAgents {
+	for _, sub := range a.subs.subAgentsLocked() {
 		if sub != nil && sub.agentDefName == agentName {
 			targets = append(targets, sub)
 		}

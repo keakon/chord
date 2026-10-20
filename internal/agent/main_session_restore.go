@@ -1819,15 +1819,51 @@ func (a *MainAgent) FillSessionSummaryDetails(list []SessionSummary) []SessionSu
 	return out
 }
 
-func (a *MainAgent) DeleteSession(sessionID string) error {
+func (a *MainAgent) DeleteSession(sessionID string) ([]string, error) {
 	sessionsDir, err := a.projectSessionsDir()
 	if err != nil {
-		return err
+		return nil, err
 	}
+	id := strings.TrimSpace(sessionID)
+	// The external CLI keeps its transcript under the user's home, outside the
+	// session directory this delete removes. Read the pinned ids first and
+	// return them so the caller can tell the user what is left behind; Chord
+	// never deletes an external session itself.
+	externalSessionIDs := a.externalSessionIDsForSession(filepath.Join(sessionsDir, id))
 	if err := recovery.DeleteSessionByID(sessionsDir, a.sessionDir, sessionID); err != nil {
-		return fmt.Errorf("delete session %s: %w", strings.TrimSpace(sessionID), err)
+		return nil, fmt.Errorf("delete session %s: %w", id, err)
 	}
-	return nil
+	return externalSessionIDs, nil
+}
+
+// externalSessionIDsForSession lists, deduplicated and sorted, the external
+// coding-agent session ids a stored session pinned, read straight from that
+// session's durable task records. A missing or unreadable registry yields
+// nothing: the hint is best-effort and must never block the delete.
+func (a *MainAgent) externalSessionIDsForSession(sessionDir string) []string {
+	records, err := loadDurableTaskRecords(sessionDir)
+	if err != nil {
+		log.Debugf("external session hint skipped session_dir=%v error=%v", sessionDir, err)
+		return nil
+	}
+	seen := make(map[string]struct{}, len(records))
+	ids := make([]string, 0, len(records))
+	for _, rec := range records {
+		if rec == nil || rec.ExternalSession == nil {
+			continue
+		}
+		id := strings.TrimSpace(rec.ExternalSession.SessionID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (a *MainAgent) ExportSession(format, path string) {

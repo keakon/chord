@@ -58,9 +58,10 @@ type ToolActivityRecord struct {
 	// WorkDirGeneration is the binding generation that produced it. They keep
 	// the started fact attributable to the checkout it ran in; the resume path
 	// resolves a restored agent's binding from SubAgentMeta, not from here.
-	WorkDir           string `json:"workdir,omitempty"`
-	WorkDirGeneration uint64 `json:"workdir_generation,omitempty"`
-	TS                int64  `json:"ts"` // unix nanoseconds
+	WorkDir           string                 `json:"workdir,omitempty"`
+	WorkDirGeneration uint64                 `json:"workdir_generation,omitempty"`
+	Audit             *message.ToolArgsAudit `json:"audit,omitempty"`
+	TS                int64                  `json:"ts"` // unix nanoseconds
 }
 
 // SessionSnapshot captures the recoverable state of a session at a point in
@@ -443,6 +444,9 @@ func (r *RecoveryManager) AppendToolActivity(rec ToolActivityRecord) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("marshal tool-activity record: %w", err)
+	}
+	if len(data)+1 >= recoveryMaxJournalLineSize {
+		return fmt.Errorf("tool-activity record exceeds recovery size limit")
 	}
 	data = append(data, '\n')
 	if n, err := r.journalHandle.Write(data); err != nil {

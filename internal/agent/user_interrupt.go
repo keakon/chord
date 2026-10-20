@@ -10,27 +10,38 @@ import (
 )
 
 func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
-	a.subs.mu.RLock()
-	subs := make([]*SubAgent, 0, len(a.subs.subAgents)+1)
-	seen := make(map[string]struct{}, len(a.subs.subAgents)+1)
-	for _, sub := range a.subs.subAgents {
-		if sub != nil {
-			subs = append(subs, sub)
-			if sub.instanceID != "" {
-				seen[sub.instanceID] = struct{}{}
-			}
+	// Walk every live runtime, not only *SubAgent: an external coding-agent
+	// worker has no Chord turn to interrupt, but a user cancel must still stop
+	// its process and settle its task (see requestUserCancel).
+	runtimes := a.subs.snapshotRuntimes()
+	seen := make(map[string]struct{}, len(runtimes)+1)
+	for _, rt := range runtimes {
+		if id := rt.InstanceID(); id != "" {
+			seen[id] = struct{}{}
 		}
 	}
-	a.subs.mu.RUnlock()
 	if focused := a.validFocusedSubAgent(); focused != nil {
 		if _, ok := seen[focused.instanceID]; !ok {
-			subs = append(subs, focused)
+			runtimes = append(runtimes, focused)
 		}
 	}
 
 	cancelled := false
-	cancelledTaskIDs := make([]string, 0, len(subs))
-	for _, sub := range subs {
+	cancelledTaskIDs := make([]string, 0, len(runtimes))
+	for _, rt := range runtimes {
+		if worker, ok := rt.(*externalWorker); ok {
+			if worker.requestUserCancel("stopped by user") {
+				if taskID := strings.TrimSpace(worker.taskID); taskID != "" {
+					cancelledTaskIDs = append(cancelledTaskIDs, taskID)
+				}
+				cancelled = true
+			}
+			continue
+		}
+		sub := asSubAgent(rt)
+		if sub == nil {
+			continue
+		}
 		interrupted := sub.interruptCurrentTurnWithStatus(message.ToolStatusError, context.Canceled, true)
 		state := sub.State()
 		if interrupted || state == SubAgentStateRunning || state == SubAgentStateIdle || state == SubAgentStateWaitingMain || state == SubAgentStateWaitingDescendant {

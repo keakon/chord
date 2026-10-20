@@ -1506,6 +1506,8 @@ Supported file formats:
 - `.md`: YAML frontmatter plus a Markdown body. The body becomes the system prompt.
 - `.yaml` / `.yml`: plain YAML. Use `prompt` or `system_prompt` for the system prompt.
 
+A `mode: subagent` role can also run on an external coding-agent process; see [External coding-agent subagents](./external-agents.md).
+
 Markdown agent example:
 
 ```markdown

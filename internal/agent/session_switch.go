@@ -234,25 +234,28 @@ func (a *MainAgent) finishSessionSwitch() {
 
 func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
 	a.subs.mu.Lock()
-	if len(a.subs.subAgents) == 0 {
+	if a.subs.liveCountLocked() == 0 {
 		a.subs.mu.Unlock()
 		return 0
 	}
 
-	ids, subs := a.subs.removeAllLiveLocked()
+	ids, runtimes := a.subs.removeAllLiveLocked()
 	a.subs.mu.Unlock()
 
 	for i, id := range ids {
-		if subs[i] != nil {
-			a.terminateSubAgentForSessionSwitch(subs[i], id)
-		}
+		rt := runtimes[i]
 		a.fileTrack.ReleaseAll(id)
-		a.releaseSubAgentSlot(subs[i])
-		if subs[i] != nil {
+		switch worker := rt.(type) {
+		case *SubAgent:
+			a.terminateSubAgentForSessionSwitch(worker, id)
 			tools.StopAllJobsForAgent(id, "terminated on session switch")
-			subs[i].cancel()
-			subs[i].closeLLMClient()
+			worker.cancel()
+			worker.closeLLMClient()
+		case *externalWorker:
+			worker.terminateForSessionSwitch("terminated on session switch")
+			tools.StopAllJobsForAgent(id, "terminated on session switch")
 		}
+		a.releaseRuntimeSlot(rt)
 	}
 
 	return len(ids)

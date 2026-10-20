@@ -90,13 +90,18 @@ func sidebarEntryDisplayName(entry SidebarEntry) string {
 		}
 		return "main"
 	}
+	base := ""
 	if strings.TrimSpace(entry.TaskDesc) != "" {
-		return strings.TrimSpace(entry.TaskDesc)
+		base = strings.TrimSpace(entry.TaskDesc)
+	} else if strings.TrimSpace(entry.AgentDefName) != "" {
+		base = strings.TrimSpace(entry.AgentDefName)
+	} else {
+		base = entry.ID
 	}
-	if strings.TrimSpace(entry.AgentDefName) != "" {
-		return strings.TrimSpace(entry.AgentDefName)
+	if entry.External {
+		return base + " [external]"
 	}
-	return entry.ID
+	return base
 }
 
 func sidebarTreePrefix(entry SidebarEntry) string {

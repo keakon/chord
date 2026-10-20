@@ -33,8 +33,8 @@ func (a *MainAgent) buildRecoverySnapshot() *recovery.SessionSnapshot {
 	a.todoMu.RUnlock()
 
 	a.subs.mu.RLock()
-	agents := make([]recovery.AgentSnapshot, 0, len(a.subs.subAgents))
-	for _, sub := range a.subs.subAgents {
+	agents := make([]recovery.AgentSnapshot, 0, a.subs.liveCountLocked())
+	for _, sub := range a.subs.subAgentsLocked() {
 		state := sub.State()
 		summary := sub.LastSummary()
 		pendingComplete := sub.PendingCompleteIntent()

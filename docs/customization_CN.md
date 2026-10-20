@@ -35,6 +35,8 @@ Python 项目中，Chord 会沿同一路径寻找最近的有效虚拟环境，�
 
 完整 Agent 配置字段、示例和委派选项见 [配置与认证：Agent 配置](./configuration_CN.md#agent-配置)。
 
+要让子 Agent 运行在外部 coding agent 进程中，见[外部 coding agent 子 Agent](./external-agents_CN.md)。
+
 ## Skills
 
 Chord 默认从以下目录发现 Skills：

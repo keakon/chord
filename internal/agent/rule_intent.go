@@ -146,8 +146,8 @@ func (a *MainAgent) syncSubAgentOverlay() {
 		ruleset    permission.Ruleset
 	}
 	a.subs.mu.RLock()
-	updates := make([]subAgentRulesetUpdate, 0, len(a.subs.subAgents))
-	for _, sub := range a.subs.subAgents {
+	updates := make([]subAgentRulesetUpdate, 0, a.subs.liveCountLocked())
+	for _, sub := range a.subs.subAgentsLocked() {
 		if sub == nil {
 			continue
 		}
@@ -162,7 +162,7 @@ func (a *MainAgent) syncSubAgentOverlay() {
 	a.subs.mu.Lock()
 	defer a.subs.mu.Unlock()
 	for _, update := range updates {
-		if current := a.subs.subAgents[update.instanceID]; current == update.sub {
+		if current := a.subs.subAgentLocked(update.instanceID); current == update.sub {
 			current.setRuleset(update.ruleset)
 		}
 	}

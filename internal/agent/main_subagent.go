@@ -31,6 +31,7 @@ type SubAgentInfo struct {
 	AgentDefName        string
 	TaskDesc            string
 	ModelName           string
+	Backend             string
 	Persistence         PersistenceHealth
 	SelectedRef         string
 	RunningRef          string
@@ -224,7 +225,7 @@ func (a *MainAgent) directNonTerminalChildCountLocked(ownerAgentID, ownerTaskID 
 			seenTaskIDs[strings.TrimSpace(rec.TaskID)] = struct{}{}
 		}
 	}
-	for _, sub := range a.subs.subAgents {
+	for _, sub := range a.subs.subAgentsLocked() {
 		if sub == nil {
 			continue
 		}
@@ -432,7 +433,7 @@ func (a *MainAgent) countRuntimeSlotHolders() int {
 			holders++
 		}
 	}
-	for _, sub := range a.subs.subAgents {
+	for _, sub := range a.subs.subAgentsLocked() {
 		if sub == nil {
 			continue
 		}
@@ -559,7 +560,7 @@ func (a *MainAgent) canCallerDelegate(ctx context.Context) (delegationCaller, er
 // injects the completion result into the MainAgent's conversation for LLM
 // review, and triggers a new LLM call so the MainAgent can decide next steps
 // (e.g. mark todo as done, request revisions, start next task).
-func (a *MainAgent) buildCompletionEnvelope(sub *SubAgent, result *AgentResult) *CompletionEnvelope {
+func (a *MainAgent) buildCompletionEnvelope(artifact tools.ArtifactRef, result *AgentResult) *CompletionEnvelope {
 	if result != nil && result.Envelope != nil {
 		env := normalizeCompletionEnvelope(result.Envelope)
 		if env != nil {
@@ -571,10 +572,8 @@ func (a *MainAgent) buildCompletionEnvelope(sub *SubAgent, result *AgentResult) 
 		summary = result.Summary
 	}
 	env := &CompletionEnvelope{Summary: strings.TrimSpace(summary)}
-	if sub != nil {
-		if ref := sub.LastArtifact(); strings.TrimSpace(ref.RelPath) != "" || strings.TrimSpace(ref.ID) != "" {
-			env.Artifacts = tools.NormalizeArtifactRefs([]tools.ArtifactRef{ref})
-		}
+	if strings.TrimSpace(artifact.RelPath) != "" || strings.TrimSpace(artifact.ID) != "" {
+		env.Artifacts = tools.NormalizeArtifactRefs([]tools.ArtifactRef{artifact})
 	}
 	return normalizeCompletionEnvelope(env)
 }
@@ -586,22 +585,45 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		return
 	}
 
-	a.subs.mu.RLock()
-	sub := a.subs.subAgents[evt.SourceID]
-	a.subs.mu.RUnlock()
+	sub := a.subs.runtime(evt.SourceID)
 	if sub == nil {
 		log.Warnf("handleAgentDone: unknown SubAgent source=%v", evt.SourceID)
 		return
 	}
-	replyMessageID := firstReplyMessageID(sub)
-	ownerAgentID, ownerTaskID, _, _ := sub.ownerSnapshot()
-	completion := a.buildCompletionEnvelope(sub, result)
+	if worker, ok := sub.(*externalWorker); ok {
+		if worker.sessionEpoch != a.recoverySessionEpoch() {
+			return
+		}
+		select {
+		case <-worker.done:
+		default:
+			go func() {
+				<-worker.done
+				a.sendEvent(evt)
+			}()
+			return
+		}
+		worker.promptMu.Lock()
+		ended := worker.processEnded
+		worker.promptMu.Unlock()
+		if !ended {
+			a.closeExternalWorker(worker, SubAgentStateFailed, "External process termination is not proven", "external process termination is not proven", nil)
+			return
+		}
+		if worker.closing.Load() {
+			a.closeExternalWorker(worker, SubAgentStateCancelled, "external agent cancelled", "external agent cancelled", nil)
+			return
+		}
+	}
+	replyMessageID := sub.LastReplyMessageID()
+	ownerAgentID, ownerTaskID, _, _ := sub.OwnerSnapshot()
+	completion := a.buildCompletionEnvelope(sub.LastArtifact(), result)
 
-	a.releaseSubAgentSlot(sub)
+	a.releaseRuntimeSlot(sub)
 	a.emitActivity(evt.SourceID, ActivityIdle, "")
 	mailbox := &SubAgentMailboxMessage{
 		AgentID:      evt.SourceID,
-		TaskID:       sub.taskID,
+		TaskID:       sub.TaskID(),
 		OwnerAgentID: ownerAgentID,
 		OwnerTaskID:  ownerTaskID,
 		InReplyTo:    replyMessageID,
@@ -624,7 +646,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 	// the queued event's own persist path and must never block the terminal
 	// commit or leave the task stuck in a non-terminal state.
 	if err := a.prepareSubAgentMailboxMessage(mailbox); err != nil {
-		log.Warnf("completion mailbox durability degraded task_id=%v agent_id=%v error=%v (will retry through the mailbox queue)", sub.taskID, evt.SourceID, err)
+		log.Warnf("completion mailbox durability degraded task_id=%v agent_id=%v error=%v (will retry through the mailbox queue)", sub.TaskID(), evt.SourceID, err)
 	} else if messageID := strings.TrimSpace(mailbox.MessageID); messageID != "" {
 		// Already durably recorded and applied here; the mailbox event must
 		// only deliver it, not write or apply it a second time.
@@ -638,8 +660,8 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 
 	a.emitToTUI(AgentDoneEvent{
 		AgentID:       evt.SourceID,
-		TaskID:        sub.taskID,
-		AgentType:     sub.agentDefName,
+		TaskID:        sub.TaskID(),
+		AgentType:     sub.AgentDefName(),
 		ParentAgentID: controlPlaneAgentID(ownerAgentID),
 		ParentTaskID:  ownerTaskID,
 		Summary:       result.Summary,
@@ -833,9 +855,7 @@ func (a *MainAgent) handleJobFinished(evt Event) {
 	// already terminated falls back to the main transcript below.
 	var sub *SubAgent
 	if payload.AgentID != "" && payload.AgentID != a.instanceID {
-		a.subs.mu.RLock()
-		sub = a.subs.subAgents[payload.AgentID]
-		a.subs.mu.RUnlock()
+		sub = a.subs.subAgent(payload.AgentID)
 	}
 	if sub == nil && payload.AgentID != "" && payload.AgentID != a.instanceID {
 		// A parked owner has no live runtime by design; its detached job
@@ -967,8 +987,8 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	}
 	a.subs.mu.Lock()
 	if !caller.IsMain {
-		owner := a.subs.subAgents[caller.AgentID]
-		if owner == nil || strings.TrimSpace(owner.taskID) != strings.TrimSpace(caller.TaskID) || !isNonTerminalTaskState(string(owner.State())) {
+		owner := a.subs.runtimeLocked(caller.AgentID)
+		if owner == nil || strings.TrimSpace(owner.TaskID()) != strings.TrimSpace(caller.TaskID) || !isNonTerminalTaskState(string(owner.State())) {
 			a.subs.mu.Unlock()
 			a.admissionMu.Unlock()
 			return tools.TaskHandle{}, fmt.Errorf("delegate owner task is no longer active")
@@ -1041,7 +1061,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	if conflictRecord != nil {
 		a.orchestrationMetrics.scopeConflicts.Add(1)
 	}
-	if a.llmFactory == nil {
+	if !agentDef.IsExternalBackend() && a.llmFactory == nil {
 		a.subs.mu.Unlock()
 		a.admissionMu.Unlock()
 		return tools.TaskHandle{}, fmt.Errorf("LLM client factory not configured; call SetLLMFactory before creating SubAgents")
@@ -1064,58 +1084,84 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 		}
 		admission.complete(result, resultErr)
 	}()
-	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
-	if subLLMClient == nil {
-		return tools.TaskHandle{}, fmt.Errorf("cannot initialize model pool for agent %q; check chord doctor config", agentDef.Name)
-	}
+	var subLLMClient *llm.Client
 	clientCommitted := false
 	defer func() {
 		if !clientCommitted && subLLMClient != nil {
 			subLLMClient.Close()
 		}
 	}()
-	a.applyServiceTierToClient(subLLMClient)
 	var extraMCPTools []tools.Tool
-	if len(agentDef.MCP) > 0 {
-		extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
-		if err != nil {
-			return tools.TaskHandle{}, err
-		}
-	}
 	instanceID := NextInstanceID(agentDef.Name)
 	subCtx, cancel := context.WithCancel(a.parentCtx)
-	subCfg := a.baseSubAgentConfig(agentDef, instanceID, subLLMClient, subCtx, cancel, extraMCPTools)
-	if strings.TrimSpace(requestedWorkDir) != "" {
-		subCfg.WorkDir = requestedWorkDir
+	var rt subAgentRuntime
+	if agentDef.IsExternalBackend() {
+		worker, workerErr := a.newExternalWorker(externalWorkerConfig{
+			agentDef:           agentDef,
+			instanceID:         instanceID,
+			taskID:             taskID,
+			taskDesc:           description,
+			planTaskRef:        planTaskRef,
+			semanticTaskKey:    semanticTaskKey,
+			expectedWriteScope: expectedWriteScope,
+			resultSchemaJSON:   resultSchemaJSON,
+			caller:             caller,
+			workDir:            requestedWorkDir,
+			ctx:                subCtx,
+			cancel:             cancel,
+		})
+		if workerErr != nil {
+			cancel()
+			return tools.TaskHandle{}, workerErr
+		}
+		rt = worker
+	} else {
+		subLLMClient = a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
+		if subLLMClient == nil {
+			cancel()
+			return tools.TaskHandle{}, fmt.Errorf("cannot initialize model pool for agent %q; check chord doctor config", agentDef.Name)
+		}
+		a.applyServiceTierToClient(subLLMClient)
+		if len(agentDef.MCP) > 0 {
+			extraMCPTools, err = a.getOrCreateAgentMCP(agentDef.Name, agentDef.MCP)
+			if err != nil {
+				cancel()
+				return tools.TaskHandle{}, err
+			}
+		}
+		subCfg := a.baseSubAgentConfig(agentDef, instanceID, subLLMClient, subCtx, cancel, extraMCPTools)
+		if strings.TrimSpace(requestedWorkDir) != "" {
+			subCfg.WorkDir = requestedWorkDir
+		}
+		// A worker that inherits a caller working in a managed checkout must record
+		// it: the environment block and completion report name the checkout its
+		// relative paths belong to.
+		if caller.WorkDirState.WorktreeID != "" {
+			inherited := caller.WorkDirState
+			inherited.Generation = 0
+			subCfg.WorkDirState = inherited
+		}
+		// The instructions follow the checkout the worker starts in, not the
+		// snapshot its parent froze.
+		subCfg.TaskID = taskID
+		subCfg.TaskDesc = description
+		subCfg.PlanTaskRef = planTaskRef
+		subCfg.SemanticKey = semanticTaskKey
+		subCfg.WriteScope = expectedWriteScope
+		subCfg.OwnerAgentID = caller.AgentID
+		subCfg.OwnerTaskID = caller.TaskID
+		subCfg.Depth = caller.Depth + 1
+		subCfg.JoinToOwner = !caller.IsMain && caller.Delegation.ChildJoinEnabled()
+		subCfg.ResultSchema = resultSchema
+		subCfg.ResultSchemaJSON = resultSchemaJSON
+		rt = NewSubAgent(subCfg)
 	}
-	// A worker that inherits a caller working in a managed checkout must record
-	// it: the environment block and completion report name the checkout its
-	// relative paths belong to.
-	if caller.WorkDirState.WorktreeID != "" {
-		inherited := caller.WorkDirState
-		inherited.Generation = 0
-		subCfg.WorkDirState = inherited
-	}
-	// The instructions follow the checkout the worker starts in, not the
-	// snapshot its parent froze.
-	subCfg.TaskID = taskID
-	subCfg.TaskDesc = description
-	subCfg.PlanTaskRef = planTaskRef
-	subCfg.SemanticKey = semanticTaskKey
-	subCfg.WriteScope = expectedWriteScope
-	subCfg.OwnerAgentID = caller.AgentID
-	subCfg.OwnerTaskID = caller.TaskID
-	subCfg.Depth = caller.Depth + 1
-	subCfg.JoinToOwner = !caller.IsMain && caller.Delegation.ChildJoinEnabled()
-	subCfg.ResultSchema = resultSchema
-	subCfg.ResultSchemaJSON = resultSchemaJSON
-	sub := NewSubAgent(subCfg)
 	admissionStartedAt = time.Now()
 	a.admissionMu.Lock()
 	a.orchestrationMetrics.recordAdmissionWait(time.Since(admissionStartedAt))
 	if a.shuttingDown.Load() || a.admissionPaused.Load() || a.admissionEpoch.Load() != admissionEpoch || requestCtx.Err() != nil {
 		a.admissionMu.Unlock()
-		cancel()
+		rt.abortStartup()
 		if err := requestCtx.Err(); err != nil {
 			return tools.TaskHandle{}, err
 		}
@@ -1125,49 +1171,48 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	if a.subs.admissions[taskID] != admission {
 		a.subs.mu.Unlock()
 		a.admissionMu.Unlock()
-		cancel()
+		rt.abortStartup()
 		return tools.TaskHandle{}, fmt.Errorf("delegate admission was cancelled")
 	}
 	if !caller.IsMain {
-		owner := a.subs.subAgents[caller.AgentID]
-		if owner == nil || strings.TrimSpace(owner.taskID) != strings.TrimSpace(caller.TaskID) || !isNonTerminalTaskState(string(owner.State())) {
+		owner := a.subs.runtimeLocked(caller.AgentID)
+		if owner == nil || strings.TrimSpace(owner.TaskID()) != strings.TrimSpace(caller.TaskID) || !isNonTerminalTaskState(string(owner.State())) {
 			a.subs.mu.Unlock()
 			a.admissionMu.Unlock()
-			cancel()
+			rt.abortStartup()
 			return tools.TaskHandle{}, fmt.Errorf("delegate owner task is no longer active")
 		}
 	}
-	if !sub.InjectAdmittedInitialInput(description) {
+	if !rt.injectInitialInput(description) {
 		a.subs.mu.Unlock()
 		a.admissionMu.Unlock()
-		cancel()
-		return tools.TaskHandle{}, fmt.Errorf("SubAgent %s rejected its initial task", sub.instanceID)
+		rt.abortStartup()
+		return tools.TaskHandle{}, fmt.Errorf("SubAgent %s rejected its initial task", rt.InstanceID())
 	}
 	initialMessageCommitted := false
 	defer func() {
 		if !initialMessageCommitted {
-			sub.removeInitialUserMessage()
+			rt.removeInitialInput()
 		}
 	}()
 	registrationSessionDir := a.sessionDir
-	registrationRecord := buildTaskRecordFromSub(sub, nil, "", a.explicitUserTurnCount.Load(), time.Now())
+	registrationRecord := rt.buildTaskRecord(nil, "", a.explicitUserTurnCount.Load(), time.Now())
 	a.subs.mu.Unlock()
 
-	persistErr := a.persistSubAgentRegistration(registrationSessionDir, sub, registrationRecord)
+	persistErr := rt.persistRegistration(registrationSessionDir, registrationRecord)
 	if persistErr != nil {
-		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
+		_ = os.Remove(subAgentMetaPath(registrationSessionDir, rt.InstanceID()))
 		a.admissionMu.Unlock()
-		cancel()
+		rt.abortStartup()
 		return tools.TaskHandle{}, fmt.Errorf("persist initial durable task registration: %w", persistErr)
 	}
 
 	a.subs.mu.Lock()
 	if a.subs.admissions[taskID] != admission || requestCtx.Err() != nil {
 		a.subs.mu.Unlock()
-		_ = os.Remove(subAgentMetaPath(registrationSessionDir, sub.instanceID))
-		_ = a.persistTaskRegistryRecord(registrationSessionDir, taskID, nil)
+		rt.removeRegistration(registrationSessionDir, taskID)
 		a.admissionMu.Unlock()
-		cancel()
+		rt.abortStartup()
 		if err := requestCtx.Err(); err != nil {
 			return tools.TaskHandle{}, err
 		}
@@ -1175,19 +1220,16 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	}
 	a.subs.removeAdmissionLocked(taskID)
 	admission.slotHeld = false
-	sub.semMu.Lock()
-	sub.semHeld = true
-	sub.semMu.Unlock()
-	a.publishSubAgentLocked(sub, taskID, registrationRecord)
+	rt.takeSlot()
+	a.publishSubAgentLocked(rt, taskID, registrationRecord)
 	a.subs.mu.Unlock()
-	a.persistSubAgentRecoverySnapshot(sub, taskID)
+	rt.persistRecoverySnapshot(taskID)
 	admissionCommitted = true
 	clientCommitted = true
 	initialMessageCommitted = true
 	a.admissionMu.Unlock()
 
-	sub.startRunLoop()
-	sub.armStartupWatchdog()
+	rt.startRuntime()
 	log.Infof("SubAgent created and started instance=%v task_id=%v agent_def=%v", instanceID, taskID, agentDef.Name)
 	a.emitToTUI(AgentStartedEvent{
 		AgentID:       instanceID,
@@ -1230,8 +1272,8 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 // registration writes have succeeded and their admission/activation slot
 // ownership has been transferred, so from this point on nothing is rolled back
 // and the two failure paths stay symmetric by construction.
-func (a *MainAgent) publishSubAgentLocked(sub *SubAgent, taskID string, record *DurableTaskRecord) {
-	a.subs.subAgents[sub.instanceID] = sub
+func (a *MainAgent) publishSubAgentLocked(rt subAgentRuntime, taskID string, record *DurableTaskRecord) {
+	a.subs.subAgents[rt.InstanceID()] = rt
 	a.subs.taskRecords[taskID] = cloneDurableTaskRecord(record)
 	a.subs.notifyTaskChangeLocked()
 }
@@ -1435,10 +1477,8 @@ func (a *MainAgent) validFocusedSubAgent() *SubAgent {
 	if sub == nil {
 		return nil
 	}
-	a.subs.mu.RLock()
-	current, exists := a.subs.subAgents[sub.instanceID]
-	a.subs.mu.RUnlock()
-	if exists && current == sub {
+	current := a.subs.subAgent(sub.instanceID)
+	if current == sub {
 		return sub
 	}
 	a.focusedAgent.CompareAndSwap(sub, nil)
@@ -1470,9 +1510,10 @@ func (a *MainAgent) focusedDurableTask() *DurableTaskRecord {
 }
 
 type focusedAgentSnapshot struct {
-	sub    *SubAgent
-	task   *DurableTaskRecord
-	parked bool
+	sub      *SubAgent
+	external *externalWorker
+	task     *DurableTaskRecord
+	parked   bool
 	// settled marks a terminal task whose runtime is gone without ever being
 	// parked (a crash between settlement and park): its transcript stays
 	// readable, while actions must refuse it until the task is delegated anew.
@@ -1522,6 +1563,9 @@ func (a *MainAgent) resolveConversationTarget(target ConversationTarget) (focuse
 	if sub := a.subAgentByTaskID(rec.TaskID); sub != nil {
 		return focusedAgentSnapshot{sub: sub, task: rec}, true
 	}
+	if worker, ok := a.subs.runtimeByTaskID(rec.TaskID).(*externalWorker); ok {
+		return focusedAgentSnapshot{external: worker, task: rec}, true
+	}
 	if rec.RuntimeParked {
 		return focusedAgentSnapshot{task: rec, parked: true}, true
 	}
@@ -1536,6 +1580,9 @@ func (a *MainAgent) focusedAgentSnapshot() focusedAgentSnapshot {
 		return focusedAgentSnapshot{sub: sub, task: a.taskRecordByTaskID(sub.taskID)}
 	}
 	if rec := a.focusedDurableTask(); rec != nil {
+		if worker, ok := a.subs.runtimeByTaskID(rec.TaskID).(*externalWorker); ok {
+			return focusedAgentSnapshot{external: worker, task: rec}
+		}
 		if rec.RuntimeParked {
 			return focusedAgentSnapshot{task: rec, parked: true}
 		}
@@ -1563,12 +1610,15 @@ func (a *MainAgent) SwitchFocus(agentID string) {
 		a.setFocusedTaskID("")
 		return
 	}
-	a.subs.mu.RLock()
-	sub := a.subs.subAgents[agentID]
-	a.subs.mu.RUnlock()
+	sub := a.subs.subAgent(agentID)
 	if sub != nil {
 		a.focusedAgent.Store(sub)
 		a.setFocusedTaskID(sub.taskID)
+		return
+	}
+	if worker, ok := a.subs.runtime(agentID).(*externalWorker); ok {
+		a.focusedAgent.Store(nil)
+		a.setFocusedTaskID(worker.taskID)
 		return
 	}
 	a.subs.mu.RLock()
@@ -1594,9 +1644,9 @@ func (a *MainAgent) GetAllAgentsContextUsage() []AgentContextUsage {
 	out := []AgentContextUsage{{AgentID: "main", ContextCurrent: a.ctxMgr.LastTotalContextTokens(), ContextLimit: a.ctxMgr.GetUsableCompactionBudget(), ContextMessageCount: a.ctxMgr.MessageCount()}}
 	a.subs.mu.RLock()
 	defer a.subs.mu.RUnlock()
-	for id, sub := range a.subs.subAgents {
+	for _, sub := range a.subs.subAgentsLocked() {
 		cur, limit := sub.GetContextStats()
-		out = append(out, AgentContextUsage{AgentID: id, ContextCurrent: cur, ContextLimit: limit, ContextMessageCount: sub.GetContextMessageCount()})
+		out = append(out, AgentContextUsage{AgentID: sub.instanceID, ContextCurrent: cur, ContextLimit: limit, ContextMessageCount: sub.GetContextMessageCount()})
 	}
 	return out
 }

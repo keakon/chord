@@ -58,12 +58,20 @@ func (m *Model) confirmSessionDeletion() tea.Cmd {
 	if target == nil || m.agent == nil {
 		return closeCmd
 	}
-	if err := m.agent.DeleteSession(target.ID); err != nil {
+	externalSessionIDs, err := m.agent.DeleteSession(target.ID)
+	if err != nil {
 		return tea.Batch(closeCmd, m.enqueueToast(err.Error(), "error"))
 	}
 	m.removeSessionSelectOptionByID(target.ID)
-	msg := fmt.Sprintf("Deleted session %s", target.ID)
-	return tea.Batch(closeCmd, m.enqueueToast(msg, "info"))
+	cmds := []tea.Cmd{closeCmd, m.enqueueToast(fmt.Sprintf("Deleted session %s", target.ID), "info")}
+	// The external CLI keeps its transcript outside the session directory, so
+	// deleting the Chord session leaves it behind. Name the pinned ids instead
+	// of letting the user assume they were cleaned up with the session.
+	if len(externalSessionIDs) > 0 {
+		cmds = append(cmds, m.enqueueToast(fmt.Sprintf(
+			"External session(s) not deleted (outside Chord): %s", strings.Join(externalSessionIDs, ", ")), "info"))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) removeSessionSelectOptionByID(sessionID string) {

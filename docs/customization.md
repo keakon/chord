@@ -40,6 +40,8 @@ Common uses:
 
 For the full agent schema (fields, examples, and delegation options), see [Configuration & Auth: Agent config](./configuration.md#agent-config).
 
+To run a subagent on an external coding-agent process, see [External coding-agent subagents](./external-agents.md).
+
 ## Skills
 
 Chord discovers Skills from these directories by default:

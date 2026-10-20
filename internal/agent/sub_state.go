@@ -40,6 +40,27 @@ func (s *SubAgent) State() SubAgentState {
 	return state
 }
 
+func (s *SubAgent) InstanceID() string {
+	return s.instanceID
+}
+
+func (s *SubAgent) TaskID() string {
+	return s.taskID
+}
+
+func (s *SubAgent) AgentDefName() string {
+	return s.agentDefName
+}
+
+// invalidateRuntimeDiagnostics drops the request-diagnostics snapshot published
+// for this runtime so a removed runtime cannot leave a stale view behind.
+func (s *SubAgent) invalidateRuntimeDiagnostics() {
+	if s == nil {
+		return
+	}
+	s.contextDiagnostics.invalidate()
+}
+
 func (s *SubAgent) LastSummary() string {
 	_, summary := s.runtimeState.snapshot()
 	return summary

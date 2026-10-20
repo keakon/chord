@@ -179,7 +179,7 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	parkedAt := time.Now()
 	skillSnapshot := sub.parkedSkillSnapshot()
 	a.subs.mu.Lock()
-	if current := a.subs.subAgents[agentID]; current != sub || !sub.canPark() {
+	if current := a.subs.subAgentLocked(agentID); current != sub || !sub.canPark() {
 		a.subs.mu.Unlock()
 		return false
 	}
@@ -197,11 +197,11 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 		return false
 	}
 	a.subs.mu.Lock()
-	if current := a.subs.subAgents[agentID]; current != sub || !sub.canPark() {
+	if current := a.subs.subAgentLocked(agentID); current != sub || !sub.canPark() {
 		a.subs.mu.Unlock()
 		return false
 	}
-	removed := a.subs.removeLocked(agentID)
+	removed := asSubAgent(a.subs.removeRuntimeLocked(agentID))
 	a.subs.taskRecords[sub.taskID] = cloneDurableTaskRecord(parkedRecord)
 	a.subs.mu.Unlock()
 	if a.recoveryManager() != nil {
@@ -505,8 +505,8 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 	// per stall episode through a risk_alert mailbox instead of killing the
 	// worker; the flag is cleared again on the next sweep that finds the
 	// worker healthy.
-	for _, sub := range subs {
-		if sub == nil || sub.State() != SubAgentStateRunning {
+	for _, rt := range a.subs.snapshotRuntimes() {
+		if rt == nil || rt.State() != SubAgentStateRunning {
 			continue
 		}
 		// A live Running runtime whose durable record already settled
@@ -515,12 +515,12 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		// already finished. Skip it — the settle path owns terminal truth, and
 		// the late-mailbox drop in the inbox layer covers anything that was
 		// queued before the settlement landed.
-		if rec := a.taskRecordByTaskID(strings.TrimSpace(sub.taskID)); rec != nil && !isNonTerminalTaskState(rec.State) {
+		if rec := a.taskRecordByTaskID(strings.TrimSpace(rt.TaskID())); rec != nil && !isNonTerminalTaskState(rec.State) {
 			continue
 		}
-		reason := runningSubAgentStallReason(sub, now)
+		reason := runningRuntimeStallReason(rt, now)
 		if reason == "" {
-			a.closeStallEpisodeIfAlerted(sub)
+			a.closeStallEpisodeIfAlerted(rt)
 			continue
 		}
 		// While the main agent waits on a user-facing dialog (confirm,
@@ -531,15 +531,15 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 		// quiet window never raises AGENT BLOCKED, and a worker that stays
 		// silent after the dialog resolves alerts again as a fresh episode.
 		if a.interaction.hasPendingUserInteraction() {
-			sub.markActivity()
-			a.closeStallEpisodeIfAlerted(sub)
+			rt.markActivity()
+			a.closeStallEpisodeIfAlerted(rt)
 			continue
 		}
-		if sub.stallAlertRaised() {
+		if rt.stallAlertRaised() {
 			continue
 		}
-		sub.raiseStallAlert()
-		a.queueSubAgentStallAlert(sub, reason)
+		rt.raiseStallAlert()
+		a.queueRuntimeStallAlert(rt, reason)
 	}
 }
 
@@ -550,29 +550,29 @@ func (a *MainAgent) sweepSubAgentLifecycle() {
 // silence), so an AGENT BLOCKED card is not left standing after the worker
 // resumed — the resolution closes the episode explicitly, and the worker
 // alerts again only if a genuinely new quiet window exceeds the threshold.
-func (a *MainAgent) closeStallEpisodeIfAlerted(sub *SubAgent) {
-	if sub == nil || !sub.stallAlertRaised() {
+func (a *MainAgent) closeStallEpisodeIfAlerted(rt subAgentRuntime) {
+	if rt == nil || !rt.stallAlertRaised() {
 		return
 	}
-	sub.clearStallAlert()
-	a.queueSubAgentStallResolved(sub)
+	rt.clearStallAlert()
+	a.queueRuntimeStallResolved(rt)
 }
 
-// queueSubAgentStallResolved notifies the owner that a previously alerted
+// queueRuntimeStallResolved notifies the owner that a previously alerted
 // stall episode has ended: the worker is again showing state/progress
 // updates, so the earlier risk_alert no longer applies and no action is
 // needed. The alert card itself stays in history; the resolution is a
 // separate message so the owner can tell a recovered worker from one that is
 // still silently stalled.
-func (a *MainAgent) queueSubAgentStallResolved(sub *SubAgent) {
-	if a == nil || sub == nil {
+func (a *MainAgent) queueRuntimeStallResolved(rt subAgentRuntime) {
+	if a == nil || rt == nil {
 		return
 	}
-	mailbox := newSubAgentRiskAlertMailbox(sub, nil, SubAgentStallResolvedSubtype, "stall resolved: worker resumed activity", fmt.Sprintf(
+	mailbox := newRuntimeRiskAlertMailbox(rt, SubAgentStallResolvedSubtype, "stall resolved: worker resumed activity", fmt.Sprintf(
 		"SubAgent stall episode resolved: the worker is again showing state or progress updates.\n- task_id: %s\n- agent_id: %s\n- required_action: none. The earlier AGENT BLOCKED alert for this task no longer applies; it will alert again only if the worker stalls anew.",
-		strings.TrimSpace(sub.taskID), sub.instanceID,
+		strings.TrimSpace(rt.TaskID()), rt.InstanceID(),
 	))
-	a.dispatchSubAgentRiskAlert(mailbox, sub, nil)
+	a.dispatchRuntimeRiskAlert(mailbox, rt)
 }
 
 // startSubAgentLifecycleSweep runs the periodic trigger that keeps WaitingMain
@@ -618,13 +618,12 @@ func (a *MainAgent) startSubAgentLifecycleSweep(ctx context.Context) {
 // belong to the event loop. The trigger stays silent for sessions that never
 // delegate and have no pending mailbox work, so a truly idle main is not woken.
 func (a *MainAgent) hasSubAgentLifecycleSweepCandidates() bool {
-	subs := a.subs.snapshotSubAgents()
-	for _, sub := range subs {
-		if sub != nil && sub.State() == SubAgentStateRunning {
+	for _, rt := range a.subs.snapshotRuntimes() {
+		if rt != nil && rt.State() == SubAgentStateRunning {
 			return true
 		}
 	}
-	if a.waitingMainExpiryCandidatesAmong(subs) {
+	if a.waitingMainExpiryCandidatesAmong(a.subs.snapshotSubAgents()) {
 		return true
 	}
 	if a.hasDeferredMailboxDeliveries() {
@@ -679,6 +678,24 @@ func newSubAgentRiskAlertMailbox(sub *SubAgent, record *DurableTaskRecord, subty
 		ownerAgentID = strings.TrimSpace(record.OwnerAgentID)
 		ownerTaskID = strings.TrimSpace(record.OwnerTaskID)
 	}
+	return buildRiskAlertMailbox(agentID, taskID, ownerAgentID, ownerTaskID, inReplyTo, subtype, summary, payload)
+}
+
+// newRuntimeRiskAlertMailbox is newSubAgentRiskAlertMailbox for any live runtime,
+// so the shared lifecycle sweep alerts an external coding-agent worker exactly
+// as it alerts a SubAgent. External workers have no SubAgent-only reply thread,
+// so the mailbox carries the runtime's own identity fields.
+func newRuntimeRiskAlertMailbox(rt subAgentRuntime, subtype, summary, payload string) *SubAgentMailboxMessage {
+	if rt == nil {
+		return nil
+	}
+	ownerAgentID, ownerTaskID, _, _ := rt.OwnerSnapshot()
+	return buildRiskAlertMailbox(rt.InstanceID(), rt.TaskID(), ownerAgentID, ownerTaskID, rt.LastReplyMessageID(), subtype, summary, payload)
+}
+
+// buildRiskAlertMailbox assembles the risk_alert mailbox every owner-visible
+// worker alert shares from already-resolved identity fields.
+func buildRiskAlertMailbox(agentID, taskID, ownerAgentID, ownerTaskID, inReplyTo, subtype, summary, payload string) *SubAgentMailboxMessage {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
 		return nil
@@ -711,6 +728,23 @@ func (a *MainAgent) dispatchSubAgentRiskAlert(mailbox *SubAgentMailboxMessage, s
 		agentType = sub.agentDefName
 	} else if record != nil {
 		agentType = record.AgentDefName
+	}
+	a.dispatchRiskAlert(mailbox, agentType)
+}
+
+// dispatchRuntimeRiskAlert is dispatchSubAgentRiskAlert for any live runtime.
+func (a *MainAgent) dispatchRuntimeRiskAlert(mailbox *SubAgentMailboxMessage, rt subAgentRuntime) {
+	if mailbox == nil || rt == nil {
+		return
+	}
+	a.dispatchRiskAlert(mailbox, rt.AgentDefName())
+}
+
+// dispatchRiskAlert queues an already-built risk_alert mailbox for delivery and
+// emits its control-plane AgentNotifyEvent.
+func (a *MainAgent) dispatchRiskAlert(mailbox *SubAgentMailboxMessage, agentType string) {
+	if mailbox == nil {
+		return
 	}
 	ownerAgentID := strings.TrimSpace(mailbox.OwnerAgentID)
 	ownerTaskID := strings.TrimSpace(mailbox.OwnerTaskID)
@@ -900,15 +934,15 @@ func (a *MainAgent) deliverSettledWaitingMainExpiryAlert(mailbox *SubAgentMailbo
 // AgentNotifyEvent. Conservative by design: the worker is not killed — the
 // owner checks the transcript/logs and decides whether to resume, re-delegate,
 // or cancel. The sweep deduplicates per stall episode via stallAlertRaised.
-func (a *MainAgent) queueSubAgentStallAlert(sub *SubAgent, reason string) {
-	if a == nil || sub == nil {
+func (a *MainAgent) queueRuntimeStallAlert(rt subAgentRuntime, reason string) {
+	if a == nil || rt == nil {
 		return
 	}
-	mailbox := newSubAgentRiskAlertMailbox(sub, nil, "", reason, fmt.Sprintf(
+	mailbox := newRuntimeRiskAlertMailbox(rt, "", reason, fmt.Sprintf(
 		"SubAgent is suspected of stalling: it is still Running but has shown no state or progress update for an extended period — it is not executing a tool and not waiting inside a user-facing dialog.\n- task_id: %s\n- agent_id: %s\n- required_action: check the worker's transcript/logs for progress. A wait on the owner or the user must be surfaced explicitly through question, escalate, or notify instead of staying silent; if the worker is genuinely stuck, resume, re-delegate, or cancel it explicitly.",
-		strings.TrimSpace(sub.taskID), sub.instanceID,
+		strings.TrimSpace(rt.TaskID()), rt.InstanceID(),
 	))
-	a.dispatchSubAgentRiskAlert(mailbox, sub, nil)
+	a.dispatchRuntimeRiskAlert(mailbox, rt)
 }
 
 // expireAgentRequestsAfterCancellation records a WaitingMain expiry in the

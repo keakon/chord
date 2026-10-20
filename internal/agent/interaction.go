@@ -29,8 +29,8 @@ func (a *MainAgent) agentNameForInteraction(agentID string) string {
 	if agentID == identity.MainAgentID || agentID == a.instanceID {
 		return a.currentAgentName()
 	}
-	if sub := a.subs.subAgent(agentID); sub != nil {
-		return sub.agentDefName
+	if worker := a.subs.runtime(agentID); worker != nil {
+		return worker.AgentDefName()
 	}
 	return ""
 }
@@ -58,7 +58,9 @@ func (a *MainAgent) AwaitConfirmWithRuleContext(ctx context.Context, toolName, a
 }
 
 func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string, forceDenyReason bool, summary ...string) (ConfirmResponse, error) {
-	a.interaction.beginConfirmFlow()
+	if err := a.interaction.beginConfirmFlow(ctx); err != nil {
+		return ConfirmResponse{}, err
+	}
 	defer a.interaction.endConfirmFlow()
 
 	a.toolWg.Add(1)

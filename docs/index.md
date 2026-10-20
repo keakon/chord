@@ -32,6 +32,7 @@ In one DeepSWE v1.1 task Chord finished first and cheapest (6m37s, $0.052); see 
 ## Customization and integration
 
 - [Customization](./customization.md): Configure roles, skills, code diagnostics, and external tools
+- [External coding-agent subagents](./external-agents.md): Run a subagent on an external coding-agent process
 - [Hooks](./hooks.md): Automate notifications, checks, and tool-result processing
 - [Project Memory](./project-memory.md): Store durable, reviewable cross-session project memory
 - [Headless](./headless.md): Control Chord from scripts or another interface

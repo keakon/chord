@@ -40,6 +40,27 @@ func TestToolActivityAppendAndLoad(t *testing.T) {
 	}
 }
 
+func TestToolActivityOversizedAuditFailsBeforeAppend(t *testing.T) {
+	rm, _ := newTestManager(t)
+	defer rm.Close()
+	large := ToolActivityRecord{
+		CallID: "call-1", AgentID: "external-1", Tool: "write", State: ToolActivityStateStarted,
+		Audit: &message.ToolArgsAudit{EffectiveArgsJSON: strings.Repeat("x", recoveryMaxJournalLineSize)},
+	}
+	if err := rm.AppendToolActivity(large); err == nil {
+		t.Fatal("oversized authorization was persisted but cannot be restored")
+	}
+	if err := rm.AppendToolActivity(ToolActivityRecord{
+		CallID: "call-2", AgentID: "external-1", Tool: "write", State: ToolActivityStateStarted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	started, err := rm.LoadToolActivity()
+	if err != nil || len(started) != 1 {
+		t.Fatalf("oversized authorization damaged later recovery: %v %v", started, err)
+	}
+}
+
 func TestToolActivityLoadMissingJournalReturnsNil(t *testing.T) {
 	rm, _ := newTestManager(t)
 	defer rm.Close()

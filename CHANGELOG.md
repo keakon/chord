@@ -19,6 +19,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- Run subagents on an external Claude Code process while the main agent remains internal. Set `backend.kind: claude-code` in a subagent definition; Chord keeps task records, completion mailboxes, and tool authorization. Targeted followups resume completed external sessions, with no automatic replay when process or input outcome is unknown. Supports recent Claude Code releases on Unix without pinning one version; external hooks, MCP, and plugins are unsupported.
+
 - Native Gemini endpoints support opt-in continuation across requests and recovery with a fixed target. Local tools wait for final confirmation; multi-request billing and context-window observations are tracked separately.
 
 - Responses providers gain two compatibility switches for gateways that reject Chord's explicit prompt-cache fields: `compat.responses.send_prompt_cache_options` omits the top-level `prompt_cache_options`, and `compat.responses.send_prompt_cache_breakpoint` omits the `prompt_cache_breakpoint` markers (and the top-level field, which only selects the breakpoint policy). Without them a GPT-5.6-or-later model alias behind such a gateway fails every request.

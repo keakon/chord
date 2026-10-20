@@ -101,76 +101,77 @@ func (f *focusedMessagesAgent) StartupResumeStatus() (bool, string) {
 }
 
 type sessionControlAgent struct {
-	submittedInputs         []agent.SubmitInput
-	events                  chan agent.AgentEvent
-	messages                []message.Message
-	messagesByFocus         map[string][]message.Message
-	subAgents               []agent.SubAgentInfo
-	poolNamesByFocus        map[string][]string
-	mainModelPoolNames      []string
-	currentPoolByFocus      map[string]string
-	mainModelPool           string
-	availableAgents         []string
-	availableRoles          []string
-	currentRole             string
-	switchRoleErr           error
-	contentRoot             string
-	workDir                 string
-	workDirID               string
-	workDirGeneration       uint64
-	focused                 string
-	providerModelRef        string
-	providerModelRefByFocus map[string]string
-	runningModelRef         string
-	runningModelRefByFocus  map[string]string
-	runningVariant          string
-	runningVariantByFocus   map[string]string
-	tokenUsage              message.TokenUsage
-	sidebarUsage            analytics.SessionStats
-	usageStats              analytics.SessionStats
-	walltimeStats           analytics.WalltimeStats
-	contextCurrent          int
-	contextLimit            int
-	todos                   []tools.TodoItem
-	sentMessages            []string
-	confirmResolutions      []string
-	contextMessages         []message.Message
-	sentMultipart           [][]message.ContentPart
-	queuedDraftIDs          []string
-	queuedDrafts            [][]message.ContentPart
-	removedDraftIDs         []string
-	newSessionCalls         int
-	resumeCalls             int
-	resumeIDs               []string
-	resumePending           bool
-	startupResumeID         string
-	forkMsgIndices          []int
-	deleteSessionIDs        []string
-	deleteSessionErr        error
-	sessionSummary          *agent.SessionSummary
-	cancelResult            bool
-	cancelCalls             int
-	continueCalls           int
-	memoryEnabled           bool
-	memoryDegraded          bool
-	loopState               agent.LoopState
-	loopTarget              string
-	loopEnableCalls         int
-	loopDisableCalls        int
-	loopIteration           int
-	loopMaxIterations       int
-	loopMaxSet              bool
-	canUseLoop              bool
-	canUseLoopSet           bool
-	serviceTierEnabled      bool
-	serviceTier             config.ServiceTier
-	effectiveServiceTier    config.ServiceTier
-	supportedServiceTiers   []config.ServiceTier
-	yoloEnabled             bool
-	executePlanCalls        int
-	executePlanPath         string
-	executePlanAgent        string
-	handoffResolutions      []handoffResolutionCall
+	submittedInputs          []agent.SubmitInput
+	events                   chan agent.AgentEvent
+	messages                 []message.Message
+	messagesByFocus          map[string][]message.Message
+	subAgents                []agent.SubAgentInfo
+	poolNamesByFocus         map[string][]string
+	mainModelPoolNames       []string
+	currentPoolByFocus       map[string]string
+	mainModelPool            string
+	availableAgents          []string
+	availableRoles           []string
+	currentRole              string
+	switchRoleErr            error
+	contentRoot              string
+	workDir                  string
+	workDirID                string
+	workDirGeneration        uint64
+	focused                  string
+	providerModelRef         string
+	providerModelRefByFocus  map[string]string
+	runningModelRef          string
+	runningModelRefByFocus   map[string]string
+	runningVariant           string
+	runningVariantByFocus    map[string]string
+	tokenUsage               message.TokenUsage
+	sidebarUsage             analytics.SessionStats
+	usageStats               analytics.SessionStats
+	walltimeStats            analytics.WalltimeStats
+	contextCurrent           int
+	contextLimit             int
+	todos                    []tools.TodoItem
+	sentMessages             []string
+	confirmResolutions       []string
+	contextMessages          []message.Message
+	sentMultipart            [][]message.ContentPart
+	queuedDraftIDs           []string
+	queuedDrafts             [][]message.ContentPart
+	removedDraftIDs          []string
+	newSessionCalls          int
+	resumeCalls              int
+	resumeIDs                []string
+	resumePending            bool
+	startupResumeID          string
+	forkMsgIndices           []int
+	deleteSessionIDs         []string
+	deleteSessionExternalIDs []string
+	deleteSessionErr         error
+	sessionSummary           *agent.SessionSummary
+	cancelResult             bool
+	cancelCalls              int
+	continueCalls            int
+	memoryEnabled            bool
+	memoryDegraded           bool
+	loopState                agent.LoopState
+	loopTarget               string
+	loopEnableCalls          int
+	loopDisableCalls         int
+	loopIteration            int
+	loopMaxIterations        int
+	loopMaxSet               bool
+	canUseLoop               bool
+	canUseLoopSet            bool
+	serviceTierEnabled       bool
+	serviceTier              config.ServiceTier
+	effectiveServiceTier     config.ServiceTier
+	supportedServiceTiers    []config.ServiceTier
+	yoloEnabled              bool
+	executePlanCalls         int
+	executePlanPath          string
+	executePlanAgent         string
+	handoffResolutions       []handoffResolutionCall
 }
 
 type handoffResolutionCall struct {
@@ -443,9 +444,9 @@ func (s *sessionControlAgent) ListSessionSummaries() ([]agent.SessionSummary, er
 	return nil, nil
 }
 func (s *sessionControlAgent) GetSessionSummary() *agent.SessionSummary { return s.sessionSummary }
-func (s *sessionControlAgent) DeleteSession(sessionID string) error {
+func (s *sessionControlAgent) DeleteSession(sessionID string) ([]string, error) {
 	s.deleteSessionIDs = append(s.deleteSessionIDs, sessionID)
-	return s.deleteSessionErr
+	return s.deleteSessionExternalIDs, s.deleteSessionErr
 }
 func (s *sessionControlAgent) ExportSession(format, path string) {}
 func (s *sessionControlAgent) ResumeSession()                    { s.resumeCalls++ }

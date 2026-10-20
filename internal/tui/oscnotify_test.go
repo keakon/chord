@@ -90,7 +90,7 @@ func (loopBusyAgentStub) EnableLoopMode(string)                                 
 func (loopBusyAgentStub) DisableLoopMode()                                          {}
 func (loopBusyAgentStub) ListSessionSummaries() ([]agent.SessionSummary, error)     { return nil, nil }
 func (loopBusyAgentStub) GetSessionSummary() *agent.SessionSummary                  { return nil }
-func (loopBusyAgentStub) DeleteSession(string) error                                { return nil }
+func (loopBusyAgentStub) DeleteSession(string) ([]string, error)                    { return nil, nil }
 func (loopBusyAgentStub) ExportSession(string, string)                              {}
 func (loopBusyAgentStub) ResumeSession()                                            {}
 func (loopBusyAgentStub) ResumeSessionID(string)                                    {}

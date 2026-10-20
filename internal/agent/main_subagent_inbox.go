@@ -226,7 +226,7 @@ func (a *MainAgent) shouldAcceptSubAgentMailbox(sourceID string, msg *SubAgentMa
 	if sourceID == "" {
 		return true
 	}
-	if a.subAgentByID(sourceID) != nil {
+	if a.subs.runtime(sourceID) != nil {
 		return true
 	}
 	if msg != nil {
