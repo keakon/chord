@@ -640,3 +640,96 @@ func TestResponsesProvider_SynthesizesReasoningTextForReplay(t *testing.T) {
 		t.Fatalf("input item types = %v, want %v", kinds, want)
 	}
 }
+
+func TestResponsesProvider_PromptCacheCompatToggles(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		compat         *config.ResponsesCompatConfig
+		wantOptions    bool
+		wantBreakpoint bool
+	}{
+		{name: "defaults send both", wantOptions: true, wantBreakpoint: true},
+		{
+			name:           "options off keeps breakpoints",
+			compat:         &config.ResponsesCompatConfig{SendPromptCacheOptions: new(false)},
+			wantBreakpoint: true,
+		},
+		{
+			// prompt_cache_options only selects a breakpoint policy, so dropping
+			// the markers drops the pointless top-level field with them.
+			name:   "breakpoint off sends neither",
+			compat: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(false)},
+		},
+		{
+			// The explicit breakpoint switch wins even when the options switch is
+			// explicitly enabled: the options field only selects a policy for
+			// markers that are no longer sent.
+			name:   "breakpoint off overrides explicit options on",
+			compat: &config.ResponsesCompatConfig{SendPromptCacheOptions: new(true), SendPromptCacheBreakpoint: new(false)},
+		},
+		{
+			name:   "both off sends neither",
+			compat: &config.ResponsesCompatConfig{SendPromptCacheOptions: new(false), SendPromptCacheBreakpoint: new(false)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer server.Close()
+
+			providerCfg := NewProviderConfig("sample", config.ProviderConfig{
+				Type:   config.ProviderTypeResponses,
+				APIURL: server.URL + "/v1/responses",
+				Compat: &config.ProviderCompatConfig{Responses: tc.compat},
+			}, []string{"test-key"})
+			r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+			_, err := r.CompleteStream(
+				context.Background(), "test-key", "gpt-6.1-sol", "",
+				[]message.Message{{Role: "user", Content: "hello"}},
+				nil, 0, RequestTuning{},
+				func(message.StreamDelta) {},
+			)
+			if err != nil {
+				t.Fatalf("CompleteStream: %v", err)
+			}
+			if _, has := gotBody["prompt_cache_options"]; has != tc.wantOptions {
+				t.Fatalf("prompt_cache_options present=%v, want %v (body %#v)", has, tc.wantOptions, gotBody["prompt_cache_options"])
+			}
+			if got := responsesBreakpointCount(gotBody); (got > 0) != tc.wantBreakpoint {
+				t.Fatalf("prompt_cache_breakpoint markers=%d, want present %v", got, tc.wantBreakpoint)
+			}
+		})
+	}
+}
+
+// responsesBreakpointCount counts prompt_cache_breakpoint markers in the input
+// item content/output blocks of a decoded Responses request body.
+func responsesBreakpointCount(body map[string]any) int {
+	count := 0
+	items, _ := body["input"].([]any)
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"content", "output"} {
+			blocks, ok := item[key].([]any)
+			if !ok {
+				continue
+			}
+			for _, blockRaw := range blocks {
+				if block, ok := blockRaw.(map[string]any); ok {
+					if _, has := block["prompt_cache_breakpoint"]; has {
+						count++
+					}
+				}
+			}
+		}
+	}
+	return count
+}

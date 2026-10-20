@@ -14,6 +14,8 @@
 
 - 原生 Gemini 接口支持显式启用跨请求续传与固定目标断流恢复；工具等待最终确认后执行，多次请求的计费与上下文窗口分别统计。
 
+- Responses provider 新增两个兼容开关，用于拒绝 Chord 显式缓存字段的网关：`compat.responses.send_prompt_cache_options` 省略顶层 `prompt_cache_options`，`compat.responses.send_prompt_cache_breakpoint` 省略 `prompt_cache_breakpoint` 标记（同时省略只用于选择断点策略的顶层字段）。否则，GPT-5.6 及之后的模型别名落在这类网关上时每个请求都会失败。
+
 - 新增 `chord sessions list --json`，无需启动 Agent 即可按配置的存储位置及仓库共享范围查询最近会话元数据。
 
 - 通过 `present` 交付文件，恢复会话后仍可找到交付记录。工具卡逐条列出每个文件的名称、版本、类型与路径；按 `Enter` 会直接预览单个文件，有多个文件时先打开列表，卡片按钮则可预览、打开或复制路径。TUI 支持预览文本、Markdown 和图片，也可用系统关联应用打开 HTML、PDF 等文件。`.chord/` 下的文件属于私有工作状态，默认不交付；只有明确要求接收、且其路径被 `present` 权限规则点名时才会交付。

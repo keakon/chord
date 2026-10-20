@@ -103,6 +103,10 @@ A `400 invalid_responses_request` or `invalid codex request` means the endpoint 
 
 HTTP LLM dumps include `request_headers` for selected protocol and session headers after request overrides. Credential values are redacted and unrecognized headers are omitted. Compare these headers with the endpoint's requirements when the request body looks correct.
 
+### `prompt_cache_options is not supported on this model`
+
+Chord sends the explicit prompt-cache fields to GPT-5.6 and later Responses models. A compatible gateway, or a route whose model ID names a GPT-5.6-or-later model but whose backend does not implement them, rejects `prompt_cache_options` or `prompt_cache_breakpoint` and fails the request. Set `compat.responses.send_prompt_cache_breakpoint: false` to drop the explicit breakpoints and the top-level field together, or `compat.responses.send_prompt_cache_options: false` to drop only the top-level field while keeping the breakpoints. The endpoint's automatic (implicit) caching still applies. See the `compat.responses.*` rows in [Provider field reference](./configuration.md#provider-field-reference).
+
 ### DeepSeek / OpenAI-compatible thinking-mode 400s
 
 If you use a `chat-completions` provider such as DeepSeek and see errors like:

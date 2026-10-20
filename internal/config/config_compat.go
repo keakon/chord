@@ -97,6 +97,17 @@ type ResponsesCompatConfig struct {
 	// SendPromptCacheKey emits prompt_cache_key and client_metadata session
 	// routing metadata (default true).
 	SendPromptCacheKey *bool `json:"send_prompt_cache_key,omitempty" yaml:"send_prompt_cache_key,omitempty"`
+	// SendPromptCacheOptions emits the top-level prompt_cache_options field
+	// (default true). Set false for a gateway that rejects that field but still
+	// accepts explicit prompt_cache_breakpoint markers.
+	SendPromptCacheOptions *bool `json:"send_prompt_cache_options,omitempty" yaml:"send_prompt_cache_options,omitempty"`
+	// SendPromptCacheBreakpoint emits prompt_cache_breakpoint markers on
+	// eligible input content blocks (default true). Set false for a gateway
+	// that rejects explicit cache breakpoints; unlike
+	// compat.request_overrides this also reaches the markers nested inside
+	// input content blocks. Disabling it also omits prompt_cache_options,
+	// which only selects the breakpoint policy.
+	SendPromptCacheBreakpoint *bool `json:"send_prompt_cache_breakpoint,omitempty" yaml:"send_prompt_cache_breakpoint,omitempty"`
 	// SendMaxOutputTokens emits max_output_tokens with the effective output cap
 	// (default false, preserving the stable Codex request shape). Enable for
 	// compatible gateways whose server-side default output is unbounded.

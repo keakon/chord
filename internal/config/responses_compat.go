@@ -37,6 +37,8 @@ func mergeResponsesCompat(dst, src *ResponsesCompatConfig, sources map[string]st
 		{"send_tool_choice", &dst.SendToolChoice, src.SendToolChoice},
 		{"send_parallel_tool_calls", &dst.SendParallelToolCalls, src.SendParallelToolCalls},
 		{"send_prompt_cache_key", &dst.SendPromptCacheKey, src.SendPromptCacheKey},
+		{"send_prompt_cache_options", &dst.SendPromptCacheOptions, src.SendPromptCacheOptions},
+		{"send_prompt_cache_breakpoint", &dst.SendPromptCacheBreakpoint, src.SendPromptCacheBreakpoint},
 		{"send_max_output_tokens", &dst.SendMaxOutputTokens, src.SendMaxOutputTokens},
 		{"mcp_additional_tools", &dst.MCPAdditionalTools, src.MCPAdditionalTools},
 	} {

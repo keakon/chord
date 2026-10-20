@@ -46,7 +46,7 @@ func completeObservedProvider(ctx context.Context, impl Provider, provider *Prov
 		})
 		projected := messages
 		if scan.CanProject() {
-			projected = promptCacheMessagesForTarget(providerWireFamily(provider), model, tuning, messages, 0)
+			projected = promptCacheMessagesForTarget(providerWireFamily(provider), tuning, responsesCacheBreakpointsEnabled(provider, model), messages, 0)
 		}
 		result := scan.Finish(projected)
 		c := d.collector

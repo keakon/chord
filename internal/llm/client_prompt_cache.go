@@ -42,10 +42,26 @@ func (c *Client) PromptCacheMessagesForModelRef(ref string, messages []message.M
 	if !ok {
 		return messages
 	}
-	return promptCacheMessagesForTarget(providerWireFamily(target.ProviderConfig), target.ModelID, tuningForPoolTarget(target), messages, tailOverlayCount)
+	return promptCacheMessagesForTarget(providerWireFamily(target.ProviderConfig), tuningForPoolTarget(target), responsesCacheBreakpointsEnabled(target.ProviderConfig, target.ModelID), messages, tailOverlayCount)
 }
 
-func promptCacheMessagesForTarget(family string, model string, tuning RequestTuning, messages []message.Message, tailOverlayCount int) []message.Message {
+// responsesCacheBreakpointsEnabled reports whether a target emits explicit
+// Responses cache breakpoints: the model generation must support them and the
+// resolved compat must not opt out. The request builder and the cache
+// projection share this so a boundary Chord no longer marks is not still
+// reported as a cache expectation.
+func responsesCacheBreakpointsEnabled(provider *ProviderConfig, model string) bool {
+	if !modelcompat.SupportsResponsesCacheBreakpoints(model) {
+		return false
+	}
+	if provider == nil {
+		return true
+	}
+	rc := provider.ResponsesCompat(model)
+	return rc == nil || compatBool(rc.SendPromptCacheBreakpoint, true)
+}
+
+func promptCacheMessagesForTarget(family string, tuning RequestTuning, cacheBreakpoints bool, messages []message.Message, tailOverlayCount int) []message.Message {
 	if family == modelcompat.WireFamilyAnthropic && tuning.Anthropic.PromptCacheMode == "explicit" {
 		end := anthropicCacheDurableMessageCount(messages)
 		if tailOverlayCount > 0 && tailOverlayCount < len(messages) {
@@ -53,7 +69,7 @@ func promptCacheMessagesForTarget(family string, model string, tuning RequestTun
 		}
 		return messages[:end]
 	}
-	if family != modelcompat.WireFamilyOpenAIResponses || !modelcompat.SupportsResponsesCacheBreakpoints(model) {
+	if family != modelcompat.WireFamilyOpenAIResponses || !cacheBreakpoints {
 		return messages
 	}
 	// All durable user/tool input-text endings are marked. A trailing assistant

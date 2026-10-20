@@ -14,6 +14,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Native Gemini endpoints support opt-in continuation across requests and recovery with a fixed target. Local tools wait for final confirmation; multi-request billing and context-window observations are tracked separately.
 
+- Responses providers gain two compatibility switches for gateways that reject Chord's explicit prompt-cache fields: `compat.responses.send_prompt_cache_options` omits the top-level `prompt_cache_options`, and `compat.responses.send_prompt_cache_breakpoint` omits the `prompt_cache_breakpoint` markers (and the top-level field, which only selects the breakpoint policy). Without them a GPT-5.6-or-later model alias behind such a gateway fails every request.
+
 - Added `chord sessions list --json` for recent session metadata, using the configured storage and shared repository session scope without starting an agent.
 
 - Deliver files with `present` and find them again after restoring a session. The card lists each file's name, version, type, and path; `Enter` previews a single file directly and opens the list when there are several, and the card's buttons preview, open, or copy the path. Preview text, Markdown, and images in the TUI, or open files such as HTML and PDF with system-associated applications. Files under `.chord/` are private working state and are not delivered by default; one is delivered only when explicitly asked for and its path is named in a `present` permission rule.

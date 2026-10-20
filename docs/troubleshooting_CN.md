@@ -103,6 +103,10 @@ curl -I https://api.openai.com/v1
 
 HTTP LLM dump 的 `request_headers` 保存部分协议及会话请求头，内容反映请求覆盖配置生效后的值。凭据值会被隐藏，未识别的请求头不会保存。请求体看起来正确时，可将这些请求头与端点要求对照检查。
 
+### `prompt_cache_options is not supported on this model`
+
+Chord 会对 GPT-5.6 及之后的 Responses 模型发送显式缓存字段。兼容网关，或模型 ID 名称是 GPT-5.6 及之后、后端却不实现这两类字段的路由，会拒绝 `prompt_cache_options` 或 `prompt_cache_breakpoint`，导致请求失败。设置 `compat.responses.send_prompt_cache_breakpoint: false` 可同时去掉显式断点和顶层字段；设置 `compat.responses.send_prompt_cache_options: false` 则只去掉顶层字段、保留断点。此时端点的自动（隐式）缓存仍然生效。参见[Provider 字段参考](./configuration_CN.md#provider-字段参考)中的 `compat.responses.*` 条目。
+
 ### DeepSeek / OpenAI 兼容 thinking 模式 400
 
 如果你使用的是 DeepSeek 这类 `chat-completions` provider，并看到下面这类报错：

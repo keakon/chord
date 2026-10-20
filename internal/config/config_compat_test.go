@@ -411,6 +411,8 @@ providers:
         send_store: false
         send_tool_choice: false
         send_prompt_cache_key: false
+        send_prompt_cache_options: false
+        send_prompt_cache_breakpoint: false
         send_reasoning_include: false
         send_max_output_tokens: true
         mcp_additional_tools: true
@@ -456,6 +458,12 @@ providers:
 	}
 	if r.SendPromptCacheKey == nil || *r.SendPromptCacheKey {
 		t.Fatalf("send_prompt_cache_key = %#v, want false", r.SendPromptCacheKey)
+	}
+	if r.SendPromptCacheOptions == nil || *r.SendPromptCacheOptions {
+		t.Fatalf("send_prompt_cache_options = %#v, want false", r.SendPromptCacheOptions)
+	}
+	if r.SendPromptCacheBreakpoint == nil || *r.SendPromptCacheBreakpoint {
+		t.Fatalf("send_prompt_cache_breakpoint = %#v, want false", r.SendPromptCacheBreakpoint)
 	}
 	if r.SendReasoningInclude == nil || *r.SendReasoningInclude {
 		t.Fatalf("send_reasoning_include = %#v, want false", r.SendReasoningInclude)

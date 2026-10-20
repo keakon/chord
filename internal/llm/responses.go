@@ -454,7 +454,27 @@ func (r *ResponsesProvider) CompleteStream(
 		if err != nil {
 			return nil, nil, &NativeToolError{Cause: err}
 		}
-		apiInput := convertMessagesToResponsesWithItemIDs("", replayMessages, store, freeform, modelcompat.SupportsResponsesCacheBreakpoints(model))
+		// Keep the Responses HTTP request shape aligned with codex-rs for every
+		// Responses provider, not only preset:codex. Some relay endpoints validate
+		// these fields as the Responses client contract and reject narrower OpenAI
+		// samples that omit them. Provider compat.responses toggles can drop
+		// individual fields for gateways that reject them instead.
+		rc := (*config.ResponsesCompatConfig)(nil)
+		if r.provider != nil {
+			rc = r.provider.ResponsesCompat(model)
+		}
+		var sendStore, sendToolChoice, sendParallelToolCalls, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens, sendPromptCacheOptions *bool
+		if rc != nil {
+			sendStore = rc.SendStore
+			sendToolChoice = rc.SendToolChoice
+			sendParallelToolCalls = rc.SendParallelToolCalls
+			sendPromptCacheKey = rc.SendPromptCacheKey
+			sendReasoningInclude = rc.SendReasoningInclude
+			sendMaxOutputTokens = rc.SendMaxOutputTokens
+			sendPromptCacheOptions = rc.SendPromptCacheOptions
+		}
+		cacheBreakpoints := responsesCacheBreakpointsEnabled(r.provider, model)
+		apiInput := convertMessagesToResponsesWithItemIDs("", replayMessages, store, freeform, cacheBreakpoints)
 
 		// Validate that we have at least one input item.
 		if len(apiInput) == 0 {
@@ -471,25 +491,6 @@ func (r *ResponsesProvider) CompleteStream(
 		// HTTP path is full-input only. We do not send previous_response_id here;
 		// connection-scoped reuse belongs to the Codex WebSocket transport.
 		fullInput := apiInput
-
-		// Keep the Responses HTTP request shape aligned with codex-rs for every
-		// Responses provider, not only preset:codex. Some relay endpoints validate
-		// these fields as the Responses client contract and reject narrower OpenAI
-		// samples that omit them. Provider compat.responses toggles can drop
-		// individual fields for gateways that reject them instead.
-		rc := (*config.ResponsesCompatConfig)(nil)
-		if r.provider != nil {
-			rc = r.provider.ResponsesCompat(model)
-		}
-		var sendStore, sendToolChoice, sendParallelToolCalls, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens *bool
-		if rc != nil {
-			sendStore = rc.SendStore
-			sendToolChoice = rc.SendToolChoice
-			sendParallelToolCalls = rc.SendParallelToolCalls
-			sendPromptCacheKey = rc.SendPromptCacheKey
-			sendReasoningInclude = rc.SendReasoningInclude
-			sendMaxOutputTokens = rc.SendMaxOutputTokens
-		}
 		// Hoist reasoning computation so the reasoning replay synthesis below shares
 		// the same reasoning-active signal as the request body.
 		effectiveReasoningEffort, effectiveReasoningSummary := resolveResponsesReasoningFields(ot.EffectiveReasoningEffort(), ot.ReasoningSummary)
@@ -560,7 +561,7 @@ func (r *ResponsesProvider) CompleteStream(
 		reqBody.omitStore = !compatBool(sendStore, true)
 		reqBody.omitInclude = !compatBool(sendReasoningInclude, true)
 		reqBody.Input = fullInput
-		if modelcompat.SupportsResponsesCacheBreakpoints(model) {
+		if cacheBreakpoints && compatBool(sendPromptCacheOptions, true) {
 			reqBody.PromptCacheOptions = responsesPromptCacheOptions(messages, fullInput)
 		}
 		if sessionKey != "" && compatBool(sendPromptCacheKey, true) {

@@ -412,3 +412,25 @@ func TestProviderResponsesCompatRetainsResolvedSnapshot(t *testing.T) {
 		t.Fatalf("compat = %+v, want immutable resolved false", compat)
 	}
 }
+
+func TestProviderResponsesPromptCacheCompatModelOverride(t *testing.T) {
+	cfg := NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Compat: &config.ProviderCompatConfig{Responses: &config.ResponsesCompatConfig{
+			SendPromptCacheOptions: new(false), SendPromptCacheBreakpoint: new(false),
+		}},
+		Models: map[string]config.ModelConfig{
+			"gpt-6.1-sol": {},
+			"gpt-6.2-sol": {Compat: &config.ModelCompatConfig{Responses: &config.ResponsesCompatConfig{
+				SendPromptCacheOptions: new(true), SendPromptCacheBreakpoint: new(true),
+			}}},
+		},
+	}, nil)
+	defer cfg.Close()
+	if rc := cfg.ResponsesCompat("gpt-6.1-sol"); *rc.SendPromptCacheOptions || responsesCacheBreakpointsEnabled(cfg, "gpt-6.1-sol") {
+		t.Fatalf("provider-level false not inherited: %+v", rc)
+	}
+	if rc := cfg.ResponsesCompat("gpt-6.2-sol"); !*rc.SendPromptCacheOptions || !responsesCacheBreakpointsEnabled(cfg, "gpt-6.2-sol") {
+		t.Fatalf("model-level true not applied: %+v", rc)
+	}
+}

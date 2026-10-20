@@ -99,3 +99,21 @@ func TestAnthropicCacheDiagnosticExcludesFoldedReminderResult(t *testing.T) {
 		t.Fatalf("transient tool result included in cache diagnostics: %d", len(got))
 	}
 }
+
+func TestResponsesCacheDiagnosticFallsBackToFullRequestWithoutBreakpoints(t *testing.T) {
+	cfg := NewProviderConfig("sample", config.ProviderConfig{
+		Type: config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{
+			"gpt-6.1-sol": {Compat: &config.ModelCompatConfig{Responses: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(false)}}},
+		},
+	}, nil)
+	client := NewClient(cfg, nil, "gpt-6.1-sol", 4096, "")
+	defer client.Close()
+	history := []message.Message{
+		{Role: message.RoleUser, Content: "durable question"},
+		{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "transient hint"},
+	}
+	if got := client.PromptCacheMessagesForModelRef("sample/gpt-6.1-sol", history, 1); len(got) != len(history) {
+		t.Fatalf("projection without breakpoints = %d messages, want full request %d", len(got), len(history))
+	}
+}
