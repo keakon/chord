@@ -134,7 +134,7 @@ The error panel keeps the most recent 80 errors in a ring buffer (newest first),
 
 The right panel keeps a stable order: agents, background jobs, and todos appear and disappear during a session, so they render after the model, usage, integration, and repository sections and never shift the information above them. A focused agent has a `▸` marker alongside its status icon, so its running, waiting, or failed state remains visible.
 
-Collapsible sections start folded and open on their own once they hold something worth showing: `LSP`, `MCP`, and `SKILLS` wait for a running language-server process, a connected MCP server, or a skill whose body is in context, while `TODOS`, `CHANGED FILES`, `AGENTS`, and `JOBS` open with their first entry. `GIT` stays folded because its header already carries the summary. Click any section header to fold or expand it; a manual choice sticks until you click the header back to the state the section would take on its own, after which it follows its content again. LSP and MCP headers retain a failure count while folded, including MCP login failures; expand the section to identify the server and use `/mcp` to inspect its status.
+Collapsible sections start folded and open on their own once they hold something worth showing: `LSP`, `MCP`, and `SKILLS` wait for a running language-server process, a connected MCP server, or a skill whose body is in context, while `TODOS`, `CHANGED FILES`, `AGENTS`, and `JOBS` open with their first entry. `GIT` stays folded because its header already carries the branch and the count summary (see [the `GIT` block](#git-block)). Click any section header to fold or expand it; a manual choice sticks until you click the header back to the state the section would take on its own, after which it follows its content again. LSP and MCP headers retain a failure count while folded, including MCP login failures; expand the section to identify the server and use `/mcp` to inspect its status.
 
 Enter `/status` to open the same live information across the full conversation area, including in narrow terminals. Use `j` / `k` or the arrow keys to scroll, `PgUp` / `PgDn` to page, and `g` / `G` to jump to the top or bottom. `Tab` / `Shift+Tab` selects a section; `Enter` or `Space` folds or expands it. Mouse scrolling and clicks work as in the right panel. `Esc` or `q` returns to the conversation.
 
@@ -156,6 +156,14 @@ A task awaiting its owner can show one line from its current coordination reques
 - `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
 - `Calls` counts the real LLM requests issued by the focused agent (main agent, running SubAgent, or parked task). It comes from the persisted usage ledger, so it survives session restore and is not reset by context compaction.
 - The sidebar rows are per-agent cumulative or per-request readings; `/context` describes only the latest single request. A cumulative `Cache R` total can therefore be much larger than one request's input, and its percentage describes that running total rather than the context window. `/context` states this scope explicitly and anchors its window percentages to the same budget this block's gauge uses.
+
+### `GIT` block
+
+The header carries the branch (or the worktree name after it, separated by `@`) followed by counts: `↑N` and `↓N` are commits ahead of and behind the upstream, `+N` is staged files, `~N` is files in conflict, `!N` is unstaged changes including untracked files, and `*N` is stashes. Each file lands in exactly one of `+`, `~`, and `!`, so the counts never overlap and adding them gives the number of affected files. A zero count is omitted, as is the whole summary when the tree is clean.
+
+Expanding the section lists the same information as rows: `Conflicts`, `Changes`, `Staged`, `Stash`, and `Sync` (the ahead/behind pair on one line). `Branch` shows the current branch, and `Worktree` plus `Worktree Path` appear only when the session runs in a managed worktree.
+
+When the panel is too narrow for the branch name and every count, the counts win and the branch name is truncated from the tail (for example `feature/very-...`). If even that is not enough, counts are dropped in order of urgency — stashes first, then the ahead/behind numbers, then staged, then conflicts, then unstaged — so the unstaged count and the conflict count are the last to disappear.
 
 ### `TIME` block
 

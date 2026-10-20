@@ -204,6 +204,8 @@ func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIn
 	appendSep()
 	appendInt(gitInfo.StagedFiles)
 	appendSep()
+	appendInt(gitInfo.ConflictedFiles)
+	appendSep()
 	appendInt(gitInfo.Stashes)
 	appendSep()
 	appendInt(gitInfo.Ahead)

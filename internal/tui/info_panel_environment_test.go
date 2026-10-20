@@ -56,6 +56,11 @@ func TestInfoPanelGitBlockExpanded(t *testing.T) {
 			t.Fatalf("expanded git section missing %q in:\n%s", want, joined)
 		}
 	}
+	for _, hidden := range []string{"Conflicts:", "0 files"} {
+		if strings.Contains(joined, hidden) {
+			t.Fatalf("expanded git section should hide %q when zero in:\n%s", hidden, joined)
+		}
+	}
 	plain := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
 	if strings.Contains(plain, "main@fix-ui ↑2 ↓1 !3") {
 		t.Fatalf("expanded git header should omit summary, got:\n%s", plain)
@@ -83,6 +88,19 @@ func TestInfoPanelGitBlockExpandedHidesZeroNumericRows(t *testing.T) {
 	for _, hidden := range []string{"Staged:", "Stash:", "Sync:", "Worktree Path:", "0 files", "0 entries", "↑0", "↓0"} {
 		if strings.Contains(joined, hidden) {
 			t.Fatalf("expanded git section should hide zero value %q in:\n%s", hidden, joined)
+		}
+	}
+}
+
+func TestInfoPanelGitBlockExpandedShowsConflicts(t *testing.T) {
+	m := NewModel(newInfoPanelAgent())
+	m.gitStatus.Info = gitinspect.Info{Present: true, Branch: "main", ChangedFiles: 1, StagedFiles: 2, ConflictedFiles: 3}
+	m.toggleInfoPanelSection(infoPanelSectionGit)
+
+	joined := strings.Join(infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▼ GIT"), "\n")
+	for _, want := range []string{"Conflicts: 3 files", "Changes: 1 files", "Staged: 2 files"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expanded git section missing %q in:\n%s", want, joined)
 		}
 	}
 }

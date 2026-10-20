@@ -153,6 +153,7 @@ func gitStatusInfoEqual(a, b gitinspect.Info) bool {
 		a.Dir == b.Dir &&
 		a.ChangedFiles == b.ChangedFiles &&
 		a.StagedFiles == b.StagedFiles &&
+		a.ConflictedFiles == b.ConflictedFiles &&
 		a.Stashes == b.Stashes &&
 		a.Ahead == b.Ahead &&
 		a.Behind == b.Behind
@@ -216,31 +217,41 @@ func gitStatusRef(info gitinspect.Info) string {
 }
 
 // gitStatusStatusPart is one numeric status marker of the collapsed git header
-// summary. The slice keeps the canonical display order (sync, staged, changed,
-// stash); dropWeight ranks markers so the least useful one can be dropped first
-// when the counts would leave no room for a recognizable ref — the changed-file
+// summary. The slice keeps the canonical display order (sync, staged, conflicted,
+// changed, stash); dropWeight ranks markers so the least useful one can be dropped
+// first when the counts would leave no room for a recognizable ref — the changed-file
 // count is the most actionable and survives longest, stash counts go first.
 type gitStatusStatusPart struct {
 	text       string
 	dropWeight int
 }
 
+// gitStatusStatusParts lists the numeric markers of the collapsed git header in
+// canonical display order: sync, staged, conflicts, changed, stash. dropWeight
+// ranks them for the case where the counts would crowd the ref below the minimum
+// recognizable width, and the highest weight goes first. The order encodes
+// urgency rather than importance: the changed-file count is the primary "work in
+// progress" signal and survives longest, an unresolved conflict blocks committing
+// so it outranks the ahead/behind sync numbers, and stash counts go first.
 func gitStatusStatusParts(info gitinspect.Info) []gitStatusStatusPart {
 	var parts []gitStatusStatusPart
 	if info.Ahead > 0 {
-		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("↑%d", info.Ahead), dropWeight: 2})
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("↑%d", info.Ahead), dropWeight: 3})
 	}
 	if info.Behind > 0 {
-		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("↓%d", info.Behind), dropWeight: 3})
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("↓%d", info.Behind), dropWeight: 4})
 	}
 	if info.StagedFiles > 0 {
-		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("+%d", info.StagedFiles), dropWeight: 1})
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("+%d", info.StagedFiles), dropWeight: 2})
+	}
+	if info.ConflictedFiles > 0 {
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("~%d", info.ConflictedFiles), dropWeight: 1})
 	}
 	if info.ChangedFiles > 0 {
 		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("!%d", info.ChangedFiles), dropWeight: 0})
 	}
 	if info.Stashes > 0 {
-		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("*%d", info.Stashes), dropWeight: 4})
+		parts = append(parts, gitStatusStatusPart{text: fmt.Sprintf("*%d", info.Stashes), dropWeight: 5})
 	}
 	return parts
 }

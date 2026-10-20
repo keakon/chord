@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,11 +21,65 @@ func TestParseGitStatusPorcelainV2(t *testing.T) {
 	if info.Ahead != 14 || info.Behind != 2 {
 		t.Fatalf("ahead/behind = %d/%d, want 14/2", info.Ahead, info.Behind)
 	}
-	if info.ChangedFiles != 3 {
-		t.Fatalf("ChangedFiles = %d, want 3", info.ChangedFiles)
+	if info.ChangedFiles != 2 {
+		t.Fatalf("ChangedFiles = %d, want 2", info.ChangedFiles)
 	}
 	if info.StagedFiles != 1 {
 		t.Fatalf("StagedFiles = %d, want 1", info.StagedFiles)
+	}
+	if info.ConflictedFiles != 0 {
+		t.Fatalf("ConflictedFiles = %d, want 0", info.ConflictedFiles)
+	}
+}
+
+// Staged and changed are disjoint buckets: a path with staged content counts as
+// staged even when the worktree also differs, so a partially staged path can
+// never inflate both numbers.
+func TestParseGitStatusPorcelainV2PartitionsStagedAndChanged(t *testing.T) {
+	info := parseGitStatusPorcelainV2(strings.Join([]string{
+		"1 MM N... 100644 100644 100644 abc abc partial.go",
+		"1 MD N... 100644 000000 000000 abc 0000 staged_deleted.go",
+		"1 A. N... 000000 100644 100644 0000 abc staged_new.go",
+		"1 .M N... 100644 100644 100644 abc abc worktree.go",
+		"1 .D N... 100644 100644 000000 abc 0000 worktree_deleted.go",
+		"2 R. N... 100644 100644 100644 abc abc renamed.go\told.go",
+		"2 RM N... 100644 100644 100644 abc abc renamed_dirty.go\told2.go",
+		"1 .A N... 000000 000000 100644 0000 0000 intent_to_add.go",
+		"? untracked.txt",
+	}, "\n") + "\n")
+
+	if info.StagedFiles != 5 {
+		t.Fatalf("StagedFiles = %d, want 5 (MM, MD, A., R., RM)", info.StagedFiles)
+	}
+	if info.ChangedFiles != 4 {
+		t.Fatalf("ChangedFiles = %d, want 4 (.M, .D, intent-to-add, untracked)", info.ChangedFiles)
+	}
+	if info.ConflictedFiles != 0 {
+		t.Fatalf("ConflictedFiles = %d, want 0", info.ConflictedFiles)
+	}
+}
+
+// Unmerged paths are their own bucket: git reports them in a separate section,
+// so they must not be counted as staged or changed.
+func TestParseGitStatusPorcelainV2CountsUnmergedSeparately(t *testing.T) {
+	info := parseGitStatusPorcelainV2("# branch.head main\nu UU N... 100644 100644 100644 100644 aaa bbb conflict.go\n1 M. N... 100644 100644 100644 abc abc staged.go\n")
+	if info.ConflictedFiles != 1 {
+		t.Fatalf("ConflictedFiles = %d, want 1", info.ConflictedFiles)
+	}
+	if info.StagedFiles != 1 {
+		t.Fatalf("StagedFiles = %d, want 1", info.StagedFiles)
+	}
+	if info.ChangedFiles != 0 {
+		t.Fatalf("ChangedFiles = %d, want 0", info.ChangedFiles)
+	}
+}
+
+// A record whose XY status field is missing must not be counted at all, rather
+// than inflating both buckets the way the old unconditional ChangedFiles++ did.
+func TestParseGitStatusPorcelainV2SkipsRecordsWithoutStatusField(t *testing.T) {
+	info := parseGitStatusPorcelainV2("1 \n2\n1 .M N... 100644 100644 100644 abc abc file.go\n")
+	if info.ChangedFiles != 1 || info.StagedFiles != 0 || info.ConflictedFiles != 0 {
+		t.Fatalf("counts = %d/%d/%d, want 1/0/0", info.ChangedFiles, info.StagedFiles, info.ConflictedFiles)
 	}
 }
 

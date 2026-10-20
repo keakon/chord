@@ -86,6 +86,40 @@ func TestGitStatusSummaryBudgetedFitsKeepsCanonicalOrder(t *testing.T) {
 	}
 }
 
+// A path with staged content counts only as staged, so the two counts cannot
+// overlap and the summary stays a faithful partition of the changed paths.
+func TestGitStatusSummaryDoesNotDoubleCountPartiallyStaged(t *testing.T) {
+	// 4 paths in total: 2 staged (one of them also dirty in the worktree),
+	// 1 changed only, 1 untracked.
+	info := gitinspect.Info{Present: true, Branch: "main", ChangedFiles: 2, StagedFiles: 2}
+	if got := gitStatusSummaryBudgeted(info, 100); got != "main +2 !2" {
+		t.Fatalf("summary = %q, want %q", got, "main +2 !2")
+	}
+}
+
+// Unmerged paths are their own marker, ordered after staged and before changed.
+func TestGitStatusSummaryShowsConflictedMarker(t *testing.T) {
+	info := gitinspect.Info{Present: true, Branch: "main", ChangedFiles: 2, StagedFiles: 1, ConflictedFiles: 3}
+	if got := gitStatusSummaryBudgeted(info, 100); got != "main +1 ~3 !2" {
+		t.Fatalf("summary = %q, want %q", got, "main +1 ~3 !2")
+	}
+}
+
+// ConflictedFiles is part of the snapshot identity: a refresh that only changes
+// the conflict count must not read as an unchanged snapshot, or the adaptive
+// polling delay would keep growing through the one change the panel shows.
+func TestGitStatusInfoEqualComparesConflictedFiles(t *testing.T) {
+	base := gitinspect.Info{Present: true, Branch: "main", ChangedFiles: 1, StagedFiles: 1, Stashes: 2, Ahead: 1, Behind: 1}
+	if !gitStatusInfoEqual(base, base) {
+		t.Fatal("identical snapshots reported as changed")
+	}
+	conflicted := base
+	conflicted.ConflictedFiles = 2
+	if gitStatusInfoEqual(base, conflicted) {
+		t.Fatal("a conflict-only change was reported as an unchanged snapshot")
+	}
+}
+
 func TestGitStatusSummaryBudgetedLongBranchKeepsCounts(t *testing.T) {
 	info := gitinspect.Info{Present: true, Branch: "feature/very-long-branch-name-here", ChangedFiles: 2}
 	got := gitStatusSummaryBudgeted(info, 22)
@@ -112,6 +146,8 @@ func TestGitStatusSummaryBudgetedShortRefKeepsAllCounts(t *testing.T) {
 	}
 }
 
+// Drop order is urgency-ranked, not display order: the changed count outlives
+// conflicts, which outlive staged, which outlive sync; stash counts go first.
 func TestGitStatusSummaryBudgetedDropsLeastUsefulCountsForLongRef(t *testing.T) {
 	original := runewidth.DefaultCondition.EastAsianWidth
 	t.Cleanup(func() { runewidth.DefaultCondition.EastAsianWidth = original })
@@ -130,6 +166,26 @@ func TestGitStatusSummaryBudgetedDropsLeastUsefulCountsForLongRef(t *testing.T) 
 				t.Fatalf("summary = %q, want %q", got, testCase.want)
 			}
 		})
+	}
+}
+
+// A conflict blocks committing, so the ~ marker outranks the sync numbers and the
+// staged count when the ref has to share its space, while the stash count is the
+// first to go.
+func TestGitStatusSummaryConflictsOutrankSyncAndStaged(t *testing.T) {
+	info := gitinspect.Info{Present: true, Branch: "feature/very-long-branch-name-here", Ahead: 123, Behind: 12, StagedFiles: 7, ChangedFiles: 3, ConflictedFiles: 2, Stashes: 5}
+	for _, width := range []int{22, 18, 14} {
+		got := gitStatusSummaryBudgeted(info, width)
+		if !strings.Contains(got, "~2") || !strings.Contains(got, "!3") {
+			t.Fatalf("conflict and changed counts must survive at width %d, got %q", width, got)
+		}
+		if strings.Contains(got, "*5") {
+			t.Fatalf("stash count should be dropped first, got %q", got)
+		}
+	}
+	// At the tightest width the sync numbers and the staged count give way.
+	if got := gitStatusSummaryBudgeted(info, 18); strings.Contains(got, "↑123") {
+		t.Fatalf("sync count should be dropped before conflicts, got %q", got)
 	}
 }
 

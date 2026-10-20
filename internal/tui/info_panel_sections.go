@@ -512,6 +512,9 @@ func (m *Model) buildInfoPanelGitBlock(lineW int) string {
 			lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Worktree Path", currentStyles.InfoPanelValue.Render(terminaltext.TruncateOneLine(displayWorkingDir(m.workingDir), lineW-16-infoPanelCollapsibleContentInset))))
 		}
 	}
+	if info.ConflictedFiles > 0 {
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Conflicts", currentStyles.InfoPanelValue.Render(fmt.Sprintf("%d files", info.ConflictedFiles))))
+	}
 	if info.ChangedFiles > 0 {
 		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Changes", currentStyles.InfoPanelValue.Render(fmt.Sprintf("%d files", info.ChangedFiles))))
 	}

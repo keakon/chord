@@ -52,6 +52,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- The info panel's git section no longer counts a partially staged file twice. A file that has both staged and unstaged content was reported under both the staged (`+`) and changed (`!`) counts, so the two numbers overlapped and their sum could exceed the number of affected files. Staged and changed are now disjoint: a path with any staged content counts once as staged, otherwise once as changed, and unmerged paths are reported separately as conflicts (`~`) instead of inflating both.
+
 - Replayed tool-call arguments no longer reach OpenAI Responses endpoints raw when they are malformed or empty. History conversion now applies the same sanitized placeholder the other providers use, so a history entry with corrupt arguments — for example an imported call whose source rollout recorded a truncated arguments string — cannot fail the whole request on resume.
 
 - Tool call arguments and reasoning text no longer show up as assistant prose on OpenAI Responses endpoints. Event routing follows the event type inside the stream payload and only falls back to the SSE frame label when the payload carries no type, so a gateway that relabels a frame cannot divert tool arguments or thinking into the message text; a text delta addressed to a tool-call item is dropped. Tool calls themselves are unaffected, and the mismatch is reported in the log once per request.

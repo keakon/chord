@@ -34,10 +34,13 @@ type Info struct {
 	Dir          string
 	ChangedFiles int
 	StagedFiles  int
-	Stashes      int
-	Ahead        int
-	Behind       int
-	CapturedAt   time.Time
+	// ConflictedFiles counts unmerged paths. Git reports them in their own
+	// section, so they belong to neither the staged nor the changed bucket.
+	ConflictedFiles int
+	Stashes         int
+	Ahead           int
+	Behind          int
+	CapturedAt      time.Time
 }
 
 // Collect observes status, stashes and linked-worktree identity within one timeout.
@@ -163,14 +166,22 @@ func parseGitStatusPorcelainV2(out string) Info {
 				info.Behind = parseGitAB(fields[1], '-')
 			}
 		case strings.HasPrefix(line, "1 "), strings.HasPrefix(line, "2 "):
-			info.ChangedFiles++
+			// X describes the index against HEAD and Y the worktree against the
+			// index, so both halves can be non-empty for the same path. Staged
+			// and changed are disjoint buckets: a path with any staged content
+			// counts once as staged, otherwise once as changed. Otherwise a
+			// partially staged path would inflate both numbers.
 			fields := strings.Fields(line)
-			if len(fields) >= 2 && len(fields[1]) >= 1 && fields[1][0] != '.' {
+			if len(fields) < 2 {
+				continue
+			}
+			if fields[1][0] != '.' {
 				info.StagedFiles++
+			} else {
+				info.ChangedFiles++
 			}
 		case strings.HasPrefix(line, "u "):
-			info.ChangedFiles++
-			info.StagedFiles++
+			info.ConflictedFiles++
 		case strings.HasPrefix(line, "? "):
 			info.ChangedFiles++
 		}
