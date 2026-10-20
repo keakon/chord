@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/keakon/chord/internal/hook"
@@ -168,5 +169,48 @@ func TestDirectoryInstructionCandidateBudgetBlocksWholeNewSet(t *testing.T) {
 		if f.Operation != message.DirectoryInstructionBlocked || f.Reason != message.DirectoryInstructionReasonInputBudget || f.Body == "" {
 			t.Fatalf("partial or missing candidate: %+v", f)
 		}
+	}
+}
+
+func TestDirectoryInstructionsGrepMissingPathKeepsResponseOpen(t *testing.T) {
+	p, root := directoryPipelineFixture(t)
+	p = p.directoryAttemptSnapshot()
+	present := filepath.Join(root, "present.go")
+	if err := os.WriteFile(present, []byte("sample"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	call := directoryCall("grep", tools.NameGrep, map[string]any{"pattern": "sample", "paths": []string{filepath.Join(root, "missing.go"), "present.go"}})
+	var result ToolExecutionResult
+	p.discoverAfterSuccessfulRead(context.Background(), call, tools.ReadObservation{}, &result)
+	if reason := p.directoryGate.Reason(); reason != "" {
+		t.Fatalf("response gate closed: %s notes=%v", reason, result.Notes)
+	}
+	if result.ControlReason != "" || len(result.Notes) != 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestDirectoryInstructionsGrepExpansionFailureKeepsResponseOpen(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix HOME resolution")
+	}
+	p, root := directoryPipelineFixture(t)
+	p.registry.Register(tools.GrepTool{})
+	present := filepath.Join(root, "present.go")
+	if err := os.WriteFile(present, []byte("sample"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", "")
+	call := directoryCall("search", tools.NameGrep, map[string]any{"pattern": "sample", "paths": []string{"~/missing.go", present}})
+	result, err := p.execute(context.Background(), call, false)
+	if err != nil || !result.ExecutionStarted || result.ControlReason != "" {
+		t.Fatalf("grep=%+v err=%v", result, err)
+	}
+	if reason := p.directoryRuntime.attempt.Load().gate.Reason(); reason != "" {
+		t.Fatalf("response gate closed: %s notes=%v", reason, result.Notes)
+	}
+	next, err := p.execute(context.Background(), directoryCall("write", tools.NameWrite, map[string]string{"path": present, "content": "updated"}), false)
+	if err != nil || !next.ExecutionStarted {
+		t.Fatalf("sibling write=%+v err=%v", next, err)
 	}
 }

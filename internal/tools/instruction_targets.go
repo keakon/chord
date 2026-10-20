@@ -3,7 +3,6 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -143,6 +142,9 @@ func instructionTargets(name string, args json.RawMessage, baseDir string, inspe
 		}
 		resolved, err := resolveToolPathAbsInDir(path, baseDir)
 		if err != nil {
+			if name == NameGrep && inspect {
+				continue
+			}
 			return nil, err
 		}
 		if seen[resolved] {
@@ -151,9 +153,10 @@ func instructionTargets(name string, args json.RawMessage, baseDir string, inspe
 		seen[resolved] = true
 		targetMode := mode
 		if name == NameGrep && inspect {
-			info, err := os.Stat(resolved)
+			// Match grep's partial-success handling for paths it never reads.
+			_, info, err := resolveExistingToolPathInDir(path, baseDir, PathTargetAny, "search")
 			if err != nil {
-				return nil, fmt.Errorf("inspect search target: %w", err)
+				continue
 			}
 			if info.IsDir() {
 				targetMode = InstructionTargetDirectory

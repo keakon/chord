@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +62,53 @@ func TestReadObservationActivationPathFollowsSymlink(t *testing.T) {
 	real, _ := filepath.EvalSymlinks(path)
 	if !ok || o.Path != link || o.ActivationPath != real {
 		t.Fatalf("observation: %+v", o)
+	}
+}
+
+func TestInstructionTargetsGrepSkipsUnresolvableSearchPaths(t *testing.T) {
+	root := t.TempDir()
+	present := filepath.Join(root, "present.go")
+	if err := os.WriteFile(present, []byte("sample"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"pattern": "sample", "paths": []string{"missing.go", "present.go"}})
+	targets, err := InstructionTargets(NameGrep, raw, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].Path != present || targets[0].Mode != InstructionTargetContent {
+		t.Fatalf("targets: %+v", targets)
+	}
+	raw, _ = json.Marshal(map[string]any{"pattern": "sample", "paths": []string{"missing.go"}})
+	targets, err = InstructionTargets(NameGrep, raw, root)
+	if err != nil || len(targets) != 0 {
+		t.Fatalf("missing-only targets=%+v err=%v", targets, err)
+	}
+}
+
+func TestInstructionTargetsGrepSkipsPathExpansionFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix HOME resolution")
+	}
+	root := t.TempDir()
+	present := filepath.Join(root, "present.go")
+	if err := os.WriteFile(present, []byte("sample"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", "")
+	raw, _ := json.Marshal(map[string]any{"pattern": "sample", "paths": []string{"~/missing.go", present}})
+	output, err := (GrepTool{BaseDir: root}).Execute(context.Background(), raw)
+	if err != nil || !strings.Contains(output, "present.go") {
+		t.Fatalf("grep output=%q err=%v; want partial success", output, err)
+	}
+	targets, err := InstructionTargets(NameGrep, raw, root)
+	if err != nil || len(targets) != 1 || targets[0].Path != present || targets[0].Mode != InstructionTargetContent {
+		t.Fatalf("targets=%+v err=%v; want only the searched path", targets, err)
+	}
+	if _, err := InstructionTargetsWithoutIO(NameGrep, raw, root); err == nil {
+		t.Fatal("stream admission accepted an unresolved path")
+	}
+	if _, err := InstructionTargets(NameRead, json.RawMessage(`{"path":"~/missing.go"}`), root); err == nil {
+		t.Fatal("read accepted an unresolved path")
 	}
 }
