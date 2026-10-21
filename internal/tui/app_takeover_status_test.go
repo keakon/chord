@@ -315,6 +315,9 @@ func TestTakeoverObservationSurvivesSaveFailureAndCompletesRetry(t *testing.T) {
 	}
 
 	cmd := m.pollTakeoverObservation(now.Add(takeoverObserveInterval + time.Millisecond))
+	if cmd == nil {
+		t.Fatal("status query never rescheduled after a save failure")
+	}
 	msg := cmd().(takeoverObserveMsg)
 	_, activation := m.Update(msg)
 	m.Update(activation())
@@ -382,7 +385,8 @@ func TestTakeoverObservationAnswerResetsFailureCount(t *testing.T) {
 
 	now := time.Now()
 	m.Update(m.pollTakeoverObservation(now)())
-	m.Update(m.pollTakeoverObservation(now.Add(takeoverObserveInterval + time.Millisecond))())
+	now = now.Add(takeoverObserveInterval + time.Millisecond)
+	m.Update(m.pollTakeoverObservation(now)())
 	if !m.takeover.observing {
 		t.Fatal("answered source retired the banner")
 	}

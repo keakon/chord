@@ -526,7 +526,6 @@ func (m *Model) applyTakeoverObservation(msg takeoverObserveMsg) tea.Cmd {
 		return nil
 	}
 	m.takeover.observePending = false
-	m.takeover.lastObserveAt = time.Now()
 	if msg.err != nil {
 		m.takeover.observeFailures++
 		if m.takeover.observeFailures < takeoverObserveFailureLimit {
