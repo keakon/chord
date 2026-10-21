@@ -4,10 +4,9 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 )
 
-// fileActions is the canonical action set. The delivery card lists all four for
-// every file, and the file viewer lists the ones that do something for its
-// current state; both index into this slice, so the same action runs whichever
-// surface the reader used.
+// fileActions is the canonical action set. The file viewer lists the actions
+// that do something for its current state, and its footer indexes into this
+// slice.
 var fileActions = []string{"Preview", "Open", "Open with", "Copy path"}
 
 const (
@@ -47,15 +46,6 @@ func viewerActionButtons(showing bool) (buttons []string, indexes []int) {
 		indexes = append(indexes, i)
 	}
 	return buttons, indexes
-}
-
-// deliveryActionButtons returns the delivery card's per-file buttons.
-func deliveryActionButtons() []string {
-	buttons := make([]string, len(fileActions))
-	for i, label := range fileActions {
-		buttons[i] = "[" + label + "]"
-	}
-	return buttons
 }
 
 // wrapActionButtons lays bracketed buttons out on rows that fit width and

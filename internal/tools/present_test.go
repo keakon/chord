@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -137,5 +138,17 @@ func TestIsChordInternalDeliveryTargetResolvesSymlinkedRoot(t *testing.T) {
 	}}
 	if IsChordInternalDeliveryTarget(loc, permission.PathScope{}) {
 		t.Fatalf("worktree checkout under .chord must not make its own docs a .chord target: %#v", loc)
+	}
+}
+
+func TestPresentDescriptionRejectsEditedRepositoryFiles(t *testing.T) {
+	description := (PresentTool{}).Description()
+	for _, want := range []string{
+		"Use it only when the user needs a file itself",
+		"Do not declare repository source, tests, changelog, or configuration files merely because you edited them",
+	} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("description missing %q: %q", want, description)
+		}
 	}
 }

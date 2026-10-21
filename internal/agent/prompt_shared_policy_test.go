@@ -621,3 +621,15 @@ func TestMainAgentCommunicationPrompt_ReportsResultsNotBookkeeping(t *testing.T)
 		}
 	}
 }
+
+func TestFileDeliveryPromptRejectsEditedRepositoryFiles(t *testing.T) {
+	for _, want := range []string{
+		"Call present only when the user needs a file itself",
+		"Do not present repository source, tests, changelog, or configuration files merely because you edited them",
+		"a specific file the user explicitly asked to receive",
+	} {
+		if !strings.Contains(fileDeliveryPrompt, want) {
+			t.Fatalf("fileDeliveryPrompt missing %q in %q", want, fileDeliveryPrompt)
+		}
+	}
+}

@@ -43,7 +43,7 @@ func TestDeliveryCardRendersAsLabelledToolCard(t *testing.T) {
 	if !strings.Contains(joined, "DELIVERED #7") {
 		t.Fatalf("card has no label badge with block number:\n%s", joined)
 	}
-	if !strings.Contains(joined, "1 file(s) delivered") {
+	if !strings.Contains(joined, "1 file(s)") {
 		t.Errorf("card does not report what it delivered:\n%s", joined)
 	}
 	for i, line := range lines {
@@ -53,27 +53,69 @@ func TestDeliveryCardRendersAsLabelledToolCard(t *testing.T) {
 	}
 }
 
-// The four bracketed buttons are the card's whole interaction surface, and the
-// header has to say what they do — the previous first line was a bare
-// "Delivered files · Enter or click for actions" string with no label.
-func TestDeliveryCardExplainsItsButtons(t *testing.T) {
-	block := deliveryTestBlock("/project", deliveryTestFile("f1", "notes.md", "", "/project/notes.md"))
+// The card is an index of files, not an action menu: each file occupies one
+// row and the actions live in the file list.
+func TestDeliveryCardUsesCompactFileRows(t *testing.T) {
+	block := deliveryTestBlock("/project", deliveryTestFile("f1", "notes.md", "session note", "/project/notes.md"))
 	joined := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 
-	for _, action := range fileActions {
-		if !strings.Contains(joined, "["+action+"]") {
-			t.Errorf("card does not offer the %s action:\n%s", action, joined)
+	for _, unwanted := range []string{"[Preview]", "Current file", "text/markdown", "/project/notes.md"} {
+		if strings.Contains(joined, unwanted) {
+			t.Errorf("card still contains %q:\n%s", unwanted, joined)
 		}
 	}
-	if !strings.Contains(joined, "Enter or click a button") {
-		t.Errorf("card does not tell the reader the buttons are actionable:\n%s", joined)
+	for _, want := range []string{"notes.md", "session note", "Enter or click a file to open"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("card is missing %q:\n%s", want, joined)
+		}
 	}
 }
 
-// A hit must land on the button it names. The card used to mix a hardcoded
-// column with a border offset that no longer applied, so every hit pointed one
-// line above the row it described and the buttons could not be pressed.
-func TestDeliveryCardHitsPointAtTheirButtons(t *testing.T) {
+// Hit columns are viewport columns: they must start at the card body origin,
+// not at column zero. Starting at zero made the rail/margin open the file and
+// left the right edge of the body unclickable.
+func TestDeliveryCardHitColumnsUseBodyOrigin(t *testing.T) {
+	block := deliveryTestBlock("/project", deliveryTestFile("f1", "notes.md", "session note", "/project/notes.md"))
+	lines := block.Render(80, "")
+	if len(block.deliveryHits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(block.deliveryHits))
+	}
+	hit := block.deliveryHits[0]
+	metrics := newToolCardMetrics(80)
+	_, originCol := deliveryCardBodyOrigin(metrics.blockStyle)
+	if originCol <= 0 {
+		t.Fatalf("body origin col = %d, want the rail/margin offset", originCol)
+	}
+	if hit.start != originCol {
+		t.Fatalf("hit start = %d, want body origin %d", hit.start, originCol)
+	}
+	if hit.end != originCol+metrics.contentWidth {
+		t.Fatalf("hit end = %d, want %d", hit.end, originCol+metrics.contentWidth)
+	}
+
+	m := &Model{width: 80, height: 40}
+	if _, handled := m.activateDeliveryCard(block, hit.line, hit.start-1); handled {
+		t.Fatal("click left of the card body hit the file row")
+	}
+	if _, handled := m.activateDeliveryCard(block, hit.line, hit.end-1); !handled {
+		t.Fatal("click on the last body column missed the file row")
+	}
+	if _, handled := m.activateDeliveryCard(block, hit.line, hit.end); handled {
+		t.Fatal("click past the card body hit the file row")
+	}
+
+	plain := terminaltext.StripANSI(lines[hit.line])
+	before, _, found := strings.Cut(plain, "notes.md")
+	if !found {
+		t.Fatalf("file row %q does not name the file", plain)
+	}
+	if col := ansi.StringWidth(before); col < hit.start || col >= hit.end {
+		t.Fatalf("file name at column %d is outside hit %d..%d", col, hit.start, hit.end)
+	}
+}
+
+// Each file row is one click target for that file.
+func TestDeliveryCardFileRowsAreClickTargets(t *testing.T) {
 	for _, width := range []int{40, 80, 120} {
 		files := []message.DeliveredFile{
 			deliveryTestFile("f1", "notes.md", "session note", "/project/notes.md"),
@@ -81,32 +123,25 @@ func TestDeliveryCardHitsPointAtTheirButtons(t *testing.T) {
 		}
 		block := deliveryTestBlock("/project", files...)
 		lines := block.Render(width, "")
-		if len(block.deliveryHits) != len(files)*len(fileActions) {
-			t.Fatalf("width %d: got %d hits, want %d", width, len(block.deliveryHits), len(files)*len(fileActions))
+		if len(block.deliveryHits) != len(files) {
+			t.Fatalf("width %d: got %d hits, want %d", width, len(block.deliveryHits), len(files))
 		}
 		seen := make(map[string]bool, len(block.deliveryHits))
-		for _, hit := range block.deliveryHits {
+		for i, hit := range block.deliveryHits {
 			if hit.line < 0 || hit.line >= len(lines) {
 				t.Fatalf("width %d: hit line %d outside card (%d lines)", width, hit.line, len(lines))
 			}
-			if hit.start >= hit.end {
-				t.Fatalf("width %d: empty hit range %d..%d", width, hit.start, hit.end)
+			if hit.start >= hit.end || hit.end > width {
+				t.Fatalf("width %d: invalid hit range %d..%d", width, hit.start, hit.end)
 			}
 			plain := terminaltext.StripANSI(lines[hit.line])
-			runes := []rune(plain)
-			if hit.end > len(runes) {
-				t.Fatalf("width %d: hit column %d past line end %d", width, hit.end, len(runes))
+			if !strings.Contains(plain, files[i].DisplayName) {
+				t.Errorf("width %d: hit line %q does not name %q", width, plain, files[i].DisplayName)
 			}
-			// The named action's own button text has to sit under the hit.
-			button := "[" + fileActions[hit.action] + "]"
-			if got := string(runes[hit.start:hit.end]); got != button {
-				t.Errorf("width %d: hit covers %q, want %q (line %q)", width, got, button, plain)
+			if seen[hit.fileID] {
+				t.Errorf("width %d: duplicate hit for %s", width, hit.fileID)
 			}
-			key := hit.fileID + ":" + fileActions[hit.action]
-			if seen[key] {
-				t.Errorf("width %d: duplicate hit for %s", width, key)
-			}
-			seen[key] = true
+			seen[hit.fileID] = true
 		}
 	}
 }
@@ -261,40 +296,36 @@ func TestFileViewerEscHintNamesOneAction(t *testing.T) {
 	}
 }
 
-// A button press already names its action, so the view must not also auto-load
-// the file — that issued two previews for one click.
-func TestDeliveryCardButtonDoesNotDoubleLoad(t *testing.T) {
-	block := deliveryTestBlock("/project", deliveryTestFile("f1", "notes.md", "", "/project/notes.md"))
+func TestDeliveryCardFileClickPreviewsThatFile(t *testing.T) {
+	block := deliveryTestBlock("/project",
+		deliveryTestFile("f1", "notes.md", "", "/project/notes.md"),
+		deliveryTestFile("f2", "report.md", "", "/project/report.md"),
+	)
 	block.renderDeliveryCard(80)
 
 	m := &Model{width: 80, height: 40}
-	for _, hit := range block.deliveryHits {
-		if hit.action != 3 { // Copy path; it does not load content.
-			continue
-		}
-		cmd, handled := m.activateDeliveryCard(block, hit.line, hit.start)
-		if !handled || cmd == nil {
-			t.Fatal("copy-path button did not dispatch")
-		}
-		if m.fileViewer.showing {
-			t.Error("pressing a button also started a preview load")
-		}
-		if m.fileViewer.selected != 0 || len(m.fileViewer.files) != 1 {
-			t.Errorf("button did not select its file: selected=%d files=%d", m.fileViewer.selected, len(m.fileViewer.files))
-		}
-		return
+	if len(block.deliveryHits) != 2 {
+		t.Fatalf("hits = %d, want 2", len(block.deliveryHits))
 	}
-	t.Fatal("no Copy path hit recorded")
+	hit := block.deliveryHits[1]
+	cmd, handled := m.activateDeliveryCard(block, hit.line, hit.start)
+	if !handled || cmd == nil {
+		t.Fatal("file row did not dispatch")
+	}
+	if !m.fileViewer.open || !m.fileViewer.showing {
+		t.Fatal("file row did not open the preview")
+	}
+	if m.fileViewer.selected != 1 || len(m.fileViewer.files) != 2 {
+		t.Errorf("file row did not select its file: selected=%d files=%d", m.fileViewer.selected, len(m.fileViewer.files))
+	}
 }
 func deliveryTestApps() []desktop.Application {
 	return []desktop.Application{{ID: "app", Name: "Example"}}
 }
 
-// A click that misses every delivery button is not the card's action: the body
-// is prose about the files, and the card's own hint says "click a button".
-// Treating a miss as "show me this delivery" turned the whole card into an
-// invisible button, so a reader could not start a text selection on it.
-func TestDeliveryCardClickMissesButtonsStartsSelection(t *testing.T) {
+// A click that misses every file row is not the card's action: the body is
+// prose about the files, so it stays selectable.
+func TestDeliveryCardClickMissesRowsStartsSelection(t *testing.T) {
 	block := deliveryTestBlock("/project", deliveryTestFile("f1", "notes.md", "session note", "/project/notes.md"))
 	m := clickBlockLineContaining(t, block, 80, 24, "session note")
 
@@ -306,23 +337,18 @@ func TestDeliveryCardClickMissesButtonsStartsSelection(t *testing.T) {
 	}
 }
 
-// Pressing a rendered button still acts, even though the card body no longer
-// does.
-func TestDeliveryCardButtonClickOpensFileView(t *testing.T) {
+func TestDeliveryCardFileClickOpensPreview(t *testing.T) {
 	block := deliveryTestBlock("/project", deliveryTestFile("f1", "notes.md", "session note", "/project/notes.md"))
-	m := clickBlockLineContaining(t, block, 80, 24, "file(s) delivered")
+	m := clickBlockLineContaining(t, block, 80, 24, "file(s)")
 
-	for _, hit := range block.deliveryHits {
-		if hit.action != 0 { // Preview
-			continue
-		}
-		m.Update(tea.MouseClickMsg{X: hit.start, Y: m.viewport.offset + hit.line, Button: tea.MouseLeft})
-		if !m.fileViewer.open {
-			t.Fatal("preview button did not open the file view")
-		}
-		return
+	if len(block.deliveryHits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(block.deliveryHits))
 	}
-	t.Fatal("no Preview hit recorded")
+	hit := block.deliveryHits[0]
+	m.Update(tea.MouseClickMsg{X: hit.start, Y: m.viewport.offset + hit.line, Button: tea.MouseLeft})
+	if !m.fileViewer.open || !m.fileViewer.showing {
+		t.Fatal("file row did not open the preview")
+	}
 }
 
 // A compaction checkpoint carries the files delivered before it, but it is still

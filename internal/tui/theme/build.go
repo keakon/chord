@@ -99,6 +99,10 @@ func (s *Styles) applyBlockStyles(t Palette) {
 	s.ToolResultExpandedStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.ToolResultExpandedFg))
 
+	s.ToolFileNameStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(t.SelectedFg))
+
 	// ToolFieldConnectorStyle renders the "↳" that opens a field row. It is
 	// never bold and sits a few steps below the label's foreground, so a row
 	// reads as connector -> label -> value instead of one flat grey run.

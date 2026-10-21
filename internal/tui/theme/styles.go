@@ -26,6 +26,7 @@ type Styles struct {
 	ToolResultBoxStyle           lipgloss.Style
 	ToolResultStyle              lipgloss.Style
 	ToolResultExpandedStyle      lipgloss.Style
+	ToolFileNameStyle            lipgloss.Style
 	ToolFieldConnectorStyle      lipgloss.Style
 	ToolStatusSuccessStyle       lipgloss.Style
 	ToolStatusErrorStyle         lipgloss.Style

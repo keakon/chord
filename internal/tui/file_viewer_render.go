@@ -190,33 +190,55 @@ func (m *Model) fileViewerLayout() fileViewerPresentation {
 		}
 	} else if !v.showing {
 		p.rows = append(p.rows, "Delivered files · ↑↓ select · Enter preview")
-		for i := fileMenuStart(v.selected, height, 2); i < len(v.files) && len(p.rows) < height; i++ {
+		root, paths := deliveryDisplayPaths(v.files, m.workingDir)
+		if label := deliveryRootLabel(root); label != "" && len(p.rows)+1 < height {
+			p.rows = append(p.rows, currentStyles.DimStyle.Render("  "+fileLabel(label)+"/"))
+		}
+		if len(p.rows)+1 < height {
+			p.rows = append(p.rows, "")
+		}
+		visible := max(1, height-len(p.rows))
+		start := max(0, v.selected-visible+1)
+		for i := start; i < len(v.files) && len(p.rows) < height; i++ {
 			f := v.files[i]
-			prefix := "  "
+			path := paths[i]
+			if path == "" {
+				path = f.DisplayName
+			}
+			dir, name := deliveryPathParts(path)
+			suffix := ""
+			if dir != "" {
+				suffix += "  " + dir + "/"
+			}
+			if label := deliveryTypeLabel(f.MIME); label != "" {
+				suffix += "  " + label
+			}
 			if i == v.selected {
-				prefix = "> "
+				// Truncate before Width: lipgloss wraps content that exceeds the
+				// width, and an embedded newline would add a visual row while the
+				// hit still counted the entry as one row.
+				label := ansi.Truncate(" ▸ "+fileLabel(name)+fileLabel(suffix), width, "…")
+				p.rows = append(p.rows, currentStyles.SelectedStyle.Width(width).Render(label))
+			} else {
+				row := "   " + currentStyles.ToolFileNameStyle.Render(fileLabel(name))
+				if suffix != "" {
+					row += currentStyles.DimStyle.Render(fileLabel(suffix))
+				}
+				p.rows = append(p.rows, row)
 			}
-			p.hits = append(p.hits, fileViewerHit{kind: fileHitEntry, row: len(p.rows), end: width, index: i})
-			p.rows = append(p.rows, prefix+fileLabel(f.DisplayName)+" · "+fileLabel(f.MIME))
-			// The card body shows the working-directory-relative path, so the
-			// list must not contradict it with an absolute one. Copy path and
-			// the external-open actions still resolve the absolute path.
-			if path := deliveryDisplayPath(f, m.workingDir); path != "" && len(p.rows) < height {
-				p.hits = append(p.hits, fileViewerHit{kind: fileHitEntry, row: len(p.rows), end: width, index: i})
-				p.rows = append(p.rows, "  "+fileLabel(path))
-			}
+			p.hits = append(p.hits, fileViewerHit{kind: fileHitEntry, row: len(p.rows) - 1, end: width, index: i})
 		}
 	} else if len(v.files) > 0 {
 		f := v.files[v.selected]
-		version := "Current file"
-		if f.Locator.Kind == message.FileLocatorArtifact {
-			version = "Declared version"
-		}
 		mode := "source"
 		if !m.fileViewerSourceMode() {
 			mode = "Markdown"
 		}
-		p.rows = append(p.rows, fileLabel(f.DisplayName)+" · "+version+" · "+mode)
+		version := ""
+		if f.Locator.Kind == message.FileLocatorArtifact {
+			version = " · Declared version"
+		}
+		p.rows = append(p.rows, fileLabel(f.DisplayName)+version+" · "+mode)
 		for i := v.offset; i < len(v.lines) && len(p.rows) < height; i++ {
 			lines := m.fileViewerVisualLines(i)
 			start := 0
@@ -232,6 +254,9 @@ func (m *Model) fileViewerLayout() fileViewerPresentation {
 	p.rows = append(p.rows, fileLabel(v.note))
 	buttons, indexes := viewerActionButtons(v.showing)
 	actions, hits := wrapActionButtons(buttons, width)
+	for i := range actions {
+		actions[i] = currentStyles.KeyHintStyle.Render(actions[i])
+	}
 	for i, h := range hits {
 		p.hits = append(p.hits, fileViewerHit{kind: fileHitAction, row: len(p.rows) + h[0], start: h[1], end: min(width, h[2]), index: indexes[i]})
 	}
