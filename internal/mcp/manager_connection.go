@@ -438,8 +438,10 @@ func (m *Manager) Unload() {
 	m.publish()
 }
 
-// retireAllLocked retires every entry and returns the clients no in-flight lease
-// still holds; callers close them after releasing m.mu.
+// retireAllLocked retires every entry and returns the clients to close once m.mu
+// is released. A client an in-flight lease still holds is force-detached rather
+// than left to Release: shutdown and idle unload both need the connection gone,
+// and the later Release only drops the retained entry without closing it again.
 func (m *Manager) retireAllLocked(reason RetireReason) []*Client {
 	var clients []*Client
 	for name := range m.entries {

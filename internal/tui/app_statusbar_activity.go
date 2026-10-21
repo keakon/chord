@@ -475,10 +475,5 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 		pillParts = append(pillParts, formatStatusBarTransportProgress(status.Bytes, status.Events))
 	}
 
-	// Handle terminal states (1-2s flush window)
-	if status.Terminal != "" {
-		return currentStyles.StatusHintStyle.Render(strings.Join(pillParts, " "))
-	}
-
 	return currentStyles.StatusHintStyle.Render(strings.Join(pillParts, " "))
 }

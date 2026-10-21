@@ -516,7 +516,8 @@ func TestRenderConfirmOptionsIncludesDenyReason(t *testing.T) {
 
 func TestConfirmOptionsShareOneRowWhenWidthAllows(t *testing.T) {
 	// The dialog caps its width at 90 columns, leaving 86 for content. All five
-	// options fit in 81, so they must not wrap and leave the right side unused.
+	// options occupy 80 columns, so they must not wrap and leave the right side
+	// unused.
 	m := NewModelWithSize(nil, 120, 40)
 	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo hi"}`}
 
