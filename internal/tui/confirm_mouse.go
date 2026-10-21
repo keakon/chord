@@ -101,9 +101,6 @@ func layoutConfirmOptionRows(specs []confirmOptionSpec, width int) []confirmOpti
 		lineWidth = 0
 	}
 	for _, spec := range specs {
-		if spec.action == confirmDialogView || spec.action == confirmDialogEdit {
-			flush()
-		}
 		optionWidth := ansi.StringWidth(renderConfirmOption(spec))
 		if len(current.options) > 0 && lineWidth+2+optionWidth > width {
 			flush()
