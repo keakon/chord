@@ -85,6 +85,7 @@ export default defineConfig({
           translations: { 'zh-CN': '扩展与集成' },
           items: [
             { slug: 'customization', translations: { 'zh-CN': '扩展与定制' } },
+            { slug: 'external-agents', translations: { 'zh-CN': '外部 Agent' } },
             { slug: 'hooks', translations: { 'zh-CN': 'Hooks' } },
             { slug: 'headless', translations: { 'zh-CN': 'Headless 集成' } },
             { slug: 'acp', translations: { 'zh-CN': 'ACP Agent 模式' } },

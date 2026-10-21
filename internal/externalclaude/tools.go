@@ -10,13 +10,13 @@ import (
 // table drives permission evaluation and TUI card selection.
 type Mapping struct {
 	ChordName string
-	Degraded  bool
 }
 
 // MapTool translates a Claude tool name and input into the Chord tool name and
 // chord-shaped input. ok is false when Chord has no equivalent; such calls are
 // shown as generic cards and are never auto-allowed by a chord ruleset match.
 func MapTool(claudeName string, input json.RawMessage) (mapping Mapping, chordInput json.RawMessage, ok bool) {
+	claudeName = NormalizeToolName(claudeName)
 	switch claudeName {
 	case "Read":
 		return Mapping{ChordName: toolname.Read}, remapFields(input, map[string]string{"file_path": "path"}), true
@@ -25,7 +25,8 @@ func MapTool(claudeName string, input json.RawMessage) (mapping Mapping, chordIn
 	case "Write":
 		return Mapping{ChordName: toolname.Write}, remapFields(input, map[string]string{"file_path": "path"}), true
 	case "NotebookEdit":
-		return Mapping{ChordName: "NotebookEdit", Degraded: true}, input, false
+		return Mapping{ChordName: toolname.NotebookEdit},
+			remapFields(input, map[string]string{"notebook_path": "path"}), true
 	case "AskUserQuestion":
 		return Mapping{ChordName: toolname.Question}, input, true
 	case "Bash":

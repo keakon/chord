@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -20,6 +21,14 @@ func (w *externalWorker) persistExternalSessionLocked() error {
 	}
 	record.ExternalSession.Inputs = slices.Clone(w.inputs)
 	record.ExternalSession.ProcessEnded = w.processEnded
+	record.ExternalSession.RunID = w.runID
+	if w.baseline != nil {
+		baseline := *w.baseline
+		record.ExternalSession.Baseline = &baseline
+	} else {
+		record.ExternalSession.Baseline = nil
+	}
+	record.UpdatedAt = time.Now()
 	if err := w.parent.persistTaskRegistryRecord(owner.dir, w.taskID, record); err != nil {
 		w.persistence.markDegraded(err)
 		return fmt.Errorf("persist external input state: %w", err)

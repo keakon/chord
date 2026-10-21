@@ -20,7 +20,7 @@ const (
 	QuestionStatusAccepted        = "accepted"
 	QuestionStatusResolved        = "resolved"
 	QuestionStatusWaitInterrupted = "wait_interrupted"
-	MaxQuestionBatch              = 3
+	MaxQuestionBatch              = 4
 	MaxPendingQuestions           = 32
 	MaxQuestionTextBytes          = 8192
 	MaxQuestionOptions            = 16

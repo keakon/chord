@@ -325,6 +325,7 @@ func TestControlFrames(t *testing.T) {
 func TestMapTool(t *testing.T) {
 	tests := []struct {
 		name       string
+		claudeName string
 		input      string
 		wantName   string
 		wantOK     bool
@@ -372,6 +373,15 @@ func TestMapTool(t *testing.T) {
 			goneFields: []string{"path", "glob"},
 		},
 		{
+			name:       "notebook_edit",
+			claudeName: "NotebookEdit",
+			input:      `{"notebook_path":"/tmp/a.ipynb","cell_id":"cell-1","new_source":"print(1)","cell_type":"code"}`,
+			wantName:   toolname.NotebookEdit,
+			wantOK:     true,
+			wantFields: map[string]string{"path": `"/tmp/a.ipynb"`, "cell_id": `"cell-1"`, "new_source": `"print(1)"`},
+			goneFields: []string{"notebook_path"},
+		},
+		{
 			name:     "unknown",
 			input:    `{"foo":"bar"}`,
 			wantOK:   false,
@@ -380,7 +390,11 @@ func TestMapTool(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mapping, input, ok := MapTool(mapToolName(tc.wantName), json.RawMessage(tc.input))
+			claudeName := tc.claudeName
+			if claudeName == "" {
+				claudeName = mapToolName(tc.wantName)
+			}
+			mapping, input, ok := MapTool(claudeName, json.RawMessage(tc.input))
 			if ok != tc.wantOK {
 				t.Fatalf("MapTool() ok = %v, want %v", ok, tc.wantOK)
 			}

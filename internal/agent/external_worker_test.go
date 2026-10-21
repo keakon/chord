@@ -280,6 +280,97 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"c
 	}
 }
 
+func TestExternalWorkerKeepsStreamSegmentsAlignedWithAssistantMessages(t *testing.T) {
+	root := t.TempDir()
+	script := writeFakeClaude(t, `
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"55555555-5555-4555-8555-555555555555"}'
+printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"first "}}}'
+printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"answer"}}}'
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"first answer"},{"type":"tool_use","id":"toolu_first","name":"Read","input":{"file_path":"README.md"}}]}}'
+printf '%s\n' '{"type":"control_request","request_id":"perm-1","request":{"subtype":"can_use_tool","tool_name":"Read","input":{"file_path":"README.md"},"tool_use_id":"toolu_first"}}'
+IFS= read -r line
+printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_first","content":"ok"}]}}'
+printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"second answer"}}}'
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"second answer"}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"second answer"}'
+`)
+	a := newTestMainAgent(t, root)
+	configureExternalTestRuntime(t, a, script, `"*": allow`)
+	a.agentConfigs["external-worker"].Backend.LaunchArgs = []string{"--include-partial-messages"}
+
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{
+		Description: "stream two assistant messages",
+		AgentType:   "external-worker",
+	})
+	if err != nil {
+		t.Fatalf("CreateSubAgent: %v", err)
+	}
+	a.setFocusedTaskID(handle.TaskID)
+	t.Cleanup(func() { a.setFocusedTaskID("") })
+	record := driveExternalTask(t, a, handle.TaskID)
+	if record.State != string(SubAgentStateCompleted) {
+		t.Fatalf("task state = %q, want completed", record.State)
+	}
+
+	type streamStep struct {
+		kind   string
+		text   string
+		seq    uint64
+		isTool bool
+	}
+	var steps []streamStep
+	for len(a.outputCh) > 0 {
+		switch event := (<-a.outputCh).(type) {
+		case ToolCallStartEvent:
+			if event.ID == "toolu_first" {
+				steps = append(steps, streamStep{kind: "tool", isTool: true})
+			}
+		case StreamTextCommitEvent:
+			if event.AgentID == handle.AgentID {
+				steps = append(steps, streamStep{kind: "commit", text: event.Text, seq: event.RequestSeq})
+			}
+		case StreamSegmentEndedEvent:
+			if event.AgentID == handle.AgentID {
+				steps = append(steps, streamStep{kind: "end", seq: event.RequestSeq})
+			}
+		}
+	}
+	var commits []streamStep
+	toolAt := -1
+	for i, step := range steps {
+		if step.isTool {
+			toolAt = i
+		}
+		if step.kind == "commit" {
+			commits = append(commits, step)
+		}
+	}
+	if len(commits) != 2 {
+		t.Fatalf("commits = %+v, want one per assistant message", commits)
+	}
+	if commits[0].text != "first answer" || commits[1].text != "second answer" {
+		t.Fatalf("commit texts = %q, %q; want first/second answer", commits[0].text, commits[1].text)
+	}
+	if commits[0].seq == commits[1].seq {
+		t.Fatalf("both messages committed into request seq %d; want a fresh segment per message", commits[0].seq)
+	}
+	if toolAt < 0 {
+		t.Fatal("tool call event missing")
+	}
+	firstCommitAt, secondCommitAt := -1, -1
+	for i, step := range steps {
+		if step.kind == "commit" && step.text == "first answer" {
+			firstCommitAt = i
+		}
+		if step.kind == "commit" && step.text == "second answer" {
+			secondCommitAt = i
+		}
+	}
+	if !(firstCommitAt < toolAt && toolAt < secondCommitAt) {
+		t.Fatalf("stream order = %+v; want first text, tool card, second text", steps)
+	}
+}
+
 func TestExternalWorkerDoesNotReusePreviousTurnText(t *testing.T) {
 	root := t.TempDir()
 	script := writeFakeClaude(t, `
@@ -538,5 +629,57 @@ func TestExternalStartupRequiresDurableProcessState(t *testing.T) {
 				t.Fatal("failed initialization submitted input or left a process")
 			}
 		})
+	}
+}
+
+func TestExternalWorkerIgnoresNestedAgentText(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureExternalTestRuntime(t, a, "claude", `"*": allow`)
+	w, err := a.newExternalWorker(externalWorkerConfig{
+		agentDef: a.agentConfigs["external-worker"], instanceID: "external-1", taskID: "task-1",
+		ctx: context.Background(), cancel: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested := externalclaude.Event{
+		Type:            externalclaude.TypeAssistant,
+		ParentToolUseID: "agent-call",
+		Message: &externalclaude.Message{Content: []externalclaude.ContentBlock{{
+			Type: "text", Text: "nested plan",
+		}}},
+	}
+	if terminal, _ := w.handleExternalEvent(nested); terminal {
+		t.Fatal("nested assistant text terminated the task")
+	}
+	if text := w.lastAssistantText(); text != "" {
+		t.Fatalf("nested assistant text became the task answer: %q", text)
+	}
+	nestedStream := externalclaude.Event{
+		Type:            externalclaude.TypeStreamEvent,
+		ParentToolUseID: "agent-call",
+		StreamEvent: &externalclaude.StreamEvent{Type: "content_block_delta", Delta: &externalclaude.StreamDelta{
+			Type: "text_delta", Text: "nested delta",
+		}},
+	}
+	if terminal, _ := w.handleExternalEvent(nestedStream); terminal {
+		t.Fatal("nested stream text terminated the task")
+	}
+	for _, msg := range w.messageSnapshot() {
+		if strings.Contains(msg.Content, "nested") {
+			t.Fatalf("nested text reached the task transcript: %q", msg.Content)
+		}
+	}
+	topLevel := externalclaude.Event{
+		Type: externalclaude.TypeAssistant,
+		Message: &externalclaude.Message{Content: []externalclaude.ContentBlock{{
+			Type: "text", Text: "top-level answer",
+		}}},
+	}
+	if terminal, _ := w.handleExternalEvent(topLevel); terminal {
+		t.Fatal("top-level assistant text terminated the task")
+	}
+	if text := w.lastAssistantText(); text != "top-level answer" {
+		t.Fatalf("top-level answer = %q", text)
 	}
 }

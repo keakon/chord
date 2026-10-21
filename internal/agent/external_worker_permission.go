@@ -18,6 +18,41 @@ type externalPermissionRequest struct {
 	cancel context.CancelFunc
 }
 
+// externalPermissionOutcome remembers the answer to a request id. Claude Code
+// can repeat a control request when it did not receive the first response;
+// replaying the decision keeps that retry from hanging while still refusing a
+// second authorization for the same tool call.
+type externalPermissionOutcome struct {
+	frame externalclaude.Frame
+	done  bool
+}
+
+// externalPermissionOutcomeLimit bounds the replay cache. A replayed request id
+// is rare, but every recorded outcome holds a complete frame including the
+// tool's full input, so an unbounded cache grows with the worker's whole tool
+// history.
+const externalPermissionOutcomeLimit = 64
+
+// pruneExternalPermissionOutcomesLocked drops settled outcomes once the cache
+// is over its limit. Dropping one only costs a re-evaluation if the CLI replays
+// that exact id, and a re-evaluation asks again rather than reusing a decision,
+// so the fallback stays fail-closed. Callers must hold permissionMu.
+func pruneExternalPermissionOutcomesLocked(outcomes map[string]*externalPermissionOutcome) {
+	for len(outcomes) > externalPermissionOutcomeLimit {
+		dropped := false
+		for id, outcome := range outcomes {
+			if outcome != nil && outcome.done {
+				delete(outcomes, id)
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			return
+		}
+	}
+}
+
 type externalToolBinding struct {
 	fingerprint [32]byte
 	requested   bool
@@ -47,11 +82,16 @@ func (w *externalWorker) bindExternalTool(id, name string, input json.RawMessage
 
 func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 	w.permissionMu.Lock()
-	if w.permissionSeen[event.RequestID] {
+	if outcome := w.permissionOutcomes[event.RequestID]; outcome != nil {
+		frame, done := outcome.frame, outcome.done
 		w.permissionMu.Unlock()
+		if done {
+			w.redeliverExternalPermission(frame)
+		}
 		return
 	}
-	w.permissionSeen[event.RequestID] = true
+	outcome := &externalPermissionOutcome{}
+	w.permissionOutcomes[event.RequestID] = outcome
 	ctx, cancel := context.WithCancel(w.ctx)
 	w.permissionRequests[event.RequestID] = externalPermissionRequest{cancel: cancel}
 	w.permissionWG.Add(1)
@@ -61,6 +101,15 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 		frame := w.evaluateExternalPermission(ctx, event)
 		w.permissionMu.Lock()
 		_, active := w.permissionRequests[event.RequestID]
+		if active {
+			delete(w.permissionRequests, event.RequestID)
+		}
+		if len(w.permissionRequests) == 0 && w.State() == SubAgentStateWaitingMain {
+			w.setState(SubAgentStateRunning, "external agent running")
+		}
+		w.permissionMu.Unlock()
+		// The write can block on stdin backpressure, so it must not hold the lock
+		// that result handling needs to inspect pending permissions.
 		writeFailed := false
 		if active && ctx.Err() == nil {
 			writeCtx, writeCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -69,15 +118,28 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 			}
 			writeCancel()
 		}
-		delete(w.permissionRequests, event.RequestID)
-		cancel()
-		if len(w.permissionRequests) == 0 && w.State() == SubAgentStateWaitingMain {
-			w.setState(SubAgentStateRunning, "external agent running")
-		}
+		w.permissionMu.Lock()
+		outcome.frame, outcome.done = frame, true
+		pruneExternalPermissionOutcomesLocked(w.permissionOutcomes)
 		w.permissionMu.Unlock()
+		cancel()
 		if writeFailed {
 			w.teardown()
 		}
+	}()
+}
+
+func (w *externalWorker) redeliverExternalPermission(frame externalclaude.Frame) {
+	session := w.currentSession()
+	if session == nil {
+		return
+	}
+	w.permissionWG.Add(1)
+	go func() {
+		defer w.permissionWG.Done()
+		ctx, cancel := context.WithTimeout(w.ctx, 5*time.Second)
+		defer cancel()
+		_ = session.WriteFrameContext(ctx, frame)
 	}()
 }
 
@@ -130,12 +192,14 @@ func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event e
 	}
 	mapping, chordInput, mapped := externalclaude.MapTool(request.ToolName, request.Input)
 	name, args := request.ToolName, request.Input
+	evaluationName := externalclaude.NormalizeToolName(request.ToolName)
 	if mapped {
 		name, args = mapping.ChordName, chordInput
+		evaluationName = mapping.ChordName
 	}
-	decision := evaluateToolPermissionInDir(w.currentRuleset(), name, args, w.pathScope())
-	action := normalizeToolPermissionAction(name, decision.Action)
-	if !mapped && !w.currentRuleset().LastSpecificToolMatch(name, decision.MatchArgument).Found {
+	decision := evaluateToolPermissionInDir(w.currentRuleset(), evaluationName, args, w.pathScope())
+	action := normalizeToolPermissionAction(evaluationName, decision.Action)
+	if !mapped && !w.currentRuleset().LastSpecificToolMatch(evaluationName, decision.MatchArgument).Found {
 		return deny("external tool requires an explicit role rule")
 	}
 	if action == permission.ActionDeny {
@@ -143,7 +207,7 @@ func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event e
 	}
 	ctx = withRulePathScope(tools.WithTaskID(tools.WithAgentID(ctx, w.instanceID), w.taskID), w.pathScope())
 	ctx = tools.WithToolCallID(ctx, request.ToolUseID)
-	if action == permission.ActionAsk || request.ToolName == "ExitPlanMode" {
+	if action == permission.ActionAsk || evaluationName == "ExitPlanMode" {
 		w.setState(SubAgentStateWaitingMain, externalPermissionSummary(request.ToolName))
 		response, err := w.parent.AwaitConfirmWithRuleContext(ctx, name, string(args), externalPermissionTimeout,
 			decision.NeedsApprovalPaths, decision.AlreadyAllowedPaths, decision.NeedsApprovalRules, decision.AlreadyAllowedRules,
@@ -163,7 +227,7 @@ func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event e
 		}
 	}
 	updatedInput := request.Input
-	if request.ToolName == "AskUserQuestion" {
+	if evaluationName == tools.NameQuestion {
 		w.setState(SubAgentStateWaitingMain, externalPermissionSummary(request.ToolName))
 		var err error
 		updatedInput, err = w.answerExternalQuestion(ctx, request.Input)
@@ -171,7 +235,7 @@ func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event e
 			return deny("external question cancelled or unavailable")
 		}
 	}
-	if ctx.Err() != nil || evaluateToolPermissionInDir(w.currentRuleset(), name, args, w.pathScope()).Action == permission.ActionDeny {
+	if ctx.Err() != nil || evaluateToolPermissionInDir(w.currentRuleset(), evaluationName, args, w.pathScope()).Action == permission.ActionDeny {
 		return deny("external permission no longer valid")
 	}
 	w.externalToolStateMu.Lock()

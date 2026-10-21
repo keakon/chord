@@ -69,6 +69,9 @@ type externalWorker struct {
 	inputs           []externalTaskInput
 	inputSeq         uint64
 	processEnded     bool
+	// runID is the last supervisor run persisted for this task. It is written
+	// before the launch so a receipt names exactly one run.
+	runID string
 
 	rulesetMu sync.RWMutex
 	ruleset   permission.Ruleset
@@ -122,7 +125,7 @@ type externalWorker struct {
 	permissionMu        sync.Mutex
 	permissionWG        sync.WaitGroup
 	permissionRequests  map[string]externalPermissionRequest
-	permissionSeen      map[string]bool
+	permissionOutcomes  map[string]*externalPermissionOutcome
 	historyMu           sync.Mutex
 	ctxMgr              *ctxmgr.Manager
 
@@ -196,7 +199,7 @@ func (a *MainAgent) newExternalWorker(cfg externalWorkerConfig) (*externalWorker
 		toolBindings:       make(map[string]*externalToolBinding),
 		ctxMgr:             ctxmgr.NewManager(0, 0),
 		permissionRequests: make(map[string]externalPermissionRequest),
-		permissionSeen:     make(map[string]bool),
+		permissionOutcomes: make(map[string]*externalPermissionOutcome),
 	}
 	worker.sessionEpoch = a.recoverySessionEpoch()
 	if err := worker.ensureSessionID(); err != nil {
@@ -384,7 +387,7 @@ func (w *externalWorker) buildTaskRecord(previous *DurableTaskRecord, closedReas
 		SessionID: w.currentSessionID(),
 		WorkDir:   w.workDir, WorkDirState: w.workDirState, Prompt: strings.TrimSpace(w.agentDef.SystemPrompt + "\n\n" + w.agentDef.PromptAppend),
 		Command: w.backend.EffectiveCommand(), LaunchArgs: slices.Clone(w.backend.LaunchArgs),
-		EnvKeys: envKeys, ProcessEnded: w.processEnded, Inputs: slices.Clone(w.inputs),
+		EnvKeys: envKeys, ProcessEnded: w.processEnded, RunID: w.runID, Inputs: slices.Clone(w.inputs),
 		Baseline: w.baseline,
 	}
 	w.promptMu.Unlock()

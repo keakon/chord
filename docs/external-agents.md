@@ -62,6 +62,7 @@ Chord owns the protocol, session identity, and permission channel:
 [--session-id <uuid> | --resume <uuid>] --permission-prompt-tool stdio
 --permission-mode default --safe-mode --restricted
 --setting-sources "" --strict-mcp-config --mcp-config '{"mcpServers":{}}'
+--tools <managed tools> --settings <managed settings JSON>
 ```
 
 Supported `launch_args` are `--model`, `--effort`, `--max-turns`, `--max-budget-usd`, `--include-partial-messages`, `--replay-user-messages`, and additional tool prohibitions through `--disallowedTools` / `--disallowed-tools`. Long options also accept `--flag=value`.
@@ -76,11 +77,22 @@ Every `can_use_tool` request is translated into Chord's tool names and arguments
 
 - `allow`: Chord answers without a prompt.
 - `deny`: Chord denies execution and saves a terminal tool record.
-- `ask`: a confirmation is bound to the subagent. Timeout, cancellation, or persistence failure does not approve execution. Edited arguments require a new external tool request.
+- `ask`: a confirmation is bound to the subagent. Timeout, cancellation, or persistence failure does not approve execution. A request left unanswered for five minutes is denied. Edited arguments require a new external tool request.
 
-The managed set contains Read, Edit, Write, NotebookEdit, Bash, Glob, Grep, WebFetch, WebSearch, TodoWrite, Agent, AskUserQuestion, and ExitPlanMode. Unmapped tools require an explicit role rule using their original name; wildcard `allow` does not allow them. `AskUserQuestion` uses Chord's question UI and returns answers to Claude. `ExitPlanMode` always requests confirmation and does not switch Chord's main role.
+Path rules apply to file tools, including NotebookEdit's `notebook_path`. Nest the path pattern under the tool name; a top-level key is always matched against the tool name, not its arguments. For example:
 
-Claude can reject a tool before requesting host authorization. TodoWrite is unavailable in the current managed mode, and ExitPlanMode is rejected outside plan mode. Chord does not bypass these restrictions.
+```yaml
+permission:
+  "*": deny
+  NotebookEdit:
+    "notes/*.ipynb": allow
+```
+
+This allows NotebookEdit only for notebooks under `notes/`, matching the same paths as an Edit rule. A `question` rule that resolves to `ask` is treated as `allow`: the question UI itself is the confirmation.
+
+The managed set contains Read, Edit, Write, NotebookEdit, Bash, Glob, Grep, WebFetch, WebSearch, TodoWrite, Agent, AskUserQuestion, and ExitPlanMode. Claude's `Task` spelling is accepted as an alias for `Agent`. Unmapped tools require an explicit role rule using their original name; wildcard `allow` does not allow them. `AskUserQuestion` uses Chord's question UI, answers up to four questions per call, and returns the answers to Claude. `ExitPlanMode` asks the user and does not switch Chord's main role; in `default` permission mode Claude rejects it as unavailable before any host authorization.
+
+Claude can reject a tool before requesting host authorization; TodoWrite is unavailable in the current managed mode. Chord does not bypass these restrictions.
 
 Chord disables project and user customization, hooks, external MCP, plugins, and sandbox auto-approval. The command and administrator policy remain trusted boundaries; role permissions are not an operating-system sandbox. Shell rules use last-match precedence: `git *` is not read-only, and `go test` executes repository code.
 
@@ -127,12 +139,12 @@ backend:
 
 - The external model call does not use Chord model pools or key rotation and does not produce Chord usage statistics.
 - Chord sends `interrupt`, closes input, and gives the CLI a short grace period to flush its transcript and exit before terminating the process group. Existing changes are not rolled back; tools without a receipt show an unknown outcome.
-- Every external worker is backed by a dedicated supervisor process that owns its process group. If Chord is forcibly killed, the supervisor sees the lifecycle channel close and tears that group down, leaving a minimal lifecycle receipt under `external-supervisor/` in the state directory; a run Chord settled itself deletes its receipt. If Chord and the supervisor are killed together nothing guarantees cleanup, so such a receipt has to be checked by run id. Resume checks do not clean up orphaned processes.
+- Every external worker is backed by a dedicated supervisor process that owns its process group. If Chord is forcibly killed, the supervisor sees the lifecycle channel close and tears that group down, leaving a lifecycle receipt named after the run under `external-supervisor/` in the state directory. Chord writes a receipt for every run, including runs it settled itself: reading the exit report does not prove Chord persisted it. Receipts older than 30 days are pruned. If Chord and the supervisor are killed together nothing guarantees cleanup, so the receipt may be missing or may describe a run that never proved cleanup. Resume does not clean up orphaned processes; it only accepts the receipt of the exact run the task last launched.
 - Pause is not supported. Stop and restart the task instead.
 - Only one input runs at a time. Incoming messages are durably queued; messages received after sealing run in a new attempt on the same task after the old process exits and settles. Targeted messages to completed tasks resume their session. Cancelled tasks must be delegated again.
 - Hooks, skills, and compaction do not apply to the external process. Result contracts do: the declared `result_schema` is delivered to the process as part of its role instructions at initialization, and the final answer must be a single JSON object satisfying it. An answer that is not a JSON object, or that misses what the schema requires, fails the task with the violations named.
 - Deleting a Chord session does not delete the external session transcript under your home directory; Chord lists the pinned session ids it leaves behind.
 - External subagents accept text input only, not images or PDFs.
-- Resume requires an existing external session, proven old-process termination, no input with an unknown outcome, and unchanged command, arguments, environment keys, role instructions, and working-directory binding. Credentials are resolved again from the current environment. Chord refuses automatic replay when process termination or input outcome is unknown after a crash.
+- Resume requires an existing external session, proven old-process termination, no input with an unknown outcome, and unchanged command, arguments, environment keys, role instructions, and working-directory binding. Credentials are resolved again from the current environment. After a crash, the task persists the supervisor run id before each launch; resume reads the receipt named after that exact run and accepts it only when it records proven process-group cleanup. A missing, malformed, version-mismatched, or unproven receipt keeps resume refused.
 - Chord's workspace lease serializes writes only for tools Chord executes itself. Tools of an external backend run inside the CLI process, so writes from an external worker and any other writer are not serialized against each other; give overlapping work separate checkouts.
 - Completion reports the checkout path, branch, and base commit, plus a diff stat against that base when the checkout was clean at startup. Chord does not track which files the external agent changed: the checkout is shared and other processes may write it too, so inspect the diff against the reported base commit instead.

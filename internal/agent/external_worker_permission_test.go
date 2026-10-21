@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -103,8 +105,100 @@ func TestExternalToolDenyIsIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := w.derivedDisallowedTools()
-	if len(got) != 1 || got[0] != "Edit" {
-		t.Fatalf("disallowed = %v", got)
+	// Agent and ExitPlanMode have no Chord equivalent, so evaluateExternalPermission
+	// only authorizes them through a rule naming the Claude tool. Without one the
+	// call can never succeed and the tool must not stay visible.
+	for _, want := range []string{"Edit", "Agent", "ExitPlanMode"} {
+		if !slices.Contains(got, want) {
+			t.Fatalf("disallowed = %v, want %s", got, want)
+		}
+	}
+	for _, kept := range []string{"Read", "Write", "Bash", "AskUserQuestion"} {
+		if slices.Contains(got, kept) {
+			t.Fatalf("disallowed = %v, must keep %s", got, kept)
+		}
+	}
+}
+
+func TestExternalNamedRuleKeepsUnmappedToolVisible(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureExternalTestRuntime(t, a, "claude", "\"*\": deny\nAgent: allow")
+	w, err := a.newExternalWorker(externalWorkerConfig{agentDef: a.agentConfigs["external-worker"], instanceID: "external-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := w.derivedDisallowedTools(); slices.Contains(got, "Agent") {
+		t.Fatalf("a rule naming Agent must keep it visible: %v", got)
+	}
+}
+
+func TestExternalPermissionOutcomeCacheIsBounded(t *testing.T) {
+	outcomes := make(map[string]*externalPermissionOutcome)
+	for i := 0; i <= externalPermissionOutcomeLimit+5; i++ {
+		outcomes[strconv.Itoa(i)] = &externalPermissionOutcome{done: true}
+	}
+	pending := &externalPermissionOutcome{}
+	outcomes["pending"] = pending
+	pruneExternalPermissionOutcomesLocked(outcomes)
+	if len(outcomes) > externalPermissionOutcomeLimit {
+		t.Fatalf("cache = %d entries, want at most %d", len(outcomes), externalPermissionOutcomeLimit)
+	}
+	if outcomes["pending"] != pending {
+		t.Fatal("an unsettled outcome must never be pruned")
+	}
+}
+
+func TestExternalTaskAliasUsesAgentRules(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureExternalTestRuntime(t, a, "claude", "\"*\": deny\nAgent: allow")
+	w, err := a.newExternalWorker(externalWorkerConfig{
+		agentDef: a.agentConfigs["external-worker"], instanceID: "external-1", taskID: "task-1",
+		ctx: context.Background(), cancel: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := w.evaluateExternalPermission(context.Background(), externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
+		ToolName: "Task", ToolUseID: "agent-call",
+		Input: json.RawMessage(`{"description":"inspect","prompt":"Inspect the fixture.","subagent_type":"Explore"}`),
+	}})
+	var decision externalclaude.PermissionDecision
+	if err := json.Unmarshal(frame.Response.Response, &decision); err != nil {
+		t.Fatal(err)
+	}
+	if decision.Behavior != externalclaude.PermissionBehaviorAllow {
+		t.Fatalf("Task alias did not use the Agent rule: %+v", decision)
+	}
+}
+
+func TestExternalNotebookEditUsesPathRules(t *testing.T) {
+	root := t.TempDir()
+	a := newTestMainAgent(t, root)
+	configureExternalTestRuntime(t, a, "claude", "\"*\": deny\nNotebookEdit:\n  \"notes/*.ipynb\": allow")
+	w, err := a.newExternalWorker(externalWorkerConfig{
+		agentDef: a.agentConfigs["external-worker"], instanceID: "external-1", taskID: "task-1",
+		workDir: root, ctx: context.Background(), cancel: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluate := func(id, path string) externalclaude.PermissionDecision {
+		t.Helper()
+		frame := w.evaluateExternalPermission(context.Background(), externalclaude.Event{RequestID: id, Request: &externalclaude.ControlRequest{
+			ToolName: "NotebookEdit", ToolUseID: id,
+			Input: json.RawMessage(`{"notebook_path":` + strconv.Quote(path) + `,"cell_id":"cell-1","new_source":"print(1)"}`),
+		}})
+		var decision externalclaude.PermissionDecision
+		if err := json.Unmarshal(frame.Response.Response, &decision); err != nil {
+			t.Fatal(err)
+		}
+		return decision
+	}
+	if decision := evaluate("allowed", filepath.Join(root, "notes", "a.ipynb")); decision.Behavior != externalclaude.PermissionBehaviorAllow {
+		t.Fatalf("notebook inside the allowed path was not approved: %+v", decision)
+	}
+	if decision := evaluate("denied", filepath.Join(root, "other.ipynb")); decision.Behavior != externalclaude.PermissionBehaviorDeny {
+		t.Fatalf("notebook outside the allowed path was approved: %+v", decision)
 	}
 }
 
@@ -184,7 +278,12 @@ func TestExternalQuestionMultipleAndCustomAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := json.RawMessage(`{"questions":[{"header":"Options","question":"Choose options","multiSelect":true,"options":[{"label":"Alpha","description":"First"},{"label":"Beta","description":"Second"}]},{"header":"Text","question":"Provide a value","options":[{"label":"Default","description":"Default value"}]}]}`)
+	input := json.RawMessage(`{"questions":[
+		{"header":"Options","question":"Choose options","multiSelect":true,"options":[{"label":"Alpha","description":"First"},{"label":"Beta","description":"Second"}]},
+		{"header":"Text","question":"Provide a value","options":[{"label":"Default","description":"Default value"}]},
+		{"header":"Level","question":"Pick a level","options":[{"label":"Low","description":"Low"},{"label":"High","description":"High"}]},
+		{"header":"Notes","question":"Add notes","options":[{"label":"Default","description":"Default notes"}]}
+	]}`)
 	done := make(chan externalclaude.Frame, 1)
 	go func() {
 		done <- w.evaluateExternalPermission(ctx, externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
@@ -196,17 +295,24 @@ func TestExternalQuestionMultipleAndCustomAnswers(t *testing.T) {
 		select {
 		case event := <-a.eventCh:
 			a.dispatch(event)
-			if !answered && len(a.questions.records) == 2 {
-				// Answer the second question first to verify that delivery
-				// order does not replace the original question association.
-				for _, header := range []string{"Text", "Options"} {
+			if !answered && len(a.questions.records) == 4 {
+				// Answer in reverse order to verify that delivery order does not
+				// replace the original question association.
+				for _, header := range []string{"Notes", "Level", "Text", "Options"} {
 					for id, q := range a.questions.records {
 						if q.Item.Header != header {
 							continue
 						}
-						op := QuestionOperation{Operation: QuestionOpAnswer, QuestionID: id, Answers: []string{"1", "0"}}
+						op := QuestionOperation{Operation: QuestionOpAnswer, QuestionID: id, Answers: []string{"1"}}
+						if header == "Options" {
+							op.Answers = []string{"1", "0"}
+						}
 						if header == "Text" {
 							op.Answers = []string{"A custom value"}
+							op.Custom = true
+						}
+						if header == "Notes" {
+							op.Answers = []string{"Extra notes"}
 							op.Custom = true
 						}
 						if receipt := applyTestQuestion(t, a, op, time.Time{}); !receipt.Accepted {
@@ -228,7 +334,9 @@ func TestExternalQuestionMultipleAndCustomAnswers(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !answered || decision.Behavior != externalclaude.PermissionBehaviorAllow ||
-				updated.Answers["Choose options"] != "Beta, Alpha" || updated.Answers["Provide a value"] != "A custom value" {
+				updated.Answers["Choose options"] != "Beta, Alpha" || updated.Answers["Provide a value"] != "A custom value" ||
+				updated.Answers["Pick a level"] != "High" || updated.Answers["Add notes"] != "Extra notes" ||
+				len(updated.Answers) != 4 {
 				t.Fatalf("answers were not associated with their questions: %+v %+v", decision, updated)
 			}
 			data, err := os.ReadFile(filepath.Join(a.currentRecoveryOwnership().dir, recovery.ToolActivityFilename))

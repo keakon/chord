@@ -35,6 +35,7 @@ const (
 	NameViewImage      = toolname.ViewImage
 	NameGenerateImage  = toolname.GenerateImage
 	NameCompactContext = toolname.CompactContext
+	NameNotebookEdit   = toolname.NotebookEdit
 )
 
 var NormalizeName = toolname.Normalize

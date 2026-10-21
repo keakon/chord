@@ -314,7 +314,7 @@ func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName
 // matching argument, so its rules participate in path-scope matching.
 func isPathToolPermission(toolName string) bool {
 	switch tools.NormalizeName(toolName) {
-	case tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameViewImage:
+	case tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameViewImage, tools.NameNotebookEdit:
 		return true
 	default:
 		return false

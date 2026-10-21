@@ -12,7 +12,16 @@ var managedTools = []string{
 	"WebFetch", "WebSearch", "TodoWrite", "Agent", "AskUserQuestion", "ExitPlanMode",
 }
 
-func ManagedTool(name string) bool { return slices.Contains(managedTools, name) }
+// NormalizeToolName maps Claude Code's Task alias onto the Agent tool. The
+// catalogue and control requests can use either spelling for the same tool.
+func NormalizeToolName(name string) string {
+	if name == "Task" {
+		return "Agent"
+	}
+	return name
+}
+
+func ManagedTool(name string) bool { return slices.Contains(managedTools, NormalizeToolName(name)) }
 
 func ManagedToolNames() []string { return slices.Clone(managedTools) }
 

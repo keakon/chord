@@ -19,7 +19,7 @@
 
 ### 新功能
 
-- 子 Agent 可以运行在外部 Claude Code 进程上，主 Agent 仍使用 Chord 内部运行时。在子 Agent 定义中设置 `backend.kind: claude-code`，Chord 保留任务记录、完成邮箱和工具授权；完成后可以发送定向消息继续外部会话，进程或输入结果未知时不自动重放。支持 Unix 上较新的 Claude Code 版本，不锁定单一版本；不支持外部 hooks、MCP 或插件。
+- 子 Agent 可以运行在外部 Claude Code 进程上，主 Agent 仍使用 Chord 内部运行时。在子 Agent 定义中设置 `backend.kind: claude-code`，Chord 保留任务记录、完成邮箱和工具授权；完成后可以发送定向消息继续外部会话。Chord 被强制终止时，专属监督进程仍会清理 worker 的进程组并留下最小生命周期回执；监督进程先退出时，Chord 按启动前绑定的进程身份完成清理。恢复只接受能证明同一会话与工作目录已完成清理的回执；进程或输入结果未知时不自动重放。支持 Unix 上较新的 Claude Code 版本：受管传输面向 `stream-json` 协议本身，不锁定单一版本；`stream_event` 载荷不完整或 delta 类型未知时，对应任务带着具体原因失败。不支持外部 hooks、MCP 或插件。`delegate` 也接受这类 Agent 的 `result_schema`：契约在初始化阶段随角色指令送给外部进程，最终答复不是满足它的 JSON 对象时任务带着违规项失败。
 
 - 原生 Gemini 接口支持显式启用跨请求续传与固定目标断流恢复；工具等待最终确认后执行，多次请求的计费与上下文窗口分别统计。
 
@@ -45,8 +45,6 @@
 ### 改进
 
 - OpenCode 导入会把源会话已应用的压缩映射为 Chord 的上下文摘要 checkpoint：配对摘要成为 checkpoint，站在压缩保留的最旧一条消息之前；这些近期消息留作历史；源侧早已折叠掉的早期消息由该 checkpoint 替换——即源模型当时看到的形态。只有最新一次可用的压缩会塑造导入结果；导出未记录压缩保留了哪些消息时，保留完整历史并在报告中说明。压缩已完成却没有摘要文本时同样跳过，除非被替换的早期消息里还留有可作锚点的原始请求：此时 checkpoint 只携带该请求，报告会说明摘要文本缺失。CLI 输出与 `import-report.json` 记录映射的 checkpoint 数、被替换的消息数和被跳过的标记数。
-
-- 每个外部子 Agent 的进程组改由该 worker 专属的独立监督进程持有。Chord 被强制终止后，监督进程发现生命通道断开即清理该进程组，并在状态目录的 `external-supervisor/` 下留下最小生命周期回执；Chord 侧发现监督进程先退出时，按启动前绑定的 PID/PGID 兜底清理，身份不匹配则拒绝发信号。Chord 自己确认清理的运行会删除对应回执。
 
 - 内嵌模型目录采用 [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2)，加入 Gemini 4 Argon，保留 1M token 共享窗口，默认流式绑定上限为 65,536 token，long decode 续传需要显式配置；记录 DeepSeek-V4.1-Flash-1017 在既有 `deepseek/deepseek-flash` 线路上的发布。
 

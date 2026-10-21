@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -215,23 +216,26 @@ func (r *supervisedRun) finishWith(cleanup Cleanup, err error, reason string, co
 		ExitSignal: sig,
 		Cleanup:    &cleanup,
 	}
-	delivered := writeMessage(r.out, message) == nil
-	if !delivered || !cleanup.Proven {
-		writeReceipt(r.request.ReceiptDir, Receipt{
-			Version:    receiptVersion,
-			RunID:      r.request.RunID,
-			Command:    r.request.Command,
-			Dir:        r.request.Dir,
-			PID:        r.pid,
-			PGID:       r.pgid,
-			StartedAt:  r.startedAt,
-			FinishedAt: time.Now(),
-			Reason:     reason,
-			ExitCode:   code,
-			ExitSignal: sig,
-			Cleanup:    cleanup,
-		})
-	}
+	_ = writeMessage(r.out, message)
+	// The receipt is written for every run, not only when delivery failed: a
+	// successful pipe write only means Chord's supervisor client read the exit,
+	// not that Chord persisted it before dying. Recovery looks up the receipt by
+	// this run's exact ID; old receipts are pruned by the host.
+	writeReceipt(r.request.ReceiptDir, Receipt{
+		Version:    receiptVersion,
+		RunID:      r.request.RunID,
+		Command:    r.request.Command,
+		Args:       slices.Clone(r.request.Args),
+		Dir:        r.request.Dir,
+		PID:        r.pid,
+		PGID:       r.pgid,
+		StartedAt:  r.startedAt,
+		FinishedAt: time.Now(),
+		Reason:     reason,
+		ExitCode:   code,
+		ExitSignal: sig,
+		Cleanup:    cleanup,
+	})
 	if !cleanup.Proven {
 		return ExitFailure
 	}
@@ -239,31 +243,30 @@ func (r *supervisedRun) finishWith(cleanup Cleanup, err error, reason string, co
 }
 
 // fail reports a run that never started. There is no process group to tear
-// down, so the only job left is telling Chord, or leaving a receipt.
+// down, so the only job left is telling Chord and leaving a receipt with the
+// same run identity.
 func fail(out *os.File, request Message, err error) int {
-	message := Message{Type: TypeError, RunID: request.RunID, Error: err.Error()}
-	delivered := writeMessage(out, message) == nil
-	if !delivered {
-		writeReceipt(request.ReceiptDir, Receipt{
-			Version:    receiptVersion,
-			RunID:      request.RunID,
-			Command:    request.Command,
-			Dir:        request.Dir,
-			StartedAt:  time.Now(),
-			FinishedAt: time.Now(),
-			Reason:     ReasonLaunchFailed,
-			Cleanup:    Cleanup{Proven: true, Note: "no process was started"},
-		})
-	}
+	_ = writeMessage(out, Message{Type: TypeError, RunID: request.RunID, Error: err.Error()})
+	writeReceipt(request.ReceiptDir, Receipt{
+		Version:    receiptVersion,
+		RunID:      request.RunID,
+		Command:    request.Command,
+		Args:       slices.Clone(request.Args),
+		Dir:        request.Dir,
+		StartedAt:  time.Now(),
+		FinishedAt: time.Now(),
+		Reason:     ReasonLaunchFailed,
+		Cleanup:    Cleanup{Proven: true, Note: "launch failed before a process group was bound"},
+	})
 	if out != nil {
 		_ = out.Close()
 	}
 	return ExitFailure
 }
 
-// writeReceipt leaves the minimal evidence of a cleanup Chord did not see. It
-// is best effort by design: a supervisor that cannot write must still finish
-// the teardown it was started for.
+// writeReceipt leaves the lifecycle evidence of one run. It is best effort by
+// design: a supervisor that cannot write must still finish the teardown it was
+// started for.
 func writeReceipt(dir string, receipt Receipt) {
 	dir = filepath.Clean(dir)
 	if dir == "" || dir == "." {

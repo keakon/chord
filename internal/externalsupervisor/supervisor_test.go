@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -30,6 +31,10 @@ func writeManagedFixture(t *testing.T, body string) string {
 // startSupervised starts a supervisor for one fixture process. The supervisor
 // is this test binary: Chord re-executes the running executable, which the
 // TestMain intercept turns into a supervisor.
+// managedFixtureArgs are passed to every fixture so receipts can prove which
+// child invocation they belong to.
+var managedFixtureArgs = []string{"--resume", "11111111-2222-4333-8444-555555555555"}
+
 func startSupervised(t *testing.T, body, receiptDir string) *Supervisor {
 	t.Helper()
 	if receiptDir != "" {
@@ -40,6 +45,7 @@ func startSupervised(t *testing.T, body, receiptDir string) *Supervisor {
 	sup, err := Start(Config{
 		Child: ChildSpec{
 			Command: writeManagedFixture(t, body),
+			Args:    slices.Clone(managedFixtureArgs),
 			Env:     managedFixtureEnv(),
 			Dir:     t.TempDir(),
 		},
@@ -141,8 +147,14 @@ func TestSupervisorCleansUpWhenHostDisappears(t *testing.T) {
 	if receipt.Reason != ReasonHostGone {
 		t.Fatalf("receipt reason = %q, want %q", receipt.Reason, ReasonHostGone)
 	}
+	if receipt.RunID != sup.RunID() {
+		t.Fatalf("receipt run = %q, want %q", receipt.RunID, sup.RunID())
+	}
 	if receipt.PID != pid || receipt.PGID != pgid {
 		t.Fatalf("receipt identity = (%d, %d), want (%d, %d)", receipt.PID, receipt.PGID, pid, pgid)
+	}
+	if !slices.Equal(receipt.Args, managedFixtureArgs) {
+		t.Fatalf("receipt args = %v, want %v", receipt.Args, managedFixtureArgs)
 	}
 	if !receipt.Cleanup.Proven {
 		t.Fatalf("receipt cleanup = %+v, want proven", receipt.Cleanup)
@@ -248,18 +260,134 @@ printf 'clean\n'
 	}
 }
 
-func TestSupervisedRunKeepsNoReceiptWhenHostSettlesIt(t *testing.T) {
+// A run Chord settled still leaves its receipt: the supervisor cannot know
+// whether Chord persisted the exit, and a receipt under the run id is what a
+// later recovery can look up exactly.
+func TestSettledRunKeepsReceiptUnderItsRunID(t *testing.T) {
 	receiptDir := filepath.Join(t.TempDir(), "receipts")
 	sup := startSupervised(t, "exit 0\n", receiptDir)
+	runID := sup.RunID()
+	if !ValidRunID(runID) {
+		t.Fatalf("run id = %q, want the shape recovery can look up", runID)
+	}
 	if err := sup.Stop(2 * time.Second); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	entries, err := os.ReadDir(receiptDir)
+	receipt, err := LoadReceipt(receiptDir, runID)
 	if err != nil {
-		t.Fatalf("read receipt dir: %v", err)
+		t.Fatalf("load receipt of the settled run: %v", err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("receipt dir has %d entries, want none for a run Chord settled", len(entries))
+	if !receipt.Cleanup.Proven {
+		t.Fatalf("receipt cleanup = %+v, want proven", receipt.Cleanup)
+	}
+	if receipt.PID != sup.Report().PID {
+		t.Fatalf("receipt pid = %d, want %d", receipt.PID, sup.Report().PID)
+	}
+	// Another run id never resolves to this receipt, however similar the run
+	// looked.
+	other, err := NewRunID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadReceipt(receiptDir, other); err == nil {
+		t.Fatal("a receipt proved a run it does not name")
+	}
+}
+
+// The run id is decided before the launch and persisted by Chord; the
+// supervisor must use exactly that identity so the receipt is findable.
+func TestStartUsesRequestedRunID(t *testing.T) {
+	receiptDir := filepath.Join(t.TempDir(), "receipts")
+	runID, err := NewRunID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sup, err := Start(Config{
+		Child: ChildSpec{
+			Command: writeManagedFixture(t, "exit 0\n"),
+			Env:     managedFixtureEnv(),
+			Dir:     t.TempDir(),
+		},
+		RunID:            runID,
+		ReceiptDir:       receiptDir,
+		KillGrace:        time.Second,
+		HandshakeTimeout: 20 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("start supervisor: %v", err)
+	}
+	if sup.RunID() != runID {
+		t.Fatalf("supervisor run = %q, want %q", sup.RunID(), runID)
+	}
+	if err := sup.Stop(2 * time.Second); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if _, err := LoadReceipt(receiptDir, runID); err != nil {
+		t.Fatalf("receipt under the requested run id: %v", err)
+	}
+}
+
+func TestPruneReceiptsKeepsRecentAndUnreadableFiles(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	oldID, err := NewRunID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recentID, err := NewRunID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeReceipt(dir, Receipt{Version: receiptVersion, RunID: oldID, FinishedAt: now.Add(-48 * time.Hour), Cleanup: Cleanup{Proven: true}})
+	writeReceipt(dir, Receipt{Version: receiptVersion, RunID: recentID, FinishedAt: now.Add(-time.Hour), Cleanup: Cleanup{Proven: true}})
+	malformed := filepath.Join(dir, "not-a-receipt.json")
+	if err := os.WriteFile(malformed, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := PruneReceipts(dir, now.Add(-24*time.Hour)); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if _, err := LoadReceipt(dir, oldID); err == nil {
+		t.Fatal("an old receipt survived the sweep")
+	}
+	if _, err := LoadReceipt(dir, recentID); err != nil {
+		t.Fatalf("a recent receipt was pruned: %v", err)
+	}
+	if _, err := os.Stat(malformed); err != nil {
+		t.Fatalf("a malformed receipt was pruned instead of kept for diagnosis: %v", err)
+	}
+	// A receipt directory that does not exist yet is not a failure: the sweep
+	// runs before the first supervisor may have created it.
+	if err := PruneReceipts(filepath.Join(dir, "missing"), now); err != nil {
+		t.Fatalf("prune missing dir: %v", err)
+	}
+}
+
+func TestLoadReceiptRejectsUnprovableIdentity(t *testing.T) {
+	dir := t.TempDir()
+	runID, err := NewRunID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeReceipt(dir, Receipt{Version: receiptVersion, RunID: runID, Cleanup: Cleanup{Proven: true}})
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{name: "empty", id: ""},
+		{name: "not hex", id: strings.Repeat("z", 32)},
+		{name: "wrong length", id: "abcd"},
+		{name: "path traversal", id: "../" + runID},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := LoadReceipt(dir, tc.id); err == nil {
+				t.Fatalf("LoadReceipt accepted run id %q", tc.id)
+			}
+		})
+	}
+	if _, err := LoadReceipt(dir, runID); err != nil {
+		t.Fatalf("valid run id: %v", err)
 	}
 }
 

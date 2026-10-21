@@ -62,6 +62,7 @@ permission:
 [--session-id <uuid> | --resume <uuid>] --permission-prompt-tool stdio
 --permission-mode default --safe-mode --restricted
 --setting-sources "" --strict-mcp-config --mcp-config '{"mcpServers":{}}'
+--tools <受管工具> --settings <受管设置 JSON>
 ```
 
 `launch_args` 支持 `--model`、`--effort`、`--max-turns`、`--max-budget-usd`、`--include-partial-messages`、`--replay-user-messages`，以及追加禁用工具的 `--disallowedTools` / `--disallowed-tools`。长选项可以使用 `--flag=value`。
@@ -76,11 +77,22 @@ permission:
 
 - `allow`：Chord 直接应答，不打扰用户。
 - `deny`：Chord 拒绝执行并保存工具终态。
-- `ask`：弹出绑定到该子 Agent 的确认框。超时、取消或持久化失败不批准执行；编辑参数需要外部 Agent 重新发起调用。
+- `ask`：弹出绑定到该子 Agent 的确认框。超时、取消或持久化失败不批准执行；五分钟内无人回答按拒绝处理；编辑参数需要外部 Agent 重新发起调用。
 
-受管工具集合包括 Read、Edit、Write、NotebookEdit、Bash、Glob、Grep、WebFetch、WebSearch、TodoWrite、Agent、AskUserQuestion 和 ExitPlanMode。没有 Chord 映射的工具需要使用其原名声明明确角色规则，通配 `allow` 不会放行它们。`AskUserQuestion` 使用 Chord 问题界面并回填答案；`ExitPlanMode` 始终请求确认，不切换 Chord 主角色。
+路径规则适用于文件工具，包括 NotebookEdit 的 `notebook_path`。路径模式要嵌套在工具名下面；顶层键始终匹配工具名，不匹配参数。例如：
 
-Claude 自身仍可先拒绝工具。当前受管模式下 TodoWrite 不可用，ExitPlanMode 因不在计划模式而拒绝；Chord 不会绕过这些限制。
+```yaml
+permission:
+  "*": deny
+  NotebookEdit:
+    "notes/*.ipynb": allow
+```
+
+上面的规则只放行 `notes/` 下的 notebook，与 Edit 的同路径规则效果一致。`question` 规则若判定为 `ask`，按 `allow` 处理：问题界面本身就是确认。
+
+受管工具集合包括 Read、Edit、Write、NotebookEdit、Bash、Glob、Grep、WebFetch、WebSearch、TodoWrite、Agent、AskUserQuestion 和 ExitPlanMode。Claude 的 `Task` 写法按 `Agent` 的别名处理。没有 Chord 映射的工具需要使用其原名声明明确角色规则，通配 `allow` 不会放行它们。`AskUserQuestion` 使用 Chord 问题界面，每次最多回答四个问题并回填给 Claude。`ExitPlanMode` 会请求用户确认，不切换 Chord 主角色；在 `default` 权限模式下，Claude 会在请求宿主授权之前就按不可用拒绝它。
+
+Claude 自身仍可先拒绝工具；当前受管模式下 TodoWrite 不可用。Chord 不会绕过这些限制。
 
 Chord 禁用项目和用户自定义、hooks、外部 MCP、插件及 sandbox 自动批准。外部命令和管理员策略仍是受信任边界，角色权限不是操作系统沙箱。shell 规则采用最后匹配优先；宽泛的 `git *` 不等于只读权限，`go test` 也会执行仓库代码。
 
@@ -127,12 +139,12 @@ backend:
 
 - 外部模型调用不经过 Chord 模型池和 key rotation，也不计入 Chord 用量统计。
 - 取消时，Chord 发送 `interrupt` 并关闭输入流，给 CLI 短暂时间写完转录并退出；仍未退出才终止进程组。已发生的修改不会撤销，缺少回执的工具显示结果未知。
-- 每个外部 worker 都有一个独立监督进程持有其进程组。Chord 被强制终止后，监督进程发现生命通道断开即清理该进程组，并在状态目录的 `external-supervisor/` 下留一条最小生命周期回执；Chord 自己收尾并确认清理的运行会删掉对应回执。Chord 与监督进程同时被终止时仍无法保证清理，这类回执需按 run id 人工核对；恢复检查不会清理孤儿进程。
+- 每个外部 worker 都有一个独立监督进程持有其进程组。Chord 被强制终止后，监督进程发现生命通道断开即清理该进程组，并在状态目录的 `external-supervisor/` 下留一条以运行 ID 命名的生命周期回执。Chord 自己收尾并确认清理的运行同样写回执——读到退出报告并不代表 Chord 已把它持久化；超过 30 天的回执会被清理。Chord 与监督进程同时被终止时仍无法保证清理，回执可能缺失，也可能来自一次尚未证明清理结束的运行。恢复不会清理孤儿进程，只接受该任务最后一次启动那一次运行的回执。
 - 不支持暂停。需要停下时直接停止任务再重开。
 - 每次只执行一个输入。运行中收到的消息持久化排队；封口后的消息等旧进程退出并结算后，在同一任务的新 attempt 中处理。完成后的定向消息也会恢复会话；取消的任务必须重新委派。
 - Hooks、Skills 和上下文压缩不作用于外部进程；结果契约会作用：声明了 `result_schema` 时，该契约随角色指令在初始化阶段一并送给外部进程，最终答复必须是满足它的单个 JSON 对象。答复不是 JSON 对象，或缺少 schema 要求的字段时，任务带着违规项失败。
 - 删除 Chord 会话不会删除用户 HOME 下的外部会话转录；Chord 会列出因此留下的 session id。
 - 外部子 Agent 只接受文本消息，不接受图片或 PDF。
-- 恢复要求外部会话仍存在、已证明旧进程退出、没有结果未知的输入，且命令、参数、环境变量键、角色指令及工作目录与保存的绑定一致。凭据从当前环境重新取得。崩溃后未证明进程退出，或输入结果未知时，Chord 拒绝自动重放。
+- 恢复要求外部会话仍存在、已证明旧进程退出、没有结果未知的输入，且命令、参数、环境变量键、角色指令及工作目录与保存的绑定一致。凭据从当前环境重新取得。崩溃后，任务在每次启动前先持久化监督进程的运行 ID；恢复时按该 ID 精确读取回执，只有回执记录了已证明的进程组清理才允许继续。回执缺失、损坏、版本不符或未证明清理时一律拒绝恢复。
 - Chord 的工作区租约只对 Chord 自己执行的工具做串行化。外部后端的工具在 CLI 进程内执行，因此外部 worker 与其他写入者之间没有串行化保证；可能重叠的工作请使用独立检出。
 - 完成信封给出检出路径、分支和基线 commit，并在启动时工作区干净的情况下附带相对该基线的 diff 统计。Chord 不追踪外部 Agent 改了哪些文件：工作区是共享的，其他进程也可能写入，请自行对比报告里的基线 commit。

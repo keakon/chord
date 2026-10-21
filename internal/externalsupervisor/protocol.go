@@ -105,6 +105,7 @@ type Receipt struct {
 	Version    int       `json:"version"`
 	RunID      string    `json:"run_id"`
 	Command    string    `json:"command"`
+	Args       []string  `json:"args,omitempty"`
 	Dir        string    `json:"dir,omitempty"`
 	PID        int       `json:"pid"`
 	PGID       int       `json:"pgid"`

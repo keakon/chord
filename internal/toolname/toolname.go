@@ -38,6 +38,11 @@ const (
 	ViewImage      = "view_image"
 	GenerateImage  = "generate_image"
 	CompactContext = "compact_context"
+
+	// NotebookEdit names Claude Code's notebook editor. Chord has no tool of
+	// its own by that name; the identifier exists so the permission ruleset can
+	// match notebook paths with the same path-scope semantics as other edits.
+	NotebookEdit = "NotebookEdit"
 )
 
 // MCPToolPrefix marks the ids of dynamically registered MCP tools, whose shape

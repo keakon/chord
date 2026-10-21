@@ -42,17 +42,21 @@ const (
 // backend. Backend is the adapter name ("claude-code"); SessionID is the
 // external session Chord pinned.
 type ExternalTaskSession struct {
-	Backend      string                    `json:"backend,omitempty"`
-	SessionID    string                    `json:"session_id,omitempty"`
-	WorkDir      string                    `json:"work_dir,omitempty"`
-	WorkDirState WorkDirState              `json:"work_dir_state"`
-	Prompt       string                    `json:"prompt,omitempty"`
-	Command      string                    `json:"command,omitempty"`
-	LaunchArgs   []string                  `json:"launch_args,omitempty"`
-	EnvKeys      []string                  `json:"env_keys,omitempty"`
-	ProcessEnded bool                      `json:"process_ended"`
-	Inputs       []externalTaskInput       `json:"inputs,omitempty"`
-	Baseline     *externalCheckoutBaseline `json:"baseline,omitempty"`
+	Backend      string       `json:"backend,omitempty"`
+	SessionID    string       `json:"session_id,omitempty"`
+	WorkDir      string       `json:"work_dir,omitempty"`
+	WorkDirState WorkDirState `json:"work_dir_state"`
+	Prompt       string       `json:"prompt,omitempty"`
+	Command      string       `json:"command,omitempty"`
+	LaunchArgs   []string     `json:"launch_args,omitempty"`
+	EnvKeys      []string     `json:"env_keys,omitempty"`
+	ProcessEnded bool         `json:"process_ended"`
+	// RunID identifies the last supervisor run launched for this task. It is
+	// persisted before the launch, so a receipt of exactly this run proves
+	// whether its process group was torn down.
+	RunID    string                    `json:"run_id,omitempty"`
+	Inputs   []externalTaskInput       `json:"inputs,omitempty"`
+	Baseline *externalCheckoutBaseline `json:"baseline,omitempty"`
 }
 
 type externalTaskInput struct {

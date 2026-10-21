@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/externalclaude"
+	"github.com/keakon/chord/internal/externalsupervisor"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -85,13 +86,35 @@ func (a *MainAgent) rehydrateExternalTask(record *DurableTaskRecord, text string
 	}
 }
 
+// externalSessionReceiptProvesEnded accepts the receipt of exactly the run the
+// task last persisted as proof that its process group was torn down. Looking it
+// up by run id is what makes the proof unambiguous: a receipt of an earlier
+// turn, another task, or a run that is still cleaning up can never match.
+func (a *MainAgent) externalSessionReceiptProvesEnded(record *DurableTaskRecord) bool {
+	binding := record.ExternalSession
+	if binding == nil || !externalsupervisor.ValidRunID(binding.RunID) {
+		return false
+	}
+	dir := a.externalSupervisorReceiptDir()
+	if dir == "" {
+		return false
+	}
+	receipt, err := externalsupervisor.LoadReceipt(dir, binding.RunID)
+	if err != nil {
+		return false
+	}
+	return receipt.Cleanup.Proven
+}
+
 func (a *MainAgent) rehydrateExternalTaskLeader(record *DurableTaskRecord, activation *subAgentActivation, admissionEpoch uint64, text string, metadata *message.MailboxMetadata) (w *externalWorker, err error) {
 	binding := record.ExternalSession
 	if binding == nil || binding.Backend != config.BackendKindClaudeCode || !externalclaude.ValidSessionID(binding.SessionID) {
 		return nil, fmt.Errorf("external task has no valid session binding")
 	}
 	if !binding.ProcessEnded {
-		return nil, fmt.Errorf("external task process termination is not proven; resume is unsafe")
+		if !a.externalSessionReceiptProvesEnded(record) {
+			return nil, fmt.Errorf("external task process termination is not proven; resume is unsafe")
+		}
 	}
 	for _, input := range binding.Inputs {
 		if input.State == message.ToolRecoveryStateOutcomeUnknown {
@@ -139,7 +162,7 @@ func (a *MainAgent) rehydrateExternalTaskLeader(record *DurableTaskRecord, activ
 			prepared.abortStartup()
 		}
 	}()
-	w.sessionID, w.resumeNext, w.processEnded = binding.SessionID, true, true
+	w.sessionID, w.resumeNext, w.processEnded, w.runID = binding.SessionID, true, true, binding.RunID
 	w.ownerAgentID, w.ownerTaskID, w.depth, w.joinToOwner = record.OwnerAgentID, record.OwnerTaskID, record.Depth, record.JoinToOwner
 	w.workDirState = binding.WorkDirState
 	w.ctxMgr.RestoreMessages(history)

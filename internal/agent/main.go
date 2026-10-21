@@ -828,6 +828,9 @@ type MainAgent struct {
 	// publishes a whole new state here; cachedWorkDir stays the immutable
 	// directory the session started in.
 	workDirState workDirBinding
+	// supervisorReceiptPruneOnce bounds the cross-session supervisor receipt
+	// directory to one sweep per agent.
+	supervisorReceiptPruneOnce sync.Once
 	// worktreeRT carries cmd-injected worktree services (storage locator,
 	// repository root, LSP rebind). Written before the agent runs turns.
 	worktreeRT  WorktreeRuntime

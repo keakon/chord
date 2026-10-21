@@ -146,7 +146,11 @@ func TestQuestionSizeLimits(t *testing.T) {
 		t.Fatal("accepted oversized question")
 	}
 	item.Question = "Which?"
-	if ValidateQuestionItems([]QuestionItem{item, item, item, item}) == nil {
+	items := make([]QuestionItem, MaxQuestionBatch+1)
+	for i := range items {
+		items[i] = item
+	}
+	if ValidateQuestionItems(items) == nil {
 		t.Fatal("accepted oversized batch")
 	}
 }

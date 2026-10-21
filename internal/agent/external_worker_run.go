@@ -14,6 +14,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/externalclaude"
+	"github.com/keakon/chord/internal/externalsupervisor"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 )
@@ -155,12 +156,22 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 		env[key] = os.ExpandEnv(value)
 	}
 	w.promptMu.Lock()
+	// The run identity is persisted before the supervisor exists: a crash
+	// between the spawn and Chord persisting the exit can then be matched to
+	// exactly one receipt, and a missing receipt keeps resume refused.
+	runID, err := externalsupervisor.NewRunID()
+	if err != nil {
+		w.promptMu.Unlock()
+		return nil, err
+	}
+	w.runID = runID
 	w.processEnded = false
 	err = w.persistExternalSessionLocked()
 	w.promptMu.Unlock()
 	if err != nil {
 		return nil, err
 	}
+	w.parent.pruneExternalSupervisorReceipts()
 	session, err := externalclaude.Start(externalclaude.ProcessConfig{
 		Command: w.backend.EffectiveCommand(),
 		Args:    args,
@@ -172,7 +183,7 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 		// The process runs under its own supervisor: Chord can be killed
 		// mid-task, and only a process that outlives it can still tear the
 		// worker's process group down.
-		Supervisor: &externalclaude.SupervisorConfig{ReceiptDir: w.supervisorReceiptDir()},
+		Supervisor: &externalclaude.SupervisorConfig{RunID: runID, ReceiptDir: w.supervisorReceiptDir()},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start external agent: %w", err)
@@ -216,14 +227,47 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 	return session, nil
 }
 
-// supervisorReceiptDir is where a supervisor leaves the minimal lifecycle
-// receipt of a cleanup Chord never saw. Chord deletes the receipt of every run
-// it settles itself, so what remains is the evidence of a run that outlived it.
+// supervisorReceiptDir is where a supervisor leaves the lifecycle receipt of
+// every run. Chord never deletes them per run: a crash between the spawn and
+// the exit persist is exactly when the receipt is the only proof, so the
+// directory is bounded by age instead.
 func (w *externalWorker) supervisorReceiptDir() string {
 	if w == nil || w.parent == nil {
 		return ""
 	}
-	locator := w.parent.pathLocator
+	return w.parent.externalSupervisorReceiptDir()
+}
+
+// externalSupervisorReceiptRetention bounds how long a settled run's receipt
+// stays available to prove a crash-time teardown.
+const externalSupervisorReceiptRetention = 30 * 24 * time.Hour
+
+// pruneExternalSupervisorReceipts runs at most once per agent: receipts are
+// written for every run, so without a sweep the directory grows forever.
+func (a *MainAgent) pruneExternalSupervisorReceipts() {
+	if a == nil {
+		return
+	}
+	dir := a.externalSupervisorReceiptDir()
+	if dir == "" {
+		return
+	}
+	a.supervisorReceiptPruneOnce.Do(func() {
+		cutoff := time.Now().Add(-externalSupervisorReceiptRetention)
+		if err := externalsupervisor.PruneReceipts(dir, cutoff); err != nil {
+			log.Warnf("prune external supervisor receipts: %v", err)
+		}
+	})
+}
+
+// externalSupervisorReceiptDir is where supervisors leave the lifecycle
+// receipts of every run. Receipts are evidence for resume after a crash, so
+// they live outside any one session directory.
+func (a *MainAgent) externalSupervisorReceiptDir() string {
+	if a == nil {
+		return ""
+	}
+	locator := a.pathLocator
 	if locator == nil {
 		var err error
 		if locator, err = config.DefaultPathLocator(); err != nil {
@@ -295,9 +339,6 @@ func (w *externalWorker) handleExternalEvent(event externalclaude.Event) (termin
 				log.Debugf("external agent initialized instance=%v version=%v session=%v", w.instanceID, event.ClaudeCodeVersion, event.SessionID)
 			}
 			for _, name := range event.Tools {
-				if name == "Task" {
-					name = "Agent"
-				}
 				if !externalclaude.ManagedTool(name) {
 					w.setResultError(fmt.Errorf("external tool catalogue contains an unmanaged tool"))
 					return true, externalTaskInput{}
@@ -305,16 +346,30 @@ func (w *externalWorker) handleExternalEvent(event externalclaude.Event) (termin
 			}
 		}
 	case externalclaude.TypeStreamEvent:
+		if event.ParentToolUseID != "" {
+			// Text streamed by a tool's nested agent is not this worker's answer:
+			// only complete events are persisted, and the top-level result is
+			// the task outcome.
+			return false, externalTaskInput{}
+		}
 		if w.handleExternalStreamEvent(event) {
 			return true, externalTaskInput{}
 		}
 	case externalclaude.TypeAssistant:
-		if text := event.AssistantText(); text != "" {
-			if err := w.persistExternalMessage(message.Message{Role: message.RoleAssistant, Content: text}); err != nil {
-				w.setResultError(err)
-				return true, externalTaskInput{}
+		if event.ParentToolUseID == "" {
+			if text := event.AssistantText(); text != "" {
+				if err := w.persistExternalMessage(message.Message{Role: message.RoleAssistant, Content: text}); err != nil {
+					w.setResultError(err)
+					return true, externalTaskInput{}
+				}
+				// A complete assistant message ends the live segment that
+				// streamed it: the card must hold exactly this message, and
+				// the next message (usually after a tool card) gets its own.
+				w.commitExternalStream(text)
+				w.finishExternalStream()
+				w.startExternalStreamSegment()
+				w.noteAssistantText(text)
 			}
-			w.noteAssistantText(text)
 		}
 		for _, use := range event.ToolUses() {
 			w.externalToolStateMu.Lock()
@@ -361,11 +416,17 @@ func (w *externalWorker) handleExternalEvent(event externalclaude.Event) (termin
 }
 
 func (w *externalWorker) beginExternalStreamSegment() {
-	w.streamRequestSeq++
-	w.streamActive = false
 	w.lastAssistantMu.Lock()
 	w.lastAssistant = ""
 	w.lastAssistantMu.Unlock()
+	w.startExternalStreamSegment()
+}
+
+// startExternalStreamSegment opens a fresh live segment without dropping the
+// last complete assistant message: the closing result may still repeat it.
+func (w *externalWorker) startExternalStreamSegment() {
+	w.streamRequestSeq++
+	w.streamActive = false
 }
 
 func (w *externalWorker) streamIdentity() (uint64, uint64) {
@@ -416,9 +477,13 @@ func (w *externalWorker) handleExternalStreamEvent(event externalclaude.Event) b
 }
 
 func (w *externalWorker) commitExternalStream(text string) {
-	if !w.streamActive {
+	if text == "" {
 		return
 	}
+	// A commit without streamed deltas (a complete assistant message or a
+	// distinct closing result) still opens a card, so the segment stays active
+	// until its end event settles that card.
+	w.streamActive = true
 	turnID, requestSeq := w.streamIdentity()
 	w.parent.emitToTUI(StreamTextCommitEvent{
 		Text: text, AgentID: w.instanceID,
@@ -447,7 +512,13 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (bool,
 	if text == "" {
 		text = w.lastAssistantText()
 	}
-	w.commitExternalStream(text)
+	lastAssistant := w.lastAssistantText()
+	// A complete assistant message was already committed when it arrived. Only
+	// uncommitted deltas or a distinct closing text need a commit here; repeating
+	// the last message would open a duplicate card.
+	if text != "" && (w.streamActive || text != lastAssistant) {
+		w.commitExternalStream(text)
+	}
 	w.finishExternalStream()
 	if event.IsError {
 		reason := text
@@ -457,11 +528,18 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (bool,
 		if reason == "" {
 			reason = "external agent returned an error result"
 		}
-		if text != "" && text != w.lastAssistantText() {
+		if text != "" && text != lastAssistant {
 			if err := w.persistExternalMessage(message.Message{Role: message.RoleAssistant, Content: text}); err != nil {
 				w.setResultError(err)
 				return true, externalTaskInput{}
 			}
+		}
+		// An error result is a definitive outcome for this input: the failure is
+		// carried by the task state, not by an unknown input that would block a
+		// targeted follow-up.
+		if err := w.finishExternalInput(); err != nil {
+			w.setResultError(err)
+			return true, externalTaskInput{}
 		}
 		w.setResultError(fmt.Errorf("external agent failed: %s", reason))
 		return true, externalTaskInput{}
@@ -482,17 +560,22 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (bool,
 		w.setResultError(unresolved)
 		return true, externalTaskInput{}
 	}
-	if text != "" && text != w.lastAssistantText() {
+	if text != "" && text != lastAssistant {
 		if err := w.persistExternalMessage(message.Message{Role: message.RoleAssistant, Content: text}); err != nil {
 			w.setResultError(err)
 			return true, externalTaskInput{}
 		}
 	}
 	// The closing result is the task's delivered result, so the contract is
-	// enforced on it before the input completes: a violation leaves the input
-	// outcome unknown, exactly like an error result does.
+	// enforced on it before the input completes. A violation is a definitive
+	// outcome for this input (the task fails), so it does not become unknown and
+	// block a targeted follow-up.
 	if !w.hasQueuedExternalInput() {
 		if err := w.validateExternalResultContract(w.resultText); err != nil {
+			if inputErr := w.finishExternalInput(); inputErr != nil {
+				w.setResultError(inputErr)
+				return true, externalTaskInput{}
+			}
 			w.setResultError(err)
 			return true, externalTaskInput{}
 		}
@@ -644,13 +727,31 @@ func (w *externalWorker) derivedDisallowedTools() []string {
 	var disallowed []string
 	for _, name := range externalclaude.ManagedToolNames() {
 		mapping, _, mapped := externalclaude.MapTool(name, json.RawMessage(`{}`))
-		permissionName := name
-		if mapped {
-			permissionName = mapping.ChordName
+		if !mapped {
+			// Chord has no equivalent, so evaluateExternalPermission only
+			// authorizes it through a rule that names the Claude tool itself;
+			// a wildcard allow is not enough. Without such a rule every call is
+			// denied, so leaving the tool visible only invites the model to
+			// retry a call that can never succeed.
+			if !externalToolHasNamedRule(ruleset, name) {
+				disallowed = append(disallowed, name)
+			}
+			continue
 		}
-		if ruleset.IsDisabled(permissionName) {
+		if ruleset.IsDisabled(mapping.ChordName) {
 			disallowed = append(disallowed, name)
 		}
 	}
 	return disallowed
+}
+
+// externalToolHasNamedRule reports whether the ruleset contains a rule that
+// names the tool, ignoring the wildcard default.
+func externalToolHasNamedRule(ruleset permission.Ruleset, name string) bool {
+	for _, rule := range ruleset {
+		if permissionRuleTargetsTool(rule, name) {
+			return true
+		}
+	}
+	return false
 }
