@@ -190,14 +190,20 @@ func (r *dripReader) Read(p []byte) (int, error) {
 }
 
 // blockingReader blocks until the total-budget timer cancels it, then reports
-// the cancellation, which is the masking case classification must survive.
+// the cancellation, which is the masking case classification must survive. The
+// wait is bounded so a regression that never fires the budget fails this test
+// instead of stalling the package until go test's timeout.
 type blockingReader struct {
 	cancelled <-chan struct{}
 }
 
 func (r *blockingReader) Read(_ []byte) (int, error) {
-	<-r.cancelled
-	return 0, context.Canceled
+	select {
+	case <-r.cancelled:
+		return 0, context.Canceled
+	case <-time.After(5 * time.Second):
+		return 0, errors.New("total timeout never cancelled the read")
+	}
 }
 
 // slowChunkReader delivers chunks with simulated inter-chunk delays.
