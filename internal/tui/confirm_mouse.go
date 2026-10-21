@@ -55,7 +55,7 @@ func (m *Model) confirmOptionSpecs() []confirmOptionSpec {
 		{action: confirmDialogDeny, hint: hint("Esc/D", "Deny")},
 		{action: confirmDialogDenyReason, hint: hint("R", "Deny+Reason")},
 		{action: confirmDialogEdit, hint: hint("E", "Edit args")},
-		{action: confirmDialogAddRule, hint: hint("M", "Remember…")},
+		{action: confirmDialogAddRule, hint: hint("M", "Remember rule")},
 	}
 }
 

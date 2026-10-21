@@ -519,8 +519,11 @@ func TestRenderConfirmOptionsIncludesRememberRuleForDelete(t *testing.T) {
 	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: `{"path":"old.txt"}`}
 
 	plain := terminaltext.StripANSI(m.renderConfirmDialog())
-	if !strings.Contains(plain, "[M] Remember…") {
-		t.Fatalf("expected [M] Remember option for Delete confirmation, got:\n%s", plain)
+	if !strings.Contains(plain, "[M] Remember rule") {
+		t.Fatalf("expected [M] Remember rule option for Delete confirmation, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "Remember…") {
+		t.Fatalf("rule hint must not carry an ellipsis, which reads as truncation, got:\n%s", plain)
 	}
 }
 
@@ -530,7 +533,7 @@ func TestRenderConfirmDialogRememberRuleKeyShowsRulePickerAfterCachedSummary(t *
 	m.confirm.request = &ConfirmRequest{ToolName: tools.NameEdit, ArgsJSON: `{"path":"internal/tui/confirm_render.go","patch":"@@\n-old\n+new\n"}`}
 
 	summary := terminaltext.StripANSI(m.renderConfirmDialog())
-	if !strings.Contains(summary, "[M] Remember…") {
+	if !strings.Contains(summary, "[M] Remember rule") {
 		t.Fatalf("expected add-rule option in summary dialog, got:\n%s", summary)
 	}
 	if !strings.Contains(summary, "⚠ Confirmation Required") {
