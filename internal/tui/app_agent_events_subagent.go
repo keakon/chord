@@ -353,6 +353,18 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.compactionBgStatus.Active = true
 			m.compactionBgStatus.Bytes = evt.Bytes
 			m.compactionBgStatus.Events = evt.Events
+		case agent.CompactionStatusReady:
+			// The draft is produced but parked for the continuation barrier:
+			// freeze the pill's elapsed and switch it to the static ready state
+			// until the owning terminal resolves the slot. Only the running
+			// plan's own ready marker applies, mirroring the terminal guard.
+			if !m.compactionBgStatus.Active || !m.compactionBgStatus.ReadyAt.IsZero() {
+				break
+			}
+			if m.compactionBgStatus.PlanID != "" && evt.PlanID != "" && evt.PlanID != m.compactionBgStatus.PlanID {
+				break
+			}
+			m.compactionBgStatus.ReadyAt = now
 		case agent.CompactionStatusSucceeded, agent.CompactionStatusFailed, agent.CompactionStatusSkipped, agent.CompactionStatusCancelled:
 			// The slot shows a running compaction: only that compaction's own
 			// terminal may resolve it. A terminal from another plan id — the

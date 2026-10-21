@@ -52,6 +52,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - A tool card whose arguments carry a top-level `summary` now leads with it as the header subject instead of burying it in the option group.
 
+- The status bar compaction pill now freezes its timer and shows a `ready` marker once the summary is produced, instead of counting the wait for the agent's next request boundary as compaction time. The `✓`/`✗` outcome then reports the compaction work duration rather than the total wait.
+
 ### Fixes
 
 - MCP servers unloaded after an idle period now reconnect on the next request instead of staying unavailable until Chord restarts. An explicit close still shuts the runtime down.

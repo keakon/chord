@@ -427,16 +427,26 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 		case agent.CompactionStatusCancelled:
 			icon = "✕" // Void mark: the checkpoint or compaction was cancelled
 		}
+	} else if !status.ReadyAt.IsZero() {
+		icon = compactionPillReadyIcon
 	}
 
-	// Time elapsed since start
-	elapsedText := strings.TrimSpace(formatStatusBarElapsed(now.Sub(status.StartedAt)))
+	// Time elapsed since start. A ready pill freezes at the moment the draft
+	// was produced: the remaining wait belongs to the foreground request's
+	// continuation barrier, not to compaction work, so counting it would
+	// misread a mid-request pause as an ongoing summarize.
+	elapsedEnd := now
+	if !status.ReadyAt.IsZero() {
+		elapsedEnd = status.ReadyAt
+	}
+	elapsedText := strings.TrimSpace(formatStatusBarElapsed(elapsedEnd.Sub(status.StartedAt)))
 
-	// Build pill content. The breathing icon stays the visual anchor in both
-	// states: live compaction uses an alternating ■/▪ so it reads as still in
-	// flight, terminal states use the outcome glyph (✓/✗/⤼/✕) for the short
-	// flush window. Elapsed keeps ticking so a long compaction stays visibly
-	// alive without a spinner.
+	// Build pill content. The icon is the visual anchor in all three states:
+	// live compaction uses an alternating ■/▪ so it reads as still in flight,
+	// the ready state uses a static glyph for a produced draft waiting for the
+	// continuation barrier, and terminal states use the outcome glyph
+	// (✓/✗/⤼/✕) for the short flush window. Live elapsed keeps ticking so a
+	// long compaction stays visibly alive without a spinner.
 	pillParts := make([]string, 0, 3)
 	pillParts = append(pillParts, icon+" "+elapsedText)
 
@@ -444,6 +454,11 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 	// usage-driven compaction so the user can tell the two apart.
 	if status.Trigger == agent.CompactionTriggerModelDriven {
 		pillParts = append(pillParts, "model checkpoint")
+	}
+	// Ready marker: the summary is done, the durable rewrite is still waiting
+	// for the agent's next request boundary.
+	if status.Terminal == "" && !status.ReadyAt.IsZero() {
+		pillParts = append(pillParts, "ready")
 	}
 	// Terminal reason (e.g. low-gain skip cause) is surfaced during the flush
 	// window; the status bar truncates it to the available width.

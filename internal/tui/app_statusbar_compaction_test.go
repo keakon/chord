@@ -378,3 +378,99 @@ func TestCompactionLivePillShowsElapsed(t *testing.T) {
 		t.Fatalf("live compaction pill = %q, should not render the literal \"compacting\" word", got)
 	}
 }
+
+// A parked draft (produced but waiting for the continuation barrier) freezes
+// the pill's elapsed at the ready time and swaps the breathing icon for the
+// static ready glyph: the remaining wait belongs to the foreground request,
+// not to compaction work.
+func TestCompactionReadyStatusFreezesElapsed(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	now := time.Unix(1_700_000_000, 0)
+	m.compactionBgStatus = compactionBackgroundStatus{
+		Active:    true,
+		StartedAt: now.Add(-12 * time.Second),
+		ReadyAt:   now.Add(-9 * time.Second),
+	}
+
+	got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now))
+	if !strings.Contains(got, "◆ 3s") {
+		t.Fatalf("ready compaction pill = %q, want static ready icon with the frozen 3s elapsed", got)
+	}
+	if !strings.Contains(got, "ready") {
+		t.Fatalf("ready compaction pill = %q, want the ready marker", got)
+	}
+	if strings.Contains(got, "■") || strings.Contains(got, "▪") {
+		t.Fatalf("ready compaction pill = %q, want no breathing live icon", got)
+	}
+	// The frozen elapsed must not resume counting while the draft waits.
+	later := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now.Add(30 * time.Second)))
+	if !strings.Contains(later, "◆ 3s") {
+		t.Fatalf("ready compaction pill after 30s = %q, want the elapsed still frozen at 3s", later)
+	}
+}
+
+// The ready marker follows the single-slot rules: only the running plan's own
+// marker applies, a second marker is ignored, and the owning terminal keeps
+// the frozen elapsed for its flush window.
+func TestCompactionReadyStatusEventGuards(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusStarted, Trigger: "usage_driven", PlanID: "3"}})
+
+	// A foreign plan's ready marker must not touch the running slot.
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusReady, PlanID: "4"}})
+	if !m.compactionBgStatus.ReadyAt.IsZero() {
+		t.Fatalf("foreign ready marker must be ignored, got %+v", m.compactionBgStatus)
+	}
+
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusReady, PlanID: "3"}})
+	if m.compactionBgStatus.ReadyAt.IsZero() {
+		t.Fatal("owning ready marker must freeze the pill")
+	}
+	frozenAt := m.compactionBgStatus.ReadyAt
+
+	// A repeated ready marker must not move the freeze point.
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusReady, PlanID: "3"}})
+	if !m.compactionBgStatus.ReadyAt.Equal(frozenAt) {
+		t.Fatalf("repeated ready marker moved the freeze point: %v -> %v", frozenAt, m.compactionBgStatus.ReadyAt)
+	}
+
+	// The owning terminal resolves the slot but keeps the frozen elapsed for
+	// the flush window.
+	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusSucceeded, PlanID: "3"}})
+	if m.compactionBgStatus.Active || m.compactionBgStatus.Terminal != agent.CompactionStatusSucceeded {
+		t.Fatalf("owning terminal must resolve the slot, got %+v", m.compactionBgStatus)
+	}
+	if !m.compactionBgStatus.ReadyAt.Equal(frozenAt) {
+		t.Fatalf("terminal must keep the ready freeze point, got %v", m.compactionBgStatus.ReadyAt)
+	}
+}
+
+// A terminal that follows a ready marker reports the compaction work duration
+// (start -> ready), not the total wait including the continuation barrier.
+func TestCompactionTerminalAfterReadyKeepsFrozenElapsed(t *testing.T) {
+	m := NewModelWithSize(nil, 140, 24)
+	now := time.Unix(1_700_000_000, 0)
+	m.compactionBgStatus = compactionBackgroundStatus{
+		StartedAt:  now.Add(-12 * time.Second),
+		ReadyAt:    now.Add(-9 * time.Second),
+		Terminal:   agent.CompactionStatusSucceeded,
+		TerminalAt: now,
+	}
+
+	got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now))
+	if !strings.Contains(got, "✓ 3s") {
+		t.Fatalf("terminal pill after ready = %q, want the frozen 3s work duration", got)
+	}
+	if strings.Contains(got, "ready") {
+		t.Fatalf("terminal pill after ready = %q, want no ready marker beside the outcome glyph", got)
+	}
+}
+
+func TestCompactionBackgroundStatusKeyIncludesReady(t *testing.T) {
+	live := compactionBackgroundStatus{Active: true, StartedAt: time.Unix(1, 0)}
+	ready := live
+	ready.ReadyAt = time.Unix(2, 0)
+	if compactionBackgroundStatusKey(live) == compactionBackgroundStatusKey(ready) {
+		t.Fatal("ready transition must change the compaction status cache key")
+	}
+}

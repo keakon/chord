@@ -214,11 +214,11 @@ func (a *MainAgent) recordCompactionAppliedAnalyticsEvent(d *compactionDraft, he
 	a.recordCompactionLifecycleEvent("applied", diagnostic)
 }
 
-// compactionStatusEvent builds a terminal CompactionStatusEvent from the
-// current compaction state's trigger and plan so every terminal outcome
-// carries the trigger and plan id end-to-end; headless forwarding and the
-// gateway rely on them. When the state has already been cleared the trigger
-// stays empty (pre-field events).
+// compactionStatusEvent builds a CompactionStatusEvent from the current
+// compaction state's trigger and plan so every outcome carries the trigger and
+// plan id end-to-end; headless forwarding and the gateway rely on them. When
+// the state has already been cleared the trigger stays empty (pre-field
+// events).
 func (a *MainAgent) compactionStatusEvent(status string, reason string) CompactionStatusEvent {
 	evt := CompactionStatusEvent{Status: status, Reason: reason}
 	if a.compactionState.trigger != "" {

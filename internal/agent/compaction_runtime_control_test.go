@@ -367,6 +367,46 @@ func TestHandleCompactionReadyEmitsIdleActivityOnCompletion(t *testing.T) {
 	}
 }
 
+// A ready draft parked for the continuation barrier must tell the TUI pill:
+// the summarize work is done, so the pill freezes its elapsed and shows the
+// ready state instead of counting the foreground request's remaining wait as
+// compaction time.
+func TestHandleCompactionReadyParkedDraftEmitsReadyStatus(t *testing.T) {
+	t.Parallel()
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
+	a.compactionState.headSplit = 2
+	a.newTurn("")
+	if a.turn == nil {
+		t.Fatal("expected active turn")
+	}
+	draft := &compactionDraft{
+		NewMessages: []message.Message{{Role: "user", Content: "[Context Summary]", IsCompactionSummary: true}},
+		HeadSplit:   2,
+		PlanID:      1,
+		Target:      compactionTarget{sessionEpoch: a.sessionEpoch},
+		Manual:      true,
+	}
+
+	a.handleCompactionReady(Event{Type: EventCompactionReady, Payload: draft})
+
+	if a.compactionState.readyDraft == nil {
+		t.Fatal("an active turn must park the ready draft for the continuation barrier")
+	}
+	events := drainAgentEvents(a.Events())
+	foundReady := false
+	for _, evt := range events {
+		if status, ok := evt.(CompactionStatusEvent); ok && status.Status == CompactionStatusReady {
+			foundReady = true
+			break
+		}
+	}
+	if !foundReady {
+		t.Fatalf("a parked draft must emit a ready compaction status, got %#v", events)
+	}
+}
+
 func TestHandleCompactionFailedEmitsIdleActivityOnCompletion(t *testing.T) {
 	t.Parallel()
 	projectRoot := t.TempDir()

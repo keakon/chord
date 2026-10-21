@@ -852,6 +852,10 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 			}
 		}
 
+		// The pill freezes its elapsed here: the summarize work is done and the
+		// remaining wait belongs to the foreground request's continuation
+		// barrier, not to compaction.
+		a.emitToTUI(a.compactionStatusEvent(CompactionStatusReady, ""))
 		// Emit activity to show compaction is ready but waiting for barrier.
 		// Guarded: a live foreground request keeps the slot, the pill already
 		// carries the compaction state.

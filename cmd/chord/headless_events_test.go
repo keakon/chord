@@ -358,6 +358,16 @@ func TestHeadlessCompactionStatusProgressFiltered(t *testing.T) {
 	}
 }
 
+// The ready marker (a parked draft waiting for the continuation barrier) is
+// TUI-only: the gateway resolves a compaction slot on any non-started status,
+// so forwarding it would be misread as a terminal outcome.
+func TestHeadlessCompactionStatusReadyFiltered(t *testing.T) {
+	state := &headlessState{}
+	if envs := filterHeadlessEvent(agent.CompactionStatusEvent{Status: agent.CompactionStatusReady, PlanID: "3"}, state); len(envs) != 0 {
+		t.Fatalf("ready markers must not reach the control plane, got %d", len(envs))
+	}
+}
+
 func TestHeadlessCompactionStatusRespectsSubscription(t *testing.T) {
 	state := &headlessState{subscriptions: map[string]bool{}}
 	if envs := filterHeadlessEvent(agent.CompactionStatusEvent{Status: agent.CompactionStatusSucceeded, Trigger: "model_driven"}, state); len(envs) != 0 {

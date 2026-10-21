@@ -711,6 +711,9 @@ func (MemoryHealthEvent) agentEvent() {}
 // Status is one of the CompactionStatus* constants below.
 // Progress events carry response bytes and stream event counts accumulated
 // across the request attempts made by one compaction task.
+// Ready is TUI-only: it marks a produced draft parked for the continuation
+// barrier. Headless drops it like progress, because control-plane consumers
+// resolve a compaction slot on any non-started status.
 type CompactionStatusEvent struct {
 	Status string
 	Bytes  int64
@@ -741,6 +744,7 @@ func (CompactionStatusEvent) agentEvent() {}
 const (
 	CompactionStatusStarted   = "started"
 	CompactionStatusProgress  = "progress"
+	CompactionStatusReady     = "ready"
 	CompactionStatusSucceeded = "succeeded"
 	CompactionStatusSkipped   = "skipped"
 	CompactionStatusFailed    = "failed"

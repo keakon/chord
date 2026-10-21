@@ -124,8 +124,11 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	case agent.CompactionStatusEvent:
 		touch()
 		// The control plane observes started and terminal outcomes only;
-		// internal progress telemetry stays on the TUI slot.
-		if e.Status == agent.CompactionStatusProgress {
+		// internal progress telemetry stays on the TUI slot. Ready is TUI-only
+		// too: the gateway resolves a compaction slot on any non-started
+		// status, so a parked-draft ready marker must not reach it as a
+		// terminal outcome.
+		if e.Status == agent.CompactionStatusProgress || e.Status == agent.CompactionStatusReady {
 			state.stampHeadlessSeq(true)
 			return nil
 		}

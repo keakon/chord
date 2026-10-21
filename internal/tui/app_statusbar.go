@@ -1139,13 +1139,16 @@ func statusBarRightKey(effectiveWidth, leftWidth, activityWidth int, path status
 
 // compactionBackgroundStatusKey folds the mutable compaction background state
 // into the right-side cache key so a streaming progress update (bytes/events)
-// invalidates the cached pill instead of rendering a stale suffix.
+// or the ready transition (frozen elapsed, static icon) invalidates the cached
+// pill instead of rendering a stale suffix.
 func compactionBackgroundStatusKey(s compactionBackgroundStatus) string {
 	if !s.Active && s.Terminal == "" {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString(s.Terminal)
+	b.WriteByte('|')
+	b.WriteString(strconv.FormatBool(!s.ReadyAt.IsZero()))
 	b.WriteByte('|')
 	b.WriteString(strconv.FormatInt(s.Bytes, 10))
 	b.WriteByte('|')

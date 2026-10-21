@@ -25,6 +25,11 @@ func compactionPillIconAt(now time.Time) string {
 	return "▪"
 }
 
+// compactionPillReadyIcon marks a produced draft waiting for the continuation
+// barrier. Unlike the breathing live icon it is static, so the pill reads as
+// settled work rather than an in-flight request.
+const compactionPillReadyIcon = "◆"
+
 func statusBarTickCmd(generation uint64, delay time.Duration) tea.Cmd {
 	if delay <= 0 {
 		delay = time.Second
