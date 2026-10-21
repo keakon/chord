@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
@@ -481,8 +482,19 @@ func TestPrepareMessagesDefersExternalReadInvalidation(t *testing.T) {
 	}
 
 	// Out-of-band write, no new tool call: lazy validation flags the read.
+	// The edit keeps the byte length identical, so only a stat change can
+	// reveal it; bump mtime explicitly so detection does not depend on the
+	// filesystem's timestamp granularity.
+	beforeEdit, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile changed: %v", err)
+	}
+	editedAt := beforeEdit.ModTime().Add(time.Second)
+	if err := os.Chtimes(path, editedAt, editedAt); err != nil {
+		t.Fatalf("Chtimes: %v", err)
 	}
 	setTestRequestBatch(a, nil, 2)
 	msgs = append(msgs,

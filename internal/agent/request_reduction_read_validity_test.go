@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/config"
@@ -128,8 +129,19 @@ func TestPrepareMessagesForLLM_ShellInvalidationVerdictMemoizedPerShell(t *testi
 	// F2 lazy validation: an external edit without a new mutating shell is
 	// still detected — the read is stat-checked each request and re-hashed
 	// when the mtime/size changed, so the model stops trusting stale content.
+	// The edit keeps the byte length identical, so only a stat change can
+	// reveal it; bump mtime explicitly so detection does not depend on the
+	// filesystem's timestamp granularity.
+	beforeEdit, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile changed: %v", err)
+	}
+	editedAt := beforeEdit.ModTime().Add(time.Second)
+	if err := os.Chtimes(path, editedAt, editedAt); err != nil {
+		t.Fatalf("Chtimes: %v", err)
 	}
 	second := a.prepareMessagesForLLM(msgs)
 	if !strings.Contains(second[2].Content, "truncated="+tools.ReadTruncatedStale) {
