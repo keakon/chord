@@ -399,6 +399,27 @@ func TestViewShowsSessionSwitchOverlayAfterDelay(t *testing.T) {
 	}
 }
 
+func TestSessionSwitchOverlayKeepsCardBackground(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.beginSessionSwitch("resume", "20261020165156220")
+	m.sessionSwitch.startedAt = time.Now().Add(-sessionSwitchOverlayDelay - 10*time.Millisecond)
+
+	card := m.renderSessionSwitchOverlay(m.layout.main)
+	if card == "" {
+		t.Fatal("expected non-empty session switch overlay")
+	}
+	wantBg := colorOfTheme(m.theme.InfoPanelBg)
+	line := findRenderedLineContaining(card, "Resuming session")
+	if line == "" {
+		t.Fatalf("missing overlay headline: %q", terminaltext.StripANSI(card))
+	}
+	// Every headline segment is rendered by its own style; the interior must keep
+	// the card background instead of falling back to the terminal default.
+	assertRenderedTextBackground(t, line, "↺", wantBg)
+	assertRenderedTextBackground(t, line, "Resuming session", wantBg)
+	assertRenderedTextBackground(t, line, "20261020165156220", wantBg)
+}
+
 func TestViewDelaysSessionSwitchOverlayToAvoidFlash(t *testing.T) {
 	backend := &sessionControlAgent{providerModelRef: "openai/gpt-5.5"}
 	m := NewModelWithSize(backend, 120, 24)

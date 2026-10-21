@@ -219,6 +219,10 @@ func (m *Model) renderSessionSwitchOverlay(_ image.Rectangle) string {
 	if subtitle := strings.TrimSpace(sessionSwitchOverlaySubtitle(m.sessionSwitch.kind)); subtitle != "" {
 		bodyLines = append(bodyLines, subtitleStyle.Render("  "+subtitle))
 	}
+	// The headline is assembled from per-segment styles whose resets would drop
+	// the card background, letting the terminal default show through the middle
+	// of the card; restore it after every reset so the interior keeps one surface.
+	bodyLines = preserveCardBg(bodyLines, m.theme.InfoPanelBg)
 	body := lipgloss.JoinVertical(lipgloss.Left, bodyLines...)
 	return cardStyle.Render(body)
 }
