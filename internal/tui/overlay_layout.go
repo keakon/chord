@@ -4,8 +4,6 @@ import (
 	"image"
 	"strings"
 
-	"github.com/keakon/x/ansi"
-
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
@@ -53,16 +51,11 @@ func layoutOverlay(cfg OverlayConfig, area image.Rectangle) overlayLayout {
 	maxHints := max(available-minContent-layout.titleGap-layout.hintGap, hintRows)
 	if len(layout.hintLines) > maxHints && cfg.CompactHint != "" {
 		layout.hintLines = wrapHintLines(cfg.CompactHint, width)
-		if len(layout.hintLines) > maxHints {
-			// Fill the available rows and truncate only the last one, so keys
-			// that would otherwise be cut with the tail stay visible.
-			last := strings.Join(layout.hintLines[maxHints-1:], "  ")
-			layout.hintLines = append(layout.hintLines[:maxHints-1], ansi.Truncate(last, width, "…"))
-		}
 	}
-	if len(layout.hintLines) > maxHints && cfg.CompactHint == "" {
-		tail := strings.Join(layout.hintLines[maxHints-1:], "  ")
-		layout.hintLines[maxHints-1] = ansi.Truncate(tail, width, "…")
+	if len(layout.hintLines) > maxHints {
+		// Drop whole chips instead of cutting one mid-word: a fragment such as
+		// "[M…" names no action and owns no hit target.
+		layout.hintLines = packHintChips(splitHintChips(layout.hintLines), width, maxHints)
 	}
 	layout.hintLines = layout.hintLines[:min(len(layout.hintLines), maxHints)]
 	layout.contentHeight = max(available-layout.titleGap-layout.hintGap-len(layout.hintLines), 1)

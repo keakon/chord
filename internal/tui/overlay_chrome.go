@@ -110,6 +110,95 @@ func wrapHintLines(hint string, width int) []string {
 	return out
 }
 
+// splitHintChips flattens wrapped hint lines back into their chips.
+func splitHintChips(lines []string) []string {
+	chips := make([]string, 0, len(lines))
+	for _, line := range lines {
+		for chip := range strings.SplitSeq(line, "  ") {
+			if chip != "" {
+				chips = append(chips, chip)
+			}
+		}
+	}
+	return chips
+}
+
+// hintKeyOnly keeps just the key of a rendered chip, so a hint that runs out of
+// room can still name the action's binding.
+func hintKeyOnly(chip string) string {
+	plain := ansi.Strip(chip)
+	if !strings.HasPrefix(plain, "[") {
+		return ""
+	}
+	end := strings.IndexByte(plain, ']')
+	if end < 0 {
+		return ""
+	}
+	return currentStyles.KeyHintStyle.Render(plain[:end+1])
+}
+
+// packHintChips fits chips into at most maxLines rows of width. A chip that
+// does not fit is moved to the next row; the trailing chip falls back to its
+// key plus "…" and any remaining chips are dropped whole. Cutting a chip
+// mid-word leaves a fragment such as "[M…" that names no action and owns no
+// hit target, while dropping the exit key entirely hides how to back out.
+func packHintChips(chips []string, width, maxLines int) []string {
+	if width <= 0 || maxLines <= 0 {
+		return nil
+	}
+	lines := make([]string, 0, maxLines)
+	current := ""
+	currentWidth := 0
+	dropped := false
+	for i, chip := range chips {
+		chipWidth := ansi.StringWidth(chip)
+		if chipWidth > width {
+			chip = ansi.Truncate(chip, width, "…")
+			chipWidth = ansi.StringWidth(chip)
+		}
+		if current == "" {
+			if len(lines) == maxLines {
+				dropped = true
+				break
+			}
+			current, currentWidth = chip, chipWidth
+			continue
+		}
+		if currentWidth+2+chipWidth <= width {
+			current += "  " + chip
+			currentWidth += 2 + chipWidth
+			continue
+		}
+		if i == len(chips)-1 {
+			if key := hintKeyOnly(chip); key != "" && currentWidth+2+ansi.StringWidth(key)+1 <= width {
+				lines = append(lines, current+"  "+key+currentStyles.DimStyle.Render("…"))
+				return lines
+			}
+		}
+		lines = append(lines, current)
+		if len(lines) == maxLines {
+			dropped = true
+			break
+		}
+		current, currentWidth = chip, chipWidth
+	}
+	if current != "" && len(lines) < maxLines {
+		lines = append(lines, current)
+	}
+	if dropped && len(lines) > 0 {
+		last := lines[len(lines)-1]
+		switch {
+		case ansi.StringWidth(last)+3 <= width:
+			lines[len(lines)-1] = last + "  …"
+		case ansi.StringWidth(last)+1 <= width:
+			lines[len(lines)-1] = last + "…"
+		default:
+			lines[len(lines)-1] = ansi.Truncate(last, width, "…")
+		}
+	}
+	return lines
+}
+
 // renderTabRow renders a dialog tab strip with the active tab highlighted.
 func renderTabRow(labels []string, active int) string {
 	parts := make([]string, len(labels))

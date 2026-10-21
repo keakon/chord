@@ -97,6 +97,54 @@ func TestWrapHintLinesEmptyInput(t *testing.T) {
 	}
 }
 
+func TestPackHintChipsDropsWholeChips(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	chips := []string{
+		renderHintChip(hint("R", "Deny+Reason")),
+		renderHintChip(hint("E", "Edit args")),
+		renderHintChip(hint("M", "Remember rule")),
+	}
+	lines := packHintChips(chips, 35, 1)
+	if len(lines) != 1 {
+		t.Fatalf("lines = %d, want 1", len(lines))
+	}
+	plain := ansi.Strip(lines[0])
+	if !strings.Contains(plain, "[E] Edit args") {
+		t.Fatalf("packed hint lost a whole chip: %q", plain)
+	}
+	if strings.Contains(plain, "[M…") || strings.Contains(plain, "Remem") {
+		t.Fatalf("packed hint cut a chip in half: %q", plain)
+	}
+	if !strings.HasSuffix(plain, "…") {
+		t.Fatalf("packed hint should mark the dropped tail: %q", plain)
+	}
+	if width := ansi.StringWidth(plain); width > 35 {
+		t.Fatalf("packed hint width = %d > 35: %q", width, plain)
+	}
+}
+
+func TestPackHintChipsKeepsTrailingExitKey(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	chips := []string{
+		renderHintChip(hint("Enter", "select")),
+		renderHintChip(hint("Esc", "close")),
+	}
+	lines := packHintChips(chips, 25, 1)
+	if len(lines) != 1 {
+		t.Fatalf("lines = %d, want 1", len(lines))
+	}
+	plain := ansi.Strip(lines[0])
+	if !strings.Contains(plain, "[Esc]") {
+		t.Fatalf("packed hint dropped the exit key: %q", plain)
+	}
+	if !strings.HasSuffix(plain, "…") {
+		t.Fatalf("shortened chip should end with an ellipsis: %q", plain)
+	}
+	if width := ansi.StringWidth(plain); width > 25 {
+		t.Fatalf("packed hint width = %d > 25: %q", width, plain)
+	}
+}
+
 func TestRenderTabRowHighlightsActiveTab(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	row := renderTabRow([]string{"[Pending]", "[History]"}, 1)
