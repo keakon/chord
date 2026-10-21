@@ -115,6 +115,8 @@ Declaring an honest narrow scope keeps sibling-overlap hints meaningful: when th
 
 A read-only task should pick an agent whose role registers no file-modifying tools and pass an empty scope, which is accepted only for such roles; a role that can write files must declare a non-empty scope or the delegation is rejected. Command tools such as `shell` are never scope-restricted and stay governed by the role's permission rules. Denying `delegate` also disables `cancel` and nested delegation for that role.
 
+Which roles a delegating agent may reach is a permission decision too: `delegate` rules match the `agent_type` argument, so a role can be limited to a subset of SubAgent definitions, and the Delegate tool then lists only those targets. See [Permissions & Safety: Special permission semantics](./permissions-and-safety.md#special-permission-semantics).
+
 ### Delegated result contracts
 
 `delegate` accepts an optional `result_schema` that declares what the worker's delivered result must contain. The accepted vocabulary is `type`, `required`, `properties`, `items`, `enum`, and `description`, with `type` limited to `object`, `array`, `string`, `integer`, `number`, and `boolean`; the top level must be `type: "object"`. A schema outside that subset is rejected at delegation time instead of being silently ignored, and undeclared fields always pass — a contract states that what you asked for is present and correct rather than enumerating everything the worker may return.

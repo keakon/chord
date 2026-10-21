@@ -24,9 +24,11 @@ Chord 是一个可读取文件、修改文件、执行命令并调用外部工�
 
 - `allow`：自动允许
 - `ask`：执行前要求确认
-- `deny`：直接拒绝
+- `deny`：拒绝调用。其中 pattern 为 `*` 的 `deny`（包含 `tool: deny` 这种简写）还会把该工具从模型的工具列表中整体移除，模型看不到它的 schema；带具体 pattern 的 `deny` 只拒绝匹配的调用，工具本身仍可见。
 
 规则按工具名匹配；内置工具名的完整清单见[内置工具](./tools_CN.md)。
+
+是否移除工具由**最后一条匹配该工具名**的规则决定，并且只有该规则自身的 pattern 是通配 `*` 时才会移除——能匹配某次调用参数的窄规则不会胜出。因此写在具体 `allow` **之后**的通配 `deny` 兜底，效果是整个工具被禁用，而不是被收窄：通配兜底要写在前面，具体规则写在后面，正如下面的示例所示。两个控制工具不受通配 deny 约束（`compact_context` 与 `done`），`edit` / `apply_patch` 家族的两个格式还会共享同一条拒绝；详见[特殊权限语义](#特殊权限语义)。
 
 规则指名了不存在的工具时匹配不到任何东西，因此拼错工具名会让规则静默失效，而不是报错。后台工作通过 `shell`（配合 `run_in_background: true`）加 `job_output`、`job_list`、`job_kill` 工具完成。
 
@@ -148,7 +150,7 @@ web_fetch:
       tester: ask
   ```
 
-  被拒绝的目标不会出现在 Delegate 工具 schema 或协调 prompt 中；如果所有已配置的 SubAgent 目标都被拒绝，Delegate 会被隐藏。权限规则按「最后匹配优先」生效，因此通配兜底规则应写在具体目标规则之前。
+  pattern 支持 glob，因此 `rev*` 可以覆盖所有名字以 `rev` 开头的目标。Delegate 工具 schema 是 SubAgent 名称与描述进入模型上下文的唯一位置：它的 `agent_type` enum 与描述只列出本角色可用的目标，因此被拒绝的目标对模型不可见；即使调用里强行写上了被拒绝的目标，也会在启动 worker 之前被拒绝。如果所有已配置的 SubAgent 目标都被拒绝，Delegate 会被隐藏。
 - `delegate` 也控制一组委派工作流。如果有效的通配 `deny` 将它整体禁用，Chord 还会禁用通过 `cancel` 取消 SubAgent、从 SubAgent 中隐藏嵌套的 `delegate` / `cancel`，并把 SubAgent 的 `notify` 限制为只通知自己的 owner，而不是任意指定目标。原因是取消或定向通知其他委派任务本身属于管理 delegated workstreams；如果禁用委派却允许这些片段，会形成一个不完整但仍可干扰委派工作的控制面。
 - 因此 `cancel` 依赖 `delegate`：即使配置了 `cancel: allow`，只要 `delegate` 被禁用，`cancel` 仍会被拒绝。若希望某个角色能取消委派工作，需要同时启用 `delegate` 和 `cancel`。
 - `question: ask` 会被归一化为 `allow`。`question` 工具本身就是向用户提出结构化问题并等待回答；如果在提问前再加一次权限确认，只会产生重复弹窗，并不能降低最终决策风险。

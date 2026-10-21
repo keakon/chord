@@ -24,9 +24,11 @@ Typical permission states:
 
 - `allow`: auto-allow
 - `ask`: require confirmation before execution
-- `deny`: reject directly
+- `deny`: reject the call. A `deny` carrying the wildcard pattern — including the shorthand `tool: deny` — goes further and removes the tool from the model's tool list entirely, so the model never sees its schema. A `deny` carrying a concrete pattern only rejects the matching calls and leaves the tool visible.
 
 Rules are keyed by tool name; the full list of built-in tool names is in [Built-in tools](./tools.md).
+
+Removing a tool is decided by the last rule matching the tool name, and that rule removes the tool only when its own argument pattern is the wildcard — the narrower rule that would match a particular call's arguments does not win. A wildcard `deny` written *after* a specific `allow` therefore disables the whole tool instead of narrowing it: put the wildcard fallback first and the specific rules after it, as the examples below do. Two control tools are exempt from wildcard-only denial (`compact_context` and `done`), and the `edit` / `apply_patch` family shares a denial between its two formats; see [Special permission semantics](#special-permission-semantics).
 
 A rule that names a nonexistent tool matches nothing, so a typo silently leaves that tool unmatched instead of failing. Background work runs through `shell` (with `run_in_background: true`) plus the `job_output`, `job_list`, and `job_kill` tools.
 
@@ -154,7 +156,7 @@ Most tools use the literal `allow` / `ask` / `deny` meaning above, but a few orc
       tester: ask
   ```
 
-  Denied targets are omitted from the Delegate tool schema and coordination prompt. If every configured SubAgent target is denied, Delegate is hidden. Permission rules use last-match-wins ordering, so put the wildcard fallback before the specific target rules.
+  Patterns are globs, so `rev*` covers every target whose name starts with `rev`. The Delegate tool schema is the only place a SubAgent's name and description reach the model: its `agent_type` enum and description list exactly the targets this role may use, so a denied target is invisible to the model, and a call naming one anyway is rejected before the worker starts. If every configured SubAgent target is denied, Delegate is hidden.
 - `delegate` also controls the delegation workflow as a group. If it is entirely disabled by an effective wildcard `deny`, Chord disables SubAgent cancellation via `cancel`, hides nested `delegate`/`cancel` from SubAgents, and limits SubAgent `notify` to owner-only follow-up instead of arbitrary target routing. The reason is that cancelling or targeting other delegated tasks is part of managing delegated workstreams; allowing those pieces while disabling delegation would create a partial control plane that can interfere with work the role is not allowed to orchestrate.
 - `cancel` therefore depends on `delegate`: even if `cancel: allow` is configured, `cancel` is denied when `delegate` is disabled. To allow a role to cancel delegated work, enable both `delegate` and `cancel`.
 - `question: ask` is normalized to `allow`. The `question` tool already asks the user a structured question and waits for their answer, so adding a separate permission confirmation before asking the question would create a redundant prompt without reducing the risk of the final decision.

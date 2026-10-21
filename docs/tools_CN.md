@@ -113,6 +113,8 @@ Shell 和后台输出超过 16 KiB 时，结果会显示简短预览及日志文
 
 只读任务应选择注册不到文件修改工具的角色并传空 scope：空 scope 只对这种角色放行，能写文件的角色必须声明非空范围，否则委派被拒绝。`shell` 这类命令工具不受 scope 约束，可用性由角色的权限规则决定。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。
 
+可委派给哪些角色同样由权限决定：`delegate` 的规则匹配 `agent_type` 参数，因此一个角色可以被限制为只能委派给部分 SubAgent 定义，Delegate 工具也只列出这些可选目标。详见[权限与安全：特殊权限语义](./permissions-and-safety_CN.md#特殊权限语义)。
+
 ### 交付结果契约
 
 `delegate` 可以带一个可选的 `result_schema`，声明 worker 交付的结果必须包含什么。可用的关键字只有 `type`、`required`、`properties`、`items`、`enum` 和 `description`，`type` 只能取 `object`、`array`、`string`、`integer`、`number`、`boolean`，顶层必须是 `type: "object"`。超出这个子集的 schema 会在委派时被拒绝，不会被静默忽略；未声明的字段一律放行，所以契约校验的是「你要的东西在不在、对不对」，而不是枚举 worker 能返回的全部内容。
