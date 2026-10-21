@@ -7,5 +7,5 @@ git -C "$repo_root" config core.hooksPath .githooks
 echo "Git hooks installed: core.hooksPath=.githooks"
 echo "pre-commit will reject paths ignored by staged repository rules"
 echo "pre-commit will run goimports + gofmt on staged .go files"
-echo "pre-push will run fmt-check, deps-check, vet, staticcheck, modernize-check, and test"
+echo "pre-push will run make preflight"
 echo "(install goimports with: go install golang.org/x/tools/cmd/goimports@latest)"

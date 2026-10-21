@@ -3,6 +3,12 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 hook="$repo_root/.githooks/pre-push"
+# The hook delegates to a Makefile target; the stub make below would accept any
+# target name, so verify the real target exists before exercising the hook.
+grep -q '^preflight:' "$repo_root/Makefile" || {
+  echo "Makefile has no preflight target for the pre-push hook" >&2
+  exit 1
+}
 unset $(git rev-parse --local-env-vars)
 export GIT_CONFIG_GLOBAL=/dev/null
 export GIT_CONFIG_NOSYSTEM=1
@@ -52,8 +58,8 @@ for checkout in "$fixture" "$test_root/worktree"; do
     echo "pre-push changed the checkout or index" >&2
     exit 1
   }
-  grep -q "deps-check" "$make_log" || {
-    echo "pre-push hook did not run the dependency audit (deps-check)" >&2
+  grep -qx "preflight" "$make_log" || {
+    echo "pre-push hook did not run the preflight gate" >&2
     exit 1
   }
 done

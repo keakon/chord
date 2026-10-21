@@ -49,7 +49,7 @@ while IFS= read -r path; do
 done < <(git diff --name-only @{push}...HEAD 2>/dev/null || git diff --name-only HEAD~1...HEAD)
 
 echo "pre-push: running lightweight checks"
-make fmt-check deps-check vet staticcheck modernize-check test-fast
+make preflight
 
 if [[ "$has_doc_changes" -eq 1 ]]; then
   echo "pre-push: running docs checks"
