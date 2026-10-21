@@ -33,7 +33,7 @@ This configures `core.hooksPath` to use `.githooks/` and ensures:
 
 - `pre-commit` rejects staged paths ignored by the staged repository rules
 - `pre-commit` automatically runs `goimports` and `gofmt` on staged `.go` files
-- `pre-push` runs `fmt-check`, `vet`, `staticcheck`, `modernize-check`, and tests before pushing
+- `pre-push` runs `fmt-check`, `vet`, `staticcheck`, `modernize-check`, and tests before pushing; its test gate goes through `make test-fast`, so it uses a memory-backed temp dir when one is available (see below)
 
 `pre-commit` refuses to format and re-stage a Go file that also has unstaged changes, because that would sweep hunks belonging to other work into the commit. When you deliberately want to commit only the staged hunks of such a file, pass the override on the command line for that one command:
 
