@@ -319,12 +319,13 @@ func TestSpooledMailboxIndexSpansDecodeEachRecordExactly(t *testing.T) {
 // mutex breaks.
 func TestConcurrentSpoolAppendsRecordExactSpans(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
-	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
+	a := &MainAgent{}
+	sessionDir := t.TempDir()
+	path := filepath.Join(sessionDir, "subagents", "mailbox.jsonl")
 	// Create the log up front so every concurrent append opens an existing
 	// file: without this the writers also race the directory creation, which is
 	// unrelated to the span this test checks.
-	if _, _, err := a.appendSubAgentMailboxLog(a.sessionDir, path, SubAgentMailboxMessage{MessageID: "warmup", TaskID: "task-0", Summary: "warmup"}); err != nil {
+	if _, _, err := a.appendSubAgentMailboxLog(sessionDir, path, SubAgentMailboxMessage{MessageID: "warmup", TaskID: "task-0", Summary: "warmup"}); err != nil {
 		t.Fatalf("warmup append: %v", err)
 	}
 	if err := os.Truncate(path, 0); err != nil {
@@ -356,7 +357,7 @@ func TestConcurrentSpoolAppendsRecordExactSpans(t *testing.T) {
 					Kind:      SubAgentMailboxKindCompleted,
 					Summary:   strings.Repeat("x", 32+i),
 				}
-				start, end, err := a.appendSubAgentMailboxLog(a.sessionDir, path, msg)
+				start, end, err := a.appendSubAgentMailboxLog(sessionDir, path, msg)
 				if err != nil {
 					mu.Lock()
 					if fail == nil {

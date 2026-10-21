@@ -174,7 +174,7 @@ func enableTestCheckpointFileReplay(a *MainAgent) {
 
 func TestCheckpointFileReplayRequiresObservedCacheHitsPerModel(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	enableTestCheckpointFileReplay(a)
 	if !a.checkpointFileReplayAllowed("p/m") {
 		t.Fatal("observed cache rejected")

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -50,8 +51,10 @@ func TestLoadSessionUsesCompactedMailboxStateAndPreservesSequence(t *testing.T) 
 		_ = mailboxFile.Close()
 		t.Fatalf("create ack log: %v", err)
 	}
-	mailboxEncoder := json.NewEncoder(mailboxFile)
-	ackEncoder := json.NewEncoder(ackFile)
+	mailboxWriter := bufio.NewWriter(mailboxFile)
+	ackWriter := bufio.NewWriter(ackFile)
+	mailboxEncoder := json.NewEncoder(mailboxWriter)
+	ackEncoder := json.NewEncoder(ackWriter)
 	for i := range mailboxCompactionThreshold {
 		id := fmt.Sprintf("worker-%d", i+1)
 		if i == 0 {
@@ -64,6 +67,12 @@ func TestLoadSessionUsesCompactedMailboxStateAndPreservesSequence(t *testing.T) 
 		if err := ackEncoder.Encode(SubAgentMailboxAckRecord{MessageID: id, Outcome: "consumed", AckedAt: time.Now()}); err != nil {
 			t.Fatalf("encode ack: %v", err)
 		}
+	}
+	if err := mailboxWriter.Flush(); err != nil {
+		t.Fatalf("flush mailbox log: %v", err)
+	}
+	if err := ackWriter.Flush(); err != nil {
+		t.Fatalf("flush ack log: %v", err)
 	}
 	if err := mailboxFile.Close(); err != nil {
 		t.Fatalf("close mailbox log: %v", err)

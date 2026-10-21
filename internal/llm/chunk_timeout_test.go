@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/keakon/chord/internal/config"
@@ -104,36 +105,42 @@ func TestProviderChunkTimeoutReaderLeavesHealthyStreamUncappedByDefault(t *testi
 // the idle timer every time, so without a wall-clock cap it never ends.
 // A steady drip must still be cut off once the budget elapses.
 func TestStreamTotalTimeoutBoundsSlowDrip(t *testing.T) {
-	p := NewProviderConfig("test", config.ProviderConfig{
-		Type:               config.ProviderTypeResponses,
-		StreamIdleTimeout:  1,
-		StreamTotalTimeout: 1,
-	}, nil)
-	// The timer goroutine fires the total budget, so the flag must be atomic.
-	var cancelled atomic.Bool
-	cancel := func() { cancelled.Store(true) }
-	// Drip faster than the idle timeout so only the total budget can fire.
-	cr := NewProviderChunkTimeoutReader(&dripReader{interval: 100 * time.Millisecond}, p, DefaultChunkTimeout, cancel)
-	defer cr.Stop()
+	// Virtual time keeps the 1s budget deterministic and near-instant; the
+	// drip still runs on the real timer/reset path, so the cap semantics are
+	// the same as a wall-clock run.
+	synctest.Test(t, func(t *testing.T) {
+		p := NewProviderConfig("test", config.ProviderConfig{
+			Type:               config.ProviderTypeResponses,
+			StreamIdleTimeout:  1,
+			StreamTotalTimeout: 1,
+		}, nil)
+		// The timer goroutine fires the total budget, so the flag must be atomic.
+		var cancelled atomic.Bool
+		cancel := func() { cancelled.Store(true) }
+		// Drip faster than the idle timeout so only the total budget can fire.
+		cr := NewProviderChunkTimeoutReader(&dripReader{interval: 100 * time.Millisecond}, p, DefaultChunkTimeout, cancel)
+		defer cr.Stop()
 
-	buf := make([]byte, 64)
-	deadline := time.Now().Add(5 * time.Second)
-	var err error
-	for time.Now().Before(deadline) {
-		if _, err = cr.Read(buf); err != nil {
-			break
+		buf := make([]byte, 64)
+		var err error
+		// Bound the drip so a regression that never fires the budget fails fast
+		// instead of spinning on the virtual clock.
+		for range 100 {
+			if _, err = cr.Read(buf); err != nil {
+				break
+			}
 		}
-	}
-	total, ok := errors.AsType[*StreamTotalTimeoutError](err)
-	if !ok {
-		t.Fatalf("read error = %v, want *StreamTotalTimeoutError", err)
-	}
-	if !cancelled.Load() {
-		t.Fatal("cancel was not called when the total budget fired")
-	}
-	if !errors.Is(err, context.DeadlineExceeded) && !total.Timeout() {
-		t.Fatal("StreamTotalTimeoutError must be a net.Error timeout so retry classification rotates keys")
-	}
+		total, ok := errors.AsType[*StreamTotalTimeoutError](err)
+		if !ok {
+			t.Fatalf("read error = %v, want *StreamTotalTimeoutError", err)
+		}
+		if !cancelled.Load() {
+			t.Fatal("cancel was not called when the total budget fired")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) && !total.Timeout() {
+			t.Fatal("StreamTotalTimeoutError must be a net.Error timeout so retry classification rotates keys")
+		}
+	})
 }
 
 // TestStreamTotalTimeoutSurvivesCancelMasking pins that a total-budget fire is
@@ -143,8 +150,18 @@ func TestStreamTotalTimeoutBoundsSlowDrip(t *testing.T) {
 func TestStreamTotalTimeoutSurvivesCancelMasking(t *testing.T) {
 	// The timer goroutine fires the total budget, so the flag must be atomic.
 	var cancelled atomic.Bool
-	cancel := func() { cancelled.Store(true) }
-	cr := NewChunkTimeoutReader(&blockingReader{cancel: cancel}, time.Hour, cancel)
+	// The reader blocks until this fires, so the test does not wait on a fixed
+	// delay that would both slow the suite and hide a cancel that never came.
+	blocked := make(chan struct{})
+	cancel := func() {
+		cancelled.Store(true)
+		select {
+		case <-blocked:
+		default:
+			close(blocked)
+		}
+	}
+	cr := NewChunkTimeoutReader(&blockingReader{cancelled: blocked}, time.Hour, cancel)
 	defer cr.Stop()
 	cr.SetTotalTimeout(50 * time.Millisecond)
 
@@ -175,11 +192,11 @@ func (r *dripReader) Read(p []byte) (int, error) {
 // blockingReader blocks until the total-budget timer cancels it, then reports
 // the cancellation, which is the masking case classification must survive.
 type blockingReader struct {
-	cancel func()
+	cancelled <-chan struct{}
 }
 
 func (r *blockingReader) Read(_ []byte) (int, error) {
-	<-time.After(2 * time.Second)
+	<-r.cancelled
 	return 0, context.Canceled
 }
 

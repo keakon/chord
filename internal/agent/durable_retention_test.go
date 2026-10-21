@@ -134,13 +134,15 @@ func TestCompactSubAgentMailboxLogsPreservesUnconsumedAndLatestProgress(t *testi
 	if err != nil {
 		t.Fatalf("create mailbox log: %v", err)
 	}
-	mailboxEncoder := json.NewEncoder(mailboxFile)
+	mailboxWriter := bufio.NewWriter(mailboxFile)
+	mailboxEncoder := json.NewEncoder(mailboxWriter)
 	ackFile, err := os.Create(filepath.Join(subagentsDir, "mailbox-acks.jsonl"))
 	if err != nil {
 		_ = mailboxFile.Close()
 		t.Fatalf("create ack log: %v", err)
 	}
-	ackEncoder := json.NewEncoder(ackFile)
+	ackWriter := bufio.NewWriter(ackFile)
+	ackEncoder := json.NewEncoder(ackWriter)
 	writeMessage := func(msg SubAgentMailboxMessage, consumed bool) {
 		t.Helper()
 		if err := mailboxEncoder.Encode(msg); err != nil {
@@ -163,6 +165,12 @@ func TestCompactSubAgentMailboxLogsPreservesUnconsumedAndLatestProgress(t *testi
 	}
 	for i := range 10 {
 		writeMessage(SubAgentMailboxMessage{MessageID: fmt.Sprintf("recent-%04d", i), TaskID: "recent", Kind: SubAgentMailboxKindCompleted}, true)
+	}
+	if err := mailboxWriter.Flush(); err != nil {
+		t.Fatalf("flush mailbox log: %v", err)
+	}
+	if err := ackWriter.Flush(); err != nil {
+		t.Fatalf("flush ack log: %v", err)
 	}
 	if err := mailboxFile.Close(); err != nil {
 		t.Fatalf("close mailbox log: %v", err)
@@ -209,11 +217,11 @@ func TestCompactSubAgentMailboxLogsPreservesUnconsumedAndLatestProgress(t *testi
 // it. Consumed messages without a matching record age out.
 func TestCompactSubAgentMailboxLogsKeepsTerminalEvidenceForCurrentAttempt(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
-	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o700); err != nil {
+	sessionDir := filepath.Join(t.TempDir(), "session")
+	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o700); err != nil {
 		t.Fatalf("mkdir subagents: %v", err)
 	}
-	a.setTaskRecords(map[string]*DurableTaskRecord{
+	if err := persistDurableTaskRecords(sessionDir, map[string]*DurableTaskRecord{
 		"evidence-task": {
 			TaskID:            "evidence-task",
 			State:             string(SubAgentStateCompleted),
@@ -222,22 +230,23 @@ func TestCompactSubAgentMailboxLogsKeepsTerminalEvidenceForCurrentAttempt(t *tes
 			Attempt:           1,
 			UpdatedAt:         time.Now(),
 		},
-	})
-	if err := a.persistTaskRegistry(); err != nil {
+	}); err != nil {
 		t.Fatalf("persist task registry: %v", err)
 	}
 
-	mailboxFile, err := os.Create(filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl"))
+	mailboxFile, err := os.Create(filepath.Join(sessionDir, "subagents", "mailbox.jsonl"))
 	if err != nil {
 		t.Fatalf("create mailbox log: %v", err)
 	}
-	mailboxEncoder := json.NewEncoder(mailboxFile)
-	ackFile, err := os.Create(filepath.Join(a.sessionDir, "subagents", "mailbox-acks.jsonl"))
+	mailboxWriter := bufio.NewWriter(mailboxFile)
+	mailboxEncoder := json.NewEncoder(mailboxWriter)
+	ackFile, err := os.Create(filepath.Join(sessionDir, "subagents", "mailbox-acks.jsonl"))
 	if err != nil {
 		_ = mailboxFile.Close()
 		t.Fatalf("create ack log: %v", err)
 	}
-	ackEncoder := json.NewEncoder(ackFile)
+	ackWriter := bufio.NewWriter(ackFile)
+	ackEncoder := json.NewEncoder(ackWriter)
 	writeMessage := func(msg SubAgentMailboxMessage) {
 		t.Helper()
 		if err := mailboxEncoder.Encode(msg); err != nil {
@@ -270,6 +279,12 @@ func TestCompactSubAgentMailboxLogsKeepsTerminalEvidenceForCurrentAttempt(t *tes
 			Summary:   "completed",
 		})
 	}
+	if err := mailboxWriter.Flush(); err != nil {
+		t.Fatalf("flush mailbox log: %v", err)
+	}
+	if err := ackWriter.Flush(); err != nil {
+		t.Fatalf("flush ack log: %v", err)
+	}
 	if err := mailboxFile.Close(); err != nil {
 		t.Fatalf("close mailbox log: %v", err)
 	}
@@ -277,14 +292,14 @@ func TestCompactSubAgentMailboxLogsKeepsTerminalEvidenceForCurrentAttempt(t *tes
 		t.Fatalf("close ack log: %v", err)
 	}
 
-	msgs, err := loadSubAgentMailboxMessages(a.sessionDir)
+	msgs, err := loadSubAgentMailboxMessages(sessionDir)
 	if err != nil {
 		t.Fatalf("load mailbox messages before compaction: %v", err)
 	}
-	if err := compactSubAgentMailboxLogs(a.sessionDir, msgs); err != nil {
+	if err := compactSubAgentMailboxLogs(sessionDir, msgs); err != nil {
 		t.Fatalf("compactSubAgentMailboxLogs: %v", err)
 	}
-	msgs, err = loadSubAgentMailboxMessages(a.sessionDir)
+	msgs, err = loadSubAgentMailboxMessages(sessionDir)
 	if err != nil {
 		t.Fatalf("load compacted mailbox messages: %v", err)
 	}
