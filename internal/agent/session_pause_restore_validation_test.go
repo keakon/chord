@@ -16,6 +16,15 @@ import (
 
 func TestPausedSessionRestoreValidatesDependenciesBeforeActivation(t *testing.T) {
 	t.Parallel()
+	dependencies := []string{
+		"main_role",
+		"task_role",
+		"main_role_mode",
+		"task_role_mode",
+		"metadata",
+		"working_directory",
+		"working_directory_file",
+	}
 	for _, paused := range []bool{true, false} {
 		t.Run(map[bool]string{true: "paused", false: "pending_before_dispatch"}[paused], func(t *testing.T) {
 			// Rejected restores must leave this live owner untouched. Keep one
@@ -23,89 +32,98 @@ func TestPausedSessionRestoreValidatesDependenciesBeforeActivation(t *testing.T)
 			a := newReadyTestMainAgent(t)
 			installTakeoverTestLock(t, a)
 			oldPath, oldLock, oldGate := a.SessionDir(), a.sessionLock, a.sessionExecutionGate()
-			for _, consumer := range []string{"load", "startup", "takeover"} {
-				for _, dependency := range []string{"main_role", "task_role", "main_role_mode", "task_role_mode", "metadata", "working_directory", "working_directory_file"} {
-					t.Run(consumer+"/"+dependency, func(t *testing.T) {
-						path, id := createPausedTakeoverTarget(t, a, consumer+"-"+dependency)
-						a.agentConfigs = map[string]*config.AgentConfig{
-							"main-sample":   {Name: "main-sample"},
-							"worker-sample": {Name: "worker-sample", Mode: config.AgentModeSubAgent},
+			a.agentConfigs = map[string]*config.AgentConfig{
+				"main-sample":   {Name: "main-sample"},
+				"worker-sample": {Name: "worker-sample", Mode: config.AgentModeSubAgent},
+			}
+			cases := make([]struct{ consumer, dependency string }, 0, len(dependencies)+2)
+			for _, dependency := range dependencies {
+				cases = append(cases, struct{ consumer, dependency string }{"load", dependency})
+			}
+			// The dependency validation is shared by every entry point. Keep
+			// representative startup and takeover failures to cover their
+			// entry-point cleanup without repeating every invalid fixture.
+			cases = append(cases,
+				struct{ consumer, dependency string }{"startup", "main_role"},
+				struct{ consumer, dependency string }{"takeover", "working_directory_file"},
+			)
+			for _, tc := range cases {
+				t.Run(tc.consumer+"/"+tc.dependency, func(t *testing.T) {
+					path, id := createPausedTakeoverTarget(t, a, tc.consumer+"-"+tc.dependency)
+					manager := recovery.NewRecoveryManager(path)
+					snapshot, err := manager.Recover()
+					if err != nil {
+						t.Fatal(err)
+					}
+					snapshot.Pause.Paused = paused
+					if !paused {
+						if err := manager.PersistMessage(identity.MainAgentID, message.Message{Role: message.RoleUser, Content: "earlier instruction"}); err != nil {
+							t.Fatal(err)
 						}
-						manager := recovery.NewRecoveryManager(path)
-						snapshot, err := manager.Recover()
+					}
+					switch tc.dependency {
+					case "main_role":
+						snapshot.ActiveRole = "unavailable-sample"
+					case "main_role_mode":
+						snapshot.ActiveRole = "worker-sample"
+					case "task_role", "task_role_mode":
+						name := "unavailable-sample"
+						if tc.dependency == "task_role_mode" {
+							name = "main-sample"
+						}
+						if err := persistDurableTaskRecords(path, map[string]*DurableTaskRecord{"sample-task": {TaskID: "sample-task", AgentDefName: name, State: string(SubAgentStateIdle), Attempt: 1}}); err != nil {
+							t.Fatal(err)
+						}
+					case "metadata":
+						if err := os.WriteFile(filepath.Join(path, "session-meta.json"), []byte("{"), 0600); err != nil {
+							t.Fatal(err)
+						}
+					case "working_directory", "working_directory_file":
+						workDir := filepath.Join(t.TempDir(), "sample-checkout")
+						if tc.dependency == "working_directory_file" {
+							if err := os.WriteFile(workDir, []byte("sample"), 0600); err != nil {
+								t.Fatal(err)
+							}
+						}
+						if err := recovery.SaveSessionMeta(path, recovery.SessionMeta{WorktreePath: workDir}); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := manager.SaveSnapshot(snapshot); err != nil {
+						t.Fatal(err)
+					}
+					if err := manager.Close(); err != nil {
+						t.Fatal(err)
+					}
+					switch tc.consumer {
+					case "load":
+						_, err = a.loadSessionState(path)
+					case "startup":
+						a.sessionDir = path
+						err = a.RestoreSessionAtStartup()
+						a.sessionDir = oldPath
+					case "takeover":
+						reply := make(chan error, 1)
+						a.handleTakeoverTarget(sessionTakeoverTarget{ctx: t.Context(), sessionID: id.SessionID, identity: id, reply: reply})
+						err = <-reply
+					}
+					if err == nil || !strings.Contains(err.Error(), "restore_failed") {
+						t.Fatalf("missing dependency did not reject restore: %v", err)
+					}
+					if a.SessionDir() != oldPath || a.sessionLock != oldLock || oldGate.Snapshot().Paused {
+						t.Fatal("invalid checkpoint changed current ownership or execution")
+					}
+					if a.sessionExecutionPaused() || len(a.PendingSessionInputs()) != 0 {
+						t.Fatal("invalid paused checkpoint was installed")
+					}
+					if tc.consumer == "takeover" {
+						lock, err := recovery.AcquireSessionLock(path)
 						if err != nil {
-							t.Fatal(err)
+							t.Fatal("invalid restore retained target lock")
 						}
-						snapshot.Pause.Paused = paused
-						if !paused {
-							if err := manager.PersistMessage(identity.MainAgentID, message.Message{Role: message.RoleUser, Content: "earlier instruction"}); err != nil {
-								t.Fatal(err)
-							}
-						}
-						switch dependency {
-						case "main_role":
-							snapshot.ActiveRole = "unavailable-sample"
-						case "main_role_mode":
-							snapshot.ActiveRole = "worker-sample"
-						case "task_role", "task_role_mode":
-							name := "unavailable-sample"
-							if dependency == "task_role_mode" {
-								name = "main-sample"
-							}
-							if err := persistDurableTaskRecords(path, map[string]*DurableTaskRecord{"sample-task": {TaskID: "sample-task", AgentDefName: name, State: string(SubAgentStateIdle), Attempt: 1}}); err != nil {
-								t.Fatal(err)
-							}
-						case "metadata":
-							if err := os.WriteFile(filepath.Join(path, "session-meta.json"), []byte("{"), 0600); err != nil {
-								t.Fatal(err)
-							}
-						case "working_directory", "working_directory_file":
-							workDir := filepath.Join(t.TempDir(), "sample-checkout")
-							if dependency == "working_directory_file" {
-								if err := os.WriteFile(workDir, []byte("sample"), 0600); err != nil {
-									t.Fatal(err)
-								}
-							}
-							if err := recovery.SaveSessionMeta(path, recovery.SessionMeta{WorktreePath: workDir}); err != nil {
-								t.Fatal(err)
-							}
-						}
-						if err := manager.SaveSnapshot(snapshot); err != nil {
-							t.Fatal(err)
-						}
-						if err := manager.Close(); err != nil {
-							t.Fatal(err)
-						}
-						switch consumer {
-						case "load":
-							_, err = a.loadSessionState(path)
-						case "startup":
-							a.sessionDir = path
-							err = a.RestoreSessionAtStartup()
-							a.sessionDir = oldPath
-						case "takeover":
-							reply := make(chan error, 1)
-							a.handleTakeoverTarget(sessionTakeoverTarget{ctx: t.Context(), sessionID: id.SessionID, identity: id, reply: reply})
-							err = <-reply
-						}
-						if err == nil || !strings.Contains(err.Error(), "restore_failed") {
-							t.Fatalf("missing dependency did not reject restore: %v", err)
-						}
-						if a.SessionDir() != oldPath || a.sessionLock != oldLock || oldGate.Snapshot().Paused {
-							t.Fatal("invalid checkpoint changed current ownership or execution")
-						}
-						if a.sessionExecutionPaused() || len(a.PendingSessionInputs()) != 0 {
-							t.Fatal("invalid paused checkpoint was installed")
-						}
-						if consumer == "takeover" {
-							lock, err := recovery.AcquireSessionLock(path)
-							if err != nil {
-								t.Fatal("invalid restore retained target lock")
-							}
-							_ = lock.Release()
-						}
-					})
-				}
+						_ = lock.Release()
+					}
+				})
 			}
 		})
 	}

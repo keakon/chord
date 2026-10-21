@@ -47,9 +47,9 @@ func TestTakeoverRepeatedSaveRestoreReclaimsRuntime(t *testing.T) {
 		return 0
 	}
 	beforeFD, beforeWorkers := countFD(), runtime.NumGoroutine()
-	// Keep both save paths in the ordinary suite. The stress gate repeats
+	// Smoke both save paths in the ordinary suite. The stress gate repeats
 	// them long enough to expose accumulating descriptors and workers.
-	iterations := 5
+	iterations := 2
 	if os.Getenv("CHORD_TEST_STRESS") == "1" {
 		iterations = 100
 	}
