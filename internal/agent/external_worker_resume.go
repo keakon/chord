@@ -147,8 +147,8 @@ func (a *MainAgent) rehydrateExternalTaskLeader(record *DurableTaskRecord, activ
 	w, err = a.newExternalWorker(externalWorkerConfig{
 		agentDef: def, instanceID: NextInstanceID(def.Name), taskID: record.TaskID, taskDesc: record.TaskDesc,
 		planTaskRef: record.PlanTaskRef, semanticTaskKey: record.SemanticTaskKey,
-		expectedWriteScope: record.ExpectedWriteScope, resultSchemaJSON: record.ResultSchema,
-		workDir: binding.WorkDir, ctx: ctx, cancel: cancel,
+		resultSchemaJSON: record.ResultSchema,
+		workDir:          binding.WorkDir, ctx: ctx, cancel: cancel,
 	})
 	if err != nil {
 		cancel()

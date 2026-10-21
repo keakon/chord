@@ -14,7 +14,6 @@ func TestOrchestrationStatsAggregatesRuntimeAndDurableState(t *testing.T) {
 
 	now := time.Now()
 	a.orchestrationMetrics.recordAdmissionWait(12 * time.Millisecond)
-	a.orchestrationMetrics.scopeConflicts.Add(2)
 	a.orchestrationMetrics.recordPark("task-parked", now.Add(-40*time.Millisecond))
 	a.orchestrationMetrics.recordRehydrate("task-parked", now)
 	a.orchestrationMetrics.recordMailboxCreated("msg-1", now.Add(-30*time.Millisecond))
@@ -44,8 +43,8 @@ func TestOrchestrationStatsAggregatesRuntimeAndDurableState(t *testing.T) {
 	if stats.AdmissionWaitCount != 1 || stats.AdmissionWaitTotal != 12*time.Millisecond || stats.AdmissionWaitAverage != 12*time.Millisecond {
 		t.Fatalf("admission stats = count %d total %v average %v", stats.AdmissionWaitCount, stats.AdmissionWaitTotal, stats.AdmissionWaitAverage)
 	}
-	if stats.ScopeConflicts != 2 || stats.Parks != 1 || stats.Rehydrates != 1 {
-		t.Fatalf("lifecycle counters = conflicts %d parks %d rehydrates %d", stats.ScopeConflicts, stats.Parks, stats.Rehydrates)
+	if stats.Parks != 1 || stats.Rehydrates != 1 {
+		t.Fatalf("lifecycle counters = parks %d rehydrates %d", stats.Parks, stats.Rehydrates)
 	}
 	if stats.ParkedDurationCount != 1 || stats.ParkedDurationTotal <= 0 || stats.ParkedDurationAverage != stats.ParkedDurationTotal {
 		t.Fatalf("parked duration stats = count %d total %v average %v", stats.ParkedDurationCount, stats.ParkedDurationTotal, stats.ParkedDurationAverage)

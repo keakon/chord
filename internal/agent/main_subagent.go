@@ -48,7 +48,6 @@ type delegationCaller struct {
 	Depth      int
 	Delegation config.DelegationConfig
 	Ruleset    permission.Ruleset
-	WriteScope tools.WriteScope
 	WorkDir    string
 	// WorkDirState is the caller's active checkout binding. A worker that
 	// inherits the caller's directory inherits this
@@ -67,14 +66,6 @@ func (a *MainAgent) subAgentWorkDir() string {
 	}
 	workDir, _ = os.Getwd()
 	return workDir
-}
-
-// writeScopeBaseDir is the directory that relative declared scopes resolve
-// against. Declared scopes are advisory coordination declarations: they feed
-// duplicate/overlap hints between sibling tasks and the worker's own context,
-// and are never enforced at tool execution time.
-func (a *MainAgent) writeScopeBaseDir() string {
-	return a.subAgentWorkDir()
 }
 
 func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID string, client *llm.Client, parentCtx context.Context, cancel context.CancelFunc, extraMCPTools []tools.Tool) SubAgentConfig {
@@ -128,16 +119,6 @@ func (c subAgentDelegateCreator) CreateSubAgent(ctx context.Context, req tools.S
 	return c.parent.CreateSubAgent(ctx, req)
 }
 
-// AgentRoleRegistersNoFileWriteTools implements tools.AgentFileWriteSurface for
-// nested delegation; the classification depends only on the target agent
-// definition's role, never on the delegating worker.
-func (c subAgentDelegateCreator) AgentRoleRegistersNoFileWriteTools(agentType string) bool {
-	if c.parent == nil {
-		return false
-	}
-	return c.parent.agentRoleRegistersNoFileWriteTools(agentType)
-}
-
 func (c subAgentDelegateCreator) AvailableSubAgents() []tools.AgentInfo {
 	if c.parent == nil {
 		return nil
@@ -162,8 +143,7 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 			Depth:        0,
 			Delegation:   cfg.Delegation,
 			Ruleset:      a.effectiveRuleset(),
-			WriteScope:   tools.WriteScope{},
-			WorkDir:      a.writeScopeBaseDir(),
+			WorkDir:      a.subAgentWorkDir(),
 			WorkDirState: a.workDirState.load(),
 			IsMain:       true,
 		}, nil
@@ -179,7 +159,6 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 		Depth:      depth,
 		Delegation: sub.delegation,
 		Ruleset:    sub.currentRuleset(),
-		WriteScope: sub.currentWriteScope(),
 		// The caller's *current* checkout, not the directory it was created
 		// in: a caller whose session adopted a different checkout must
 		// delegate into the checkout it is actually working in.
@@ -254,57 +233,32 @@ func (a *MainAgent) directNonTerminalChildCountLocked(ownerAgentID, ownerTaskID 
 
 // duplicateTaskHandle builds the hard already_exists handle for a delegation
 // that collided with a confirmed duplicate — an identical explicit
-// semantic_task_key. A probable duplicate (the description-derived fallback key
-// or plan_task_ref reuse without an explicit key in common) must never be
+// semantic_task_key. A probable duplicate (a plan_task_ref reuse) must never be
 // rejected; it gets a started handle annotated by duplicateHintedTaskHandle
-// instead. Write-scope overlap never reaches this handle either: it is
-// advisory and annotated on the started handle by scopeConflictHintedTaskHandle.
+// instead.
 func duplicateTaskHandle(existing *DurableTaskRecord) tools.TaskHandle {
 	handle := tools.TaskHandle{
-		Status:             "already_exists",
-		TaskID:             existing.TaskID,
-		AgentID:            existing.LatestInstanceID,
-		Message:            "a task with the same explicit semantic_task_key already exists; continue it with `" + tools.NameNotify + "` instead of creating a duplicate delegate",
-		PlanTaskRef:        existing.PlanTaskRef,
-		SemanticTaskKey:    existing.SemanticTaskKey,
-		ExpectedWriteScope: existing.ExpectedWriteScope,
-		SuggestedTaskID:    existing.TaskID,
-		SuggestedAgentID:   existing.LatestInstanceID,
-		SuggestedAction:    "notify_existing",
-		DuplicateDetected:  true,
+		Status:            "already_exists",
+		TaskID:            existing.TaskID,
+		AgentID:           existing.LatestInstanceID,
+		Message:           "a task with the same explicit semantic_task_key already exists; continue it with `" + tools.NameNotify + "` instead of creating a duplicate delegate",
+		PlanTaskRef:       existing.PlanTaskRef,
+		SemanticTaskKey:   existing.SemanticTaskKey,
+		SuggestedTaskID:   existing.TaskID,
+		SuggestedAgentID:  existing.LatestInstanceID,
+		SuggestedAction:   "notify_existing",
+		DuplicateDetected: true,
 	}
 	return handle
 }
 
-// scopeConflictHintedTaskHandle annotates a started handle when the new task's
-// declared write scope overlaps another non-terminal task. Write scopes are
-// declarations, not authorities, so the overlap never rejects the delegation —
-// the new task runs and the caller decides how to keep the two workers from
-// editing the same files: serialize the tasks, coordinate shared edits with
-// the other worker via notify, or move this work to its own git worktree.
-func scopeConflictHintedTaskHandle(started tools.TaskHandle, existing *DurableTaskRecord) tools.TaskHandle {
-	taskID := strings.TrimSpace(existing.TaskID)
-	if taskID == "" {
-		return started
-	}
-	started.ScopeConflict = true
-	started.SuggestedTaskID = taskID
-	started.SuggestedAgentID = strings.TrimSpace(existing.LatestInstanceID)
-	started.SuggestedAction = "serialize_or_worktree"
-	started.Message = fmt.Sprintf(
-		"task started, but its declared write scope overlaps the still-active task %s: both workers may edit the same files, so run them serially, coordinate the shared edits with that task via %s (target_task_id=%s), or move this work to its own git worktree before touching the same paths",
-		taskID, tools.NameNotify, taskID)
-	return started
-}
-
 // duplicateHintedTaskHandle annotates a started handle when the new task
-// collided with a probable duplicate: the description-derived fallback key or a
-// plan_task_ref points at another task (or in-flight admission) from the same
-// delegation context, but that collision is a heuristic, not proof that both
-// are one deliverable. The new task is kept and the caller is told about the
-// other task so the model can decide: continue the existing task with notify
-// and cancel the fresh copy if they really are the same deliverable, or keep
-// both if they are not.
+// collided with a probable duplicate: a plan_task_ref points at another task
+// (or in-flight admission) from the same delegation context, but that collision
+// is a heuristic, not proof that both are one deliverable. The new task is kept
+// and the caller is told about the other task so the model can decide: continue
+// the existing task with notify and cancel the fresh copy if they really are
+// the same deliverable, or keep both if they are not.
 func duplicateHintedTaskHandle(started tools.TaskHandle, existing *DurableTaskRecord, pending *subAgentAdmission) tools.TaskHandle {
 	taskID := ""
 	if existing != nil {
@@ -327,57 +281,44 @@ func duplicateHintedTaskHandle(started tools.TaskHandle, existing *DurableTaskRe
 	return started
 }
 
-// findPendingDuplicateOrConflictingTaskLocked is the admissions equivalent of
-// findDuplicateOrConflictingTaskLocked: it screens still-admitting tasks
-// (subAgentAdmission entries) as if they were running records, using the same
-// disposition rules. A caller may only wait for and reuse a pending task's
-// admission result when the match is taskDuplicateExplicitKey — the pending
-// call asserted the same explicit semantic_task_key, so both really are the
-// same deliverable. A probable match must never block the caller on another
-// admission's handle.
-func (a *MainAgent) findPendingDuplicateOrConflictingTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string, semanticKeyExplicit bool, expectedWriteScope tools.WriteScope) (*DurableTaskRecord, taskDuplicateDisposition, bool, *subAgentAdmission) {
+// findPendingDuplicateTaskLocked is the admissions equivalent of
+// findDuplicateTaskLocked: it screens still-admitting tasks (subAgentAdmission
+// entries) as if they were running records, using the same disposition rules.
+// A caller may only wait for and reuse a pending task's admission result when
+// the match is taskDuplicateExplicitKey — the pending call asserted the same
+// explicit semantic_task_key, so both really are the same deliverable. A
+// probable match must never block the caller on another admission's handle.
+func (a *MainAgent) findPendingDuplicateTaskLocked(ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey string) (*DurableTaskRecord, taskDuplicateDisposition, *subAgentAdmission) {
 	var probable *DurableTaskRecord
 	var probableAdmission *subAgentAdmission
-	var conflictRecord *DurableTaskRecord
-	var conflictAdmission *subAgentAdmission
-	var conflictDisposition taskDuplicateDisposition
 	for _, pending := range a.subs.admissions {
 		if pending == nil {
 			continue
 		}
 		rec := &DurableTaskRecord{
-			TaskID:             pending.taskID,
-			AgentDefName:       pending.agentType,
-			PlanTaskRef:        pending.planTaskRef,
-			SemanticTaskKey:    pending.semanticTaskKey,
-			ExpectedWriteScope: pending.expectedWriteScope,
-			OwnerAgentID:       pending.ownerAgentID,
-			OwnerTaskID:        pending.ownerTaskID,
-			State:              string(SubAgentStateRunning),
+			TaskID:          pending.taskID,
+			AgentDefName:    pending.agentType,
+			PlanTaskRef:     pending.planTaskRef,
+			SemanticTaskKey: pending.semanticTaskKey,
+			OwnerAgentID:    pending.ownerAgentID,
+			OwnerTaskID:     pending.ownerTaskID,
+			State:           string(SubAgentStateRunning),
 		}
-		disposition, conflict := a.duplicateOrConflictingTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope, a.writeScopeBaseDir())
+		disposition := a.duplicateTaskRecord(rec, ownerAgentID, ownerTaskID, agentType, planTaskRef, semanticTaskKey)
 		if disposition == taskDuplicateExplicitKey {
 			// The identical explicit semantic_task_key is the only pending
-			// match a caller may wait on, and it outranks advisory conflicts
-			// from other admissions (iteration order is arbitrary).
-			return rec, disposition, false, pending
+			// match a caller may wait on.
+			return rec, disposition, pending
 		}
-		if conflict && conflictRecord == nil {
-			conflictRecord = rec
-			conflictDisposition = disposition
-			conflictAdmission = pending
-		} else if disposition == taskDuplicateProbable && probable == nil {
+		if disposition == taskDuplicateProbable && probable == nil {
 			probable = rec
 			probableAdmission = pending
 		}
 	}
-	if conflictRecord != nil {
-		return conflictRecord, conflictDisposition, true, conflictAdmission
-	}
 	if probable != nil {
-		return probable, taskDuplicateProbable, false, probableAdmission
+		return probable, taskDuplicateProbable, probableAdmission
 	}
-	return nil, taskDuplicateNone, false, nil
+	return nil, taskDuplicateNone, nil
 }
 
 func (a *MainAgent) releaseSubAgentAdmission(admission *subAgentAdmission) {
@@ -928,7 +869,6 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	agentType := req.AgentType
 	planTaskRef := req.PlanTaskRef
 	semanticTaskKey := req.SemanticTaskKey
-	expectedWriteScope := req.ExpectedWriteScope
 	requestCtx := ctx
 	caller, err := a.canCallerDelegate(ctx)
 	if err != nil {
@@ -946,12 +886,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	n := a.adhocSeq.Add(1)
 	taskID := fmt.Sprintf("adhoc-%d", n)
 	planTaskRef = strings.TrimSpace(planTaskRef)
-	// Only an explicitly supplied semantic_task_key is a confirmed duplicate
-	// identity; the key derived from the description is a heuristic that may
-	// only hint at duplicates (see duplicateOrConflictingTaskRecord).
-	semanticKeyExplicit := strings.TrimSpace(semanticTaskKey) != ""
-	semanticTaskKey = resolveSemanticTaskKey(semanticTaskKey, description)
-	expectedWriteScope = expectedWriteScope.Normalized()
+	semanticTaskKey = strings.TrimSpace(semanticTaskKey)
 	agentDef, err := a.resolveAgentDef(agentType)
 	if err != nil {
 		return tools.TaskHandle{}, err
@@ -967,13 +902,12 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	// drives both the worker's tools and its initial binding.
 	requestedWorkDir := caller.WorkDir
 	admission := &subAgentAdmission{
-		taskID:             taskID,
-		ownerAgentID:       caller.AgentID,
-		ownerTaskID:        caller.TaskID,
-		agentType:          agentType,
-		planTaskRef:        planTaskRef,
-		semanticTaskKey:    semanticTaskKey,
-		expectedWriteScope: expectedWriteScope,
+		taskID:          taskID,
+		ownerAgentID:    caller.AgentID,
+		ownerTaskID:     caller.TaskID,
+		agentType:       agentType,
+		planTaskRef:     planTaskRef,
+		semanticTaskKey: semanticTaskKey,
 	}
 	admissionStartedAt := time.Now()
 	a.admissionMu.Lock()
@@ -1003,43 +937,27 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 			Message: fmt.Sprintf("direct non-terminal child limit reached (max_children=%d)", maxChildren),
 		}, nil
 	}
-	existing, duplicate, conflict := a.findDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope)
-	conflictRecord := (*DurableTaskRecord)(nil)
-	if conflict {
-		conflictRecord = existing
-	}
+	existing, duplicate := a.findDuplicateTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey)
 	// Only a confirmed duplicate — the identical explicit semantic_task_key —
-	// rejects the delegation here. A write-scope conflict is advisory: declared
-	// scopes gate nothing, so two non-terminal tasks may overlap and still both
-	// be created; the started handle points at the other task so the caller can
-	// serialize, coordinate shared edits, or move the new work to its own
-	// worktree. A probable duplicate (the description-derived fallback key or a
-	// plan_task_ref match without an explicit key) also falls through and
-	// creates a real task: that key is a heuristic, and whether the two
-	// descriptions really are one deliverable is the model's decision. A
-	// probable match must also never join a pending admission, so it never
-	// waits for another task's handle.
+	// rejects the delegation here. A probable duplicate (a plan_task_ref match)
+	// falls through and creates a real task: whether the two tasks really are
+	// one deliverable is the model's decision. A probable match must also never
+	// join a pending admission, so it never waits for another task's handle.
 	rejected := existing != nil && duplicate == taskDuplicateExplicitKey
 	var pendingDuplicate *subAgentAdmission
 	if !rejected {
 		// A probable registry match (or no registry match at all) still leaves
 		// pending admissions to screen: a rejecting pending admission — the
 		// identical explicit semantic_task_key — dominates, and only such a
-		// pending match may later be waited on. A pending scope conflict or
-		// probable match annotates the started handle instead.
+		// pending match may later be waited on. A pending probable match
+		// annotates the started handle instead.
 		var pendingExisting *DurableTaskRecord
 		var pendingDup taskDuplicateDisposition
-		var pendingConflict bool
-		pendingExisting, pendingDup, pendingConflict, pendingDuplicate = a.findPendingDuplicateOrConflictingTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey, semanticKeyExplicit, expectedWriteScope)
+		pendingExisting, pendingDup, pendingDuplicate = a.findPendingDuplicateTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey)
 		if pendingExisting != nil && pendingDup == taskDuplicateExplicitKey {
 			rejected = true
-		} else if pendingExisting != nil {
-			if existing == nil {
-				existing, duplicate = pendingExisting, pendingDup
-			}
-			if pendingConflict && conflictRecord == nil {
-				conflictRecord = pendingExisting
-			}
+		} else if pendingExisting != nil && existing == nil {
+			existing, duplicate = pendingExisting, pendingDup
 		}
 	}
 	probableDuplicate := !rejected && existing != nil && duplicate == taskDuplicateProbable
@@ -1057,9 +975,6 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 			}
 		}
 		return duplicateTaskHandle(existing), nil
-	}
-	if conflictRecord != nil {
-		a.orchestrationMetrics.scopeConflicts.Add(1)
 	}
 	if !agentDef.IsExternalBackend() && a.llmFactory == nil {
 		a.subs.mu.Unlock()
@@ -1097,18 +1012,17 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	var rt subAgentRuntime
 	if agentDef.IsExternalBackend() {
 		worker, workerErr := a.newExternalWorker(externalWorkerConfig{
-			agentDef:           agentDef,
-			instanceID:         instanceID,
-			taskID:             taskID,
-			taskDesc:           description,
-			planTaskRef:        planTaskRef,
-			semanticTaskKey:    semanticTaskKey,
-			expectedWriteScope: expectedWriteScope,
-			resultSchemaJSON:   resultSchemaJSON,
-			caller:             caller,
-			workDir:            requestedWorkDir,
-			ctx:                subCtx,
-			cancel:             cancel,
+			agentDef:         agentDef,
+			instanceID:       instanceID,
+			taskID:           taskID,
+			taskDesc:         description,
+			planTaskRef:      planTaskRef,
+			semanticTaskKey:  semanticTaskKey,
+			resultSchemaJSON: resultSchemaJSON,
+			caller:           caller,
+			workDir:          requestedWorkDir,
+			ctx:              subCtx,
+			cancel:           cancel,
 		})
 		if workerErr != nil {
 			cancel()
@@ -1147,7 +1061,6 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 		subCfg.TaskDesc = description
 		subCfg.PlanTaskRef = planTaskRef
 		subCfg.SemanticKey = semanticTaskKey
-		subCfg.WriteScope = expectedWriteScope
 		subCfg.OwnerAgentID = caller.AgentID
 		subCfg.OwnerTaskID = caller.TaskID
 		subCfg.Depth = caller.Depth + 1
@@ -1223,7 +1136,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	rt.takeSlot()
 	a.publishSubAgentLocked(rt, taskID, registrationRecord)
 	a.subs.mu.Unlock()
-	rt.persistRecoverySnapshot(taskID)
+	if sub := asSubAgent(rt); sub != nil {
+		sub.persistRecoverySnapshot(taskID)
+	}
 	admissionCommitted = true
 	clientCommitted = true
 	initialMessageCommitted = true
@@ -1241,26 +1156,15 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	})
 	a.emitToTUI(AgentStatusEvent{AgentID: instanceID, Status: "running", Message: fmt.Sprintf("Started task %s: %s", taskID, truncateString(description, 80))})
 	handle := tools.TaskHandle{
-		Status:             "started",
-		TaskID:             taskID,
-		AgentID:            instanceID,
-		Message:            "running in background",
-		PlanTaskRef:        planTaskRef,
-		SemanticTaskKey:    semanticTaskKey,
-		ExpectedWriteScope: expectedWriteScope,
+		Status:          "started",
+		TaskID:          taskID,
+		AgentID:         instanceID,
+		Message:         "running in background",
+		PlanTaskRef:     planTaskRef,
+		SemanticTaskKey: semanticTaskKey,
 	}
 	if probableDuplicate {
 		handle = duplicateHintedTaskHandle(handle, existing, pendingDuplicate)
-	}
-	if conflictRecord != nil {
-		if probableDuplicate {
-			// The collision is probably the same deliverable, whose owner is
-			// told to notify the earlier task; keep that guidance and surface
-			// the overlap as a flag only.
-			handle.ScopeConflict = true
-		} else {
-			handle = scopeConflictHintedTaskHandle(handle, conflictRecord)
-		}
 	}
 	return handle, nil
 }
@@ -1304,68 +1208,6 @@ func taskIDForSub(sub *SubAgent) string {
 		return ""
 	}
 	return sub.taskID
-}
-
-// agentDefConfigForRole mirrors resolveAgentDef's lookup (registered config
-// first, built-in fallback) without its validation errors, and takes a state
-// snapshot so callers inside registry locks can classify a role from a record's
-// AgentDefName without racing config replacement. Returns nil when the role has
-// no config document.
-func (a *MainAgent) agentDefConfigForRole(agentType string) *config.AgentConfig {
-	if a == nil || strings.TrimSpace(agentType) == "" {
-		return nil
-	}
-	if cfg := a.snapshotAgentConfigByName(agentType); cfg != nil {
-		return cfg
-	}
-	return config.BuiltinAgentConfigs()[agentType]
-}
-
-// rulesetRegistersNoFileWriteTools reports whether the effective permission
-// ruleset keeps every canonical file-modifying tool (write, edit, delete,
-// apply_patch) out of the worker's registry. A role that denies all four
-// cannot modify files through file tools, which is what makes an empty write
-// scope safe for its delegates and what keeps its tasks from conflicting with
-// any other task over file paths.
-func rulesetRegistersNoFileWriteTools(ruleset permission.Ruleset) bool {
-	for _, name := range []string{tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete} {
-		if !ruleset.IsDisabled(name) {
-			return false
-		}
-	}
-	return true
-}
-
-// agentRoleRegistersNoFileWriteTools reports whether the agent definition's
-// role registers no file-modifying tool under the current effective ruleset.
-// Unknown or unresolvable roles default to false (write-capable) so the
-// conservative path-scope and overlap semantics apply.
-func (a *MainAgent) agentRoleRegistersNoFileWriteTools(agentType string) bool {
-	cfg := a.agentDefConfigForRole(agentType)
-	if cfg == nil {
-		return false
-	}
-	return rulesetRegistersNoFileWriteTools(a.buildSubAgentRuleset(cfg))
-}
-
-// AgentRoleRegistersNoFileWriteTools implements tools.AgentFileWriteSurface so
-// the Delegate tool can accept an empty expected_write_scope when the chosen
-// agent_type's role registers no file-modifying tools.
-func (a *MainAgent) AgentRoleRegistersNoFileWriteTools(agentType string) bool {
-	return a.agentRoleRegistersNoFileWriteTools(agentType)
-}
-
-// taskScopesConflict reports whether two delegated tasks would run as
-// concurrent writers over an overlapping boundary. A task whose role registers
-// no file-modifying tools never writes files, so it conflicts with nothing; a
-// write-capable task conflicts with another write-capable task exactly when
-// their boundaries overlap, where an empty scope is the conservative
-// whole-workspace boundary.
-func (a *MainAgent) taskScopesConflict(agentTypeA string, scopeA tools.WriteScope, agentTypeB string, scopeB tools.WriteScope, baseDir string) bool {
-	if a.agentRoleRegistersNoFileWriteTools(agentTypeA) || a.agentRoleRegistersNoFileWriteTools(agentTypeB) {
-		return false
-	}
-	return writeScopesOverlap(scopeA, scopeB, baseDir)
 }
 
 func (a *MainAgent) resolveAgentDef(agentType string) (*config.AgentConfig, error) {

@@ -58,7 +58,6 @@ type externalWorker struct {
 	depth        int
 	joinToOwner  bool
 
-	writeScope       tools.WriteScope
 	resultSchema     map[string]any
 	resultSchemaJSON json.RawMessage
 	workDir          string
@@ -134,18 +133,17 @@ type externalWorker struct {
 }
 
 type externalWorkerConfig struct {
-	agentDef           *config.AgentConfig
-	instanceID         string
-	taskID             string
-	taskDesc           string
-	planTaskRef        string
-	semanticTaskKey    string
-	expectedWriteScope tools.WriteScope
-	resultSchemaJSON   json.RawMessage
-	caller             delegationCaller
-	workDir            string
-	ctx                context.Context
-	cancel             context.CancelFunc
+	agentDef         *config.AgentConfig
+	instanceID       string
+	taskID           string
+	taskDesc         string
+	planTaskRef      string
+	semanticTaskKey  string
+	resultSchemaJSON json.RawMessage
+	caller           delegationCaller
+	workDir          string
+	ctx              context.Context
+	cancel           context.CancelFunc
 }
 
 func (a *MainAgent) newExternalWorker(cfg externalWorkerConfig) (*externalWorker, error) {
@@ -184,7 +182,6 @@ func (a *MainAgent) newExternalWorker(cfg externalWorkerConfig) (*externalWorker
 		ownerTaskID:        strings.TrimSpace(cfg.caller.TaskID),
 		depth:              cfg.caller.Depth + 1,
 		joinToOwner:        !cfg.caller.IsMain && cfg.caller.Delegation.ChildJoinEnabled(),
-		writeScope:         cfg.expectedWriteScope,
 		resultSchema:       resultSchema,
 		resultSchemaJSON:   append(json.RawMessage(nil), cfg.resultSchemaJSON...),
 		workDir:            workDir,
@@ -285,8 +282,6 @@ func (w *externalWorker) clearStallAlert() {
 	w.runtimeState.setStallAlerted(false)
 }
 
-func (w *externalWorker) invalidateRuntimeDiagnostics() {}
-
 func (w *externalWorker) injectInitialInput(description string) bool {
 	if w.started.Load() {
 		return false
@@ -369,7 +364,6 @@ func (w *externalWorker) buildTaskRecord(previous *DurableTaskRecord, closedReas
 	rec.PlanTaskRef = w.planTaskRef
 	rec.SemanticTaskKey = w.semanticTaskKey
 	rec.ResultSchema = cloneRawJSON(w.resultSchemaJSON)
-	rec.ExpectedWriteScope = w.writeScope.Normalized()
 	rec.OwnerAgentID = ownerAgentID
 	rec.OwnerTaskID = ownerTaskID
 	rec.Depth = depth
@@ -434,8 +428,6 @@ func (w *externalWorker) removeRegistration(sessionDir, taskID string) {
 	}
 	_ = w.parent.persistTaskRegistryRecord(sessionDir, taskID, nil)
 }
-
-func (w *externalWorker) persistRecoverySnapshot(_ string) {}
 
 // setState transitions the worker state, ignoring illegal transitions.
 func (w *externalWorker) setState(state SubAgentState, summary string) bool {

@@ -326,9 +326,6 @@ func TestRestoredCancelledSubAgentContinueReactivatesWithoutAppendingMessage(t *
 		State:        SubAgentStateCancelled,
 		LastSummary:  "Cancelled before shutdown",
 		Messages:     []message.Message{{Role: "user", Content: "Investigate issue"}},
-		// The explicit continue revives this record through rehydration,
-		// which refuses scope-less records.
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}})
 	if count != 1 {
 		t.Fatalf("restoreLoadedSubAgents() = %d, want 1", count)
@@ -478,9 +475,6 @@ func TestRestoreLoadedSubAgentsKeepsOwnedMailboxQueuedUntilManualContinue(t *tes
 		TaskDesc:     "Investigate issue",
 		State:        SubAgentStateRunning,
 		LastSummary:  "restored parent",
-		// Manual continue wakes the parked parent through rehydration, which
-		// refuses scope-less records.
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}})
 	if count != 1 {
 		t.Fatalf("restoreLoadedSubAgents() = %d, want 1", count)
@@ -805,18 +799,16 @@ func TestRestoreSessionRebuildsTaskIdentityFromSnapshot(t *testing.T) {
 	if err := rm.PersistMessage("agent-identity", message.Message{Role: "user", Content: "inspect identity"}); err != nil {
 		t.Fatalf("PersistMessage(agent): %v", err)
 	}
-	wantScope := tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
 		CreatedAt: time.Now(),
 		ActiveAgents: []recovery.AgentSnapshot{{
-			InstanceID:         "agent-identity",
-			TaskID:             "adhoc-identity",
-			AgentDefName:       "restorer",
-			TaskDesc:           "inspect identity",
-			PlanTaskRef:        "plan-item-identity",
-			SemanticTaskKey:    "inspect-identity",
-			ExpectedWriteScope: wantScope,
-			State:              string(SubAgentStateCompleted),
+			InstanceID:      "agent-identity",
+			TaskID:          "adhoc-identity",
+			AgentDefName:    "restorer",
+			TaskDesc:        "inspect identity",
+			PlanTaskRef:     "plan-item-identity",
+			SemanticTaskKey: "inspect-identity",
+			State:           string(SubAgentStateCompleted),
 		}},
 	}); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
@@ -838,9 +830,6 @@ func TestRestoreSessionRebuildsTaskIdentityFromSnapshot(t *testing.T) {
 	if record.PlanTaskRef != "plan-item-identity" || record.SemanticTaskKey != "inspect-identity" {
 		t.Fatalf("restored identity = (%q, %q), want snapshot values", record.PlanTaskRef, record.SemanticTaskKey)
 	}
-	if len(record.ExpectedWriteScope.PathPrefix) != 1 || record.ExpectedWriteScope.PathPrefix[0] != "internal/agent" {
-		t.Fatalf("restored write scope = %#v, want %#v", record.ExpectedWriteScope, wantScope)
-	}
 }
 
 func TestSubAgentMetaPersistsTaskIdentity(t *testing.T) {
@@ -849,7 +838,6 @@ func TestSubAgentMetaPersistsTaskIdentity(t *testing.T) {
 	sub := newControllableTestSubAgent(t, a, "adhoc-meta-identity")
 	sub.planTaskRef = "plan-item-meta"
 	sub.semanticTaskKey = "meta-identity"
-	sub.writeScope = tools.WriteScope{Files: []string{"internal/agent/subagent_meta.go"}}
 	a.persistSubAgentMeta(sub)
 
 	meta, err := loadSubAgentMeta(a.sessionDir, sub.instanceID)
@@ -858,9 +846,6 @@ func TestSubAgentMetaPersistsTaskIdentity(t *testing.T) {
 	}
 	if meta == nil || meta.PlanTaskRef != sub.planTaskRef || meta.SemanticTaskKey != sub.semanticTaskKey {
 		t.Fatalf("persisted meta = %#v, want task identity", meta)
-	}
-	if len(meta.ExpectedWriteScope.Files) != 1 || meta.ExpectedWriteScope.Files[0] != "internal/agent/subagent_meta.go" {
-		t.Fatalf("persisted meta write scope = %#v, want original file scope", meta.ExpectedWriteScope)
 	}
 }
 
@@ -962,9 +947,6 @@ func TestMailboxReplyChainPersistsAcrossResume(t *testing.T) {
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "resume worker conversation"})
 	sub := newControllableTestSubAgent(t, a, "adhoc-7")
 	sub.agentDefName = "restorer"
-	// The reply chain is replayed through a rehydrated worker after restore;
-	// its durable record must carry a write boundary to be rehydratable.
-	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.setState(SubAgentStateWaitingMain, "need decision")
 	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
@@ -1092,10 +1074,6 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 	sub := newControllableTestSubAgent(t, a, "adhoc-21")
 	sub.agentDefName = "restorer"
 	sub.taskDesc = "Investigate issue"
-	// handleAgentDone below persists this worker's durable record, which the
-	// second agent revives by rehydrating after restore — a scope-less record
-	// is refused outright, so carry the boundary a real task was admitted with.
-	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.ctxMgr.Append(message.Message{Role: "user", Content: "Investigate issue"})
 	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)

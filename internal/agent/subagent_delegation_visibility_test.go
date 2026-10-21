@@ -148,7 +148,7 @@ func TestSubAgentDelegateTargetsUseSubAgentRuleset(t *testing.T) {
 }
 
 // A SubAgent with nested delegation must receive the shared delegation
-// strategy (continue-with-Notify versus new delegate, write-scope
+// strategy (continue-with-Notify versus new delegate, independent
 // parallelism) in its own system prompt: the Delegate tool description
 // defers to the surrounding prompt, and this role has no "SubAgent
 // Workflow" section.
@@ -188,7 +188,7 @@ func TestSubAgentSystemPromptIncludesDelegationStrategyWhenNested(t *testing.T) 
 		"## Nested Delegation",
 		"prefer `notify` on the existing task instead of creating a new delegate",
 		"prefer a new `delegate` instead of overloading an existing worker",
-		"Dispatch tasks in parallel only when their write scopes are clearly independent",
+		"Dispatch tasks in parallel only when their work is independent",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("nested SubAgent system prompt missing %q", want)

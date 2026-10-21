@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -21,7 +20,6 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tooloutput"
@@ -259,31 +257,6 @@ func (p toolExecutionPipeline) recordToolActivityStarted(tc message.ToolCall) er
 		return fmt.Errorf("tool %q not executed: failed to record started state before execution: %w", tc.Name, err)
 	}
 	return nil
-}
-
-func normalizedScopeAbsPath(path, baseDir string) string {
-	path = strings.TrimSpace(path)
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(baseDir, path)
-	}
-	abs, err := filepath.Abs(path)
-	if err == nil {
-		path = abs
-	}
-	path = filepath.Clean(path)
-	// Shared with permission matching on purpose: the rule check and the
-	// execution must resolve the same path the same way, or a rule stops
-	// applying to the call it was written for.
-	if resolved, ok := pathutil.ResolveSymlinksBestEffort(path); ok {
-		return filepath.Clean(resolved)
-	}
-	return path
-}
-
-// pathWithinScope reports whether target lies inside base.
-func pathWithinScope(base, target string) bool {
-	_, ok := pathutil.RelToBase(target, base)
-	return ok
 }
 
 // validateToolCallArgs runs every argument check a tool call must pass before

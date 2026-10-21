@@ -716,16 +716,8 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 			return nil, "", false, err
 		}
 	}
-	// The revived worker runs under the record's normalized declared scope.
-	// Delegate admits a task with an empty expected_write_scope only when its
-	// role's permission rules register no file-modifying tools; under that
-	// role the revived worker's tool surface is itself the boundary — no
-	// write, edit, delete, or apply_patch tool is registered, so an empty
-	// scope means "nothing to declare" rather than "unrestricted". A
-	// write-capable role cannot produce an empty-scope record through
-	// Delegate, so the record needs no further check: the role, re-derived
-	// from the record's AgentDefName at rehydration, governs.
-	writeScope := record.ExpectedWriteScope.Normalized()
+	// The revived worker's file access comes from its role's permission rules;
+	// the durable record carries no per-task write-boundary declaration.
 	agentDef, err := a.resolveAgentDef(record.AgentDefName)
 	if err != nil {
 		return nil, "", false, err
@@ -763,7 +755,6 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	subCfg.TaskDesc = record.TaskDesc
 	subCfg.PlanTaskRef = record.PlanTaskRef
 	subCfg.SemanticKey = record.SemanticTaskKey
-	subCfg.WriteScope = writeScope
 	if len(record.ResultSchema) > 0 {
 		// The contract is recompiled from its canonical bytes so a restored
 		// worker validates exactly what it was admitted with. Uncompilable
@@ -887,10 +878,6 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if baseRecord == nil {
 		baseRecord = record
 	}
-	// The record may have been settled, or its advisory scope replaced, while
-	// this activation was preparing its runtime outside admissionMu. Publish
-	// the current durable scope so the live snapshot matches the record.
-	sub.publishWriteScope(baseRecord.ExpectedWriteScope)
 	baseWasTerminal := isTerminalSubAgentState(SubAgentState(strings.TrimSpace(baseRecord.State)))
 	rehydratedRecord := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], "", a.explicitUserTurnCount.Load(), time.Now())
 	if baseWasTerminal {

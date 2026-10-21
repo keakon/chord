@@ -699,15 +699,14 @@ func TestRehydrateTaskRestoresRecordedWorktree(t *testing.T) {
 	}
 
 	record := &DurableTaskRecord{
-		TaskID:             "adhoc-restore-worktree",
-		AgentDefName:       "worker",
-		TaskDesc:           "resume in the recorded worktree",
-		State:              string(SubAgentStateCompleted),
-		ResumePolicy:       taskResumePolicyNotify,
-		LatestInstanceID:   sub.instanceID,
-		InstanceHistory:    []string{sub.instanceID},
-		RuntimeParked:      true,
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
+		TaskID:           "adhoc-restore-worktree",
+		AgentDefName:     "worker",
+		TaskDesc:         "resume in the recorded worktree",
+		State:            string(SubAgentStateCompleted),
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: sub.instanceID,
+		InstanceHistory:  []string{sub.instanceID},
+		RuntimeParked:    true,
 	}
 	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("root instructions\n"), 0o644); err != nil {
 		t.Fatalf("write main checkout AGENTS.md: %v", err)
@@ -775,15 +774,14 @@ func TestRehydrateTaskIgnoresStaleRecordedWorktree(t *testing.T) {
 	}
 
 	record := &DurableTaskRecord{
-		TaskID:             "adhoc-restore-stale",
-		AgentDefName:       "worker",
-		TaskDesc:           "resume after the worktree was removed",
-		State:              string(SubAgentStateCompleted),
-		ResumePolicy:       taskResumePolicyNotify,
-		LatestInstanceID:   sub.instanceID,
-		InstanceHistory:    []string{sub.instanceID},
-		RuntimeParked:      true,
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
+		TaskID:           "adhoc-restore-stale",
+		AgentDefName:     "worker",
+		TaskDesc:         "resume after the worktree was removed",
+		State:            string(SubAgentStateCompleted),
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: sub.instanceID,
+		InstanceHistory:  []string{sub.instanceID},
+		RuntimeParked:    true,
 	}
 	restoredAgent := newWorktreeTestAgentOn(t, repo, "session-restore-stale-2")
 	configureNestedDelegationTestRuntime(restoredAgent, 1)
@@ -908,15 +906,14 @@ func TestRehydrateTaskKeepsRecordedMainCheckoutAfterParentSwitches(t *testing.T)
 	}
 
 	record := &DurableTaskRecord{
-		TaskID:             "adhoc-restore-maindir",
-		AgentDefName:       "worker",
-		TaskDesc:           "resume in the recorded main checkout",
-		State:              string(SubAgentStateCompleted),
-		ResumePolicy:       taskResumePolicyNotify,
-		LatestInstanceID:   sub.instanceID,
-		InstanceHistory:    []string{sub.instanceID},
-		RuntimeParked:      true,
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
+		TaskID:           "adhoc-restore-maindir",
+		AgentDefName:     "worker",
+		TaskDesc:         "resume in the recorded main checkout",
+		State:            string(SubAgentStateCompleted),
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: sub.instanceID,
+		InstanceHistory:  []string{sub.instanceID},
+		RuntimeParked:    true,
 	}
 	restoredAgent := newWorktreeTestAgentOn(t, repo, "session-restore-maindir-2")
 	if restoredAgent.sessionDir != a.sessionDir {

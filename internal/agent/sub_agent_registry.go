@@ -18,18 +18,17 @@ type subAgentActivation struct {
 }
 
 type subAgentAdmission struct {
-	taskID             string
-	ownerAgentID       string
-	ownerTaskID        string
-	agentType          string
-	planTaskRef        string
-	semanticTaskKey    string
-	expectedWriteScope tools.WriteScope
-	slotHeld           bool
-	done               chan struct{}
-	once               sync.Once
-	result             tools.TaskHandle
-	err                error
+	taskID          string
+	ownerAgentID    string
+	ownerTaskID     string
+	agentType       string
+	planTaskRef     string
+	semanticTaskKey string
+	slotHeld        bool
+	done            chan struct{}
+	once            sync.Once
+	result          tools.TaskHandle
+	err             error
 }
 
 func (a *subAgentAdmission) complete(result tools.TaskHandle, err error) {
@@ -70,7 +69,6 @@ type subAgentRuntime interface {
 	OwnerSnapshot() (ownerAgentID, ownerTaskID string, depth int, joinToOwner bool)
 	LastReplyMessageID() string
 	markActivity()
-	invalidateRuntimeDiagnostics()
 
 	// Admission and durable registration. CreateSubAgent drives both runtime
 	// kinds through these so the admission, identity and publish ordering stay
@@ -80,7 +78,6 @@ type subAgentRuntime interface {
 	buildTaskRecord(previous *DurableTaskRecord, closedReason string, currentTurn uint64, now time.Time) *DurableTaskRecord
 	persistRegistration(sessionDir string, record *DurableTaskRecord) error
 	removeRegistration(sessionDir string, taskID string)
-	persistRecoverySnapshot(taskID string)
 	takeSlot()
 	releaseSlot() (held, borrowed, bypassed bool)
 	slotHeld() bool
@@ -369,8 +366,8 @@ func (r *subAgentRegistry) removeRuntime(instanceID string) subAgentRuntime {
 
 func (r *subAgentRegistry) removeRuntimeLocked(instanceID string) subAgentRuntime {
 	rt := r.subAgents[instanceID]
-	if rt != nil {
-		rt.invalidateRuntimeDiagnostics()
+	if sub := asSubAgent(rt); sub != nil {
+		sub.invalidateRuntimeDiagnostics()
 	}
 	delete(r.subAgents, instanceID)
 	delete(r.stateEnteredTurn, instanceID)

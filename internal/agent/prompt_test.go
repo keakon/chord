@@ -87,13 +87,12 @@ type taskCreatorStub struct {
 
 func (s taskCreatorStub) CreateSubAgent(_ context.Context, req tools.SubAgentRequest) (tools.TaskHandle, error) {
 	return tools.TaskHandle{
-		Status:             "started",
-		TaskID:             "adhoc-1",
-		AgentID:            "stub-subagent",
-		Message:            "running in background",
-		PlanTaskRef:        req.PlanTaskRef,
-		SemanticTaskKey:    req.SemanticTaskKey,
-		ExpectedWriteScope: req.ExpectedWriteScope,
+		Status:          "started",
+		TaskID:          "adhoc-1",
+		AgentID:         "stub-subagent",
+		Message:         "running in background",
+		PlanTaskRef:     req.PlanTaskRef,
+		SemanticTaskKey: req.SemanticTaskKey,
 	}, nil
 }
 

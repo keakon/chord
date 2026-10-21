@@ -122,8 +122,6 @@ type SubAgent struct {
 	resultSchemaJSON   json.RawMessage
 	resultContractMu   sync.Mutex
 	resultContract     *TaskContractDiagnostics
-	writeScopeMu       sync.RWMutex
-	writeScope         tools.WriteScope
 	ownerMu            sync.RWMutex
 	ownerAgentID       string
 	ownerTaskID        string
@@ -601,7 +599,6 @@ type SubAgentConfig struct {
 	// drift; empty means the task has no contract.
 	ResultSchema     map[string]any
 	ResultSchemaJSON json.RawMessage
-	WriteScope       tools.WriteScope
 	OwnerAgentID     string
 	OwnerTaskID      string
 	Depth            int
@@ -691,10 +688,8 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			}
 			subTools.Register(t)
 		default:
-			// A task's write scope never removes command tools from the
-			// worker: shell side effects cannot be path-validated, so their
-			// availability follows the role's permission rules alone (a
-			// wildcard deny keeps them out of the registry).
+			// Tool availability follows the role's permission rules alone; a
+			// wildcard deny keeps a tool out of the registry.
 			if cfg.Ruleset.IsDisabled(t.Name()) {
 				continue
 			}
@@ -754,7 +749,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		semanticTaskKey:   strings.TrimSpace(cfg.SemanticKey),
 		resultSchema:      cfg.ResultSchema,
 		resultSchemaJSON:  cloneRawJSON(cfg.ResultSchemaJSON),
-		writeScope:        cfg.WriteScope.Normalized(),
 		ownerAgentID:      strings.TrimSpace(cfg.OwnerAgentID),
 		ownerTaskID:       strings.TrimSpace(cfg.OwnerTaskID),
 		depth:             cfg.Depth,

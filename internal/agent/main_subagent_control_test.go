@@ -11,7 +11,6 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/recovery"
-	"github.com/keakon/chord/internal/tools"
 )
 
 func newControllableTestSubAgent(t *testing.T, parent *MainAgent, taskID string) *SubAgent {
@@ -124,10 +123,6 @@ func newRevivalRaceTestMainAgent(t *testing.T) (*MainAgent, *DurableTaskRecord) 
 		LatestInstanceID: "restorer-9",
 		InstanceHistory:  []string{"restorer-9"},
 		RuntimeParked:    true,
-		// Both revival-race tests pin the attempt/settlement handling around
-		// rehydration — not the write boundary itself — so the fixture carries a
-		// plausible one.
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: cloneDurableTaskRecord(record)})
 	return a, record

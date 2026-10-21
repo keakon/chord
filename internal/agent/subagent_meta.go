@@ -17,20 +17,19 @@ import (
 )
 
 type subAgentMeta struct {
-	InstanceID         string           `json:"instance_id"`
-	TaskID             string           `json:"task_id"`
-	AgentDefName       string           `json:"agent_def_name,omitempty"`
-	TaskDesc           string           `json:"task_desc,omitempty"`
-	PlanTaskRef        string           `json:"plan_task_ref,omitempty"`
-	SemanticTaskKey    string           `json:"semantic_task_key,omitempty"`
-	ExpectedWriteScope tools.WriteScope `json:"expected_write_scope"`
-	SelectedModelRef   string           `json:"selected_model_ref,omitempty"`
-	RunningModelRef    string           `json:"running_model_ref,omitempty"`
-	OwnerAgentID       string           `json:"owner_agent_id,omitempty"`
-	OwnerTaskID        string           `json:"owner_task_id,omitempty"`
-	Depth              int              `json:"depth,omitempty"`
-	State              string           `json:"state,omitempty"`
-	LastSummary        string           `json:"last_summary,omitempty"`
+	InstanceID       string `json:"instance_id"`
+	TaskID           string `json:"task_id"`
+	AgentDefName     string `json:"agent_def_name,omitempty"`
+	TaskDesc         string `json:"task_desc,omitempty"`
+	PlanTaskRef      string `json:"plan_task_ref,omitempty"`
+	SemanticTaskKey  string `json:"semantic_task_key,omitempty"`
+	SelectedModelRef string `json:"selected_model_ref,omitempty"`
+	RunningModelRef  string `json:"running_model_ref,omitempty"`
+	OwnerAgentID     string `json:"owner_agent_id,omitempty"`
+	OwnerTaskID      string `json:"owner_task_id,omitempty"`
+	Depth            int    `json:"depth,omitempty"`
+	State            string `json:"state,omitempty"`
+	LastSummary      string `json:"last_summary,omitempty"`
 	// WorkDir is the agent's active checkout and WorkDirGeneration its binding
 	// generation. A rehydrated worker must resume in the same checkout, so a
 	// resumed transcript's relative paths are not resolved against a
@@ -87,7 +86,6 @@ func (a *MainAgent) persistSubAgentMetaToSession(sub *SubAgent, sessionDir strin
 		TaskDesc:              sub.taskDesc,
 		PlanTaskRef:           sub.planTaskRef,
 		SemanticTaskKey:       sub.semanticTaskKey,
-		ExpectedWriteScope:    sub.currentWriteScope(),
 		SelectedModelRef:      subSelectedModelRef(sub),
 		RunningModelRef:       subRunningModelRef(sub),
 		OwnerAgentID:          ownerAgentID,

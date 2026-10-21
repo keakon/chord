@@ -17,6 +17,8 @@
 
 - 恢复旧会话时，不再从非结构化的文件读取页脚推断行范围。重新读取相关文件即可为请求剪裁补齐结构化范围信息；已保存的会话正文不受影响。
 
+- `delegate` 不再声明或要求 `expected_write_scope` 参数，`scope_conflict` 提示（`suggested_action: serialize_or_worktree`）一并移除。worker 能否修改文件、运行命令，只由所属角色的权限规则决定。同一文件的并发写入仍按调用串行执行；复用某活跃任务显式 `semantic_task_key` 的委派仍以 `already_exists` 拒绝。旧 prompt 或集成继续传 `expected_write_scope` 时，Chord 运行时不会拒绝，而是丢弃该未知字段；按已发布工具 schema 严格校验参数的客户端仍需停止发送。
+
 ### 新功能
 
 - 子 Agent 可以运行在外部 Claude Code 进程上，主 Agent 仍使用 Chord 内部运行时。在子 Agent 定义中设置 `backend.kind: claude-code`，Chord 保留任务记录、完成邮箱和工具授权；完成后可以发送定向消息继续外部会话。Chord 被强制终止时，专属监督进程仍会清理 worker 的进程组并留下最小生命周期回执；监督进程先退出时，Chord 按启动前绑定的进程身份完成清理。恢复只接受能证明同一会话与工作目录已完成清理的回执；进程或输入结果未知时不自动重放。支持 Unix 上较新的 Claude Code 版本：受管传输面向 `stream-json` 协议本身，不锁定单一版本；`stream_event` 载荷不完整或 delta 类型未知时，对应任务带着具体原因失败。不支持外部 hooks、MCP 或插件。`delegate` 也接受这类 Agent 的 `result_schema`：契约在初始化阶段随角色指令送给外部进程，最终答复不是满足它的 JSON 对象时任务带着违规项失败。
@@ -49,6 +51,8 @@
 - 内嵌模型目录采用 [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2)，加入 Gemini 4 Argon，保留 1M token 共享窗口，默认流式绑定上限为 65,536 token，long decode 续传需要显式配置；记录 DeepSeek-V4.1-Flash-1017 在既有 `deepseek/deepseek-flash` 线路上的发布。
 
 - 系统提示词要求 Agent 原样保留标识符和契约细节，在设计与评审中给出首选方案及决定性理由，保留既有用法时让调用方仍可按原契约使用。提示词也要求回复和交接先讲结果与证据，并限定凭证只能通过批准机制使用。
+
+- 委派任务的重复检测现在只看调用方声明的身份：描述与其他任务偶然相似不再产生 `duplicate_detected` 提示；显式 `semantic_task_key` 复用仍以 `already_exists` 拒绝；复用 `plan_task_ref` 且未声明不同 key 时仍会附带提示。
 
 - 编辑其他 worktree 和仓库中的文件时，也能获得独立工作区的 LSP 诊断。切换目录会保留已启动的实例，侧栏显示对应的工作区目录。后台监测会更新外部改动、清理已删除文件的诊断，并释放闲置文档和实例。
 

@@ -19,7 +19,6 @@ func TestSubAgentStructuredCheckpointExtractsAuthoritativeState(t *testing.T) {
 	sub.taskDesc = "Refactor the parser and keep the CLI output format unchanged"
 	sub.ownerAgentID = "main"
 	sub.ownerTaskID = "task-7"
-	sub.writeScope = tools.WriteScope{Files: []string{"internal/parser/parser.go"}}
 	sub.taskChangesMu.Lock()
 	sub.actualChangedFiles = map[string]struct{}{"internal/parser/parser.go": {}, "internal/parser/lexer.go": {}}
 	sub.taskChangesMu.Unlock()
@@ -39,7 +38,6 @@ func TestSubAgentStructuredCheckpointExtractsAuthoritativeState(t *testing.T) {
 		"SubAgent context checkpoint: 40 earlier messages were removed for context_length_exceeded",
 		"Task: Refactor the parser and keep the CLI output format unchanged",
 		"Owner: main/task-7",
-		"Write scope: files=internal/parser/parser.go",
 		"Latest owner/user instruction: 输出格式保持不变，只调整内部实现 (constraint)",
 		"Files read or changed: internal/parser/lexer.go, internal/parser/parser.go",
 		"Completed actions: edit: edited 3 lines",
@@ -60,7 +58,7 @@ func TestSubAgentStructuredCheckpointMarksUnknownFields(t *testing.T) {
 	sub.taskDesc = ""
 	sub.runtimeState.set(SubAgentStateRunning, "")
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 5, "proactive", "archives/sub-2.md")
-	for _, field := range []string{"Task", "Owner", "Write scope", "Latest owner/user instruction", "Files read or changed", "Completed actions", "Known failures", "Open blocker"} {
+	for _, field := range []string{"Task", "Owner", "Latest owner/user instruction", "Files read or changed", "Completed actions", "Known failures", "Open blocker"} {
 		if !strings.Contains(checkpoint, "- "+field+": unknown") {
 			t.Errorf("field %q should be 'unknown' when no source exists:\n%s", field, checkpoint)
 		}
@@ -89,9 +87,9 @@ func TestSubAgentStructuredCheckpointDoesNotRepeatFailedApproach(t *testing.T) {
 func TestSubAgentStructuredCheckpointPreservesOpenBlocker(t *testing.T) {
 	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
-	sub.runtimeState.set(SubAgentStateWaitingMain, "waiting for owner to approve the write scope change")
+	sub.runtimeState.set(SubAgentStateWaitingMain, "waiting for owner to confirm the migration order")
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 4, "proactive", "archives/sub-4.md")
-	if !strings.Contains(checkpoint, "Open blocker: waiting_main: waiting for owner to approve the write scope change") {
+	if !strings.Contains(checkpoint, "Open blocker: waiting_main: waiting for owner to confirm the migration order") {
 		t.Errorf("open blocker lost: %s", checkpoint)
 	}
 	sub.cancel()

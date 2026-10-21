@@ -97,21 +97,21 @@ Shell 和后台输出超过 16 KiB 时，结果会显示简短预览及日志文
 | --- | --- |
 | `done` | 携带最终 Markdown 报告申请 loop 退出。仅在 loop 运行期间挂载，普通会话看不到它。见[使用指南：持续执行模式](./usage_CN.md#loop持续执行模式)。 |
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
-| `delegate` | 启动子任务并立即返回句柄；角色权限决定其能力，声明的工作范围用于协调，可选的 `result_schema` 声明交付结果必须包含什么。 |
+| `delegate` | 启动子任务并立即返回句柄；worker 的文件与命令能力由角色的权限规则决定，可选的 `result_schema` 声明交付结果必须包含什么。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
 | `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
 | `escalate` | SubAgent 侧：用 `kind: needs_repair` 向 owner 求助但不结束任务；用 `kind: blocked` 报告走不通，任务以失败收口。 |
 | `notify` | 向上级代理或指定子代理发送非阻塞通知。定向消息可唤醒已完成或已失败的子代理，并保留它自己的会话历史；已取消的任务不可恢复。具体参数见下方。 |
 
-### 委派任务与工作范围
+### 委派与并发
 
-`delegate` 启动一个委派的 SubAgent 工作流，并立即返回它的启动句柄（`task_id` / `agent_id`），不等它完成。调用必须携带 `expected_write_scope`，用于声明覆盖工作范围的最小 `files` / `path_prefix` / `modules`。
+`delegate` 启动一个委派的 SubAgent 工作流，并立即返回启动句柄（`task_id` / `agent_id`），不等它完成。调用参数为 `description`、`agent_type`，以及可选的 `plan_task_ref`、`semantic_task_key` 和 `result_schema`；不存在声明任务可触及哪些文件的独立参数。
 
-这份声明是协调元数据，不是运行时边界：worker 能否改文件完全由角色的权限规则决定（deny 掉 `write` / `edit` / `delete` / `apply_patch` 的角色注册不到这些工具），声明路径之外的调用不会被运行时拦截。
+worker 能否修改文件、能否运行命令，只由它所属角色的权限规则决定：角色 deny 了 `write`、`edit`、`delete`、`apply_patch`，就不会注册这些改文件工具；`shell` 等命令工具同样按角色权限执行。任务不应写入文件时，选择只读角色即可。禁用 `delegate` 也会一并禁用该角色的 `cancel` 和嵌套委派。
 
-诚实声明最窄范围，兄弟任务的叠加提示才有意义：新任务的声明范围与另一个仍活跃的任务重叠时，委派照常启动，句柄会带 `scope_conflict: true`、`suggested_task_id` 和 `suggested_action: serialize_or_worktree`，提示你把两个任务串行执行、用 `notify` 协调共享文件的编辑，或让新 worker 在独立的 git worktree 里工作。
+Chord 自己执行的工具，同一文件的并发写入会按调用串行执行，因此两个 Chord 内部 worker 不会交错写同一个文件。外部 coding-agent 后端在自己的进程内执行工具，其写入不受这条串行化保护。串行化保护的是文件完整性，而不是重叠修改之间的一致性；并行工作需要更大隔离时，改用独立检出或 Git worktree。
 
-只读任务应选择注册不到文件修改工具的角色并传空 scope：空 scope 只对这种角色放行，能写文件的角色必须声明非空范围，否则委派被拒绝。`shell` 这类命令工具不受 scope 约束，可用性由角色的权限规则决定。拒绝 `delegate` 会同时禁用该角色的 `cancel` 与嵌套委派。
+任务身份由 `semantic_task_key` 承担。显式复用某个仍活跃任务的 key 会以 `already_exists` 拒绝，应改用 `notify` 继续那个任务。仅复用同一个 `plan_task_ref` 而没有相同显式 key 时只是提示：新任务照常启动，句柄带 `duplicate_detected` 和另一个任务的 ID，是否保留两者由你判断；任务描述不参与重复判定。
 
 可委派给哪些角色同样由权限决定：`delegate` 的规则匹配 `agent_type` 参数，因此一个角色可以被限制为只能委派给部分 SubAgent 定义，Delegate 工具也只列出这些可选目标。详见[权限与安全：特殊权限语义](./permissions-and-safety_CN.md#特殊权限语义)。
 

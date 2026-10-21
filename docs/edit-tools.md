@@ -7,7 +7,7 @@ Chord provides two complementary tools for editing files, optimized for differen
 - **Pick a format:** [Quick Comparison](#quick-comparison) and [Tool Selection](#tool-selection): which tool Chord sends by default, and how to override it.
 - **Wire shapes:** [apply_patch Tool (Codex envelope)](#apply_patch-tool-codex-envelope) and [Edit (Replace) Tool](#edit-replace-tool) document the exact envelopes and matching rules.
 - **Day to day:** [Recommended Workflow](#recommended-workflow) and [Task-Specific Guidance](#task-specific-guidance).
-- **Approvals:** [Permissions](#permissions) covers write scope and auto-approval.
+- **Approvals:** [Permissions](#permissions) covers write approvals and auto-approval.
 
 ## Quick Comparison
 

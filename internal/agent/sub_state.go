@@ -281,25 +281,3 @@ func (s *SubAgent) setReplyThread(replyMessageID, replyToMailboxID, replyKind, r
 func (s *SubAgent) setLastArtifact(ref tools.ArtifactRef) {
 	s.runtimeState.setLastArtifact(ref)
 }
-
-// currentWriteScope returns the task record's advisory write-scope snapshot.
-// The declared scope is advisory and never gates tool execution: file access
-// is decided by the role's permission rules. The snapshot only feeds record
-// sync, context summaries, and later overlap advice. It is read under the lock
-// because activation publication can replace it while the worker runs.
-func (s *SubAgent) currentWriteScope() tools.WriteScope {
-	s.writeScopeMu.RLock()
-	defer s.writeScopeMu.RUnlock()
-	return s.writeScope.Normalized()
-}
-
-// publishWriteScope replaces the live scope snapshot with a committed record
-// scope. Activation publication runs outside the worker's turn, so the live
-// value must track the record the activation was committed from; the scope is
-// advisory for execution and never gates the worker's writes.
-func (s *SubAgent) publishWriteScope(scope tools.WriteScope) tools.WriteScope {
-	s.writeScopeMu.Lock()
-	defer s.writeScopeMu.Unlock()
-	s.writeScope = scope.Normalized()
-	return s.writeScope
-}

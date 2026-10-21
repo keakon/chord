@@ -99,7 +99,7 @@ Multiple entries in a model pool provide fallback on request failures. They do n
 
 - Compare a single agent, a strong coordinator with midrange workers, and a midrange coordinator with the same workers on the same real tasks. Change one factor at a time and repeat close comparisons.
 - Record end-to-end acceptance, false completion, human corrections, total cost, and elapsed time. Token prices exclude the effect of retries, review, and rework.
-- Start with few workers. Parallel writes need independent deliverables and settled shared decisions; different files can still have semantic dependencies. `expected_write_scope` is a coordination declaration, while role rules determine actual permissions.
+- Start with few workers. Parallel writes need independent deliverables and settled shared decisions; different files can still have semantic dependencies. Whether a worker may edit files or run commands is decided by its role's permission rules.
 - Review original requirements, actual changes, and verification evidence, not just the implementer's summary. Different models offer another perspective but do not guarantee independent errors.
 - Start with supported `medium` or `high` effort and adjust from results. Effort labels across vendors do not represent equal compute, and `max` does not guarantee better cost or quality.
 - Run `chord doctor models --pool <pool-name>` to check connectivity. It does not measure task success. Use Responses for GPT-6.1 Sol tool tasks; see [Model configuration](./model-configs.md).

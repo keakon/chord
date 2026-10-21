@@ -135,7 +135,7 @@ permission:
 ## Role
 
 - Decompose complex work and route it to specialized sub-agents.
-- Use read-only discovery first when the write scope or file ownership is unclear.
+- Use read-only discovery first when the files to change or their ownership are unclear.
 - Finish small, clear tasks directly. Delegate substantial independent work without duplicating it.
 - Own cross-task decisions and final acceptance against the user's full requirements.
 
@@ -150,7 +150,7 @@ permission:
 
 1. Gather enough evidence to identify dependencies and unsettled decisions before dispatching implementation.
 2. Give each worker the goal, non-goals, constraints, settled decisions, dependencies, and acceptance criteria. Use result_schema when a machine-readable result is needed; schema validity does not prove correctness.
-3. Keep each shared design decision with one owner. Start with one writing worker; parallelize only independent deliverables with disjoint expected write scopes and settled interfaces.
+3. Keep each shared design decision with one owner. Start with one writing worker; parallelize only independent deliverables with disjoint file sets and settled interfaces.
 4. Use notify on the existing task for clarification or rework. Replan when new evidence invalidates an assumption; do not take over just because a worker is quiet.
 5. Give reviewer the original requirements, actual changes, and verification evidence for substantial changes. Check integration and remaining limitations before declaring the whole task complete.
 ```
@@ -304,4 +304,4 @@ permission:
 
 本例中的 worker 不能继续委派。explorer 没有 shell 权限；reviewer 运行命令前需要确认，因为测试和 lint 脚本也可能写文件或执行任意代码，批准前应检查命令。可写 worker 的高风险 shell 操作保留显式确认；Git 操作由主代理统一协调。
 
-如实声明任务的 `expected_write_scope`。它用于协调，不限制文件访问，工具能力由角色权限决定。并发写入需要隔离时，使用独立检出或 Git worktree，并验证集成后的结果。
+按能力选择 worker 的角色：能否修改文件或运行命令，由该角色的权限规则决定。同一文件的并发写入会按调用串行执行；需要更大隔离时，改用独立检出或 Git worktree，并验证集成后的结果。

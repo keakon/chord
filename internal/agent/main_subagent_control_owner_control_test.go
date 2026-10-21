@@ -89,7 +89,7 @@ func TestDirectOwnerOnlyControlAppliesToLiveChildAndCompletedRehydrate(t *testin
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 2, MaxDepth: 2}
 
-	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child work", AgentType: "worker", ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent/main.go"}}})
+	handle, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child work", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent: %v", err)
 	}

@@ -319,7 +319,6 @@ func TestPendingHandoffKeepsParkedOwnerWakeRouting(t *testing.T) {
 
 	owner := newControllableTestSubAgent(t, a, "adhoc-held-parked-owner")
 	owner.instanceID = "owner-parked-hold-1"
-	owner.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	a.subs.mu.Lock()
 	delete(a.subs.subAgents, "worker-1")
 	a.subs.subAgents[owner.instanceID] = owner

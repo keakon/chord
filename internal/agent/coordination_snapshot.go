@@ -172,10 +172,6 @@ func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxID
 			b.WriteString(" semantic_key: ")
 			b.WriteString(rec.SemanticTaskKey)
 		}
-		if !rec.ExpectedWriteScope.Empty() {
-			b.WriteString(" write_scope: ")
-			b.WriteString(formatWriteScope(rec.ExpectedWriteScope))
-		}
 		if strings.TrimSpace(rec.LastSummary) != "" {
 			b.WriteString("\n  summary: ")
 			b.WriteString(truncateCoordinationSnapshotText(rec.LastSummary, coordinationSnapshotSummaryMaxRunes))
@@ -258,24 +254,6 @@ func runningRuntimeStallReason(rt subAgentRuntime, now time.Time) string {
 		return "running with no recent state/progress update"
 	}
 	return ""
-}
-
-func formatWriteScope(scope tools.WriteScope) string {
-	scope = scope.Normalized()
-	if scope.Empty() {
-		return ""
-	}
-	var parts []string
-	for _, item := range scope.Files {
-		parts = append(parts, "file:"+item)
-	}
-	for _, item := range scope.PathPrefix {
-		parts = append(parts, "path:"+item)
-	}
-	for _, item := range scope.Modules {
-		parts = append(parts, "module:"+item)
-	}
-	return strings.Join(parts, ",")
 }
 
 // updateSubAgentStallMarkers recomputes the SuspectedStallReason stored on each

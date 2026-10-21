@@ -14,8 +14,8 @@ import (
 // buildSubAgentStructuredCheckpoint renders the deterministic structured
 // checkpoint that replaces the removed history prefix inside a SubAgent
 // context compression. Every field is sourced from existing authoritative
-// state (task description, owner metadata, write scope, the message tail,
-// changed-file tracking, runtime state); a field with no
+// state (task description, owner metadata, the message tail, changed-file
+// tracking, runtime state); a field with no
 // derivable source is marked "unknown" rather than guessed. The checkpoint
 // intentionally does not call any live MainAgent state — it reads only the
 // SubAgent's own immutable fields, locked snapshots, and the message list
@@ -41,9 +41,6 @@ func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, 
 		ownerLabel = ""
 	}
 	b.WriteString(blankToUnknown(ownerLabel))
-	b.WriteByte('\n')
-	b.WriteString("- Write scope: ")
-	b.WriteString(blankToUnknown(s.currentWriteScope().Summary()))
 	b.WriteByte('\n')
 	b.WriteString("- Latest owner/user instruction: ")
 	b.WriteString(latestOwnerInstructionForCheckpoint(messages))

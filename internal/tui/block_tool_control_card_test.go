@@ -18,7 +18,7 @@ import (
 func TestDelegateWorkerDropsRuntimeNote(t *testing.T) {
 	// The Worker section renders the handle's structured fields; the runtime's
 	// notes are the model's diagnostics and must not join that field list.
-	note := "Note: ignored unrecognized parameter(s): args.expected_write_scope.extra"
+	note := "Note: ignored unrecognized parameter(s): args.unknown_extra.flag"
 	block := &Block{
 		ID:            5,
 		Type:          BlockToolCall,

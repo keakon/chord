@@ -74,19 +74,10 @@ func taskHandleHasContent(h tools.TaskHandle) bool {
 		h.Message != "" ||
 		h.PlanTaskRef != "" ||
 		h.SemanticTaskKey != "" ||
-		h.ScopeConflict ||
 		h.DuplicateDetected ||
 		h.SuggestedTaskID != "" ||
 		h.SuggestedAgentID != "" ||
-		h.SuggestedAction != "" ||
-		!isWriteScopeEmpty(h.ExpectedWriteScope)
-}
-
-// isWriteScopeEmpty reports whether a WriteScope has no declared content.
-// WriteScope contains slice fields, so it cannot be compared with == and
-// each field has to be checked individually.
-func isWriteScopeEmpty(s tools.WriteScope) bool {
-	return len(s.Files) == 0 && len(s.PathPrefix) == 0 && len(s.Modules) == 0
+		h.SuggestedAction != ""
 }
 
 func taskToolDescriptionContent(argsJSON string) string {

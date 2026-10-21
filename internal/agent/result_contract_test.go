@@ -546,16 +546,15 @@ func TestResultContractRehydratesAndRendersPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := &DurableTaskRecord{
-		TaskID:             "adhoc-contract-rehydrate",
-		AgentDefName:       "worker",
-		TaskDesc:           "contract work",
-		State:              string(SubAgentStateCompleted),
-		ResumePolicy:       taskResumePolicyNotify,
-		LatestInstanceID:   "worker-old",
-		InstanceHistory:    []string{"worker-old"},
-		RuntimeParked:      true,
-		ResultSchema:       canonical,
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
+		TaskID:           "adhoc-contract-rehydrate",
+		AgentDefName:     "worker",
+		TaskDesc:         "contract work",
+		State:            string(SubAgentStateCompleted),
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: "worker-old",
+		InstanceHistory:  []string{"worker-old"},
+		RuntimeParked:    true,
+		ResultSchema:     canonical,
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
 
@@ -599,8 +598,7 @@ func TestRehydrateDropsUnreadableResultContract(t *testing.T) {
 		InstanceHistory:  []string{"worker-old"},
 		RuntimeParked:    true,
 		// A top-level array can never satisfy a delegated JSON-object result.
-		ResultSchema:       json.RawMessage(`{"type":"array"}`),
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
+		ResultSchema: json.RawMessage(`{"type":"array"}`),
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
 

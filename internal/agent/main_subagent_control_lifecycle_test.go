@@ -28,10 +28,6 @@ func TestRehydratePersistenceFailureDoesNotRegisterRuntime(t *testing.T) {
 		RuntimeParked:    true,
 		ResumePolicy:     taskResumePolicyNotify,
 		LatestInstanceID: "worker-old",
-		// The fixture carries a realistic write boundary, matching records a
-		// delegated task would have been admitted under; this test only
-		// exercises the persistence-failure path.
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
 	// Block the registration file while keeping transcript and native journal
@@ -227,7 +223,6 @@ func TestSendMessageToCompletedTaskRehydratesParkedWorker(t *testing.T) {
 	sub.taskDesc = "Investigate issue"
 	sub.planTaskRef = "plan-item-13"
 	sub.semanticTaskKey = "investigate-issue"
-	sub.writeScope = tools.WriteScope{Files: []string{"internal/agent/main_subagent_control.go"}}
 	sub.ctxMgr.Append(message.Message{Role: "user", Content: "Investigate issue"})
 	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Investigate issue"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
@@ -274,9 +269,6 @@ func TestSendMessageToCompletedTaskRehydratesParkedWorker(t *testing.T) {
 	if record.PlanTaskRef != sub.planTaskRef || record.SemanticTaskKey != sub.semanticTaskKey {
 		t.Fatalf("rehydrated task identity = (%q, %q), want (%q, %q)", record.PlanTaskRef, record.SemanticTaskKey, sub.planTaskRef, sub.semanticTaskKey)
 	}
-	if len(record.ExpectedWriteScope.Files) != 1 || record.ExpectedWriteScope.Files[0] != "internal/agent/main_subagent_control.go" {
-		t.Fatalf("rehydrated write scope = %#v, want original file scope", record.ExpectedWriteScope)
-	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) && !restored.hasActiveTurn() {
 		time.Sleep(time.Millisecond)
@@ -313,10 +305,6 @@ func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
 		LatestInstanceID: "restorer-old",
 		InstanceHistory:  []string{"restorer-old"},
 		RuntimeParked:    true,
-		// The completed worker may only be revived under the write boundary
-		// its admission recorded; this test pins the orchestration/limits it
-		// resumes with, not the scope itself.
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
 
@@ -335,10 +323,10 @@ func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
 	}
 }
 
-// A task admitted under a role that registers no file-modifying tools carries
-// an empty write scope ("nothing to declare"); revival must accept that record
-// because the role's tool surface is the boundary, not a declared path list.
-func TestRehydrateAcceptsEmptyScopeForNoFileWriteToolRole(t *testing.T) {
+// A task admitted under a role that registers no file-modifying tools must
+// still revive: the role's tool surface is the boundary, not a declared path
+// list.
+func TestRehydrateNoFileWriteToolRoleKeepsToolSurface(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	setCachedWorkDirForTest(a, a.contentRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -355,24 +343,20 @@ func TestRehydrateAcceptsEmptyScopeForNoFileWriteToolRole(t *testing.T) {
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.NewShellTool("bash"))
 	record := &DurableTaskRecord{
-		TaskID:             "adhoc-rehydrate-empty",
-		AgentDefName:       "reviewer",
-		TaskDesc:           "resume read-only survey",
-		State:              string(SubAgentStateCompleted),
-		ResumePolicy:       taskResumePolicyNotify,
-		LatestInstanceID:   "reviewer-old",
-		InstanceHistory:    []string{"reviewer-old"},
-		RuntimeParked:      true,
-		ExpectedWriteScope: tools.WriteScope{},
+		TaskID:           "adhoc-rehydrate-empty",
+		AgentDefName:     "reviewer",
+		TaskDesc:         "resume read-only survey",
+		State:            string(SubAgentStateCompleted),
+		ResumePolicy:     taskResumePolicyNotify,
+		LatestInstanceID: "reviewer-old",
+		InstanceHistory:  []string{"reviewer-old"},
+		RuntimeParked:    true,
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
 
 	sub, _, err := a.rehydrateTask(record)
 	if err != nil {
 		t.Fatalf("rehydrateTask: %v", err)
-	}
-	if !sub.currentWriteScope().Empty() {
-		t.Fatalf("rehydrated scope = %#v, want empty preserved", sub.currentWriteScope())
 	}
 	for _, name := range []string{tools.NameWrite, tools.NameEdit, tools.NameDelete, tools.NameApplyPatch} {
 		if _, ok := sub.tools.Get(name); ok {
@@ -412,9 +396,6 @@ func TestConcurrentTaskRehydratePublishesOneRuntime(t *testing.T) {
 		LatestInstanceID: "restorer-40",
 		InstanceHistory:  []string{"restorer-40"},
 		RuntimeParked:    true,
-		// The concurrent-activation fixture carries the boundary a real
-		// delegated task would have been admitted under.
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
 
@@ -728,9 +709,6 @@ func TestParkedCancelledTaskAllowsExplicitUserResume(t *testing.T) {
 	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
 	sub := newControllableTestSubAgent(t, a, "adhoc-cancelled-user")
 	sub.agentDefName = "restorer"
-	// The explicit user resume revives the parked record through rehydration;
-	// carry the boundary a real task would have had.
-	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.setState(SubAgentStateCancelled, "stopped by user")
 	a.syncTaskRecordFromSub(sub, "stopped by user")
 	if !a.parkSubAgent(sub.instanceID) {
@@ -752,9 +730,6 @@ func TestDescendantMailboxRoutesThroughRehydratedOwnerAlias(t *testing.T) {
 	})
 	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
 	owner := newControllableTestSubAgent(t, a, "adhoc-owner-alias")
-	// The owner parks and is rehydrated from its durable record later in this
-	// test; give the record the write boundary a rehydrated runtime requires.
-	owner.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	owner.setState(SubAgentStateWaitingDescendant, "waiting")
 	a.syncTaskRecordFromSub(owner, "")
 	oldOwnerID := owner.instanceID
@@ -875,9 +850,6 @@ func TestParkBarrierConcurrentFocusedInputPreventsParkingAndPreservesMessage(t *
 	})
 	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
 	sub := newControllableTestSubAgent(t, a, "adhoc-park-input-race")
-	// The message racing the park barrier is delivered through a rehydrated
-	// runtime, which requires the record to carry a write boundary.
-	sub.writeScope = tools.WriteScope{PathPrefix: []string{"internal/agent"}}
 	sub.setState(SubAgentStateIdle, "idle")
 	a.syncTaskRecordFromSub(sub, "")
 	a.SwitchFocus(sub.instanceID)
@@ -998,9 +970,6 @@ func TestRehydrateSnapshotPersistFailureDoesNotLeakSlot(t *testing.T) {
 		RuntimeParked:    true,
 		ResumePolicy:     taskResumePolicyNotify,
 		LatestInstanceID: "worker-old",
-		// This test pins slot governance around a refused snapshot persist,
-		// so the rehydratable record carries the boundary real tasks ship with.
-		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: cloneDurableTaskRecord(record)})
 
@@ -1201,7 +1170,6 @@ func TestSendMessageToFailedTaskRehydratesWorkerForAnotherAttempt(t *testing.T) 
 	sub := newControllableTestSubAgent(t, a, "adhoc-failed-resume")
 	sub.agentDefName = "fixer"
 	sub.taskDesc = "Fix the parser"
-	sub.writeScope = tools.WriteScope{Files: []string{"internal/parser/parse.go"}}
 	sub.ctxMgr.Append(message.Message{Role: "user", Content: "Fix the parser"})
 	if err := a.recoveryManager().PersistMessage(sub.instanceID, message.Message{Role: "user", Content: "Fix the parser"}); err != nil {
 		t.Fatalf("PersistMessage(sub): %v", err)
@@ -1245,9 +1213,6 @@ func TestSendMessageToFailedTaskRehydratesWorkerForAnotherAttempt(t *testing.T) 
 	}
 	if record.LatestSettlement != nil {
 		t.Fatalf("record.LatestSettlement = %#v, want the previous attempt's settlement cleared", record.LatestSettlement)
-	}
-	if record.ExpectedWriteScope.Files[0] != "internal/parser/parse.go" {
-		t.Fatalf("rehydrated write scope = %#v, want the original file scope", record.ExpectedWriteScope)
 	}
 }
 

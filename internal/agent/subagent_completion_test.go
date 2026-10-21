@@ -747,20 +747,19 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 	a := newTestMainAgent(t, t.TempDir())
 	a.explicitUserTurnCount.Store(5)
 	a.subs.taskRecords["task-1"] = &DurableTaskRecord{
-		TaskID:             "task-1",
-		AgentDefName:       "explorer",
-		State:              string(SubAgentStateCompleted),
-		ResumePolicy:       taskResumePolicyNotify,
-		PlanTaskRef:        "P1",
-		SemanticTaskKey:    "coordination-snapshot",
-		LastSummary:        "research complete",
-		LastUpdatedTurn:    5,
-		LastArtifactRefs:   []tools.ArtifactRef{{ID: "art-1", Type: "research_report", RelPath: "artifacts/subagents/worker-1/report.md"}},
-		LastCompletion:     &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}},
-		ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/a.go"}},
+		TaskID:           "task-1",
+		AgentDefName:     "explorer",
+		State:            string(SubAgentStateCompleted),
+		ResumePolicy:     taskResumePolicyNotify,
+		PlanTaskRef:      "P1",
+		SemanticTaskKey:  "coordination-snapshot",
+		LastSummary:      "research complete",
+		LastUpdatedTurn:  5,
+		LastArtifactRefs: []tools.ArtifactRef{{ID: "art-1", Type: "research_report", RelPath: "artifacts/subagents/worker-1/report.md"}},
+		LastCompletion:   &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}},
 	}
 	block := a.buildCoordinationSnapshotOverlayForRequest(nil)
-	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "agent_type: explorer", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go", "write_scope: file:internal/a.go"} {
+	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "agent_type: explorer", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("snapshot missing %q:\n%s", want, block)
 		}

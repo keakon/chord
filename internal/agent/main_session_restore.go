@@ -75,7 +75,6 @@ type loadedSubAgentState struct {
 	TaskDesc                string
 	PlanTaskRef             string
 	SemanticTaskKey         string
-	ExpectedWriteScope      tools.WriteScope
 	SelectedModelRef        string
 	RunningModelRef         string
 	OwnerAgentID            string
@@ -121,9 +120,6 @@ func (b *restoredSubAgentBuilder) seedFromSnapshot(snap recovery.AgentSnapshot) 
 	}
 	if b.state.SemanticTaskKey == "" {
 		b.state.SemanticTaskKey = strings.TrimSpace(snap.SemanticTaskKey)
-	}
-	if b.state.ExpectedWriteScope.Empty() {
-		b.state.ExpectedWriteScope = snap.ExpectedWriteScope.Normalized()
 	}
 	if b.state.SelectedModelRef == "" {
 		b.state.SelectedModelRef = strings.TrimSpace(snap.SelectedModelRef)
@@ -174,9 +170,6 @@ func (b *restoredSubAgentBuilder) overlayMeta(meta *subAgentMeta) {
 	}
 	if b.state.SemanticTaskKey == "" {
 		b.state.SemanticTaskKey = strings.TrimSpace(meta.SemanticTaskKey)
-	}
-	if b.state.ExpectedWriteScope.Empty() {
-		b.state.ExpectedWriteScope = meta.ExpectedWriteScope.Normalized()
 	}
 	if b.state.SelectedModelRef == "" {
 		b.state.SelectedModelRef = strings.TrimSpace(meta.SelectedModelRef)
@@ -241,9 +234,6 @@ func (b *restoredSubAgentBuilder) overlayTaskRecord(rec *DurableTaskRecord) {
 	}
 	if b.state.SemanticTaskKey == "" {
 		b.state.SemanticTaskKey = rec.SemanticTaskKey
-	}
-	if b.state.ExpectedWriteScope.Empty() {
-		b.state.ExpectedWriteScope = rec.ExpectedWriteScope.Normalized()
 	}
 	b.state.JoinToOwner = rec.JoinToOwner
 	if b.state.Persistence.State == "" || normalizePersistenceHealthState(rec.Persistence.State) != PersistenceHealthy {

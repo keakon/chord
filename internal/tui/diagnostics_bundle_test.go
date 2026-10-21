@@ -186,7 +186,6 @@ func TestWriteOrchestrationDiagnostics(t *testing.T) {
 		WorkspaceLeasesActive:     2,
 		WorkspaceLeasesQueued:     1,
 		TasksTotal:                6,
-		ScopeConflicts:            1,
 		SubAgentQueueRejected:     2,
 		StateTransitionsRejected:  3,
 		StateTransitionRejections: map[string]uint64{"terminal": 1, "unknown": 1, "other": 1},
@@ -199,7 +198,7 @@ func TestWriteOrchestrationDiagnostics(t *testing.T) {
 		"orchestration_event_queue: overflow=2 overflow_peak=4",
 		"orchestration_runtimes: normal=4/10 borrowed=1/1 bypass_active=0 bypass_peak=1 bypass_grants=1 bypass_rejected=1",
 		"orchestration_llm_requests: active=3 capacity=8 queued=2",
-		"orchestration_tasks: total=6 scope_conflicts=1",
+		"orchestration_tasks: total=6 rehydrates=0 parks=0 queue_rejected=2",
 		"orchestration_state_transitions: rejected=3 terminal=1 unknown=1 other=1",
 	} {
 		if !strings.Contains(got, want) {

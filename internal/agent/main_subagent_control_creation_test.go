@@ -373,7 +373,7 @@ func TestCreateSubAgentInitializesConcurrentlyBeforeAdmission(t *testing.T) {
 	errs := make(chan error, 2)
 	for i := range 2 {
 		go func() {
-			handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: fmt.Sprintf("child %d", i), AgentType: "worker", ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}}})
+			handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: fmt.Sprintf("child %d", i), AgentType: "worker"})
 			results <- handle
 			errs <- err
 		}()
@@ -547,7 +547,7 @@ func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 
 	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
 	for i := range 10 {
-		handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: fmt.Sprintf("child work %d", i), AgentType: "worker", ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{fmt.Sprintf("module-%d", i)}}})
+		handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: fmt.Sprintf("child work %d", i), AgentType: "worker"})
 		if err != nil {
 			t.Fatalf("CreateSubAgent(%d): %v", i, err)
 		}
@@ -556,7 +556,7 @@ func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 		}
 	}
 
-	overflow, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "child overflow", AgentType: "worker", ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"overflow"}}})
+	overflow, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "child overflow", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent(overflow): %v", err)
 	}

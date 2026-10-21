@@ -113,7 +113,7 @@ func TestAgentMessageCardBodyNestsUnderFieldRowLabels(t *testing.T) {
 // value, returns the rest for the caller to render as a note, and the
 // Worker section renders the handle's fields as structured rows. This pins
 // all three: structured fields (including the ones the old local struct
-// silently dropped — plan_task_ref, semantic_task_key, expected_write_scope),
+// silently dropped — plan_task_ref, semantic_task_key, suggested_action),
 // the trailing note rendered separately, and the absence of the raw JSON.
 func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 	b := &Block{
@@ -121,35 +121,34 @@ func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      tools.NameDelegate,
 		Content:       `{"description":"review the card styles","agent_type":"reviewer"}`,
-		ResultContent: `{"status":"started","task_id":"adhoc-7","agent_id":"expert-12","message":"running in background","plan_task_ref":"view-switch","semantic_task_key":"tui-view-switch-streaming-card-order","expected_write_scope":{"path_prefix":["internal/tui"]}}` + "\n" + `Note: ignored unrecognized parameter(s): args.expected_write_scope.extra`,
+		ResultContent: `{"status":"started","task_id":"adhoc-7","agent_id":"expert-12","message":"running in background","plan_task_ref":"view-switch","semantic_task_key":"tui-view-switch-streaming-card-order","suggested_action":"split the task before delegating both halves"}` + "\n" + `Note: ignored unrecognized parameter(s): args.unknown_extra.flag`,
 		ResultDone:    true,
 	}
 	plain := terminaltext.StripANSI(strings.Join(b.Render(120, ""), "\n"))
 
 	// Every non-empty handle field renders as a "↳ Label: value" row in the
 	// expanded field layer, so the task_id carries the full machine-readable
-	// handle, adhoc- prefix included. The write scope is condensed to a
-	// single compact value, not re-expanded as JSON.
+	// handle, adhoc- prefix included. Each value stays a plain string, not
+	// re-expanded as JSON.
 	for _, want := range []string{
 		"↳ Status: started",
 		"↳ Agent id: expert-12",
 		"↳ Task id: adhoc-7",
 		"↳ Plan task ref: view-switch",
 		"↳ Semantic task key: tui-view-switch-streaming-card-order",
-		"↳ Expected write scope: path_prefix=[internal/tui]",
+		"↳ Suggested action: split the task before delegating both halves",
 		"↳ Message: running in background",
-		"Note: ignored unrecognized parameter(s): args.expected_write_scope.extra",
+		"Note: ignored unrecognized parameter(s): args.unknown_extra.flag",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("delegate Worker section missing %q; got:\n%s", want, plain)
 		}
 	}
-	// The raw JSON must not leak back into the body. Both the top-level
-	// payload and the nested write scope object are checked so a future
-	// regression that falls through to the raw-text path is caught.
+	// The raw JSON must not leak back into the body: neither the top-level
+	// payload nor any machine field key may fall through to the raw-text path.
 	for _, banned := range []string{
 		`"status":"started"`,
-		`"expected_write_scope":{`,
+		`"message":`,
 	} {
 		if strings.Contains(plain, banned) {
 			t.Fatalf("delegate Worker section leaks raw JSON %q; got:\n%s", banned, plain)
@@ -167,29 +166,17 @@ func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 
 // Long task-handle values must stay fully visible: a single overflowing row
 // is cut at the card edge by the width-limited wrapper, silently dropping the
-// tail of an expected_write_scope with many paths or a verbose overlap
-// suggestion. The shared field-row helper wraps such values on continuation
-// lines aligned under the value column, so the end of the value shows on both
-// a normal card and a narrow one.
+// tail of a long runtime message or a verbose duplicate suggestion. The shared
+// field-row helper wraps such values on continuation lines aligned under the
+// value column, so the end of the value shows on both a normal card and a
+// narrow one.
 func TestDelegateWorkerWrapsLongHandleValues(t *testing.T) {
 	handle := tools.TaskHandle{
-		Status:  "started",
-		TaskID:  "adhoc-9",
-		AgentID: "expert-3",
-		ExpectedWriteScope: tools.WriteScope{
-			PathPrefix: []string{
-				"internal/tui",
-				"internal/tui/views",
-				"internal/agent",
-				"internal/agent/coordination",
-				"internal/tui/block_tool_render_special.go",
-				"internal/tools/task.go",
-			},
-			Files: []string{"internal/agent/main_subagent.go"},
-		},
-		Message:         "checking the sibling task for a write-scope overlap before starting",
-		ScopeConflict:   true,
-		SuggestedAction: "narrow the delegate's expected_write_scope away from the sibling's paths and keep only the files this task actually edits",
+		Status:          "started",
+		TaskID:          "adhoc-9",
+		AgentID:         "expert-3",
+		Message:         "checking the existing task for the same deliverable before starting this delegate run and verifying the card wrapper keeps every field fully visible",
+		SuggestedAction: "continue the existing task with notify instead of starting a duplicate, and keep this new delegation focused on the remaining work for the second runner",
 	}
 	payload, err := json.Marshal(handle)
 	if err != nil {
@@ -203,23 +190,20 @@ func TestDelegateWorkerWrapsLongHandleValues(t *testing.T) {
 		ResultContent: string(payload),
 		ResultDone:    true,
 	}
-	// The last scope path, the files list that closes the scope row, and the
-	// end of the suggested action are the tails a width truncation would cut
-	// (the pre-fix card cut each row at the card edge, dropping everything
-	// past roughly the first line). Tail tokens are probed per width: on a
-	// wide card a full path stays on one line, while a narrow card can
-	// hard-break one path across two lines, so there the tail is asserted by
-	// the fragments that survive the wrap intact.
+	// The end of the message and the end of the suggested action are the tails
+	// a width truncation would cut (the pre-fix card cut each row at the card
+	// edge, dropping everything past roughly the first line). Tail tokens are
+	// probed per width: on a wide card the closing words stay on one line,
+	// while a narrow card can hard-break them, so there the tail is asserted
+	// by the fragments that survive the wrap intact.
 	tailProbes := map[int][]string{
 		120: {
-			"internal/tools/task.go",
-			"internal/agent/main_subagent.go",
-			"the files this task actually edits",
+			"fully visible",
+			"second runner",
 		},
 		70: {
-			"internal/tools/task.go",
-			"nt.go]",
-			"actually edits",
+			"visible",
+			"runner",
 		},
 	}
 	for _, width := range []int{120, 70} {
@@ -229,25 +213,25 @@ func TestDelegateWorkerWrapsLongHandleValues(t *testing.T) {
 				t.Fatalf("delegate Worker section lost the tail of a long handle value at width %d: missing %q; got:\n%s", width, want, plain)
 			}
 		}
-		// The scope row must actually wrap: the last scope path has to sit on
-		// a later line than the scope label, not share one overflowing row.
+		// The value must actually wrap: each tail has to sit on a later line
+		// than its label, not share one overflowing row.
 		rows := strings.Split(plain, "\n")
-		scopeRow := -1
-		for i, row := range rows {
-			if strings.Contains(row, "Expected write scope:") {
-				scopeRow = i
-				break
+		for _, probe := range []struct{ label, tail string }{
+			{label: "Message:", tail: "fully visible"},
+			{label: "Suggested action:", tail: "second runner"},
+		} {
+			labelRow, tailRow := -1, -1
+			for i, row := range rows {
+				if labelRow < 0 && strings.Contains(row, probe.label) {
+					labelRow = i
+				}
+				if tailRow < 0 && strings.Contains(row, probe.tail) {
+					tailRow = i
+				}
 			}
-		}
-		tailRow := -1
-		for i, row := range rows {
-			if strings.Contains(row, "internal/tools/task.go") {
-				tailRow = i
-				break
+			if labelRow < 0 || tailRow <= labelRow {
+				t.Fatalf("delegate Worker section should wrap the %s value below its label at width %d; got:\n%s", probe.label, width, plain)
 			}
-		}
-		if scopeRow < 0 || tailRow <= scopeRow {
-			t.Fatalf("delegate Worker section should wrap the scope value below its label at width %d; got:\n%s", width, plain)
 		}
 	}
 }

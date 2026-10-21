@@ -130,7 +130,7 @@ func TestCompileResultSchemaEnforcesPropertyLimit(t *testing.T) {
 
 func TestDelegateToolRejectsUnusableResultSchemaBeforeAdmission(t *testing.T) {
 	creator := &countingTaskCreator{}
-	args := `{"description":"implement feature","agent_type":"builder","expected_write_scope":{"path_prefix":["internal/agent"]},"result_schema":{"type":"object","oneOf":[]}}`
+	args := `{"description":"implement feature","agent_type":"builder","result_schema":{"type":"object","oneOf":[]}}`
 	_, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(args))
 	if err == nil || !strings.Contains(err.Error(), "oneOf") {
 		t.Fatalf("Execute() error = %v, want the unsupported keyword named", err)
@@ -149,7 +149,7 @@ func TestDelegateToolPassesCompiledResultSchemaToCreator(t *testing.T) {
 	if len(schema) == 0 {
 		t.Fatal("reference schema compiled empty")
 	}
-	args := `{"description":"implement feature","agent_type":"builder","expected_write_scope":{"path_prefix":["internal/agent"]},"result_schema":` + string(canonical) + `}`
+	args := `{"description":"implement feature","agent_type":"builder","result_schema":` + string(canonical) + `}`
 	if _, err := NewDelegateTool(creator).Execute(context.Background(), json.RawMessage(args)); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

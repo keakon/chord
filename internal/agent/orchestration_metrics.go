@@ -32,7 +32,6 @@ type metricQueueEntry struct {
 type orchestrationRuntimeMetrics struct {
 	admissionWaitCount       atomic.Uint64
 	admissionWaitNanos       atomic.Uint64
-	scopeConflicts           atomic.Uint64
 	rehydrates               atomic.Uint64
 	parks                    atomic.Uint64
 	parkedSamples            atomic.Uint64
@@ -109,7 +108,6 @@ type OrchestrationStats struct {
 	AdmissionWaitCount    uint64
 	AdmissionWaitTotal    time.Duration
 	AdmissionWaitAverage  time.Duration
-	ScopeConflicts        uint64
 	Rehydrates            uint64
 	Parks                 uint64
 	ParkedDurationCount   uint64
@@ -506,7 +504,6 @@ func (a *MainAgent) OrchestrationStats() OrchestrationStats {
 		AdmissionWaitCount:            admissionCount,
 		AdmissionWaitTotal:            admissionTotal,
 		AdmissionWaitAverage:          averageDuration(admissionTotal, admissionCount),
-		ScopeConflicts:                metrics.scopeConflicts.Load(),
 		Rehydrates:                    metrics.rehydrates.Load(),
 		Parks:                         metrics.parks.Load(),
 		ParkedDurationCount:           parkedCount,

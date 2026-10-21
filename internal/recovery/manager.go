@@ -158,21 +158,20 @@ func RestoreTodoItems(states []TodoState) []tools.TodoItem {
 
 // AgentSnapshot captures the recoverable state of a running SubAgent.
 type AgentSnapshot struct {
-	InstanceID         string           `json:"instance_id"`    // e.g. "agent-1"
-	TaskID             string           `json:"task_id"`        // plan task ID or "adhoc-N"
-	AgentDefName       string           `json:"agent_def_name"` // agent definition name (e.g. "backend-coder")
-	TaskDesc           string           `json:"task_desc"`      // task description
-	PlanTaskRef        string           `json:"plan_task_ref,omitempty"`
-	SemanticTaskKey    string           `json:"semantic_task_key,omitempty"`
-	ExpectedWriteScope tools.WriteScope `json:"expected_write_scope"`
-	SelectedModelRef   string           `json:"selected_model_ref,omitempty"`
-	RunningModelRef    string           `json:"running_model_ref,omitempty"`
-	OwnerAgentID       string           `json:"owner_agent_id,omitempty"`
-	OwnerTaskID        string           `json:"owner_task_id,omitempty"`
-	Depth              int              `json:"depth,omitempty"`
-	JoinToOwner        bool             `json:"join_to_owner,omitempty"`
-	State              string           `json:"state,omitempty"`
-	LastSummary        string           `json:"last_summary,omitempty"`
+	InstanceID       string `json:"instance_id"`    // e.g. "agent-1"
+	TaskID           string `json:"task_id"`        // plan task ID or "adhoc-N"
+	AgentDefName     string `json:"agent_def_name"` // agent definition name (e.g. "backend-coder")
+	TaskDesc         string `json:"task_desc"`      // task description
+	PlanTaskRef      string `json:"plan_task_ref,omitempty"`
+	SemanticTaskKey  string `json:"semantic_task_key,omitempty"`
+	SelectedModelRef string `json:"selected_model_ref,omitempty"`
+	RunningModelRef  string `json:"running_model_ref,omitempty"`
+	OwnerAgentID     string `json:"owner_agent_id,omitempty"`
+	OwnerTaskID      string `json:"owner_task_id,omitempty"`
+	Depth            int    `json:"depth,omitempty"`
+	JoinToOwner      bool   `json:"join_to_owner,omitempty"`
+	State            string `json:"state,omitempty"`
+	LastSummary      string `json:"last_summary,omitempty"`
 	// WorkDir is the agent's active checkout at snapshot time and
 	// WorkDirGeneration is its binding generation. They record the checkout for
 	// post-crash attribution; the resume path resolves a restored agent's

@@ -49,10 +49,9 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 // worker toward builds and tests it can never run, after which it could only
 // fabricate results or get stuck. The block tells the worker that command
 // execution and execution-based verification belong to the owner agent, and to
-// report verification honestly as not run. A task's write scope plays no part
-// in tool rejection: command-tool visibility follows the role's permission
-// rules alone, so a role that denies every file-modifying tool still keeps
-// Shell unless the role denies it too.
+// report verification honestly as not run. Command-tool visibility follows the
+// role's permission rules alone, so a role that denies every file-modifying
+// tool still keeps Shell unless the role denies it too.
 func shellExecutionBoundaryPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience) string {
 	if audience != capabilityPromptAudienceSub {
 		return ""

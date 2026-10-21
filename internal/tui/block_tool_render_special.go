@@ -514,10 +514,9 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 // nested "↳ Label: value" row, skipping empty values. A value too long for the
 // available width wraps onto continuation lines aligned under the value's
 // first column, so the width-limited card wrapper never cuts the tail of long
-// handle fields such as expected_write_scope summaries or overlap suggestions.
-// Every handle echo on the task cards (cancel/notify Result sections and the
-// delegate Worker section) goes through this row shape so the expanded field
-// layer renders identically.
+// handle fields such as duplicate suggestions. Every handle echo on the task
+// cards (cancel/notify Result sections and the delegate Worker section) goes
+// through this row shape so the expanded field layer renders identically.
 func appendTaskHandleFieldRow(out *[]string, label, value string, width int) {
 	if value == "" {
 		return
@@ -546,8 +545,8 @@ func appendTaskHandleFieldRow(out *[]string, label, value string, width int) {
 // column of nested field rows under a "Worker" section header. Every
 // non-empty field gets its own row, ordered for scannability: identity
 // (status/agent_id/task_id), resumption hints (previous_agent_id/
-// rehydrated), plan metadata, write scope, the runtime message, and
-// finally any conflict/duplicate warnings with their suggested fix.
+// rehydrated), plan metadata, the runtime message, and finally any
+// duplicate warnings with their suggested fix.
 func appendTaskHandleFieldRows(out *[]string, h tools.TaskHandle, width int) {
 	appendTaskHandleFieldRow(out, "status", h.Status, width)
 	appendTaskHandleFieldRow(out, "agent_id", h.AgentID, width)
@@ -561,33 +560,11 @@ func appendTaskHandleFieldRows(out *[]string, h tools.TaskHandle, width int) {
 	}
 	appendTaskHandleFieldRow(out, "plan_task_ref", h.PlanTaskRef, width)
 	appendTaskHandleFieldRow(out, "semantic_task_key", h.SemanticTaskKey, width)
-	appendTaskHandleFieldRow(out, "expected_write_scope", formatWriteScopeSummary(h.ExpectedWriteScope), width)
 	appendTaskHandleFieldRow(out, "message", h.Message, width)
-	if h.ScopeConflict {
-		appendTaskHandleFieldRow(out, "scope_conflict", "true", width)
-	}
 	if h.DuplicateDetected {
 		appendTaskHandleFieldRow(out, "duplicate_detected", "true", width)
 	}
 	appendTaskHandleFieldRow(out, "suggested_task_id", h.SuggestedTaskID, width)
 	appendTaskHandleFieldRow(out, "suggested_agent_id", h.SuggestedAgentID, width)
 	appendTaskHandleFieldRow(out, "suggested_action", h.SuggestedAction, width)
-}
-
-// formatWriteScopeSummary condenses a WriteScope declaration into a single
-// compact value for one field row, e.g.
-// "files=[a.go], path_prefix=[internal/agent]". An all-empty scope returns ""
-// (the caller filters that case out before calling).
-func formatWriteScopeSummary(s tools.WriteScope) string {
-	var parts []string
-	if len(s.Files) > 0 {
-		parts = append(parts, "files=["+strings.Join(s.Files, ", ")+"]")
-	}
-	if len(s.PathPrefix) > 0 {
-		parts = append(parts, "path_prefix=["+strings.Join(s.PathPrefix, ", ")+"]")
-	}
-	if len(s.Modules) > 0 {
-		parts = append(parts, "modules=["+strings.Join(s.Modules, ", ")+"]")
-	}
-	return strings.Join(parts, ", ")
 }

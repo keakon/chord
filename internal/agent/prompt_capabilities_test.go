@@ -147,7 +147,7 @@ delegate: allow
 	for _, want := range []string{
 		"## SubAgent Workflow",
 		"prefer `notify` on the existing task instead of creating a new delegate",
-		"Dispatch tasks in parallel only when their write scopes are clearly independent",
+		"Dispatch tasks in parallel only when their work is independent",
 		"After choosing substantial independent work to delegate",
 		"Continue independent work that cannot conflict with it",
 		"Until you receive an escalation, a completion, or a clear error/blocked signal from a worker, do not take over implementation just because a SubAgent is briefly quiet",

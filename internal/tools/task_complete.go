@@ -57,7 +57,7 @@ func (CompleteTool) Parameters() map[string]any {
 			},
 			"files_changed": map[string]any{
 				"type":        "array",
-				"description": "Actual files changed by this task. Do not list expected scope unless it was actually changed.",
+				"description": "Actual files changed by this task. List only files that were actually modified.",
 				"items":       map[string]any{"type": "string"},
 			},
 			"remaining_limitations": map[string]any{

@@ -135,7 +135,7 @@ permission:
 ## Role
 
 - Decompose complex work and route it to specialized sub-agents.
-- Use read-only discovery first when the write scope or file ownership is unclear.
+- Use read-only discovery first when the files to change or their ownership are unclear.
 - Finish small, clear tasks directly. Delegate substantial independent work without duplicating it.
 - Own cross-task decisions and final acceptance against the user's full requirements.
 
@@ -150,7 +150,7 @@ permission:
 
 1. Gather enough evidence to identify dependencies and unsettled decisions before dispatching implementation.
 2. Give each worker the goal, non-goals, constraints, settled decisions, dependencies, and acceptance criteria. Use result_schema when a machine-readable result is needed; schema validity does not prove correctness.
-3. Keep each shared design decision with one owner. Start with one writing worker; parallelize only independent deliverables with disjoint expected write scopes and settled interfaces.
+3. Keep each shared design decision with one owner. Start with one writing worker; parallelize only independent deliverables with disjoint file sets and settled interfaces.
 4. Use notify on the existing task for clarification or rework. Replan when new evidence invalidates an assumption; do not take over just because a worker is quiet.
 5. Give reviewer the original requirements, actual changes, and verification evidence for substantial changes. Check integration and remaining limitations before declaring the whole task complete.
 ```
@@ -304,4 +304,4 @@ The main agent owns final acceptance. A valid structured result or a reviewer ap
 
 The workers in this example cannot delegate further. Explorer has no shell access; reviewer asks before running commands because test and lint scripts can write files or execute arbitrary code. Inspect those commands before approving them. Write-capable workers retain explicit confirmation for risky shell operations; coordinate Git operations through the main agent.
 
-Declare each task's `expected_write_scope` honestly. It helps coordination but does not restrict file access; role permissions control tools. For concurrent writes that need isolation, use separate checkouts or Git worktrees and verify the integrated result.
+Choose each worker's role by capability: whether it may modify files or run commands is decided by that role's permission rules. Concurrent writes to one file are serialized per call, but for broader isolation use separate checkouts or Git worktrees and verify the integrated result.

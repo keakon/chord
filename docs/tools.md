@@ -99,21 +99,21 @@ These tools control agent workflows rather than local side effects, so YOLO does
 | --- | --- |
 | `done` | Request loop exit with a final Markdown report. Mounted only while a loop is running, so ordinary sessions never see it. See [Usage: continuous execution mode](./usage.md#loop-continuous-execution-mode). |
 | `handoff` | Transfer a plan/work to another role for execution. |
-| `delegate` | Start a sub-task and return its handle immediately. Role permissions determine capabilities; declared scope coordinates work; an optional `result_schema` declares what the delivered result must contain. |
+| `delegate` | Start a sub-task and return its handle immediately. The worker's file and command capabilities come from its role's permission rules; an optional `result_schema` declares what the delivered result must contain. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |
 | `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
 | `escalate` | SubAgent-side: ask the owner for help (`kind: needs_repair`) without ending the task, or report a dead end (`kind: blocked`), which fails it. |
 | `notify` | Send a non-blocking update to the owner or a specific delegated worker. A targeted message resumes a worker that already finished or failed, with its own transcript; a cancelled task is not resumable. See the message forms below. |
 
-### Delegation and work scope
+### Delegation and concurrency
 
-`delegate` starts a delegated SubAgent workstream and returns its startup handle (`task_id` / `agent_id`) immediately, without waiting for completion. The call must include an `expected_write_scope` that declares the narrowest `files`, `path_prefix`, or `modules` scope covering the work.
+`delegate` starts a delegated SubAgent workstream and returns its startup handle (`task_id` / `agent_id`) immediately, without waiting for completion. The call takes `description` and `agent_type`, plus optional `plan_task_ref`, `semantic_task_key`, and `result_schema`; there is no per-task declaration of which files the work may touch.
 
-The declaration is coordination metadata, not an enforced boundary: whether the worker may modify files at all is decided by its role's permission rules (a role that denies `write`, `edit`, `delete`, and `apply_patch` registers none of them), and the runtime never blocks a worker's file tools outside the declared paths.
+Whether a worker may modify files or run commands is decided only by its role's permission rules: a role that denies `write`, `edit`, `delete`, and `apply_patch` registers none of those tools, and command tools such as `shell` follow the same per-role rules. Pick a read-only agent when the task must not write. Denying `delegate` also disables `cancel` and nested delegation for that role.
 
-Declaring an honest narrow scope keeps sibling-overlap hints meaningful: when the declared scope overlaps another still-active task's, the delegation still starts and the handle carries `scope_conflict: true` with `suggested_task_id` and `suggested_action: serialize_or_worktree`, which tells you to run the two tasks serially, coordinate the shared edits through `notify`, or give the new worker its own git worktree.
+Concurrent writes to one file are serialized per call for tools Chord executes itself, so two Chord-native workers cannot interleave edits to the same file. An external coding-agent backend runs its tools inside its own process, so its writes are outside that serialization. Serialization protects file integrity, not the coherence of overlapping changes; give parallel workers separate checkouts or Git worktrees when their work needs broader isolation.
 
-A read-only task should pick an agent whose role registers no file-modifying tools and pass an empty scope, which is accepted only for such roles; a role that can write files must declare a non-empty scope or the delegation is rejected. Command tools such as `shell` are never scope-restricted and stay governed by the role's permission rules. Denying `delegate` also disables `cancel` and nested delegation for that role.
+Task identity is carried by `semantic_task_key`. Delegating with an explicit key that a live task already uses is rejected with `already_exists`, and you should continue that task with `notify` instead. Reusing a `plan_task_ref` without the same explicit key is only a hint: the new task still starts and its handle reports `duplicate_detected` with the other task's ID, leaving the decision to you. The description is not compared.
 
 Which roles a delegating agent may reach is a permission decision too: `delegate` rules match the `agent_type` argument, so a role can be limited to a subset of SubAgent definitions, and the Delegate tool then lists only those targets. See [Permissions & Safety: Special permission semantics](./permissions-and-safety.md#special-permission-semantics).
 

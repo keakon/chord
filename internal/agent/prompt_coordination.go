@@ -39,7 +39,7 @@ func delegationStrategyPromptLines(visible map[string]struct{}) string {
 	sb.WriteString("- For a genuinely new objective with low overlap and a separately trackable result, prefer a new ")
 	sb.WriteString(delegate)
 	sb.WriteString(" instead of overloading an existing worker.\n")
-	sb.WriteString("- Dispatch tasks in parallel only when their write scopes are clearly independent; do not run parallel SubAgents that may edit the same file or tightly coupled targets.\n")
+	sb.WriteString("- Dispatch tasks in parallel only when their work is independent; do not run parallel SubAgents that are likely to edit the same file or tightly coupled targets.\n")
 	return sb.String()
 }
 
@@ -49,10 +49,10 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 	}
 	delegate := toolPromptName(tools.NameDelegate)
 	var sb strings.Builder
-	// The delegate-able role catalogue (name, description, empty-scope rule)
-	// is rendered once by the Delegate tool's agent_type parameter
-	// description, which ships with the tool schema on every request where
-	// delegation is visible; it is not duplicated as a prompt list here.
+	// The delegate-able role catalogue (name and description) is rendered once
+	// by the Delegate tool's agent_type parameter description, which ships with
+	// the tool schema on every request where delegation is visible; it is not
+	// duplicated as a prompt list here.
 	// That results arrive asynchronously without polling is stated once in the
 	// Delegate tool description, which nested delegators also see.
 	sb.WriteString("## SubAgent Workflow\n")
@@ -67,7 +67,7 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 		sb.WriteString(toolPromptName(tools.NameCompactContext))
 		sb.WriteString(" when the main thread itself must keep reasoning and carrying its history costs more than restoring externalized state; the current task need not be complete.\n")
 	}
-	sb.WriteString("- After choosing substantial independent work to delegate, dispatch tasks with disjoint write scopes before starting your own independent work.\n")
+	sb.WriteString("- After choosing substantial independent work to delegate, dispatch tasks whose likely edits do not overlap before starting your own independent work.\n")
 	sb.WriteString("- Do not duplicate work assigned to an active worker. Continue independent work that cannot conflict with it; otherwise wait for runtime coordination.\n")
 	sb.WriteString("- When a message or task result arrives, reconcile it with the current artifact and evidence before acting or forwarding: decide what it changes, what to adopt, and whose next action it affects. Give each owner only the decision, interface, evidence, or dependency they still lack that changes their action; most messages need no forwarding.\n")
 	sb.WriteString("- Until you receive an escalation, a completion, or a clear error/blocked signal from a worker, do not take over implementation just because a SubAgent is briefly quiet, has not written files yet, or has not produced immediate visible output.\n")
