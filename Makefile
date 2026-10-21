@@ -15,7 +15,7 @@ GOPLS ?= gopls
 MODERNIZE_VERSION ?= v0.50.0
 MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
-.PHONY: ci fmt fmt-check deps-check test test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check bench-tui clean
+.PHONY: ci fmt fmt-check deps-check test test-fast test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check bench-tui clean
 
 ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check
 
@@ -38,6 +38,15 @@ deps-check:
 
 test:
 	$(GO) test -count=1 $(PKGS)
+
+# Opt-in speed-up: run the tests with a memory-backed temp dir when one is
+# available, otherwise fall back to the default temp dir. See
+# scripts/test_tmpdir.sh and CONTRIBUTING.md.
+test-fast:
+	@tmp="$$( ./scripts/test_tmpdir.sh )"; \
+	 if [[ -n "$$tmp" ]]; then echo "test-fast: TMPDIR=$$tmp"; \
+	 else echo "test-fast: no memory-backed temp dir; using the default temp dir"; fi; \
+	 TMPDIR="$$tmp" TMP="$$tmp" TEMP="$$tmp" $(GO) test -count=1 $(PKGS)
 
 test-cover:
 	CHORD_GO='$(GO)' CHORD_TEST_COUNT=1 ./scripts/check_ci_local.sh $(PKGS)

@@ -84,6 +84,62 @@ make docs-check
 make docs-examples-check
 ```
 
+### Speeding up local test runs
+
+The suite spends most of its wall time in durable persistence: every state write
+fsyncs, which costs milliseconds on a real disk and does not scale with
+parallelism. Running its temp dir on a memory-backed filesystem cuts that
+latency while keeping the same code paths and the same durability checks
+executing. `internal/agent`, the slowest package, drops from ~70s to ~20s.
+
+`make test-fast` uses such a filesystem when one is available and otherwise
+falls back to the default temp dir:
+
+```bash
+make test-fast
+make test-fast PKGS=./internal/agent
+```
+
+`scripts/test_tmpdir.sh` resolves the directory — first writable one wins:
+
+1. `CHORD_TEST_TMPDIR`, for example `export CHORD_TEST_TMPDIR=/dev/shm`
+2. `.chord/test-tmpdir`, an untracked repo-local file whose first non-comment line is the path
+3. the platform default: `/dev/shm` on Linux, or a reused-or-created APFS RAM disk on macOS
+
+Size it for Go's build scratch, not only the tests. `go test ./...` keeps its
+work directory (`$TMPDIR/go-build*`, including each test binary) on the same
+filesystem; with a warm Go build cache that peaks a few hundred MiB, but on a
+cold cache the same run writes every compiled package archive into that
+directory and can exceed 1 GiB. The tests' own temporary files are negligible.
+Size the RAM disk generously — the helper uses 4 GiB — because the disk
+allocates memory as data is written, so a larger ceiling does not reserve more
+RAM. A small disk fails with `no space left on device` while building.
+
+Repeated runs do not accumulate: Go deletes its work directory when a command
+exits (including on Ctrl-C) and `go test` removes each test's temporary files,
+and the Go build cache lives outside the temp dir. A run killed hard (SIGKILL,
+OOM) can leave a `go-build*` directory behind, and nothing removes it — delete
+it or recreate the RAM disk with `scripts/test_tmpdir.sh --destroy`.
+
+To create one yourself:
+
+- **Linux**: `/dev/shm` is already a tmpfs, so `TMPDIR=/dev/shm` works — provided it allows executing files (Go runs the test binary from there) and has room; containers mount it `noexec` and only 64 MiB, so check with `findmnt /dev/shm` first. A dedicated tmpfs (`sudo mount -t tmpfs -o size=2g,exec tmpfs /mnt/ram`) is equivalent.
+- **macOS**: `scripts/test_tmpdir.sh` creates an APFS RAM disk for you; to do it by hand:
+
+  ```bash
+  dev=$(hdiutil attach -nomount ram://8388608 | awk '{print $1}')
+  diskutil erasevolume APFS ChordTestRam "$dev"   # APFS, not HFS+
+  ```
+
+  Use APFS: HFS+ timestamps have one-second granularity, which breaks tests that detect an external edit by mtime. Detach it later with `scripts/test_tmpdir.sh --destroy`.
+- **Windows**: there is no built-in memory filesystem, and Go reads `TMP`/`TEMP`, not `TMPDIR`. Either install a RAM-disk tool and point `TMP`/`TEMP` at it, or point them at a fast SSD. `make test-fast` exports `TMPDIR`, `TMP`, and `TEMP` together, so the same path works under Git Bash.
+
+Any other test entry point can reuse the directory by prefixing the variable, for example:
+
+```bash
+TMPDIR=$(scripts/test_tmpdir.sh) make test-cover
+```
+
 `make gopls-check` selects production, cgo, internal-test, and external-test files with `go list` for the current `GOOS`/`GOARCH`. It fails on diagnostics even when gopls exits successfully, as well as on package-loading or tool failures. CI checks linux/amd64, darwin/arm64, and windows/amd64; other operating systems are outside this gate. To check another supported target locally, run `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 make gopls-check`. Python 3 is required to read the package metadata. Run `scripts/test_gopls_check.sh` after changing the gate.
 
 `make modernize-check` runs the pinned `golang.org/x/tools/go/analysis/passes/modernize` command across production and test code. Update `MODERNIZE_VERSION` in the Makefile deliberately when adopting a newer analyzer release; do not replace the pinned version with `@latest`, because new releases may add checks and fail the existing baseline.
