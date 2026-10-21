@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -244,5 +245,28 @@ func TestRuntimeResourceControllerNotifiesEnvOnUnloadAndReady(t *testing.T) {
 	}
 	if got := updates.Load(); got != 2 {
 		t.Fatalf("env updates after ready = %d, want 2", got)
+	}
+}
+
+// TestRuntimeResourceControllerIdleUnloadKeepsMCPUsable guards the idle unload
+// from closing the process-wide MCP manager: a closed manager answers every
+// later reconnect with context.Canceled, which is how a session ended up with a
+// permanently broken MCP integration and no way to re-enable it.
+func TestRuntimeResourceControllerIdleUnloadKeepsMCPUsable(t *testing.T) {
+	cfg := mcp.ServerConfig{Name: "sample"}
+	mgr := mcp.NewPendingManagerWithClientInfo(testMCPTargets([]mcp.ServerConfig{cfg}), mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
+	mcp.NewCatalog(mgr).SetDesiredEnabled(cfg.Name, true)
+	ctrl := newRuntimeResourceController(context.Background(), nil, mgr, nil, nil)
+	defer ctrl.Stop()
+
+	ctrl.OnAgentActivity("main", agent.ActivityIdle)
+	ctrl.runIdleUnload(ctrl.idleGen)
+
+	err := mgr.ConnectOne(context.Background(), testMCPTargets([]mcp.ServerConfig{cfg})[0])
+	if errors.Is(err, context.Canceled) {
+		t.Fatalf("idle unload closed the MCP manager: %v", err)
+	}
+	if err == nil {
+		t.Fatal("connecting a target without a transport should fail")
 	}
 }

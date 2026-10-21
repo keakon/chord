@@ -54,6 +54,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- MCP servers unloaded after an idle period now reconnect on the next request instead of staying unavailable until Chord restarts. An explicit close still shuts the runtime down.
+
 - A gateway's parameter-specific `400` or `422` rejection no longer prevents another retry round while a sibling model is rate-limited or overloaded. Recovery rounds and backoff have a time budget independent of model order; provider requests already in progress are not interrupted by that budget. Every model still gets a chance to succeed in the current round. If the whole round fails and includes a request defect, Chord returns that defect without starting another round; if all attempted models report context-length errors, it returns for context recovery.
 
 - Dragging a text selection from inside a double-width character no longer copies one extra leading or trailing character. Copied text is read through the same column offsets as the highlight, so when the start or end of the selection falls inside a wide rune, the copy covers exactly the highlighted range.

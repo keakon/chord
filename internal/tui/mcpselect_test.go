@@ -91,6 +91,34 @@ func TestMCPSelectBusyDispatchesToggleForNextRequest(t *testing.T) {
 	}
 }
 
+func TestMCPSelectRendersReleasedServerAsUnloaded(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", Idle: true, Manual: true}}
+	m := NewModelWithSize(backend, 100, 30)
+	m.mode = ModeNormal
+	m.openMCPSelect()
+
+	plain := terminaltext.StripANSI(m.renderMCPSelectDialog())
+	if !strings.Contains(plain, "alpha — unloaded") {
+		t.Fatalf("rendered MCP dialog = %q, want released server shown as unloaded", plain)
+	}
+	if strings.Contains(plain, "alpha — error") {
+		t.Fatalf("rendered MCP dialog = %q, released server must not render as error", plain)
+	}
+
+	// A released server is still startable, so Enter dispatches enable.
+	cmd := m.handleMCPSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd != nil {
+		t.Fatalf("enter should not close overlay or emit follow-up command, got %T", cmd)
+	}
+	if got := len(backend.sentMessages); got != 1 {
+		t.Fatalf("SendUserMessage() calls = %d, want 1", got)
+	}
+	if got := backend.sentMessages[0]; got != "/mcp enable alpha" {
+		t.Fatalf("sent message = %q, want %q", got, "/mcp enable alpha")
+	}
+}
+
 func TestHandleMCPSelectKeyToggleKeepsPanelOpen(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "alpha", Disabled: true, Manual: true}}

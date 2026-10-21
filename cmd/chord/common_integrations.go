@@ -43,7 +43,13 @@ func mcpServerDisplayList(mgr *mcp.Manager, catalog *mcp.Catalog, runtimeCtrl *r
 	_, mcpIdle := runtimeIdleStatus(runtimeCtrl)
 	out := make([]agent.MCPServerDisplay, len(status))
 	for i, st := range status {
-		idle := mcpIdle && !st.OK && !st.Disabled && !st.Retrying && st.Error == ""
+		// Only a recorded failure makes a row an error. An endpoint the runtime
+		// released (idle unload, parked candidate, dropped connection) is
+		// recoverable, so it renders as the neutral unloaded state instead of the
+		// failed bucket; a row that is actually connecting stays pending unless
+		// the runtime already declared the MCP surface idle.
+		released := !st.OK && !st.Disabled && !st.Retrying && st.Error == ""
+		idle := released && (!st.Pending || mcpIdle)
 		out[i] = agent.MCPServerDisplay{
 			Name:        st.Name,
 			OK:          st.OK,

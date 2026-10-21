@@ -60,6 +60,10 @@ func buildMCPSelectItems(rows []agent.MCPServerDisplay) []overlaylist.Item {
 		switch {
 		case r.OK:
 			state = "enabled"
+		case r.Idle:
+			// Released by the runtime (idle unload, parked candidate, dropped
+			// connection): still startable, so it is not an error.
+			state = "unloaded"
 		case r.Disabled:
 			state = "disabled"
 		case r.Pending && r.Retrying:

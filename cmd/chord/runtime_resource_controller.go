@@ -190,7 +190,9 @@ func (c *runtimeResourceController) runIdleUnload(gen uint64) {
 				mcpLoaded[name] = struct{}{}
 			}
 		}
-		c.mcp.Close()
+		// Unload, not Close: the runtime must be able to reconnect when the next
+		// busy cycle restores it.
+		c.mcp.Unload()
 	}
 	c.mu.Lock()
 	c.idleUnloading = false

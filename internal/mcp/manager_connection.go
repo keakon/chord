@@ -39,6 +39,7 @@ const (
 	RetireLogout    RetireReason = "logout"
 	RetireConfig    RetireReason = "config"
 	RetireSession   RetireReason = "session"
+	RetireIdle      RetireReason = "idle"
 	RetireShutdown  RetireReason = "shutdown"
 )
 
@@ -403,18 +404,7 @@ func (m *Manager) Close() {
 	}
 	m.closed = true
 	m.cancel()
-	var clients []*Client
-	for name := range m.entries {
-		if c := m.retireLocked(name, RetireShutdown); c != nil {
-			clients = append(clients, c)
-		}
-	}
-	for e := range m.retired {
-		if e.client != nil {
-			clients = append(clients, e.client)
-			e.client = nil
-		}
-	}
+	clients := m.retireAllLocked(RetireShutdown)
 	m.version++
 	m.mu.Unlock()
 	if m.unsubscribeRefresh != nil {
@@ -424,6 +414,46 @@ func (m *Manager) Close() {
 		closeMCPClient(client)
 	}
 	m.publish()
+}
+
+// Unload retires every current connection while keeping the manager usable:
+// unlike Close it neither cancels the manager context nor drops the credential
+// refresh subscription, so a later ConnectOne can reconnect. Runtime idle unload
+// uses this; Close stays the terminal shutdown path.
+func (m *Manager) Unload() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	clients := m.retireAllLocked(RetireIdle)
+	m.version++
+	m.mu.Unlock()
+	for _, client := range clients {
+		closeMCPClient(client)
+	}
+	m.publish()
+}
+
+// retireAllLocked retires every entry and returns the clients no in-flight lease
+// still holds; callers close them after releasing m.mu.
+func (m *Manager) retireAllLocked(reason RetireReason) []*Client {
+	var clients []*Client
+	for name := range m.entries {
+		if c := m.retireLocked(name, reason); c != nil {
+			clients = append(clients, c)
+		}
+	}
+	for e := range m.retired {
+		if e.client != nil {
+			clients = append(clients, e.client)
+			e.client = nil
+		}
+	}
+	return clients
 }
 
 func (m *Manager) serverNamesLocked() []string {
