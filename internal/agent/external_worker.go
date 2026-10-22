@@ -140,6 +140,7 @@ type externalWorkerConfig struct {
 	planTaskRef      string
 	semanticTaskKey  string
 	resultSchemaJSON json.RawMessage
+	baseline         *externalCheckoutBaseline
 	caller           delegationCaller
 	workDir          string
 	ctx              context.Context
@@ -202,7 +203,12 @@ func (a *MainAgent) newExternalWorker(cfg externalWorkerConfig) (*externalWorker
 	if err := worker.ensureSessionID(); err != nil {
 		return nil, err
 	}
-	worker.baseline = captureExternalCheckoutBaseline(workDir)
+	if cfg.baseline != nil {
+		// A resumed attempt keeps the baseline its task started from, so the
+		// completion envelope still answers "what changed since the task began".
+		baseline := *cfg.baseline
+		worker.baseline = &baseline
+	}
 	return worker, nil
 }
 

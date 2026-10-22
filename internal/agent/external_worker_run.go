@@ -87,7 +87,13 @@ func (w *externalWorker) runExternalWorker() {
 		}
 		if err := session.Wait(); err != nil && !w.closing.Load() && w.ctx.Err() == nil {
 			_ = w.settleUnresolvedExternalTools()
-			w.finishFailure(fmt.Errorf("external agent exit: %w", err))
+			// A non-zero exit after a result must not hide the result's own
+			// failure reason, which is usually the actionable part.
+			if resultErr := w.getResultError(); resultErr != nil {
+				w.finishFailure(fmt.Errorf("%v: %w", resultErr, err))
+			} else {
+				w.finishFailure(fmt.Errorf("external agent exit: %w", err))
+			}
 			return
 		}
 		if w.closing.Load() || w.ctx.Err() != nil {
@@ -156,6 +162,18 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 		env[key] = os.ExpandEnv(value)
 	}
 	w.promptMu.Lock()
+	needsBaseline := w.baseline == nil
+	w.promptMu.Unlock()
+	var capturedBaseline *externalCheckoutBaseline
+	if needsBaseline {
+		// Capture in the worker, not during admission: a slow index scan or a
+		// locked index must not stall the main event loop before the spawn.
+		capturedBaseline = captureExternalCheckoutBaseline(w.workDir)
+	}
+	w.promptMu.Lock()
+	if w.baseline == nil {
+		w.baseline = capturedBaseline
+	}
 	// The run identity is persisted before the supervisor exists: a crash
 	// between the spawn and Chord persisting the exit can then be matched to
 	// exactly one receipt, and a missing receipt keeps resume refused.
@@ -340,7 +358,7 @@ func (w *externalWorker) handleExternalEvent(event externalclaude.Event) (termin
 			}
 			for _, name := range event.Tools {
 				if !externalclaude.ManagedTool(name) {
-					w.setResultError(fmt.Errorf("external tool catalogue contains an unmanaged tool"))
+					w.setResultError(fmt.Errorf("external tool catalogue contains an unmanaged tool %q", name))
 					return true, externalTaskInput{}
 				}
 			}

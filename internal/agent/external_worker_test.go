@@ -478,6 +478,43 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"e
 	}
 }
 
+func TestExternalWorkerNamesUnmanagedInitTool(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	script := writeFakeClaude(t, `
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"11111111-1111-4111-8111-111111111111","tools":["Read","FutureTool"]}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"should not run"}'
+`)
+	configureExternalTestRuntime(t, a, script, `"*": allow`)
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "external-worker", Description: "Input."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := driveExternalTask(t, a, handle.TaskID)
+	if record.State != string(SubAgentStateFailed) || !strings.Contains(record.LastSummary, "FutureTool") {
+		t.Fatalf("task state=%q summary=%q, want failed with the unmanaged tool name", record.State, record.LastSummary)
+	}
+}
+
+func TestExternalWorkerKeepsResultErrorOnNonzeroExit(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	script := writeFakeClaude(t, `
+printf '%s\n' '{"type":"result","subtype":"error","is_error":true,"result":"No conversation found"}'
+exit 1
+`)
+	configureExternalTestRuntime(t, a, script, `"*": allow`)
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "external-worker", Description: "Input."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := driveExternalTask(t, a, handle.TaskID)
+	if record.State != string(SubAgentStateFailed) {
+		t.Fatalf("task state = %q, want failed", record.State)
+	}
+	if !strings.Contains(record.LastSummary, "No conversation found") || !strings.Contains(record.LastSummary, "code 1") {
+		t.Fatalf("LastSummary = %q, want the result error and the exit status", record.LastSummary)
+	}
+}
+
 func TestExternalCheckoutCompletionReportsOnlyCheckoutIdentity(t *testing.T) {
 	root := t.TempDir()
 	run := func(args ...string) {
@@ -526,6 +563,70 @@ func TestExternalCheckoutCompletionReportsOnlyCheckoutIdentity(t *testing.T) {
 	final := externalCheckoutCompletion(root, dirty, binding, "done")
 	if len(final.ActualFilesChanged) != 0 || final.Worktree.DiffError == "" || final.Worktree.DiffStat != "" {
 		t.Fatalf("dirty startup must withhold the diff stat: %+v", final)
+	}
+}
+
+func TestExternalCheckoutCompletionWithholdsDiffWhenGitStatusFails(t *testing.T) {
+	root := t.TempDir()
+	fakeGit := func(body string) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "git")
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+	fakeGit(`
+cmd="$3"
+case "$cmd" in
+  rev-parse)
+    if [ "$4" = "--abbrev-ref" ]; then printf 'main\n'; else printf '0123456789abcdef0123456789abcdef01234567\n'; fi
+    exit 0
+    ;;
+  status) exit 1 ;;
+esac
+exit 1
+`)
+	baseline := captureExternalCheckoutBaseline(root)
+	if baseline == nil || !baseline.StatusUnknown || baseline.Dirty {
+		t.Fatalf("baseline = %+v, want head with unknown status", baseline)
+	}
+	binding := WorkDirState{Path: root, WorktreeID: "main", Generation: 1}
+	env := externalCheckoutCompletion(root, baseline, binding, "done")
+	if env.Worktree == nil || env.Worktree.DiffError == "" || env.Worktree.DiffStat != "" {
+		t.Fatalf("unknown git status must withhold the diff stat: %+v", env.Worktree)
+	}
+	if !strings.Contains(env.Worktree.DiffError, "status could not be checked") {
+		t.Fatalf("DiffError = %q", env.Worktree.DiffError)
+	}
+}
+
+func TestExternalCheckoutCompletionWithholdsDiffWhenGitDiffFails(t *testing.T) {
+	root := t.TempDir()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(`#!/bin/sh
+cmd="$3"
+case "$cmd" in
+  rev-parse)
+    if [ "$4" = "--abbrev-ref" ]; then printf 'main\n'; else printf '0123456789abcdef0123456789abcdef01234567\n'; fi
+    exit 0
+    ;;
+  status) exit 0 ;;
+  diff) exit 1 ;;
+esac
+exit 1
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	baseline := captureExternalCheckoutBaseline(root)
+	if baseline == nil || baseline.StatusUnknown || baseline.Dirty {
+		t.Fatalf("baseline = %+v, want clean head", baseline)
+	}
+	binding := WorkDirState{Path: root, WorktreeID: "main", Generation: 1}
+	env := externalCheckoutCompletion(root, baseline, binding, "done")
+	if env.Worktree == nil || env.Worktree.DiffError == "" || env.Worktree.DiffStat != "" {
+		t.Fatalf("failed git diff must withhold the diff stat: %+v", env.Worktree)
 	}
 }
 

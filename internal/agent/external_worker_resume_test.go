@@ -97,6 +97,41 @@ esac
 	}
 }
 
+func TestExternalTaskResumeKeepsPersistedCheckoutBaseline(t *testing.T) {
+	root := t.TempDir()
+	script := writeFakeClaude(t, `printf '%s\n' '{"type":"result","subtype":"success","result":"Done."}'`)
+	a := newTestMainAgent(t, root)
+	configureExternalTestRuntime(t, a, script, `"*": allow`)
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "external-worker", Description: "Initial input."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := driveExternalTask(t, a, handle.TaskID)
+	if first.State != string(SubAgentStateCompleted) {
+		t.Fatalf("first attempt = %+v", first)
+	}
+	persisted := &externalCheckoutBaseline{Head: "0123456789abcdef0123456789abcdef01234567", Dirty: true}
+	a.subs.mu.Lock()
+	record := a.subs.taskRecords[handle.TaskID]
+	if record == nil || record.ExternalSession == nil {
+		a.subs.mu.Unlock()
+		t.Fatalf("task record = %+v", record)
+	}
+	record.ExternalSession.Baseline = persisted
+	a.subs.mu.Unlock()
+	if _, err := a.sendMessageToSubAgentNow("", "", handle.TaskID, "Followup input.", string(SubAgentMailboxKindDecisionRequired)); err != nil {
+		t.Fatal(err)
+	}
+	second := driveExternalTask(t, a, handle.TaskID)
+	if second.Attempt != 2 || second.State != string(SubAgentStateCompleted) {
+		t.Fatalf("second attempt = %+v", second)
+	}
+	got := second.ExternalSession.Baseline
+	if got == nil || got.Head != persisted.Head || !got.Dirty || got.StatusUnknown {
+		t.Fatalf("resume recaptured the checkout baseline: %+v", got)
+	}
+}
+
 func TestExternalTaskSealedInputQueuedUntilProcessExit(t *testing.T) {
 	root := t.TempDir()
 	release := filepath.Join(root, "release")
