@@ -1151,7 +1151,7 @@ orchestration:
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `max_live_runtimes` | `10` | 正常准入的 Agent runtime 最大数量。达到上限后，后续普通 runtime 获取会等待已有槽位释放。唤醒重激活在普通容量耗尽时，还可以使用单独设限的 borrowed pool 或 bypass pool。 |
+| `max_live_runtimes` | `10` | 正常准入的 Agent runtime 最大数量。达到上限后，后续普通 runtime 获取会立即失败并返回容量错误，不会等待槽位释放。唤醒重激活在普通容量耗尽时，还可以使用单独设限的 borrowed pool 或 bypass pool。 |
 | `max_borrowed_runtimes` | `1` | 为必须继续推进的编排工作临时增加的 runtime 准入量，例如子 Agent 事件到达后恢复父 Agent。借用额度与正常 runtime 槽位分开设限。 |
 | `max_bypass_runtimes` | `4` | 正常 runtime 池和 borrowed pool 都耗尽时，唤醒重激活可以使用的最大 bypass 数量；达到上限后，唤醒会被拒绝，持久化消息留在队列中等待后续处理。 |
 | `max_active_llm_requests` | `10` | 进程内所有编排 Agent 的 LLM 请求总并发上限。达到上限后，符合条件的请求等待。 |

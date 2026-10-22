@@ -1334,7 +1334,7 @@ orchestration:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `max_live_runtimes` | `10` | Maximum normally admitted Agent runtimes. Further normal runtime acquisition waits until a slot is released. Wake reactivation may use the separately bounded borrowed or bypass pools when ordinary capacity is exhausted. |
+| `max_live_runtimes` | `10` | Maximum normally admitted Agent runtimes. When the limit is reached, further normal runtime acquisition fails immediately with a capacity error instead of waiting for a slot. Wake reactivation may use the separately bounded borrowed or bypass pools when ordinary capacity is exhausted. |
 | `max_borrowed_runtimes` | `1` | Additional temporary runtime admissions used to wake orchestration work that must make progress, such as a parent resuming after a child event. Borrowing is bounded separately from normal runtime slots. |
 | `max_bypass_runtimes` | `4` | Maximum wake reactivations that may bypass both the normal and borrowed runtime pools when neither can make progress. When it is exhausted, the wake is refused and the durable message remains queued. |
 | `max_active_llm_requests` | `10` | Process-wide maximum concurrent LLM requests across orchestrated agents. Eligible requests wait when the limit is full. |
