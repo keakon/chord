@@ -92,6 +92,8 @@ This allows NotebookEdit only for notebooks under `notes/`, matching the same pa
 
 The managed set contains Read, Edit, Write, NotebookEdit, Bash, Glob, Grep, WebFetch, WebSearch, TodoWrite, Agent, AskUserQuestion, and ExitPlanMode. Claude's `Task` spelling is accepted as an alias for `Agent`. Unmapped tools require an explicit role rule using their original name; wildcard `allow` does not allow them. `AskUserQuestion` uses Chord's question UI, answers up to four questions per call, and returns the answers to Claude. `ExitPlanMode` asks the user and does not switch Chord's main role; in `default` permission mode Claude rejects it as unavailable before any host authorization.
 
+A tool the role ruleset disables is passed to the CLI through `--disallowedTools`, so it never appears in Claude's own tool list; the calls that remain are still gated one by one. That decision follows the normal rule matching order — the last rule matching a tool name wins regardless of its own pattern — so a wildcard `deny` fallback belongs before the specific rules that re-enable tools, as in the example above.
+
 Claude can reject a tool before requesting host authorization; TodoWrite is unavailable in the current managed mode. Chord does not bypass these restrictions.
 
 Chord disables project and user customization, hooks, external MCP, plugins, and sandbox auto-approval. The command and administrator policy remain trusted boundaries; role permissions are not an operating-system sandbox. Shell rules use last-match precedence: `git *` is not read-only, and `go test` executes repository code.

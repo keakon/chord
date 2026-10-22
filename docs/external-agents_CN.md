@@ -92,6 +92,8 @@ permission:
 
 受管工具集合包括 Read、Edit、Write、NotebookEdit、Bash、Glob、Grep、WebFetch、WebSearch、TodoWrite、Agent、AskUserQuestion 和 ExitPlanMode。Claude 的 `Task` 写法按 `Agent` 的别名处理。没有 Chord 映射的工具需要使用其原名声明明确角色规则，通配 `allow` 不会放行它们。`AskUserQuestion` 使用 Chord 问题界面，每次最多回答四个问题并回填给 Claude。`ExitPlanMode` 会请求用户确认，不切换 Chord 主角色；在 `default` 权限模式下，Claude 会在请求宿主授权之前就按不可用拒绝它。
 
+角色规则判定为禁用的工具会通过 `--disallowedTools` 传给 CLI，不会出现在 Claude 自己的工具列表里；保留下来的调用仍逐次经过确认。判定沿用通用的规则匹配顺序：由最后一条匹配该工具名的规则决定，与该规则自身的 pattern 无关，因此通配 `deny` 兜底要写在具体放行规则之前，正如上面的示例。
+
 Claude 自身仍可先拒绝工具；当前受管模式下 TodoWrite 不可用。Chord 不会绕过这些限制。
 
 Chord 禁用项目和用户自定义、hooks、外部 MCP、插件及 sandbox 自动批准。外部命令和管理员策略仍是受信任边界，角色权限不是操作系统沙箱。shell 规则采用最后匹配优先；宽泛的 `git *` 不等于只读权限，`go test` 也会执行仓库代码。
