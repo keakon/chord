@@ -98,7 +98,7 @@ func (a *MainAgent) freezeTakeoverCurrentSession(finishStructural func()) (err e
 	if err = a.saveRecoverySnapshotChecked(); err != nil {
 		return err
 	}
-	if err = manager.Sync(); err != nil {
+	if err = syncSessionDurabilityBarrier(manager); err != nil {
 		return fmt.Errorf("sync current session: %w", err)
 	}
 	closed = true

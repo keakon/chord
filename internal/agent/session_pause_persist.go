@@ -33,7 +33,7 @@ func (a *MainAgent) saveInitialSessionPause(cmd *sessionPauseCommand, checkpoint
 		err = a.persist.strictError(manager)
 	}
 	if err == nil {
-		err = manager.Sync()
+		err = syncSessionDurabilityBarrier(manager)
 	}
 	a.sendEvent(Event{Type: eventSessionPauseCheckpoint, Payload: sessionPauseResult{command: cmd, checkpoint: checkpoint, err: err}})
 }
@@ -92,7 +92,7 @@ func (a *MainAgent) saveFinalSessionPause(checkpoint *recovery.SessionPauseCheck
 			err = fmt.Errorf("session pause has no recovery writer")
 		}
 		if err == nil {
-			err = manager.Sync()
+			err = syncSessionDurabilityBarrier(manager)
 		}
 		if err == nil {
 			a.recoverySnapshotMu.Lock()

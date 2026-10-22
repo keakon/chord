@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -184,7 +185,7 @@ func TestSyncCloseErrorsCannotBeClearedByRepeatedClose(t *testing.T) {
 	if err := r.handles[identity.MainAgentID].Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Sync(); err == nil {
+	if err := r.Sync(context.Background()); err == nil {
 		t.Fatal("Sync accepted closed writer")
 	}
 	first := r.Close()
@@ -194,7 +195,7 @@ func TestSyncCloseErrorsCannotBeClearedByRepeatedClose(t *testing.T) {
 	if second := r.Close(); second != first {
 		t.Fatalf("Close did not retain error: first=%v second=%v", first, second)
 	}
-	if err := r.Sync(); !errors.Is(err, ErrClosed) {
+	if err := r.Sync(context.Background()); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Sync after close = %v", err)
 	}
 	if err := r.SaveSnapshot(&SessionSnapshot{}); !errors.Is(err, ErrClosed) {

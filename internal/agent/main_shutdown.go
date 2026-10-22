@@ -178,7 +178,9 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		// Unpublish before closing so a straggling worker resolves nil instead
 		// of a closed manager it would report as a persistence failure.
 		a.clearRecoveryManagerIf(manager)
-		manager.Close()
+		if err := manager.Close(); err != nil {
+			log.Warnf("failed to close recovery manager error=%v", err)
+		}
 	}
 
 	if a.sessionLock != nil {

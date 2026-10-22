@@ -298,7 +298,9 @@ func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) 
 	// the epoch check in recoveryManagerForEpoch keeps it from ever resolving
 	// the successor session's manager for this session's work.
 	a.clearRecoveryManagerIf(oldRecovery)
-	oldRecovery.Close()
+	if err := oldRecovery.Close(); err != nil {
+		log.Warnf("failed to close previous session recovery manager error=%v", err)
+	}
 	return nil
 }
 
