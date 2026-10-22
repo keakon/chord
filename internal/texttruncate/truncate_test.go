@@ -239,3 +239,38 @@ func TestPrefixBytesMalformedOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestSnippetKeepsBothEndsAndBoundsTheResult(t *testing.T) {
+	long := strings.Repeat("head ", 200) + "middle " + strings.Repeat("tail ", 200)
+	got := Snippet(long, 100)
+	if !strings.HasPrefix(got, "head") || !strings.HasSuffix(got, "tail") {
+		t.Fatalf("Snippet = %q, want both ends kept", got)
+	}
+	if !strings.Contains(got, "\n...\n") {
+		t.Fatalf("Snippet = %q, want the elision", got)
+	}
+	if n := len([]rune(got)); n > 100 {
+		t.Fatalf("Snippet runes = %d, want at most 100", n)
+	}
+	if short := "already fits"; Snippet(short, 100) != short {
+		t.Fatalf("Snippet(short) = %q, want it unchanged", short)
+	}
+	// Trimming happens before the bound is applied, so surrounding whitespace
+	// never counts against it.
+	if got := Snippet("  padded  ", 20); got != "padded" {
+		t.Fatalf("Snippet(padded) = %q, want %q", got, "padded")
+	}
+	// A bound too small for the separator still bounds the text: it degrades
+	// to the head instead of overrunning.
+	if got := Snippet("padded", 7); got != "padd" {
+		t.Fatalf("Snippet(small bound) = %q, want %q", got, "padd")
+	}
+	for _, in := range []string{"", "   "} {
+		if got := Snippet(in, 10); got != "" {
+			t.Fatalf("Snippet(%q) = %q, want empty", in, got)
+		}
+	}
+	if got := Snippet("text", 0); got != "" {
+		t.Fatalf("Snippet(maxChars=0) = %q, want empty", got)
+	}
+}

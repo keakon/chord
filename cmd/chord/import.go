@@ -123,9 +123,17 @@ func printImportSummary(w io.Writer, source string, res *sessionimport.ImportRes
 	if source == "claude" && r.Claude != nil {
 		printClaudeImportSummary(w, r.Claude)
 	}
+	if source == "opencode" && r.OpenCode != nil {
+		printOpenCodeImportSummary(w, r.OpenCode)
+	}
 	if reportPath != "" {
 		fmt.Fprintf(w, "Report: %s\n", reportPath)
 	}
+}
+
+func printOpenCodeImportSummary(w io.Writer, report *sessionimport.OpenCodeImportReport) {
+	fmt.Fprintf(w, "OpenCode: %d compaction checkpoint(s), %d earlier message(s) replaced, %d recent message(s) kept, %d marker(s) skipped\n",
+		report.CompactionCheckpoints, report.CompactionHeadReplaced, report.CompactionTailKept, report.MarkersSkipped)
 }
 
 func printClaudeImportSummary(w io.Writer, report *sessionimport.ClaudeImportReport) {

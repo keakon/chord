@@ -1,6 +1,9 @@
 package texttruncate
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // Runes truncates s at a UTF-8 rune boundary and appends suffix
 // only when truncation occurs.
@@ -35,6 +38,29 @@ func HeadTail(s string, headRunes, tailRunes int, sep string) string {
 		return s
 	}
 	return head + sep + tail
+}
+
+// Snippet bounds s to maxChars runes, keeping the first two thirds and the
+// last third with an elision between them so a long text keeps both of its
+// ends. Text that already fits is returned whole, and an empty text or a
+// non-positive bound yields "". It is the shared middle-elision policy: a
+// snippet a reader sees must be bounded the same way everywhere, or the same
+// text renders at two different lengths.
+func Snippet(s string, maxChars int) string {
+	s = strings.TrimSpace(s)
+	if s == "" || maxChars <= 0 {
+		return ""
+	}
+	keepHead := maxChars * 2 / 3
+	if keepHead < 1 {
+		keepHead = maxChars
+	}
+	sep := "\n...\n"
+	keepTail := max(maxChars-keepHead-len([]rune(sep)), 0)
+	if keepTail == 0 {
+		return strings.TrimSpace(Runes(s, keepHead, ""))
+	}
+	return strings.TrimSpace(HeadTail(s, keepHead, keepTail, sep))
 }
 
 // FirstRunes returns the prefix of s containing at most n runes,

@@ -41,6 +41,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- OpenCode imports map a compaction the source session applied onto a Chord context-summary checkpoint: the paired summary becomes the checkpoint standing immediately before the oldest message the compaction kept, those recent messages stay as history after it, and the earlier messages the source had already folded away are replaced by that checkpoint — the shape the source model itself saw. Only the newest usable compaction shapes the import; when the export does not record what the compaction kept, the full history is kept and the report says so. A compaction that completed with no summary text is skipped the same way, unless the replaced head still holds the original request to anchor it: the checkpoint then carries that request alone, and the report says the summary text was missing. CLI output and `import-report.json` record the mapped checkpoints, replaced messages, and skipped markers.
+
 - The embedded model catalog uses [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2), which adds Gemini 4 Argon with a shared 1M-token window and a default 65,536-token streaming binding cap, and records the DeepSeek-V4.1-Flash-1017 release on the existing `deepseek/deepseek-flash` route. Long decode continuation requires explicit configuration.
 
 - The system prompt now asks the agent to preserve identifiers and contract details exactly, give a preferred option with decisive reasons in designs and reviews, and keep existing callers usable under their original contract. It also asks replies and handoffs to lead with results and evidence, and limits credential use to approved mechanisms.

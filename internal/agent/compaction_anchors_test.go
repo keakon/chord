@@ -422,7 +422,7 @@ func TestCompactionDraftFoldsDerivedRequestConstraint(t *testing.T) {
 		t.Fatalf("unexpected draft: %+v", draft)
 	}
 	anchors := latestCompactionAnchors(draft.NewMessages)
-	if anchors.OriginalRequest != anchorLine(request, compactAnchorsRequestChars) {
+	if anchors.OriginalRequest != message.CompactionAnchorLine(request, compactAnchorsRequestChars) {
 		t.Fatalf("OriginalRequest = %q, want the verbatim request line", anchors.OriginalRequest)
 	}
 	if len(anchors.Constraints) != 0 {

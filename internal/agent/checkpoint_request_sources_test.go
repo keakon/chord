@@ -28,7 +28,7 @@ func TestCheckpointRequestProjectionPreservesCollidingSources(t *testing.T) {
 	if strings.Contains(got, checkpointSameRequestPointer) || !strings.Contains(got, "Excerpt: "+checkpointOriginalRequestPointer) {
 		t.Fatal("folded an independently sourced excerpt into the current request")
 	}
-	if !strings.Contains(got, compactAnchorsRequestLabel+"\n- "+anchorLine(older, compactAnchorsRequestChars)) {
+	if !strings.Contains(got, message.CompactionAnchorsRequestLabel+"\n- "+message.CompactionAnchorLine(older, compactAnchorsRequestChars)) {
 		t.Fatal("dropped the independently sourced Original request anchor")
 	}
 	// Only the excerpt field of the original request's row changes: its ID,
@@ -97,7 +97,7 @@ func TestCheckpointRequestProjectionLongAndInheritedSources(t *testing.T) {
 	request := strings.Repeat("Preserve the parser output. ", 60)
 	msg := requestDedupFixture(request, request, request, request)
 	projected := projectCheckpointRequests([]message.Message{msg})[0].Content
-	if strings.Contains(projected, compactAnchorsRequestLabel) || strings.Contains(projected, compactAnchorsConstraintsLabel) ||
+	if strings.Contains(projected, message.CompactionAnchorsRequestLabel) || strings.Contains(projected, message.CompactionAnchorsConstraintsLabel) ||
 		strings.Contains(projected, checkpointfmt.UserConstraintsHeading) || strings.Contains(projected, retainedRecentMessagesHeading) {
 		t.Fatalf("kept duplicate instruction blocks:\n%s", projected)
 	}

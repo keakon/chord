@@ -72,7 +72,7 @@ func buildCheckpointRequestSources(body string, history []message.Message, origi
 			if source := priorSources[checkpointOriginalRequestSource]; source != "" {
 				sources[checkpointOriginalRequestSource] = source
 			}
-		} else if prior.OriginalRequest == "" && anchors.OriginalRequest == anchorLine(original, compactAnchorsRequestChars) {
+		} else if prior.OriginalRequest == "" && anchors.OriginalRequest == message.CompactionAnchorLine(original, compactAnchorsRequestChars) {
 			sources[checkpointOriginalRequestSource] = checkpointRequestSource(original)
 		}
 	}
@@ -87,7 +87,7 @@ func buildCheckpointRequestSources(body string, history []message.Message, origi
 		var source string
 		ambiguous := false
 		for _, item := range items {
-			if !isAnchorConstraintKind(item.Kind) || anchorLine(item.Excerpt, compactAnchorsConstraintChars) != line {
+			if !isAnchorConstraintKind(item.Kind) || message.CompactionAnchorLine(item.Excerpt, compactAnchorsConstraintChars) != line {
 				continue
 			}
 			if item.RequestSource == "" || source != "" && source != item.RequestSource {

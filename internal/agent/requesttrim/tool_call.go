@@ -26,20 +26,7 @@ func (m *ToolCall) ParsedReadRequest() ReadRequest {
 
 // TextSnippet bounds a trimmed excerpt by retaining its head and tail.
 func TextSnippet(s string, maxChars int) string {
-	s = strings.TrimSpace(s)
-	if s == "" || maxChars <= 0 {
-		return ""
-	}
-	keepHead := maxChars * 2 / 3
-	if keepHead < 1 {
-		keepHead = maxChars
-	}
-	sep := "\n...\n"
-	keepTail := max(maxChars-keepHead-len([]rune(sep)), 0)
-	if keepTail == 0 {
-		return strings.TrimSpace(texttruncate.Runes(s, keepHead, ""))
-	}
-	return strings.TrimSpace(texttruncate.HeadTail(s, keepHead, keepTail, sep))
+	return texttruncate.Snippet(s, maxChars)
 }
 
 func isConfirmationOutput(content string) bool {

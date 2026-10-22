@@ -43,7 +43,7 @@ func TestBuildCompactionAnchorsSupersedesContradictoryConstraint(t *testing.T) {
 		t.Fatalf("superseded constraints = %+v", second.SupersededConstraints)
 	}
 	rendered := renderCompactionAnchors(second)
-	if !strings.Contains(rendered, compactAnchorsSupersededLabel+"\n- 不要修改 internal/parser.go") {
+	if !strings.Contains(rendered, message.CompactionAnchorsSupersededLabel+"\n- 不要修改 internal/parser.go") {
 		t.Fatalf("superseded constraint not rendered under its labeled list: %q", rendered)
 	}
 	// The superseded state round-trips through the checkpoint.

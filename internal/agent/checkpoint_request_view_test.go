@@ -68,7 +68,7 @@ func TestCheckpointRequestProjectionFoldsOriginalRequestEvidenceExcerpt(t *testi
 	original := strings.Repeat("Do not change the existing output contract. ", 30)
 	msg := requestDedupFixture("continue the parser work", original, original, "Earlier objective")
 	projected := projectCheckpointRequests([]message.Message{msg})[0].Content
-	if !strings.Contains(projected, compactAnchorsRequestLabel+"\n- "+anchorLine(original, compactAnchorsRequestChars)) {
+	if !strings.Contains(projected, message.CompactionAnchorsRequestLabel+"\n- "+message.CompactionAnchorLine(original, compactAnchorsRequestChars)) {
 		t.Fatal("folded the canonical Original request anchor")
 	}
 	evidence := projected[strings.Index(projected, message.CompactionEvidenceTag):]
@@ -193,9 +193,9 @@ func requestDedupFixture(request, original, constraint, retained string) message
 	item := buildUserCorrectionEvidence("message 1 (user)", constraint)
 	evidence := renderEvidenceArtifactContent([]evidenceItem{item, buildEvidenceItem(evidenceToolError, "Latest failing tool result", "Preserve the failure", "message 2 (tool)", "sample tool error output")})
 	body := message.CompactionAnchorsOpenTag +
-		compactAnchorsRequestLabel + "\n- " + anchorLine(original, compactAnchorsRequestChars) + "\n" +
-		compactAnchorsConstraintsLabel + "\n- " + anchorLine(constraintExcerpt, compactAnchorsConstraintChars) + "\n" +
-		compactAnchorsSupersededLabel + "\n- Old direction no longer in force.\n" +
+		message.CompactionAnchorsRequestLabel + "\n- " + message.CompactionAnchorLine(original, compactAnchorsRequestChars) + "\n" +
+		message.CompactionAnchorsConstraintsLabel + "\n- " + message.CompactionAnchorLine(constraintExcerpt, compactAnchorsConstraintChars) + "\n" +
+		message.CompactionAnchorsSupersededLabel + "\n- Old direction no longer in force.\n" +
 		message.CompactionAnchorsCloseTag +
 		"\n\n## Current User Request\n" + modelDrivenCurrentUserRequestSection(fallbackAnchor{Kind: "user_request", Label: latestUserRequestLabel, Text: request}) +
 		"\n\n## Progress\n- parser checked\n" +
@@ -222,7 +222,7 @@ func TestCheckpointRequestProjectionDeduplicatesSameSourceSections(t *testing.T)
 		t.Fatalf("request copies = %d, want only the authoritative section", got)
 	}
 	for _, want := range []string{
-		compactAnchorsSupersededLabel,
+		message.CompactionAnchorsSupersededLabel,
 		"Old direction no longer in force.",
 		"Evidence ID: " + evidenceItemID(buildUserCorrectionEvidence("message 1 (user)", request)), "Evidence Kind: user_correction",
 		"## Progress",

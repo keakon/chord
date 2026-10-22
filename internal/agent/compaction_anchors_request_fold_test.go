@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/agent/checkpointfmt"
+	"github.com/keakon/chord/internal/message"
 )
 
 // The original request is rendered verbatim as the anchors' Original request
@@ -41,9 +42,9 @@ func TestCompactionAnchorsOmitDerivedOriginalRequestConstraint(t *testing.T) {
 func TestCompactionAnchorsFoldInheritedDerivedRequestConstraint(t *testing.T) {
 	request := strings.Repeat("keep the public API stable. ", 40)
 	previous := compactionAnchors{
-		OriginalRequest: anchorLine(request, compactAnchorsRequestChars),
+		OriginalRequest: message.CompactionAnchorLine(request, compactAnchorsRequestChars),
 		Constraints: []string{
-			anchorLine(request, compactAnchorsConstraintChars),
+			message.CompactionAnchorLine(request, compactAnchorsConstraintChars),
 			"只能用标准库",
 		},
 	}
@@ -77,7 +78,7 @@ func TestCompactionAnchorsSupersedeFoldedRequestConstraint(t *testing.T) {
 		t.Fatalf("SupersededConstraints = %v, want the original direction retired", second.SupersededConstraints)
 	}
 	rendered := renderCompactionAnchors(second)
-	if !strings.Contains(rendered, compactAnchorsSupersededLabel+"\n- "+request) {
+	if !strings.Contains(rendered, message.CompactionAnchorsSupersededLabel+"\n- "+request) {
 		t.Fatalf("superseded request direction not rendered under its labeled list:\n%s", rendered)
 	}
 }

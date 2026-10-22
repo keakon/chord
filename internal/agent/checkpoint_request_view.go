@@ -161,11 +161,11 @@ func deduplicateAnchoredRequest(body, request, source string, sources map[string
 	end := start + close
 	anchors := parseCompactionAnchors(body[start:end])
 	changed := false
-	if sources[checkpointOriginalRequestSource] == source && anchors.OriginalRequest == anchorLine(request, compactAnchorsRequestChars) {
+	if sources[checkpointOriginalRequestSource] == source && anchors.OriginalRequest == message.CompactionAnchorLine(request, compactAnchorsRequestChars) {
 		anchors.OriginalRequest = ""
 		changed = true
 	}
-	line := anchorLine(requesttrim.TextSnippet(request, compactUserConstraintExcerptChars), compactAnchorsConstraintChars)
+	line := message.CompactionAnchorLine(requesttrim.TextSnippet(request, compactUserConstraintExcerptChars), compactAnchorsConstraintChars)
 	anchors.Constraints = slices.DeleteFunc(anchors.Constraints, func(constraint string) bool {
 		if constraint != line || sources[checkpointConstraintSourceKey(constraint)] != source {
 			return false

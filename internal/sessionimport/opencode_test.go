@@ -69,6 +69,42 @@ func TestConvertOpenCodeExport_WarnsForUnknownRole(t *testing.T) {
 	}
 }
 
+// A flat export may spell the role with a token the role mapping does not know.
+// The fallback still resolves it, so a user's turn never turns into assistant
+// text and no unknown-role warning fires.
+func TestConvertOpenCodeExport_LegacyRoleTokensResolveWithoutWarning(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want message.Role
+	}{
+		{name: "human is a user", data: `{"messages":[{"id":"m1","role":"human","text":"hi"}]}`, want: message.RoleUser},
+		{name: "ai is an assistant", data: `{"messages":[{"id":"m1","role":"ai","text":"hi"}]}`, want: message.RoleAssistant},
+		{name: "model is an assistant", data: `{"messages":[{"id":"m1","role":"model","text":"hi"}]}`, want: message.RoleAssistant},
+		{name: "type carries the same tokens", data: `{"messages":[{"id":"m1","type":"human","text":"hi"}]}`, want: message.RoleUser},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var report ImportReport
+			msgs, err := convertOpenCodeExport([]byte(tc.data), ReasoningStrict, &report)
+			if err != nil {
+				t.Fatalf("convertOpenCodeExport: %v", err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("msgs len=%d, want 1: %+v", len(msgs), msgs)
+			}
+			if msgs[0].Role != tc.want {
+				t.Fatalf("role=%q, want %q", msgs[0].Role, tc.want)
+			}
+			for _, warning := range report.Warnings {
+				if strings.Contains(warning, "unknown role") {
+					t.Fatalf("warnings=%q, want no unknown-role warning", report.Warnings)
+				}
+			}
+		})
+	}
+}
+
 func TestConvertOpenCodeExport_ToolFallbackWarnsOnlyActualCause(t *testing.T) {
 	data := []byte(`{
   "messages": [

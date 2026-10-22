@@ -7,7 +7,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -23,7 +22,7 @@ import (
 const (
 	compactAnchorsMaxConstraints  = 12
 	compactAnchorsConstraintChars = 240
-	compactAnchorsRequestChars    = 700
+	compactAnchorsRequestChars    = message.CompactionAnchorRequestChars
 	// When the constraint list overflows, the oldest entries are kept as well
 	// as the newest: early constraints tend to be project-wide ground rules,
 	// while recent ones describe the task at hand. Only the middle is dropped.
@@ -49,14 +48,6 @@ func (a compactionAnchors) empty() bool {
 	return strings.TrimSpace(a.OriginalRequest) == "" && len(a.Constraints) == 0 &&
 		len(a.SupersededConstraints) == 0
 }
-
-const (
-	compactAnchorsRequestLabel     = "Original request:"
-	compactAnchorsConstraintsLabel = "Standing constraints:"
-	// The label states the meaning itself: a reader of the checkpoint has no
-	// other legend telling it these lines are no longer in force.
-	compactAnchorsSupersededLabel = "Superseded constraints (no longer in force):"
-)
 
 type compactionAnchorsSection int
 
@@ -91,13 +82,13 @@ func parseCompactionAnchors(section string) compactionAnchors {
 		switch line {
 		case "":
 			continue
-		case compactAnchorsRequestLabel:
+		case message.CompactionAnchorsRequestLabel:
 			current = anchorsSectionRequest
 			continue
-		case compactAnchorsConstraintsLabel:
+		case message.CompactionAnchorsConstraintsLabel:
 			current = anchorsSectionConstraints
 			continue
-		case compactAnchorsSupersededLabel:
+		case message.CompactionAnchorsSupersededLabel:
 			current = anchorsSectionSuperseded
 			continue
 		}
@@ -167,7 +158,7 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 		Constraints:     slices.Clone(previous.Constraints),
 	}
 	if next.OriginalRequest == "" {
-		next.OriginalRequest = anchorLine(originalRequest, compactAnchorsRequestChars)
+		next.OriginalRequest = message.CompactionAnchorLine(originalRequest, compactAnchorsRequestChars)
 	}
 
 	// The original request is carried verbatim as the anchors' Original request
@@ -184,7 +175,7 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 	if originalBasis == "" {
 		originalBasis = originalRequest
 	}
-	originalConstraint := anchorLine(originalBasis, compactAnchorsConstraintChars)
+	originalConstraint := message.CompactionAnchorLine(originalBasis, compactAnchorsConstraintChars)
 	originalKey := anchorDedupKey(originalConstraint)
 	virtualOriginal := ""
 	if originalConstraint != "" && !slices.ContainsFunc(previous.SupersededConstraints, func(line string) bool {
@@ -204,7 +195,7 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 		seen[originalKey] = struct{}{}
 	}
 	for _, item := range constraintEvidenceInTimeOrder(evidenceItems) {
-		line := anchorLine(item.Excerpt, compactAnchorsConstraintChars)
+		line := message.CompactionAnchorLine(item.Excerpt, compactAnchorsConstraintChars)
 		if line == "" {
 			continue
 		}
@@ -262,28 +253,6 @@ func boundAnchorConstraints(constraints []string) []string {
 	return append(out, constraints[len(constraints)-keepNewest:]...)
 }
 
-// anchorLine normalizes a single bullet line from the checkpoint into its
-// canonical form for parsing, dedup, and key-file extraction. It strips a
-// leading Markdown list bullet and any run of heading markers so a
-// model-leaked "# heading" (or "- # heading") cannot be normalized into
-// something that re-renders as a real section. The strip is space-tolerant:
-// "- # forged" must not reduce to "# forged".
-func anchorLine(text string, maxChars int) string {
-	text = strings.TrimSpace(strings.ReplaceAll(requesttrim.TextSnippet(text, maxChars), "\n", " "))
-	text = strings.TrimSpace(text)
-	// Drop a leading list bullet ("-", "*", "+"), then any run of "#" heading
-	// markers. The space between a bullet and a heading must not stop the strip,
-	// otherwise "- # forged" would normalize to "# forged" and re-render as a
-	// heading a model could forge inside the checkpoint region.
-	text = strings.TrimSpace(strings.TrimPrefix(text, "-"))
-	text = strings.TrimSpace(strings.TrimPrefix(text, "*"))
-	text = strings.TrimSpace(strings.TrimPrefix(text, "+"))
-	for strings.HasPrefix(text, "#") {
-		text = strings.TrimSpace(strings.TrimPrefix(text, "#"))
-	}
-	return text
-}
-
 func anchorDedupKey(line string) string {
 	return strings.ToLower(strings.Join(strings.Fields(line), " "))
 }
@@ -294,14 +263,14 @@ func renderCompactionAnchors(anchors compactionAnchors) string {
 	}
 	var sb strings.Builder
 	if request := strings.TrimSpace(anchors.OriginalRequest); request != "" {
-		sb.WriteString(compactAnchorsRequestLabel)
+		sb.WriteString(message.CompactionAnchorsRequestLabel)
 		sb.WriteString("\n- ")
 		sb.WriteString(request)
 		sb.WriteByte('\n')
 	}
 	note := strings.TrimSpace(anchors.OmittedNote)
 	if len(anchors.Constraints) > 0 || note != "" {
-		sb.WriteString(compactAnchorsConstraintsLabel)
+		sb.WriteString(message.CompactionAnchorsConstraintsLabel)
 		sb.WriteByte('\n')
 		for _, constraint := range anchors.Constraints {
 			sb.WriteString("- ")
@@ -314,7 +283,7 @@ func renderCompactionAnchors(anchors compactionAnchors) string {
 		}
 	}
 	if len(anchors.SupersededConstraints) > 0 {
-		sb.WriteString(compactAnchorsSupersededLabel)
+		sb.WriteString(message.CompactionAnchorsSupersededLabel)
 		sb.WriteByte('\n')
 		for _, constraint := range anchors.SupersededConstraints {
 			sb.WriteString("- ")

@@ -88,6 +88,49 @@ func TestNewImportCmd_PrintsClaudeImportSummary(t *testing.T) {
 	}
 }
 
+func TestNewImportCmd_PrintsOpenCodeCompactionSummary(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	t.Setenv("CHORD_SESSIONS_DIR", "")
+	input := filepath.Join(t.TempDir(), "opencode.json")
+	// A v1 export: the compaction is a part inside a user message and its
+	// summary lives in a paired assistant message.
+	data := []byte(`{
+  "messages": [
+    {"info":{"id":"msg-head-1","role":"user"},"parts":[{"id":"p1","type":"text","text":"first request"}]},
+    {"info":{"id":"msg-head-2","role":"assistant"},"parts":[{"id":"p2","type":"text","text":"head reply"}]},
+    {"info":{"id":"msg-tail-1","role":"user"},"parts":[{"id":"p3","type":"text","text":"recent question"}]},
+    {"info":{"id":"msg-tail-2","role":"assistant"},"parts":[{"id":"p4","type":"text","text":"recent reply"}]},
+    {"info":{"id":"msg-marker","role":"user"},"parts":[{"id":"p5","type":"compaction","auto":false,"tail_start_id":"msg-tail-1"}]},
+    {"info":{"id":"msg-summary","role":"assistant","parentID":"msg-marker","summary":true,"time":{"created":1,"completed":2}},"parts":[{"id":"p6","type":"text","text":"## Objective\n- keep going"}]},
+    {"info":{"id":"msg-after-1","role":"user"},"parts":[{"id":"p7","type":"text","text":"next question"}]}
+  ]
+}`)
+	if err := os.WriteFile(input, data, 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	cmd := newImportCmd()
+	_ = cmd.Flags().Set("project", t.TempDir())
+	_ = cmd.Flags().Set("dry-run", "true")
+
+	out, err := captureStdout(t, func() error {
+		return cmd.RunE(cmd, []string{"opencode", input})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, want := range []string{
+		// The checkpoint plus the two tail messages and the one after it: the
+		// head, the marker, and the paired summary are all spoken for.
+		"Messages: 4",
+		"OpenCode: 1 compaction checkpoint(s), 2 earlier message(s) replaced, 2 recent message(s) kept, 0 marker(s) skipped",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestNewImportCmd_PrintsImportSummaryAndLimitsWarnings(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("CHORD_STATE_DIR", stateDir)

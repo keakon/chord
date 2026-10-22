@@ -50,12 +50,33 @@ type ImportReport struct {
 	ValidationFailures int `json:"validation_failures,omitempty"`
 
 	// Source-specific diagnostics.
-	Claude *ClaudeImportReport `json:"claude,omitempty"`
+	Claude   *ClaudeImportReport   `json:"claude,omitempty"`
+	OpenCode *OpenCodeImportReport `json:"opencode,omitempty"`
 
 	// Import summary retained for CLI/report display.
 	ToolEntriesRendered int `json:"tool_entries_rendered,omitempty"`
 
 	Warnings []string `json:"warnings,omitempty"`
+}
+
+// OpenCodeImportReport records how an OpenCode export's compactions were
+// mapped. A completed compaction is imported as the context the source model
+// saw — a checkpoint plus the recent messages it kept — so the history the
+// source had already folded away is replaced rather than imported beside its
+// own summary. The counters make that replacement visible and checkable
+// against the source export, which keeps the full history.
+type OpenCodeImportReport struct {
+	// CompactionCheckpoints counts the checkpoints mapped from the source's
+	// compactions. At most one shapes an import: the newest usable one.
+	CompactionCheckpoints int `json:"compaction_checkpoints,omitempty"`
+	// CompactionHeadReplaced counts the messages the checkpoint replaced.
+	CompactionHeadReplaced int `json:"compaction_head_replaced,omitempty"`
+	// CompactionTailKept counts the recent messages kept between the
+	// checkpoint and the compaction marker.
+	CompactionTailKept int `json:"compaction_tail_kept,omitempty"`
+	// MarkersSkipped counts compaction markers that did not become the
+	// checkpoint, whether superseded by a newer one or unusable.
+	MarkersSkipped int `json:"compaction_markers_skipped,omitempty"`
 }
 
 type ClaudeImportReport struct {

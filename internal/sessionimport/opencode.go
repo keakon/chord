@@ -28,6 +28,12 @@ const (
 	openCodePartTypeStepFinish     = "step-finish"
 	openCodePartTypeFile           = "file"
 	openCodePartTypePatch          = "patch"
+	// openCodePartTypeCompaction is the compaction marker part a v1 export
+	// writes inside a user message. A flat export carries the same token as
+	// the type of a message of its own (openCodeEventCompaction): the source
+	// spells the marker one way in both shapes, so the two names alias one
+	// value instead of drifting apart.
+	openCodePartTypeCompaction = "compaction"
 
 	openCodeRoleUser      = "user"
 	openCodeRoleHuman     = "human"
@@ -38,7 +44,7 @@ const (
 	openCodeEventModelSwitched      = "model-switched"
 	openCodeEventModelSwitchedSnake = "model_switched"
 	openCodeEventModelSwitchedEvent = "model_switched_event"
-	openCodeEventCompaction         = "compaction"
+	openCodeEventCompaction         = openCodePartTypeCompaction
 	openCodeEventSession            = "session-event"
 	openCodeEvent                   = "event"
 
@@ -63,6 +69,13 @@ const (
 // tool call under the name and arguments the source agent used, so the actions
 // that ran survive the import. Only a part too malformed to name or pair a call
 // stays as readable fallback text.
+//
+// A compaction the source session applied is mapped, not replayed: the paired
+// summary becomes a Chord context-summary checkpoint standing immediately
+// before the oldest message the compaction kept, the messages the compaction
+// kept beside the summary stay as history, and the head the source had already
+// folded away is replaced by that checkpoint — the shape the source model
+// itself saw. See openCodeCompactionPlan.
 func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportReport) ([]message.Message, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
@@ -89,8 +102,20 @@ func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportRepo
 		}
 	}
 
+	plan := planOpenCodeCompaction(file.Messages, report)
+
 	var out []message.Message
 	for idx, raw := range file.Messages {
+		// The checkpoint is placed before absorption is consulted: when the
+		// tail boundary could not be located, the checkpoint stands where the
+		// marker itself was, and the flat-export marker is one of the messages
+		// it speaks for.
+		if plan.insertsCheckpointBefore(idx) {
+			out = append(out, plan.checkpoint)
+		}
+		if plan.absorbs(idx) {
+			continue
+		}
 		msgs, skipped, toolRenderedCount, unsupportedToolCount, structuredToolCalls, structuredToolResults, reasoningSkipped, warns, err := convertOpenCodeMessage(raw, reasoningMode)
 		for _, w := range warns {
 			report.warnf("opencode message[%d]: %s", idx, w)
@@ -127,34 +152,27 @@ func convertOpenCodeMessage(raw json.RawMessage, reasoningMode string) (msgs []m
 		return nil, false, 0, 0, 0, 0, false, nil, fmt.Errorf("parse message object: %w", err)
 	}
 
-	kind := pickStringField(obj, "type", "kind", "role")
-	kind = strings.ToLower(strings.TrimSpace(kind))
+	kind := strings.ToLower(strings.TrimSpace(pickStringField(obj, "type", "kind", "role")))
+	role := openCodeRawMessageRole(obj)
 
-	roleText := pickStringField(obj, "role", "sender")
-	roleText = strings.ToLower(strings.TrimSpace(roleText))
-	if roleText == "" {
-		roleText = pickNestedStringField(obj, "info", "role", "sender")
-		roleText = strings.ToLower(strings.TrimSpace(roleText))
-	}
-	role := openCodeMessageRole(roleText)
-	if role == "" {
-		switch kind {
-		case openCodeRoleUser, openCodeRoleHuman:
-			role = message.RoleUser
-		case openCodeRoleAssistant, openCodeRoleAI, openCodeRoleModel:
-			role = message.RoleAssistant
-		}
+	// A compaction carried as a message of its own is owned by the
+	// cross-message compaction pass: the newest usable one is absorbed into
+	// the checkpoint before conversion, and every other one has already been
+	// reported there, so nothing converts on its own.
+	if kind == openCodeEventCompaction {
+		return nil, true, 0, 0, 0, 0, false, nil, nil
 	}
 
-	// Ignore model-switched/compaction markers; the importer is report-only for these.
+	// Ignore model-switched and other non-conversation events; the importer is
+	// report-only for these.
 	switch kind {
-	case openCodeEventModelSwitched, openCodeEventModelSwitchedSnake, openCodeEventModelSwitchedEvent, openCodeEventCompaction, openCodeEventSession, openCodeEvent:
+	case openCodeEventModelSwitched, openCodeEventModelSwitchedSnake, openCodeEventModelSwitchedEvent, openCodeEventSession, openCodeEvent:
 		return nil, true, 0, 0, 0, 0, false, []string{"skipped non-conversation event type=" + kind}, nil
 	}
 
 	if role != message.RoleUser && role != message.RoleAssistant {
 		// Many OpenCode exports are message-like but not chat roles (e.g. shell). Import as assistant-visible text.
-		if roleText != "" {
+		if roleText := openCodeRawRoleText(obj); roleText != "" {
 			warns = append(warns, fmt.Sprintf("unknown role %q; imported as assistant text", roleText))
 		}
 		role = message.RoleAssistant
@@ -264,6 +282,199 @@ func openCodeMessageRole(roleText string) message.Role {
 	default:
 		return ""
 	}
+}
+
+// openCodeRawMessage is one decoded export message with the identity fields
+// the role and id lookups need, resolved across both export shapes.
+type openCodeRawMessage struct {
+	obj  map[string]json.RawMessage
+	info map[string]json.RawMessage
+	id   string
+	role message.Role
+}
+
+// openCodeMessageInfo returns the identity fields of a raw export message: the
+// nested "info" object in a v1 export, the message itself in a flat one.
+func openCodeMessageInfo(obj map[string]json.RawMessage) map[string]json.RawMessage {
+	if raw, ok := obj["info"]; ok {
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(raw, &nested) == nil && len(nested) > 0 {
+			return nested
+		}
+	}
+	return obj
+}
+
+// openCodeRawMessageRole resolves the conversation role of a raw export
+// message across both export shapes, the same way the message converter does.
+// The declared role text is tried first; the fallback reads the "role" key too
+// because a flat export may spell the role there with a token the role mapping
+// does not know (human, ai, model), and leaving that key out would import the
+// user's turn as assistant text.
+func openCodeRawMessageRole(obj map[string]json.RawMessage) message.Role {
+	if role := openCodeMessageRole(openCodeRawRoleText(obj)); role != "" {
+		return role
+	}
+	switch strings.ToLower(strings.TrimSpace(pickStringField(obj, "type", "kind", "role"))) {
+	case openCodeRoleUser, openCodeRoleHuman:
+		return message.RoleUser
+	case openCodeRoleAssistant, openCodeRoleAI, openCodeRoleModel:
+		return message.RoleAssistant
+	}
+	return ""
+}
+
+// openCodeRawRoleText returns the role text a raw export message declares,
+// which is what the unknown-role warning reports.
+func openCodeRawRoleText(obj map[string]json.RawMessage) string {
+	roleText := strings.ToLower(strings.TrimSpace(pickStringField(obj, "role", "sender")))
+	if roleText == "" {
+		roleText = strings.ToLower(strings.TrimSpace(pickNestedStringField(obj, "info", "role", "sender")))
+	}
+	return roleText
+}
+
+// openCodeSummaryText joins the text parts of a summary message into the body
+// the source paired with it.
+func openCodeSummaryText(obj map[string]json.RawMessage) string {
+	if rawParts, ok := obj["parts"]; ok {
+		return openCodeTextPartsBody(rawParts, nil)
+	}
+	return strings.TrimSpace(pickStringField(obj, "text", "content"))
+}
+
+// openCodeRawUserText extracts the user-visible text of a raw export message:
+// its text parts in a v1 export, its text field in a flat one. Ignored and
+// synthetic parts are left out — the source itself does not count them as the
+// user's words.
+func openCodeRawUserText(obj map[string]json.RawMessage) string {
+	if rawParts, ok := obj["parts"]; ok {
+		return openCodeTextPartsBody(rawParts, openCodePartCountsAsUserWords)
+	}
+	if rawContent, ok := obj["content"]; ok {
+		if text := openCodeContentArrayUserText(rawContent); text != "" {
+			return text
+		}
+	}
+	return strings.TrimSpace(pickStringField(obj, "text", "content"))
+}
+
+func openCodeContentArrayUserText(rawContent json.RawMessage) string {
+	var content []any
+	if json.Unmarshal(rawContent, &content) != nil {
+		return ""
+	}
+	var texts []string
+	for _, item := range content {
+		switch block := item.(type) {
+		case string:
+			if text := strings.TrimSpace(block); text != "" {
+				texts = append(texts, text)
+			}
+		case map[string]any:
+			if !openCodePartCountsAsUserWords(block) {
+				continue
+			}
+			text, typ, ok := extractTextFromBlock(block)
+			if !ok || (typ != "" && !strings.EqualFold(strings.TrimSpace(typ), openCodePartTypeText)) {
+				continue
+			}
+			if text = strings.TrimSpace(text); text != "" {
+				texts = append(texts, text)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(texts, "\n"))
+}
+
+// openCodeTextPartsBody joins the text parts of a decoded parts array into one
+// body, or "" when the array cannot be decoded. keep optionally rejects a part
+// that is a text part but should not count; nil keeps every text part.
+func openCodeTextPartsBody(rawParts json.RawMessage, keep func(part map[string]any) bool) string {
+	var parts []map[string]any
+	if json.Unmarshal(rawParts, &parts) != nil {
+		return ""
+	}
+	var texts []string
+	for _, part := range parts {
+		if typ, _ := part["type"].(string); !strings.EqualFold(strings.TrimSpace(typ), openCodePartTypeText) {
+			continue
+		}
+		if keep != nil && !keep(part) {
+			continue
+		}
+		if s, ok := part["text"].(string); ok && strings.TrimSpace(s) != "" {
+			texts = append(texts, strings.TrimSpace(s))
+		}
+	}
+	return strings.TrimSpace(strings.Join(texts, "\n\n"))
+}
+
+// openCodePartCountsAsUserWords reports whether a text part is the user's own
+// words rather than something the source recorded beside them.
+func openCodePartCountsAsUserWords(part map[string]any) bool {
+	if ignored, _ := part["ignored"].(bool); ignored {
+		return false
+	}
+	if synthetic, _ := part["synthetic"].(bool); synthetic {
+		return false
+	}
+	return true
+}
+
+// openCodePartString reads a string field from a decoded part under any of the
+// given keys.
+func openCodePartString(part map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if s, ok := part[key].(string); ok {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
+}
+
+// openCodeRawBoolField reports whether a raw object field is the boolean true,
+// which is how a summary message is flagged (ordinary messages carry a summary
+// object instead).
+func openCodeRawBoolField(info map[string]json.RawMessage, key string) bool {
+	raw, ok := info[key]
+	if !ok {
+		return false
+	}
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
+// openCodeRawIsPresent reports whether a raw field carries a value rather than
+// an explicit null.
+func openCodeRawIsPresent(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
+}
+
+// openCodeHasError reports whether a raw message records an error.
+func openCodeHasError(info map[string]json.RawMessage) bool {
+	raw, ok := info["error"]
+	return ok && openCodeRawIsPresent(raw)
+}
+
+// openCodeTimeCompleted reports whether a raw message's time records a
+// completion, which is what makes a summary usable.
+func openCodeTimeCompleted(info map[string]json.RawMessage) bool {
+	raw, ok := info["time"]
+	if !ok {
+		return false
+	}
+	var timeObj map[string]json.RawMessage
+	if json.Unmarshal(raw, &timeObj) != nil {
+		return false
+	}
+	completed, ok := timeObj["completed"]
+	return ok && openCodeRawIsPresent(completed)
 }
 
 func extractOpenCodeContent(obj map[string]json.RawMessage) (text string, contentTypes []string, warns []string, err error) {
@@ -411,6 +622,12 @@ func convertOpenCodePartsOrdered(raw json.RawMessage, role message.Role, reasoni
 			}
 		case openCodePartTypeStepStart, openCodePartTypeStepFinish:
 			// OpenCode step markers are UI-only and intentionally skipped.
+		case openCodePartTypeCompaction:
+			// A compaction marker is UI-only metadata: the summary it pairs
+			// with is what the model saw, and the cross-message compaction
+			// pass maps that pair onto a checkpoint. Left in the transcript it
+			// would land as a raw JSON user bubble that claims to be user
+			// input.
 		case openCodePartTypePatch:
 			// A patch part is OpenCode's own ledger of the files an edit
 			// touched (a hash and a path list); the edit itself is already the
