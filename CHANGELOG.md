@@ -4,6 +4,13 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Highlights
+
+- Questions can only be answered or cancelled; the `declined` outcome and the `decline` operation are removed.
+- Deliver files with `present` and preview text, Markdown, or images in the TUI; delivered files are restored with the session.
+- Sign in to HTTP MCP servers with OAuth and manage saved logins from the CLI or TUI.
+- Take over a live local session between the TUI and a gateway, with queued inputs preserved.
+
 ### Breaking Changes
 
 - Questions can only be answered or cancelled: the `declined` outcome and the `decline` operation are removed, and `question_resolved` no longer reports `declined`. `Esc` in the question dialog now cancels (withdraws) the question instead of declining it, so a required question is never left parked with no way to resolve it, and cancelling one question of a batch releases the requirements of the ones you never saw. `Esc` is the only in-dialog cancel binding: `Ctrl+W` no longer withdraws a question and stays an ordinary text-editing key. Headless clients that sent `decline` must send `answer` or `withdraw_requirement` instead.

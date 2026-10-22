@@ -4,6 +4,13 @@
 
 ## 未发布
 
+### 亮点
+
+- 问题只能被回答或取消：`declined` 结果与 `decline` 操作已移除。
+- 通过 `present` 交付文件，并在 TUI 中预览文本、Markdown 或图片；交付记录会随会话恢复。
+- HTTP MCP 服务支持 OAuth 登录，可通过 CLI 或 TUI 管理已保存的登录。
+- 在 TUI 与本机网关之间接管运行中的会话，排队输入会保留。
+
 ### 不兼容变更
 
 - 问题只能被回答或取消：删除 `declined` 结果与 `decline` 操作，`question_resolved` 也不再报告 `declined`。题目对话框中的 `Esc` 现在改为取消（撤回）该题，而非拒绝回答，因此必要问题不会既不回答又悬置、导致无法推进；取消一批题中的一题，也会一并解除那些你从未看到的题目的要求。对话框内只保留 `Esc` 一个取消键位：`Ctrl+W` 不再撤回题目，仍作为普通文本编辑键使用。此前发送 `decline` 的 headless 客户端需改用 `answer` 或 `withdraw_requirement`。
