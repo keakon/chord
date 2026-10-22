@@ -55,6 +55,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - AGENTS shows distinct waiting states and the current coordination request reason, with clickable task and reason rows.
 
+- The **AGENTS** list marks each child task's state with icons only: `○` running, `?` awaiting its owner, `⇣` awaiting its own children, `✓` delivered, `✗` failed, `⊘` cancelled, `…` idle, and `◇` unknown. The section header counts rows by the same icons, so status words such as `delivered` and `failed` no longer take up row width.
+
 - Compaction summaries exclude independent thinking so the input budget prioritizes user requests, replies, and execution records.
 - The first-run `prevent_sleep` prompt now defaults to No on macOS, Linux, and Windows; existing saved settings are unchanged.
 - Question decision cards keep the original question and answers fully visible without folding, with separate lines for the question, selections, and option descriptions.

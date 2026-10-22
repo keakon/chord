@@ -315,8 +315,10 @@ func statusIndicator(status string) string {
 	switch status {
 	case "running":
 		return "○"
-	case "waiting_main", "waiting_descendant":
+	case "waiting_main":
 		return "?"
+	case "waiting_descendant":
+		return "⇣"
 	case "done", "completed":
 		return "✓"
 	case "cancelled":
@@ -326,6 +328,6 @@ func statusIndicator(status string) string {
 	case "idle":
 		return "…"
 	default:
-		return "·"
+		return "◇"
 	}
 }

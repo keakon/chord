@@ -252,13 +252,16 @@ func TestSidebarCompletedStatusUsesDoneSemantics(t *testing.T) {
 	sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")
 	sidebar.UpdateStatus("agent-1", "completed")
 
-	if got := sidebar.AgentsSummary(); got != "1 delivered" {
-		t.Fatalf("AgentsSummary() = %q, want %q", got, "1 delivered")
+	if got := sidebar.AgentsSummary(); got != "1 ✓" {
+		t.Fatalf("AgentsSummary() = %q, want %q", got, "1 ✓")
 	}
 	lines := sidebar.buildLines(32)
-	joined := strings.Join(lines, "\n")
-	if !strings.Contains(terminaltext.StripANSI(joined), "✓ ship tests") {
-		t.Fatalf("sidebar should render completed as done semantics, got:\n%s", terminaltext.StripANSI(joined))
+	joined := terminaltext.StripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(joined, "✓ ship tests") {
+		t.Fatalf("sidebar should render completed as done semantics, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "delivered") {
+		t.Fatalf("completed agents should carry no status text, got:\n%s", joined)
 	}
 }
 
@@ -501,7 +504,7 @@ func TestStatusIndicatorCoversEveryProducibleStatus(t *testing.T) {
 	}{
 		{string(agent.SubAgentStateRunning), "○"},
 		{string(agent.SubAgentStateWaitingMain), "?"},
-		{string(agent.SubAgentStateWaitingDescendant), "?"},
+		{string(agent.SubAgentStateWaitingDescendant), "⇣"},
 		{subAgentStatusDone, "✓"},
 		{string(agent.SubAgentStateCompleted), "✓"},
 		{string(agent.SubAgentStateCancelled), "⊘"},

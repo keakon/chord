@@ -272,14 +272,14 @@ func TestRenderInfoPanelAgentsPreserveInfoPanelBackground(t *testing.T) {
 	if section[0] != "▸ ○ builder" {
 		t.Fatalf("AGENTS main row = %q, want %q", section[0], "▸ ○ builder")
 	}
-	if section[1] != "· ship tests  unknown" {
-		t.Fatalf("AGENTS sub-agent row = %q, want %q", section[1], "· ship tests  unknown")
+	if section[1] != "◇ ship tests" {
+		t.Fatalf("AGENTS sub-agent row = %q, want %q", section[1], "◇ ship tests")
 	}
 
 	if !strings.Contains(rendered, currentStyles.InfoPanelAgentFocusedStyle.Render("▸ ○ builder")) {
 		t.Fatalf("AGENTS focused line should use info-panel-aware style; want styled content in output")
 	}
-	entryPrefix := currentStyles.InfoPanelAgentEntryStyle.Render("  · ship tests  unknown")
+	entryPrefix := currentStyles.InfoPanelAgentEntryStyle.Render("  ◇ ship tests")
 	if !strings.Contains(rendered, entryPrefix) {
 		t.Fatalf("AGENTS sub-agent line should preserve info-panel background with collapsible content indent; want %q in output", entryPrefix)
 	}
@@ -316,8 +316,8 @@ func TestRenderInfoPanelAgentsRefreshWhenFocusChangesWithoutModelChange(t *testi
 	if before[0] != "▸ ○ builder" {
 		t.Fatalf("AGENTS main row before focus switch = %q, want %q", before[0], "▸ ○ builder")
 	}
-	if before[1] != "· ship tests  unknown" {
-		t.Fatalf("AGENTS sub-agent row before focus switch = %q, want %q", before[1], "· ship tests  unknown")
+	if before[1] != "◇ ship tests" {
+		t.Fatalf("AGENTS sub-agent row before focus switch = %q, want %q", before[1], "◇ ship tests")
 	}
 
 	m.setFocusedAgent("agent-1")
@@ -328,8 +328,29 @@ func TestRenderInfoPanelAgentsRefreshWhenFocusChangesWithoutModelChange(t *testi
 	if after[0] != "○ builder" {
 		t.Fatalf("AGENTS main row after focus switch = %q, want %q", after[0], "○ builder")
 	}
-	if after[1] != "▸ · ship tests  unknown" {
-		t.Fatalf("AGENTS sub-agent row after focus switch = %q, want %q", after[1], "▸ · ship tests  unknown")
+	if after[1] != "▸ ◇ ship tests" {
+		t.Fatalf("AGENTS sub-agent row after focus switch = %q, want %q", after[1], "▸ ◇ ship tests")
+	}
+}
+
+func TestRenderInfoPanelAgentsCountFailuresByIcon(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	subs := make([]agent.SubAgentInfo, 0, 3)
+	for i := range 3 {
+		subs = append(subs, agent.SubAgentInfo{InstanceID: fmt.Sprintf("agent-%d", i), TaskDesc: "review"})
+	}
+	m.sidebar.Update(subs, "main", "builder")
+	for i := range 3 {
+		m.sidebar.UpdateStatus(fmt.Sprintf("agent-%d", i), string(agent.SubAgentStateFailed))
+	}
+
+	plain := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
+	if !strings.Contains(plain, "AGENTS · 3 ✗") {
+		t.Fatalf("AGENTS header should count failures by icon, got %q", plain)
+	}
+	if strings.Contains(plain, "failed") {
+		t.Fatalf("AGENTS rows should not spell out failure state, got %q", plain)
 	}
 }
 
@@ -340,7 +361,7 @@ func TestRenderInfoPanelCollapsedAgentsShowsHeaderOnly(t *testing.T) {
 	m.infoPanelCollapsedSections[infoPanelSectionAgents] = true
 
 	plain := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
-	if !strings.Contains(plain, "▶ AGENTS") || !strings.Contains(plain, "1 unknown") {
+	if !strings.Contains(plain, "▶ AGENTS") || !strings.Contains(plain, "1 ◇") {
 		t.Fatalf("collapsed AGENTS header should include compact count, got %q", plain)
 	}
 	section := infoPanelSectionLines(infoPanelPlainLines(plain), "▶ AGENTS")
@@ -390,7 +411,7 @@ func TestRenderInfoPanelAgentsApplyConfiguredColorToNonFocusedRows(t *testing.T)
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", Color: "196"}}, "main", "builder")
 
 	rendered := m.renderInfoPanel(48, 24)
-	want := infoPanelAgentRowStyle(SidebarEntry{ID: "agent-1", Color: "196"}, false).Render("  · agent-1  unknown")
+	want := infoPanelAgentRowStyle(SidebarEntry{ID: "agent-1", Color: "196"}, false).Render("  ◇ agent-1")
 	if !strings.Contains(rendered, want) {
 		t.Fatalf("AGENTS non-focused row should use configured color; want %q in %q", want, rendered)
 	}

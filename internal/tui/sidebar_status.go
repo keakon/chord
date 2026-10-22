@@ -10,39 +10,28 @@ import (
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
-func sidebarStatusLabel(status string) string {
-	switch status {
-	case string(agent.SubAgentStateRunning):
-		return "running"
-	case string(agent.SubAgentStateWaitingMain):
-		return "awaiting owner"
-	case string(agent.SubAgentStateWaitingDescendant):
-		return "awaiting child"
-	case string(agent.SubAgentStateCompleted), subAgentStatusDone:
-		return "delivered"
-	case string(agent.SubAgentStateFailed), subAgentStatusError:
-		return "failed"
-	case string(agent.SubAgentStateCancelled):
-		return "cancelled"
-	case string(agent.SubAgentStateIdle):
-		return "idle"
-	default:
-		return "unknown"
-	}
-}
-
-// AgentsSummary counts only child tasks, keeping attention-requiring states first.
+// AgentsSummary counts only child tasks by their status icon, keeping
+// attention-requiring states first.
 func (s Sidebar) AgentsSummary() string {
 	counts := make(map[string]int)
 	for _, entry := range s.agents {
 		if entry.ID != "main" {
-			counts[sidebarStatusLabel(entry.Status)]++
+			counts[statusIndicator(entry.Status)]++
 		}
 	}
 	var parts []string
-	for _, label := range []string{"awaiting owner", "failed", "awaiting child", "running", "idle", "delivered", "cancelled", "unknown"} {
-		if n := counts[label]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+	for _, icon := range []string{
+		statusIndicator(string(agent.SubAgentStateWaitingMain)),
+		statusIndicator(string(agent.SubAgentStateFailed)),
+		statusIndicator(string(agent.SubAgentStateWaitingDescendant)),
+		statusIndicator(string(agent.SubAgentStateRunning)),
+		statusIndicator(string(agent.SubAgentStateIdle)),
+		statusIndicator(string(agent.SubAgentStateCompleted)),
+		statusIndicator(string(agent.SubAgentStateCancelled)),
+		statusIndicator(""),
+	} {
+		if n := counts[icon]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, icon))
 		}
 	}
 	if len(parts) == 0 {
@@ -62,17 +51,9 @@ func sidebarEntryText(entry SidebarEntry, focused bool, width int) (line, reason
 		return terminaltext.TruncateOneLine(indicator, width), ""
 	}
 	nameWidth := width - iw - 1
-	label := ""
-	if entry.ID != "main" {
-		status := sidebarStatusLabel(entry.Status)
-		if nameWidth >= lipgloss.Width(sidebarTreePrefix(entry))+4+2+lipgloss.Width(status) {
-			label = "  " + status
-			nameWidth -= lipgloss.Width(label)
-		}
-	}
 	line = indicator
 	if nameWidth > 0 {
-		line += " " + sidebarRenderedName(entry, nameWidth) + label
+		line += " " + sidebarRenderedName(entry, nameWidth)
 	}
 	if entry.ID == "main" || entry.Status != string(agent.SubAgentStateWaitingMain) {
 		return line, ""

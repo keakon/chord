@@ -17,24 +17,42 @@ func TestSidebarStatusCategories(t *testing.T) {
 	if s.AgentsSummary() != "0 agents" || s.Visible() {
 		t.Fatal("empty child list")
 	}
-	for _, tc := range []struct{ state, label string }{
-		{"running", "running"}, {"waiting_main", "awaiting owner"}, {"waiting_descendant", "awaiting child"},
-		{"completed", "delivered"}, {"done", "delivered"}, {"failed", "failed"}, {"error", "failed"},
-		{"cancelled", "cancelled"}, {"idle", "idle"}, {"", "unknown"}, {"unexpected", "unknown"},
+	for _, state := range []string{
+		"running", "waiting_main", "waiting_descendant", "completed", "done",
+		"failed", "error", "cancelled", "idle", "", "unexpected",
 	} {
-		t.Run(tc.state, func(t *testing.T) {
-			if got := sidebarStatusLabel(tc.state); got != tc.label {
-				t.Fatalf("label=%q", got)
-			}
-			s.agents = append(s.agents, SidebarEntry{ID: tc.state, Status: tc.state})
-		})
+		s.agents = append(s.agents, SidebarEntry{ID: state, Status: state})
 	}
-	want := "1 awaiting owner · 2 failed · 1 awaiting child · 1 running · 1 idle · 2 delivered · 1 cancelled · 2 unknown"
+	want := "1 ? · 2 ✗ · 1 ⇣ · 1 ○ · 1 … · 2 ✓ · 1 ⊘ · 2 ◇"
 	if got := s.AgentsSummary(); got != want {
 		t.Fatalf("summary=%q want=%q", got, want)
 	}
-	if statusIndicator("") != "·" {
+	if statusIndicator("") != "◇" {
 		t.Fatal("unknown indicator")
+	}
+}
+
+func TestSidebarRowsRenderStateAsIconOnly(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		text   string
+	}{
+		{"running", "running"},
+		{"waiting_main", "awaiting owner"},
+		{"waiting_descendant", "awaiting child"},
+		{"completed", "delivered"},
+		{"failed", "failed"},
+		{"cancelled", "cancelled"},
+		{"idle", "idle"},
+		{"", "unknown"},
+	} {
+		line, _ := sidebarEntryText(SidebarEntry{ID: "worker", TaskDesc: "ship tests", Status: tc.status}, false, 60)
+		if !strings.HasPrefix(line, "  "+statusIndicator(tc.status)+" ship tests") {
+			t.Fatalf("status %q row = %q, want icon and name", tc.status, line)
+		}
+		if strings.Contains(line, tc.text) {
+			t.Fatalf("status %q row = %q, want no status text", tc.status, line)
+		}
 	}
 }
 
@@ -65,11 +83,8 @@ func TestSidebarReasonLayout(t *testing.T) {
 					t.Fatalf("width=%d text=%q", width, text)
 				}
 			}
-			if width == 40 && !strings.HasSuffix(line, "  awaiting owner") {
-				t.Fatalf("missing status: %q", line)
-			}
-			if width < 23 && strings.Contains(line, "awaiting") {
-				t.Fatalf("partial status: %q", line)
+			if width == 40 && !strings.Contains(line, "检查数据库迁移") {
+				t.Fatalf("missing task name: %q", line)
 			}
 			if reason != "" && strings.TrimSpace(reason) == "" {
 				t.Fatal("blank reason row")
@@ -108,12 +123,12 @@ func TestSidebarDefaultPanelPreservesNestedNames(t *testing.T) {
 				t.Fatalf("state=%s depth=%d exceeds row width: %q / %q", state, depth, line, reason)
 			}
 			prefix := sidebarIndicator(state, false) + " " + sidebarTreePrefix(entry)
-			name := strings.TrimSuffix(strings.TrimPrefix(line, prefix), "  "+sidebarStatusLabel(state))
+			name := strings.TrimPrefix(line, prefix)
 			if lipgloss.Width(name) < 4 {
 				t.Fatalf("state=%s depth=%d lost task name: %q", state, depth, line)
 			}
 			if depth > 1 && !strings.Contains(line, entry.TaskDesc) {
-				t.Fatalf("state=%s depth=%d should retain name instead of status: %q", state, depth, line)
+				t.Fatalf("state=%s depth=%d should retain the nested task name: %q", state, depth, line)
 			}
 			if reason != "" && len(reason)-len(strings.TrimLeft(reason, " ")) != lipgloss.Width(prefix) {
 				t.Fatalf("reason is not aligned with name: %q / %q", line, reason)
