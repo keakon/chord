@@ -24,6 +24,12 @@ func (m *Model) captureInfoPanelIntegrations() infoPanelIntegrations {
 	if m.agent == nil {
 		return snapshot
 	}
+	// An external backend manages its own LSP, MCP and skills. Chord's
+	// integration readings describe the host, not the external CLI, so they
+	// must not appear in its focus panel.
+	if strings.TrimSpace(m.focusedModelState().Backend) != "" {
+		return snapshot
+	}
 	if provider, ok := m.agent.(agent.LSPStateProvider); ok {
 		snapshot.lsp = provider.LSPServerList()
 	}

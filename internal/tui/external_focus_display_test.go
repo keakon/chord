@@ -29,6 +29,8 @@ func newExternalDisplayAgent() *externalDisplayAgent {
 	backend.walltimeStats = analytics.WalltimeStats{Model: time.Minute}
 	backend.availableSkills = []*skill.Meta{{Name: "go-expert"}}
 	backend.invokedSkills = []*skill.Meta{{Name: "go-expert"}}
+	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", OK: true}}
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "fs", OK: true}}
 	backend.keysConfirmed = 2
 	backend.keysTotal = 2
 	return &externalDisplayAgent{infoPanelAgent: backend}
@@ -52,12 +54,12 @@ func TestInfoPanelHidesModelAndChordUsageForExternalFocus(t *testing.T) {
 
 	lines := infoPanelPlainLines(m.renderInfoPanel(40, 40))
 	plain := strings.Join(lines, "\n")
-	for _, title := range []string{"MODEL", "USAGE", "TIME", "SKILLS"} {
+	for _, title := range []string{"MODEL", "USAGE", "TIME", "SKILLS", "LSP", "MCP"} {
 		if got := infoPanelSectionLines(lines, title); len(got) != 0 {
 			t.Fatalf("external info panel rendered %s section: %#v", title, got)
 		}
 	}
-	for _, unwanted := range []string{"unknown", "Provider:", "Pool", "Keys:", "tier:", "TOKENS", "test-model", "go-expert", config.BackendKindClaudeCode} {
+	for _, unwanted := range []string{"unknown", "Provider:", "Pool", "Keys:", "tier:", "TOKENS", "test-model", "go-expert", "gopls", config.BackendKindClaudeCode} {
 		if strings.Contains(plain, unwanted) {
 			t.Fatalf("external info panel = %q, must not show %q", plain, unwanted)
 		}
