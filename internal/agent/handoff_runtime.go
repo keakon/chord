@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -69,6 +70,13 @@ func (a *MainAgent) ResolveHandoff(requestID, action, agentName, denyReason stri
 // is closed, and the flow continues (plan execution, context continuation, or
 // idle for a cancel).
 func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
+	a.handleHandoffResolveEventSuspended(evt, false)
+}
+
+// handleHandoffResolveEventSuspended re-enters the decision after live external
+// workers were stopped for the execution switch. suspended reports that the
+// wait already paused admission, which this attempt must release once it ends.
+func (a *MainAgent) handleHandoffResolveEventSuspended(evt Event, suspended bool) {
 	p, ok := evt.Payload.(*handoffResolvePayload)
 	if !ok {
 		log.Errorf("handleHandoffResolveEvent: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
@@ -79,6 +87,24 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		return
 	}
 	if p.Action == handoffResolveApprove {
+		// Approval switches to the execution session, which must not abandon a
+		// live external worker without letting its task settle first.
+		deferred, suspendErr := a.suspendExternalWorkersForSwitch(
+			func() { a.handleHandoffResolveEventSuspended(evt, true) },
+			func() { a.failApprovedHandoff(errors.New("session changed while external agents were stopping")) },
+		)
+		if deferred {
+			if suspendErr != nil {
+				if suspended {
+					a.releaseExternalSwitchAdmission()
+				}
+				a.failApprovedHandoff(suspendErr)
+			}
+			return
+		}
+		if suspended {
+			defer a.releaseExternalSwitchAdmission()
+		}
 		finish, err := a.beginSessionStructural(a.parentCtx, false)
 		if err != nil {
 			a.emitToTUI(ErrorEvent{Err: err})
@@ -156,6 +182,21 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 	default:
 		log.Warnf("handleHandoffResolveEvent: unsupported handoff action=%v request_id=%v", p.Action, p.RequestID)
 	}
+}
+
+// failApprovedHandoff settles an approved handoff whose execution session
+// cannot be started, so the tool card reaches a terminal state instead of
+// leaving the decision pending forever.
+func (a *MainAgent) failApprovedHandoff(err error) {
+	pc := a.takePendingHandoff()
+	if pc == nil {
+		a.setIdleAndDrainPending()
+		return
+	}
+	a.interaction.settleHandoff(pc.RequestID)
+	a.emitToTUI(ErrorEvent{Err: err})
+	a.emitDeferredHandoffToolResult(pc, err.Error(), message.ToolStatusError)
+	a.setIdleAndDrainPending()
 }
 
 // abandonPendingHandoff drops a pending handoff without a user decision,

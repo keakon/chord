@@ -82,7 +82,7 @@ func (w *externalWorker) finishExternalInput() error {
 	defer w.promptMu.Unlock()
 	for i := range w.inputs {
 		if w.inputs[i].State == message.ToolRecoveryStateOutcomeUnknown {
-			w.inputs[i].State = externalInputCompleted
+			w.inputs = slices.Delete(w.inputs, i, i+1)
 			break
 		}
 	}

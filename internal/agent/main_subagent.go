@@ -1142,9 +1142,14 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	admissionCommitted = true
 	clientCommitted = true
 	initialMessageCommitted = true
+	// Start while still holding admissionMu: a session switch's
+	// external-worker snapshot takes the same lock, and a runtime that is
+	// registered but not yet started would be skipped there as "no process
+	// exists" — the switch would then abandon a running worker and drop its
+	// deferred settlement.
+	rt.startRuntime()
 	a.admissionMu.Unlock()
 
-	rt.startRuntime()
 	log.Infof("SubAgent created and started instance=%v task_id=%v agent_def=%v", instanceID, taskID, agentDef.Name)
 	a.emitToTUI(AgentStartedEvent{
 		AgentID:       instanceID,

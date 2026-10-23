@@ -59,7 +59,11 @@ func TestInfoPanelHidesModelAndChordUsageForExternalFocus(t *testing.T) {
 			t.Fatalf("external info panel rendered %s section: %#v", title, got)
 		}
 	}
-	for _, unwanted := range []string{"unknown", "Provider:", "Pool", "Keys:", "tier:", "TOKENS", "test-model", "go-expert", "gopls", config.BackendKindClaudeCode} {
+	backendLines := infoPanelSectionLines(lines, "BACKEND")
+	if len(backendLines) != 1 || backendLines[0] != config.BackendKindClaudeCode {
+		t.Fatalf("BACKEND section = %#v, want [%q]", backendLines, config.BackendKindClaudeCode)
+	}
+	for _, unwanted := range []string{"unknown", "Provider:", "Pool", "Keys:", "tier:", "TOKENS", "test-model", "go-expert", "gopls"} {
 		if strings.Contains(plain, unwanted) {
 			t.Fatalf("external info panel = %q, must not show %q", plain, unwanted)
 		}

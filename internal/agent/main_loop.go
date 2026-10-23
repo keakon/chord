@@ -235,8 +235,17 @@ func (a *MainAgent) dispatch(evt Event) {
 	case EventSubAgentStop:
 		a.handleSubAgentStopEvent(evt)
 	case eventExternalNavigationReady:
-		if ready, ok := evt.Payload.(externalNavigationReady); ok && ready.epoch == a.recoverySessionEpoch() {
+		ready, ok := evt.Payload.(externalNavigationReady)
+		if !ok {
+			break
+		}
+		if ready.epoch == a.recoverySessionEpoch() {
 			ready.resume()
+		} else if ready.superseded != nil {
+			// Another switch replaced the session while the workers exited, so
+			// this wait no longer owns the navigation. Tell its caller instead of
+			// leaving it blocked on a reply that can never arrive.
+			ready.superseded()
 		}
 	case EventSubAgentLifecycleSweep:
 		if !a.admissionPaused.Load() {

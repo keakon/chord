@@ -111,7 +111,7 @@ func (a *MainAgent) handleSessionControlEvent(evt Event) {
 }
 
 func (a *MainAgent) handleNewSessionCommand() {
-	if a.deferDeliverySessionSwitch(a.handleNewSessionCommand) {
+	if a.deferDeliverySessionSwitch(a.handleNewSessionCommand, a.notifyExternalSwitchSuperseded) {
 		return
 	}
 	defer a.finishSessionSwitch()
@@ -233,6 +233,12 @@ func (a *MainAgent) finishSessionSwitch() {
 }
 
 func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
+	// Every switch entry point stops and settles started external workers
+	// before calling this. A delegation that admitted concurrently with the
+	// switch can still land here started: its close event is re-sent with the
+	// worker attached to the payload, and closeExternalWorker settles it (or,
+	// once another switch replaced the session, releases its runtime slot)
+	// instead of leaking it.
 	a.subs.mu.Lock()
 	if a.subs.liveCountLocked() == 0 {
 		a.subs.mu.Unlock()
@@ -591,7 +597,7 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 // msgIndex, emits SessionRestoredEvent + ForkSessionEvent so the TUI can
 // load the forked message into the composer.
 func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
-	if a.deferDeliverySessionSwitch(func() { a.handleForkSessionCommand(msgIndex) }) {
+	if a.deferDeliverySessionSwitch(func() { a.handleForkSessionCommand(msgIndex) }, a.notifyExternalSwitchSuperseded) {
 		return
 	}
 	defer a.finishSessionSwitch()

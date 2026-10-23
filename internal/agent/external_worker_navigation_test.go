@@ -20,7 +20,7 @@ func TestExternalSessionNavigationWaitsOffLoop(t *testing.T) {
 	owner := a.currentRecoveryOwnership()
 	resumed := false
 	start := time.Now()
-	if !a.deferExternalSessionSwitch(func() { resumed = true }) {
+	if !a.deferExternalSessionSwitch(func() { resumed = true }, nil) {
 		t.Fatal("navigation was not deferred")
 	}
 	if time.Since(start) > time.Second || resumed || a.currentRecoveryOwnership() != owner {

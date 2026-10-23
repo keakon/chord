@@ -442,6 +442,8 @@ func normalizeInfoPanelSectionTitle(line string) string {
 		line = strings.TrimSpace(line[3:])
 	}
 	switch {
+	case line == "BACKEND":
+		return "BACKEND"
 	case line == "MODEL":
 		return "MODEL"
 	case line == "RATE LIMIT":

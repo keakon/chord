@@ -7,7 +7,7 @@ The current backend is Claude Code's `stream-json` mode.
 ## Requirements
 
 - Install the Claude Code CLI and sign in, or provide API credentials through `backend.env`.
-- Unix is required. The process runs in the subagent's working directory; each worker's process group belongs to a dedicated supervisor process, and Chord keeps only the business pipes.
+- Supported platforms are Linux and macOS. The process runs in the subagent's working directory; each worker's process group belongs to a dedicated supervisor process, and Chord keeps only the business pipes. Other Unix systems lack the process start token needed for crash-recovery receipts.
 - The managed transport targets the Claude Code `stream-json` protocol, not one pinned release; no version is checked or gated at launch.
 
 ## Configuration
@@ -96,7 +96,7 @@ A tool the role ruleset disables is passed to the CLI through `--disallowedTools
 
 Claude can also reject a tool on its own side before requesting host authorization — some tools are unavailable in the CLI's own managed mode. Chord does not bypass these restrictions.
 
-Chord disables project and user customization, hooks, external MCP, plugins, and sandbox auto-approval. The command and administrator policy remain trusted boundaries; role permissions are not an operating-system sandbox. Shell rules use last-match precedence: `git *` is not read-only, and `go test` executes repository code.
+Chord disables project and user customization, hooks, external MCP, plugins, and sandbox auto-approval. Authorization depends on the CLI requesting `can_use_tool` before execution. Detecting an unauthorized result afterward cannot prove that no side effect occurred. The command and administrator policy remain trusted boundaries; role permissions are not an operating-system sandbox. Shell rules use last-match precedence: `git *` is not read-only, and `go test` executes repository code.
 
 ## Quota and credentials
 
@@ -139,11 +139,13 @@ backend:
 
 ## Differences from native subagents
 
-- The external model call does not use Chord model pools or key rotation and does not produce Chord usage statistics. While you view the worker, the info panel omits MODEL and hides USAGE, TIME, SKILLS, LSP, and MCP — the last two describe Chord's own integrations, while the external CLI manages its own — and the status bar omits its model, tier, and usage pills; `/models` reports that model pools do not apply to external agents. The sidebar marks the worker's name with an `[external]` suffix.
+- The external model call does not use Chord model pools or key rotation and does not produce Chord usage statistics. While you view the worker, the info panel shows a BACKEND section naming the backend kind (for example, `claude-code`) in place of MODEL, and hides USAGE, TIME, SKILLS, LSP, and MCP — the last two describe Chord's own integrations, while the external CLI manages its own — and the status bar omits its model, tier, and usage pills; `/models` reports that model pools do not apply to external agents. The sidebar marks the worker's name with an `[external]` suffix.
 - Chord sends `interrupt`, closes input, and gives the CLI a short grace period to flush its transcript and exit before terminating the process group. Existing changes are not rolled back; tools without a receipt show an unknown outcome.
-- Every external worker is backed by a dedicated supervisor process that owns its process group. If Chord is forcibly killed, the supervisor sees the lifecycle channel close and tears that group down, leaving a lifecycle receipt named after the run under `external-supervisor/` in the state directory. Chord writes a receipt for every run, including runs it settled itself: reading the exit report does not prove Chord persisted it. Receipts older than 30 days are pruned. If Chord and the supervisor are killed together nothing guarantees cleanup, so the receipt may be missing or may describe a run that never proved cleanup. Resume does not clean up orphaned processes; it only accepts the receipt of the exact run the task last launched.
-- Quitting Chord while an external worker is still running waits only briefly for the stop sequence; the supervisor finishes the teardown after Chord exits, and the next startup records the task as interrupted by the session shutdown.
+- If process-group cleanup cannot be proven within the stop budget, the task fails and releases its runtime slot, but resume remains refused. Runtime limits count Chord's admitted workers, not possible residual processes.
+- Every external worker is backed by a dedicated supervisor process that owns its process group. If Chord is forcibly killed, the supervisor sees the lifecycle channel close and tears that group down, leaving a lifecycle receipt named after the run under `external-supervisor/` in the state directory. The supervisor writes a receipt for every run, including runs Chord settled itself: reading the exit report does not prove Chord persisted it. Receipts older than 30 days are pruned. If Chord and the supervisor are killed together nothing guarantees cleanup, so the receipt may be missing or may describe a run that never proved cleanup. Resume does not clean up orphaned processes; it only accepts the receipt of the exact run the task last launched.
+- Quitting Chord while an external worker is still running waits only briefly for the stop sequence; the supervisor finishes the teardown after Chord exits. Unsettled tasks appear as interrupted at the next startup; already recorded terminal outcomes are preserved.
 - Pause is not supported. Stop and restart the task instead.
+- Switching sessions, starting plan execution, or taking over a paused session stops live external workers first and waits for them to settle; the old task is recorded as cancelled and is not resumed automatically in the new session.
 - Only one input runs at a time. Incoming messages are durably queued; messages received after sealing run in a new attempt on the same task after the old process exits and settles. Targeted messages to completed or failed tasks resume their session. Cancelled tasks must be delegated again.
 - Hooks, skills, and compaction do not apply to the external process. Result contracts do: the declared `result_schema` is delivered to the process as part of its role instructions at initialization, and the final answer must be a single JSON object satisfying it. An answer that is not a JSON object, or that misses what the schema requires, fails the task with the violations named.
 - Deleting a Chord session does not delete the external session transcript under your home directory; Chord lists the pinned session ids it leaves behind.

@@ -64,10 +64,7 @@ type externalTaskInput struct {
 	Mailbox *message.MailboxMetadata `json:"mailbox,omitempty"`
 }
 
-const (
-	externalInputCompleted = "completed"
-	externalInputQueued    = "queued"
-)
+const externalInputQueued = "queued"
 
 func cloneExternalTaskSession(session *ExternalTaskSession) *ExternalTaskSession {
 	if session == nil {

@@ -83,10 +83,8 @@ esac
 	}
 	// An error result is a definitive outcome for the input, so a targeted
 	// follow-up must not be blocked by an unknown one.
-	for _, input := range first.ExternalSession.Inputs {
-		if input.State != externalInputCompleted {
-			t.Fatalf("input state after an error result = %q, want %q", input.State, externalInputCompleted)
-		}
+	if len(first.ExternalSession.Inputs) != 0 {
+		t.Fatalf("completed error input retained in recovery state: %+v", first.ExternalSession.Inputs)
 	}
 	if _, err := a.sendMessageToSubAgentNow("", "", handle.TaskID, "Try again.", string(SubAgentMailboxKindDecisionRequired)); err != nil {
 		t.Fatalf("follow-up after an error result: %v", err)
@@ -481,7 +479,9 @@ func TestExternalTaskRefusesUnsafeResume(t *testing.T) {
 				}
 				record.ExternalSession.RunID = runID
 			case "outcome":
-				record.ExternalSession.Inputs[0].State = message.ToolRecoveryStateOutcomeUnknown
+				record.ExternalSession.Inputs = []externalTaskInput{{
+					ID: "unfinished-input", Content: "Input.", State: message.ToolRecoveryStateOutcomeUnknown,
+				}}
 			case "prompt":
 				a.agentConfigs["external-worker"].SystemPrompt = "Changed instructions."
 			}

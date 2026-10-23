@@ -1643,7 +1643,7 @@ func (a *MainAgent) RestoreSessionAtStartup() error {
 // the most recently active openable session is chosen, and candidates another
 // process owns are skipped.
 func (a *MainAgent) handleResumeCommand(sessionID string) {
-	if a.deferDeliverySessionSwitch(func() { a.handleResumeCommand(sessionID) }) {
+	if a.deferDeliverySessionSwitch(func() { a.handleResumeCommand(sessionID) }, a.notifyExternalSwitchSuperseded) {
 		return
 	}
 	defer a.finishSessionSwitch()

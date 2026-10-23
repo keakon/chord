@@ -212,6 +212,12 @@ type SubAgentCloseRequestedPayload struct {
 	Completion     *CompletionEnvelope
 	CleanupAttempt int
 	ForceRelease   bool
+
+	// worker carries the external runtime for a close request whose runtime
+	// was already removed from the registry (a session switch abandoned a
+	// still-running worker). It never crosses a protocol boundary; it only
+	// lets the event reach its settlement after the registry lookup fails.
+	worker *externalWorker
 }
 
 type SubAgentProgressUpdatedPayload struct {

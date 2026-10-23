@@ -69,16 +69,18 @@ type externalWorker struct {
 	depth        int
 	joinToOwner  bool
 
-	resultSchema     map[string]any
-	resultSchemaJSON json.RawMessage
-	workDir          string
-	workDirState     WorkDirState
-	sessionEpoch     uint64
-	persistence      agentPersistenceHealth
-	baseline         *externalCheckoutBaseline
-	inputs           []externalTaskInput
-	inputSeq         uint64
-	processEnded     bool
+	resultSchema              map[string]any
+	resultSchemaJSON          json.RawMessage
+	workDir                   string
+	workDirState              WorkDirState
+	sessionEpoch              uint64
+	persistence               agentPersistenceHealth
+	baseline                  *externalCheckoutBaseline
+	inputs                    []externalTaskInput
+	inputSeq                  uint64
+	processEnded              bool
+	terminalSettlement        *TaskSettlement
+	terminalSettlementDurable bool
 	// runID is the last supervisor run persisted for this task. It is written
 	// before the launch so a receipt names exactly one run.
 	runID string
@@ -646,8 +648,8 @@ func (w *externalWorker) terminateForSessionSwitch(reason string) {
 	if w == nil {
 		return
 	}
-	// The session switch waits for waitDone before closing the original
-	// transcript manager.
+	// Session switches stop and settle started workers before switching, so
+	// this only reaches a worker that was still starting when they checked.
 	w.parent.closeExternalWorker(w, SubAgentStateCancelled, reason, reason, nil, 0, false)
 }
 
@@ -662,8 +664,8 @@ func (w *externalWorker) finishSuccess(text string) {
 			summary = "external agent completed without a text result"
 		}
 		w.setState(SubAgentStateCompleted, summary)
-		w.persistExternalTerminalRecord("")
 		envelope := w.externalCompletionEnvelope(summary)
+		w.persistExternalTerminalSettlement(envelope)
 		result := &AgentResult{Summary: summary, Envelope: envelope}
 		if w.parent != nil {
 			w.parent.sendEvent(Event{Type: EventAgentDone, SourceID: w.instanceID, Payload: result})
@@ -679,7 +681,7 @@ func (w *externalWorker) finishFailure(err error) {
 			message = err.Error()
 		}
 		w.setState(SubAgentStateFailed, message)
-		w.persistExternalTerminalRecord("external agent failed")
+		w.persistExternalTerminalSettlement(nil)
 		if w.parent != nil {
 			w.parent.sendEvent(Event{
 				Type:     EventSubAgentCloseRequested,
@@ -710,7 +712,7 @@ func (w *externalWorker) finishCancelled(reason string) {
 	w.finishOnce.Do(func() {
 		w.finished.Store(true)
 		w.setState(SubAgentStateCancelled, reason)
-		w.persistExternalTerminalRecord("external agent cancelled")
+		w.persistExternalTerminalSettlement(nil)
 		if w.parent != nil {
 			w.parent.sendEvent(Event{
 				Type:     EventSubAgentCloseRequested,
@@ -723,42 +725,6 @@ func (w *externalWorker) finishCancelled(reason string) {
 			})
 		}
 	})
-}
-
-// persistExternalTerminalRecord stamps the worker's own terminal decision on
-// the durable record from the worker goroutine. The event loop owns terminal
-// truth in memory — the close handler still drives settlement, retries and the
-// slot — so the stamp reaches disk only: a shutdown that stops accepting
-// events would otherwise leave a finished task recorded as running until the
-// next restore, which then misclassifies even a delivered result as failed. A
-// later close overwrites this stamp with the full settlement.
-func (w *externalWorker) persistExternalTerminalRecord(closedReason string) {
-	if w == nil || w.parent == nil {
-		return
-	}
-	w.promptMu.Lock()
-	owner, record, err := w.cloneExternalTaskRecordLocked()
-	if err != nil {
-		w.promptMu.Unlock()
-		log.Debugf("skip external terminal record task=%v instance=%v reason=%v", w.taskID, w.instanceID, err)
-		return
-	}
-	state := w.State()
-	record.State = string(state)
-	record.ResumePolicy = durableTaskResumePolicy(state)
-	record.LastSummary = w.LastSummary()
-	record.RuntimeParked = true
-	if closedReason != "" {
-		record.ClosedReason = closedReason
-	}
-	record.UpdatedAt = time.Now()
-	err = w.parent.persistTaskRegistryRecord(owner.dir, w.taskID, record)
-	w.promptMu.Unlock()
-	if err != nil {
-		// The close path retries the persist with the full settlement; a
-		// failure here only falls back to restore-time normalization.
-		log.Debugf("persist external terminal state task=%v instance=%v error=%v", w.taskID, w.instanceID, err)
-	}
 }
 
 func (w *externalWorker) externalCompletionEnvelope(summary string) *CompletionEnvelope {
@@ -794,6 +760,27 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 		return
 	}
 	if worker.sessionEpoch != a.recoverySessionEpoch() {
+		select {
+		case <-worker.done:
+		default:
+			log.Debugf("external worker close event belongs to a replaced session agent_id=%v", worker.instanceID)
+			return
+		}
+		// The session this worker ran in was replaced (another switch won
+		// while it was being stopped): its task record belongs to that
+		// session's restore-time normalization, but the runtime slot must not
+		// leak with the dropped settlement. An unproven termination keeps
+		// ProcessEnded=false in the old record, so resume stays refused there.
+		if worker.started.Load() {
+			worker.promptMu.Lock()
+			ended := worker.processEnded
+			worker.promptMu.Unlock()
+			if !ended {
+				worker.releaseUnproven.Store(true)
+			}
+			a.releaseRuntimeSlot(worker)
+		}
+		log.Warnf("external worker settlement dropped for a replaced session; runtime slot released agent_id=%v task_id=%v", worker.instanceID, worker.taskID)
 		return
 	}
 	if cleanupAttempt > 0 {
@@ -816,7 +803,7 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 						Payload: &AgentResult{Summary: reason, Envelope: completion}})
 				} else {
 					a.sendEvent(Event{Type: EventSubAgentCloseRequested, SourceID: worker.instanceID,
-						Payload: &SubAgentCloseRequestedPayload{FinalState: finalState, Reason: reason, ClosedReason: closedReason}})
+						Payload: &SubAgentCloseRequestedPayload{FinalState: finalState, Reason: reason, ClosedReason: closedReason, worker: worker}})
 				}
 			}()
 			return
@@ -844,6 +831,8 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 					worker.tryCleanupProcess(true)
 					a.sendEvent(Event{Type: EventSubAgentCloseRequested, SourceID: worker.instanceID, Payload: cleanupRequest(1)})
 				}()
+			} else {
+				log.Debugf("external cleanup escalation already in flight agent_id=%v", worker.instanceID)
 			}
 			return
 		}
@@ -868,6 +857,8 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 					<-timer.C
 					a.sendEvent(Event{Type: EventSubAgentCloseRequested, SourceID: worker.instanceID, Payload: payload})
 				}()
+			} else {
+				log.Debugf("external cleanup retry already scheduled agent_id=%v", worker.instanceID)
 			}
 			return
 		}
@@ -898,6 +889,15 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 	if !isTerminalSubAgentState(finalState) {
 		finalState = SubAgentStateCancelled
 	}
+	worker.promptMu.Lock()
+	settlement := cloneTaskSettlement(worker.terminalSettlement)
+	settlementDurable := worker.terminalSettlementDurable
+	worker.promptMu.Unlock()
+	if settlement != nil {
+		finalState = SubAgentState(settlement.Outcome)
+		reason = settlement.Summary
+		completion = settlement.Completion
+	}
 	reason = strings.TrimSpace(reason)
 	closedReason = strings.TrimSpace(closedReason)
 	if closedReason == "" {
@@ -918,6 +918,10 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 	record.RuntimeParked = true
 	record.ResumePolicy = durableTaskResumePolicy(finalState)
 	record.LastCompletion = normalizeCompletionEnvelope(completion)
+	if settlement != nil {
+		record.LatestSettlement = settlement
+		record.SettlementDurable = settlementDurable
+	}
 	if completion != nil {
 		record.LastArtifactRefs = mergeArtifactRefs(record.LastArtifactRefs, completion.Artifacts)
 	}

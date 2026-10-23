@@ -19,8 +19,8 @@ func (a *MainAgent) initializeInputDelivery() {
 	a.startNextDeliveryOperation()
 }
 
-func (a *MainAgent) deferDeliverySessionSwitch(resume func()) bool {
-	if a.deferExternalSessionSwitch(resume) {
+func (a *MainAgent) deferDeliverySessionSwitch(resume func(), superseded func()) bool {
+	if a.deferExternalSessionSwitch(resume, superseded) {
 		return true
 	}
 	if a.delivery.navigationReady {

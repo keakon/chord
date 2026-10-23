@@ -352,7 +352,7 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 		lineW := width - 2
 		sep := "\n" + currentStyles.InfoPanelLineBg.Width(lineW).Render("") + "\n"
 		m.beginInfoPanelRenderPass()
-		blockParts := make([]string, 0, 7)
+		blockParts := make([]string, 0, 8)
 		appendBlock := func(section infoPanelSectionID, block string) {
 			if block == "" {
 				return
@@ -364,6 +364,7 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 			m.recordInfoPanelSectionHitBox(section, block)
 		}
 
+		appendBlock("", m.buildInfoPanelBackendBlock(lineW))
 		appendBlock("", m.buildInfoPanelModelBlock(lineW))
 		if snap := m.focusedModelState().RateLimit; snap != nil {
 			appendBlock("", m.renderRateLimitBlock(snap, lineW))

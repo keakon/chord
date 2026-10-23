@@ -96,10 +96,6 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 	if !ok || payload == nil {
 		return
 	}
-	rt := a.subs.runtime(evt.SourceID)
-	if rt == nil {
-		return
-	}
 	finalState := payload.FinalState
 	if finalState == "" {
 		finalState = SubAgentStateCancelled
@@ -111,6 +107,17 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 	closedReason := strings.TrimSpace(payload.ClosedReason)
 	if closedReason == "" {
 		closedReason = reason
+	}
+	rt := a.subs.runtime(evt.SourceID)
+	if rt == nil {
+		// A session switch can remove a still-running external worker's
+		// runtime before its deferred close event arrives; the payload then
+		// carries the worker, and closeExternalWorker re-checks the session
+		// epoch before settling or releasing the runtime slot.
+		if payload.worker != nil {
+			a.closeExternalWorker(payload.worker, finalState, reason, closedReason, payload.Completion, payload.CleanupAttempt, payload.ForceRelease)
+		}
+		return
 	}
 	if worker, ok := rt.(*externalWorker); ok {
 		a.closeExternalWorker(worker, finalState, reason, closedReason, payload.Completion, payload.CleanupAttempt, payload.ForceRelease)

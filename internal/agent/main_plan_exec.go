@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +23,35 @@ import (
 // switch, and starts the LLM loop. Failures are reported to the TUI and the
 // agent returns to idle.
 func (a *MainAgent) startPlanExecution(planPath, agentName string) {
+	a.startPlanExecutionSuspended(planPath, agentName, false)
+}
+
+// startPlanExecutionSuspended re-enters plan execution after live external
+// workers were stopped for the switch. suspended reports that the wait already
+// paused admission, which this attempt must release once it ends.
+func (a *MainAgent) startPlanExecutionSuspended(planPath, agentName string, suspended bool) {
+	// The switch abandons the current session's workers. Let live external
+	// workers exit and settle under their own session first, then retry.
+	deferred, suspendErr := a.suspendExternalWorkersForSwitch(
+		func() { a.startPlanExecutionSuspended(planPath, agentName, true) },
+		func() {
+			a.emitToTUI(ErrorEvent{Err: errors.New("session changed while external agents were stopping; plan execution was not started")})
+			a.setIdleAndDrainPending()
+		},
+	)
+	if deferred {
+		if suspendErr != nil {
+			if suspended {
+				a.releaseExternalSwitchAdmission()
+			}
+			a.emitToTUI(ErrorEvent{Err: suspendErr})
+			a.setIdleAndDrainPending()
+		}
+		return
+	}
+	if suspended {
+		defer a.releaseExternalSwitchAdmission()
+	}
 	staging, err := a.beginPlanExecution(planPath, agentName)
 	if err != nil {
 		a.emitToTUI(ErrorEvent{Err: err})

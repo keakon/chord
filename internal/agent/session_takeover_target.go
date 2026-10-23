@@ -18,6 +18,7 @@ type sessionTakeoverTarget struct {
 	reply       chan error
 	inputGate   *executiongate.Gate
 	inputCutoff bool
+	suspended   bool
 }
 
 // ResumePausedSession switches only after the target lock, checkpoint and
@@ -53,6 +54,10 @@ func (a *MainAgent) ResumePausedSession(ctx context.Context, sid string, id reco
 
 func (a *MainAgent) handleTakeoverTarget(req sessionTakeoverTarget) {
 	reply := func(err error) {
+		if req.suspended {
+			// The external-worker wait paused admission before this retry.
+			a.releaseExternalSwitchAdmission()
+		}
 		a.releaseTakeoverInputAdmission(req)
 		req.reply <- err
 	}
@@ -101,6 +106,26 @@ func (a *MainAgent) handleTakeoverTarget(req sessionTakeoverTarget) {
 	if err != nil {
 		_ = lock.Release()
 		reply(err)
+		return
+	}
+	// Live external workers still own this session's transcript and task
+	// records. Stop them and retry the takeover after they settle instead of
+	// switching over an unsettled task.
+	deferred, suspendErr := a.suspendExternalWorkersForSwitch(
+		func() {
+			req.suspended = true
+			a.handleTakeoverTarget(req)
+		},
+		func() {
+			req.suspended = true
+			reply(pauseError("target_not_ready", "session changed while external agents were stopping"))
+		},
+	)
+	if deferred {
+		_ = lock.Release()
+		if suspendErr != nil {
+			reply(pauseError("target_not_ready", suspendErr.Error()))
+		}
 		return
 	}
 	if err = a.freezeTakeoverCurrentSession(finish); err != nil {

@@ -84,12 +84,27 @@ func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
 	return currentStyles.InfoPanelLineBg.Width(lineW).Render(line)
 }
 
+// buildInfoPanelBackendBlock names the external backend that owns the model.
+// Chord has no model identity, usage, or timing for that process, so the
+// backend kind replaces MODEL instead of being presented as a model.
+func (m *Model) buildInfoPanelBackendBlock(lineW int) string {
+	backend := strings.TrimSpace(m.focusedModelState().Backend)
+	if backend == "" {
+		return ""
+	}
+	lines := []string{
+		currentStyles.InfoPanelLineBg.Width(lineW).Render(currentStyles.InfoPanelTitle.Render("BACKEND")),
+		currentStyles.InfoPanelLineBg.Width(lineW).Render(currentStyles.InfoPanelValue.Render(terminaltext.TruncateOneLine(backend, lineW))),
+	}
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+}
+
 func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 	modelState := m.focusedModelState()
 	if strings.TrimSpace(modelState.Backend) != "" {
-		// The external CLI picks and calls its own model; Chord has no model
-		// identity to show. Omit the MODEL section entirely rather than render
-		// a placeholder or leak the main agent's model.
+		// The external CLI picks and calls its own model; the BACKEND section
+		// names the backend instead. Omit MODEL entirely rather than render a
+		// placeholder or leak the main agent's model.
 		return ""
 	}
 	provider, model, variant := modelref.SplitRunningModelRef(modelState.DisplayRef)

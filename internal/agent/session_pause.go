@@ -290,6 +290,13 @@ func (a *MainAgent) prepareSessionPause(cmd *sessionPauseCommand) {
 		cmd.result <- pauseError("interaction_blocked", "finish the current interaction or session transition first")
 		return
 	}
+	// An external worker keeps writing its own task record and transcript
+	// through the session being sealed, and pause has no way to stop it
+	// durably, so refuse instead of capturing a checkpoint over a live writer.
+	if len(a.liveExternalWorkers()) > 0 {
+		cmd.result <- pauseError("target_not_ready", "external agents cannot be paused; stop them before pausing this session")
+		return
+	}
 	if a.recoveryManager() == nil || a.sessionLock == nil {
 		cmd.result <- pauseError("persistence_failed", "session writer and ownership lock are required")
 		return
@@ -427,6 +434,9 @@ func (a *MainAgent) sessionPauseBlockers() []recovery.SessionPauseBlocker {
 	a.memoryMu.Unlock()
 	if memoryBusy {
 		out = append(out, recovery.SessionPauseBlocker{Kind: "memory", Description: "waiting for memory result persistence"})
+	}
+	for _, worker := range a.liveExternalWorkers() {
+		out = append(out, recovery.SessionPauseBlocker{OwnerTaskID: worker.taskID, Kind: "external_agent", StartedAt: worker.StateChangedAt(), Description: "stop the external agent before pausing this session"})
 	}
 	sortSessionPauseBlockers(out)
 	return out

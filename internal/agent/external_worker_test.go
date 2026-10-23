@@ -678,27 +678,34 @@ exit 1
 	}
 }
 
+func newTestUnprovenExternalRuntime(t *testing.T, a *MainAgent) *externalWorker {
+	t.Helper()
+	configureExternalTestRuntime(t, a, "claude", `"*": allow`)
+	w := newTestExternalRuntime(t, a, "task-unproven")
+	w.agentDef = a.agentConfigs["external-worker"]
+	w.backend = *w.agentDef.Backend
+	w.ctx = context.Background()
+	w.sessionEpoch = a.currentRecoveryOwnership().epoch
+	w.started.Store(true)
+	w.done = make(chan struct{})
+	close(w.done)
+	a.subs.mu.Lock()
+	a.subs.taskRecords[w.taskID] = w.buildTaskRecord(a.subs.taskRecords[w.taskID], "", 0, time.Now())
+	a.subs.mu.Unlock()
+	select {
+	case a.sem <- struct{}{}:
+	default:
+		t.Fatal("fixture could not reserve a runtime slot")
+	}
+	return w
+}
+
 func TestExternalCompletionRequiresProcessTermination(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	script := writeFakeClaude(t, `printf '%s\n' '{"type":"result","subtype":"success","result":"Done."}'`)
-	configureExternalTestRuntime(t, a, script, `"*": allow`)
-	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "external-worker", Description: "Input."})
-	if err != nil {
-		t.Fatal(err)
-	}
-	w := a.subs.runtime(handle.AgentID).(*externalWorker)
-	select {
-	case <-w.done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("process did not finish")
-	}
+	w := newTestUnprovenExternalRuntime(t, a)
 	w.promptMu.Lock()
-	w.processEnded = false
 	w.terminationRetryDelay = time.Hour
 	w.promptMu.Unlock()
-	w.sessionMu.Lock()
-	w.session = nil
-	w.sessionMu.Unlock()
 	a.closeExternalWorker(w, SubAgentStateFailed, "termination unproven", "termination unproven", nil, 0, false)
 	record := a.taskRecordByTaskID(w.taskID)
 	if len(a.sem) != 1 || isTerminalSubAgentState(SubAgentState(record.State)) || record.LatestSettlement != nil {
@@ -719,26 +726,11 @@ func TestExternalCompletionRequiresProcessTermination(t *testing.T) {
 
 func TestExternalUnprovenTerminationRetriesThenReleases(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	script := writeFakeClaude(t, `printf '%s\n' '{"type":"result","subtype":"success","result":"Done."}'`)
-	configureExternalTestRuntime(t, a, script, `"*": allow`)
-	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "external-worker", Description: "Input."})
-	if err != nil {
-		t.Fatal(err)
-	}
-	w := a.subs.runtime(handle.AgentID).(*externalWorker)
-	select {
-	case <-w.done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("process did not finish")
-	}
+	w := newTestUnprovenExternalRuntime(t, a)
 	w.promptMu.Lock()
-	w.processEnded = false
 	w.terminationRetryAttempts = 2
 	w.terminationRetryDelay = time.Millisecond
 	w.promptMu.Unlock()
-	w.sessionMu.Lock()
-	w.session = nil
-	w.sessionMu.Unlock()
 	a.closeExternalWorker(w, SubAgentStateFailed, "termination unproven", "termination unproven", nil, 0, false)
 	if len(a.sem) != 1 {
 		t.Fatal("the slot was released before the retry budget was spent")
