@@ -391,6 +391,87 @@ func TestLoadReceiptRejectsUnprovableIdentity(t *testing.T) {
 	}
 }
 
+func TestLoadReceiptRejectsProvenCleanupWithoutProcessIdentity(t *testing.T) {
+	dir := t.TempDir()
+	runID, err := NewRunID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeReceipt(dir, Receipt{
+		Version:        receiptVersion,
+		RunID:          runID,
+		ProcessStarted: true,
+		Cleanup:        Cleanup{Proven: true},
+	})
+	if _, err := LoadReceipt(dir, runID); err == nil {
+		t.Fatal("a proven receipt without a process identity was accepted")
+	}
+}
+
+func TestLaunchFailureAfterSpawnCleansWholeGroup(t *testing.T) {
+	parent := t.TempDir()
+	receiptDir := filepath.Join(parent, "receipts")
+	runID, err := NewRunID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := writeManagedFixture(t, "sleep 300 &\nsleep 300\n")
+	request := Message{
+		Type:        TypeStart,
+		RunID:       runID,
+		Command:     fixture,
+		Env:         managedFixtureEnv(),
+		Dir:         parent,
+		ReceiptDir:  receiptDir,
+		KillGraceMS: 500,
+	}
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll(stdinR, stdinW, stdoutR, stderrR)
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outR.Close()
+	var startedPID int
+	original := managedProcessGroupID
+	managedProcessGroupID = func(cmd *exec.Cmd) (int, int, error) {
+		startedPID = cmd.Process.Pid
+		time.Sleep(50 * time.Millisecond)
+		return startedPID, 0, errors.New("injected process-group lookup failure")
+	}
+	defer func() {
+		managedProcessGroupID = original
+		if startedPID > 0 {
+			_ = syscall.Kill(-startedPID, syscall.SIGKILL)
+		}
+	}()
+	code := launchManaged(outW, request, nil, stdinR, stdoutW, stderrW, time.Second)
+	if code != ExitFailure {
+		t.Fatalf("launch exit = %d, want failure", code)
+	}
+	receipt := readReceipt(t, receiptDir)
+	if !receipt.ProcessStarted || receipt.PID <= 0 || receipt.PGID <= 0 {
+		t.Fatalf("receipt identity = %+v, want the started process", receipt)
+	}
+	if !receipt.Cleanup.Proven {
+		t.Fatalf("receipt cleanup = %+v, want proven", receipt.Cleanup)
+	}
+	if got := probeGroup(receipt.PID, receipt.PGID); got != GroupGone {
+		t.Fatalf("group state = %v, want gone", got)
+	}
+}
+
 // No handshake, no run: a supervisor that never answers must not leave Chord
 // talking to a process nobody owns, and it must not leave a process behind
 // either.
@@ -410,10 +491,43 @@ func TestStartFailsWithoutHandshake(t *testing.T) {
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("error = %v, want a handshake timeout", err)
 	}
+	proven, known := StartCleanupProven(err)
+	if !known || proven {
+		t.Fatalf("cleanup proof = (%v, %v), want a known unproven launch", proven, known)
+	}
 	// The supervisor was started, so Chord has to be sure it is gone before the
 	// caller gives up on the run.
 	if commandRunning(t, silent) {
 		t.Fatal("an unresponsive supervisor outlived the failed handshake")
+	}
+}
+
+func TestStartRejectionReceiptProvesCleanup(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Start(Config{
+		Child:            ChildSpec{Command: filepath.Join(t.TempDir(), "missing-child")},
+		ReceiptDir:       dir,
+		HandshakeTimeout: 2 * time.Second,
+		KillGrace:        time.Second,
+	})
+	if err == nil {
+		t.Fatal("a launch with a missing child was accepted")
+	}
+	proven, known := StartCleanupProven(err)
+	if !known || !proven {
+		t.Fatalf("cleanup proof = (%v, %v), want a proven rejection", proven, known)
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil || len(entries) != 1 {
+		t.Fatalf("receipts = %v, %v", entries, readErr)
+	}
+	runID := strings.TrimSuffix(entries[0].Name(), ".json")
+	receipt, loadErr := LoadReceipt(dir, runID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if receipt.ProcessStarted || !receipt.Cleanup.Proven {
+		t.Fatalf("rejection receipt = %+v", receipt)
 	}
 }
 

@@ -20,7 +20,11 @@ const externalGitTimeout = 3 * time.Second
 // location and base commit and leaves the file list empty, rather than paying
 // for a list that cannot be trusted.
 type externalCheckoutBaseline struct {
-	Head string `json:"head"`
+	Head   string `json:"head"`
+	Branch string `json:"branch,omitempty"`
+	// BranchUnknown records that the branch could not be read at startup; it is
+	// reported with the completion instead of silently leaving the field empty.
+	BranchUnknown bool `json:"branch_unknown,omitempty"`
 	// StatusUnknown separates "git could not be asked" from "git said clean":
 	// a timed-out status check must never produce a trusted diff stat.
 	StatusUnknown bool `json:"status_unknown,omitempty"`
@@ -28,18 +32,31 @@ type externalCheckoutBaseline struct {
 }
 
 func captureExternalCheckoutBaseline(dir string) *externalCheckoutBaseline {
-	head, err := externalGitOutput(dir, "rev-parse", "HEAD")
-	head = strings.TrimSpace(head)
-	if err != nil || head == "" {
+	// One rev-parse returns both identities; asking for the branch here also
+	// pins it to the attempt's startup state.
+	out, err := externalGitOutput(dir, "rev-parse", "HEAD", "--abbrev-ref", "HEAD")
+	if err != nil {
 		return nil
 	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	head := strings.TrimSpace(lines[0])
+	if head == "" {
+		return nil
+	}
+	baseline := &externalCheckoutBaseline{Head: head}
+	if len(lines) >= 2 {
+		baseline.Branch = strings.TrimSpace(lines[1])
+	}
+	baseline.BranchUnknown = baseline.Branch == ""
 	// git already tracks the working tree state; asking it whether anything is
 	// dirty costs one index scan and no file reads.
 	status, err := externalGitOutput(dir, "status", "--porcelain=v1", "--untracked-files=normal")
 	if err != nil {
-		return &externalCheckoutBaseline{Head: head, StatusUnknown: true}
+		baseline.StatusUnknown = true
+		return baseline
 	}
-	return &externalCheckoutBaseline{Head: head, Dirty: strings.TrimSpace(status) != ""}
+	baseline.Dirty = strings.TrimSpace(status) != ""
+	return baseline
 }
 
 func externalCheckoutCompletion(dir string, baseline *externalCheckoutBaseline, binding WorkDirState, summary string) *CompletionEnvelope {
@@ -49,9 +66,11 @@ func externalCheckoutCompletion(dir string, baseline *externalCheckoutBaseline, 
 		env.RemainingLimitations = append(env.RemainingLimitations, "Git startup baseline is unavailable.")
 		return env
 	}
-	branch, _ := externalGitOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	env.Worktree = &CompletionWorktree{Path: dir, Name: binding.WorktreeID,
-		Generation: binding.Generation, Base: baseline.Head, Branch: strings.TrimSpace(branch)}
+		Generation: binding.Generation, Base: baseline.Head, Branch: baseline.Branch}
+	if baseline.BranchUnknown {
+		env.RemainingLimitations = append(env.RemainingLimitations, "Git branch could not be determined at startup.")
+	}
 	switch {
 	case baseline.StatusUnknown:
 		env.Worktree.DiffError = "Git status could not be checked at startup; HEAD diff does not isolate this attempt."

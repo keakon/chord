@@ -46,7 +46,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"s
 `)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := session.Initialize(ctx, ""); err != nil {
+	if _, err := session.Initialize(ctx, ""); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	if err := session.WriteUserMessage(ctx, "go"); err != nil {
@@ -98,7 +98,7 @@ exit 0
 `)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := session.Initialize(ctx, ""); err != nil {
+	if _, err := session.Initialize(ctx, ""); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	if err := session.WriteUserMessage(ctx, "go"); err != nil {

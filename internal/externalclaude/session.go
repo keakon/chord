@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -57,6 +58,24 @@ type SupervisorConfig struct {
 	ReceiptDir string
 }
 
+// StartError preserves the cleanup evidence of a launch that failed. A failed
+// launch is only safe to treat as ended when CleanupProven is true.
+type StartError struct {
+	Err           error
+	CleanupProven bool
+}
+
+func (e *StartError) Error() string { return e.Err.Error() }
+
+func (e *StartError) Unwrap() error { return e.Err }
+
+// StartFailureCleanupProven reports whether a failed Start proved that no
+// managed process group survived it.
+func StartFailureCleanupProven(err error) bool {
+	var startErr *StartError
+	return errors.As(err, &startErr) && startErr.CleanupProven
+}
+
 // Session owns one running Claude Code process and its stdout event stream.
 type Session struct {
 	cmd     *exec.Cmd
@@ -91,7 +110,11 @@ func Start(cfg ProcessConfig) (*Session, error) {
 	if cfg.Supervisor != nil {
 		return startSupervised(cfg)
 	}
-	return startDirect(cfg)
+	session, err := startDirect(cfg)
+	if err != nil {
+		return nil, &StartError{Err: err, CleanupProven: true}
+	}
+	return session, nil
 }
 
 // startDirect keeps the process in Chord's own process table. Nothing can then
@@ -173,30 +196,33 @@ func startDirect(cfg ProcessConfig) (*Session, error) {
 }
 
 // Initialize waits for the correlated initialization acknowledgment before the
-// caller may submit a user turn.
-func (s *Session) Initialize(ctx context.Context, prompt string) error {
+// caller may submit a user turn. System events received before the
+// acknowledgment are returned to the caller instead of being dropped.
+func (s *Session) Initialize(ctx context.Context, prompt string) ([]Event, error) {
 	const requestID = "chord-initialize"
 	if err := s.WriteFrameContext(ctx, InitializeRequest(requestID, prompt)); err != nil {
-		return err
+		return nil, err
 	}
+	var deferred []Event
 	for {
 		select {
 		case event, ok := <-s.events:
 			if !ok {
-				return fmt.Errorf("external process exited before initialization")
+				return nil, fmt.Errorf("external process exited before initialization")
 			}
 			if event.Type == TypeSystem {
+				deferred = append(deferred, event)
 				continue
 			}
 			if event.Type != TypeControlResponse || event.Response == nil || event.Response.RequestID != requestID {
-				return fmt.Errorf("unexpected external event before initialization: %s", event.Type)
+				return nil, fmt.Errorf("unexpected external event before initialization: %s", event.Type)
 			}
 			if event.Response.Subtype != ControlResponseSuccess {
-				return fmt.Errorf("external initialization failed")
+				return nil, fmt.Errorf("external initialization failed")
 			}
-			return nil
+			return deferred, nil
 		case <-ctx.Done():
-			return fmt.Errorf("external initialization: %w", ctx.Err())
+			return nil, fmt.Errorf("external initialization: %w", ctx.Err())
 		}
 	}
 }
@@ -390,6 +416,53 @@ func (s *Session) ProcessEnded() bool {
 		return s.sup.GroupGone()
 	}
 	return !processGroupAlive(s.cmd)
+}
+
+func (s *Session) TerminationProven() bool {
+	if s == nil {
+		return false
+	}
+	if s.sup != nil {
+		return s.sup.GroupGone()
+	}
+	if s.cmd == nil || s.cmd.Process == nil {
+		return false
+	}
+	return !processGroupAlive(s.cmd)
+}
+
+// ForceCleanup makes one more attempt to prove the process group is gone after
+// an unproven teardown. It never reports success without that proof.
+func (s *Session) ForceCleanup() bool {
+	if s == nil {
+		return false
+	}
+	if s.sup != nil {
+		if s.sup.GroupGone() {
+			return true
+		}
+		_, _ = s.sup.KillGroup()
+		return s.sup.GroupGone()
+	}
+	if s.cmd == nil || s.cmd.Process == nil {
+		return false
+	}
+	if !processGroupAlive(s.cmd) {
+		return true
+	}
+	_ = killGroup(s.cmd)
+	deadline := time.NewTimer(s.killGrace)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for processGroupAlive(s.cmd) {
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			return !processGroupAlive(s.cmd)
+		}
+	}
+	return true
 }
 
 func (s *Session) stopScanning() {

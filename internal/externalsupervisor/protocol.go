@@ -102,19 +102,20 @@ type Cleanup struct {
 // not a task result: Chord still owns task settlement, tool results and
 // mailboxes, and the supervisor never writes any of them.
 type Receipt struct {
-	Version    int       `json:"version"`
-	RunID      string    `json:"run_id"`
-	Command    string    `json:"command"`
-	Args       []string  `json:"args,omitempty"`
-	Dir        string    `json:"dir,omitempty"`
-	PID        int       `json:"pid"`
-	PGID       int       `json:"pgid"`
-	StartedAt  time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at"`
-	Reason     string    `json:"reason"`
-	ExitCode   int       `json:"exit_code,omitempty"`
-	ExitSignal int       `json:"exit_signal,omitempty"`
-	Cleanup    Cleanup   `json:"cleanup"`
+	Version        int       `json:"version"`
+	RunID          string    `json:"run_id"`
+	Command        string    `json:"command"`
+	Args           []string  `json:"args,omitempty"`
+	Dir            string    `json:"dir,omitempty"`
+	ProcessStarted bool      `json:"process_started,omitempty"`
+	PID            int       `json:"pid"`
+	PGID           int       `json:"pgid"`
+	StartedAt      time.Time `json:"started_at"`
+	FinishedAt     time.Time `json:"finished_at"`
+	Reason         string    `json:"reason"`
+	ExitCode       int       `json:"exit_code,omitempty"`
+	ExitSignal     int       `json:"exit_signal,omitempty"`
+	Cleanup        Cleanup   `json:"cleanup"`
 }
 
 const receiptVersion = 1

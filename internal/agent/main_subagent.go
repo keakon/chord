@@ -548,11 +548,11 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 		ended := worker.processEnded
 		worker.promptMu.Unlock()
 		if !ended {
-			a.closeExternalWorker(worker, SubAgentStateFailed, "External process termination is not proven", "external process termination is not proven", nil)
+			a.closeExternalWorker(worker, SubAgentStateFailed, "External process termination is not proven", "external process termination is not proven", nil, 0, false)
 			return
 		}
 		if worker.closing.Load() {
-			a.closeExternalWorker(worker, SubAgentStateCancelled, "external agent cancelled", "external agent cancelled", nil)
+			a.closeExternalWorker(worker, SubAgentStateCancelled, "external agent cancelled", "external agent cancelled", nil, 0, false)
 			return
 		}
 	}

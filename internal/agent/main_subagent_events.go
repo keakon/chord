@@ -113,7 +113,7 @@ func (a *MainAgent) handleSubAgentCloseRequestedEvent(evt Event) {
 		closedReason = reason
 	}
 	if worker, ok := rt.(*externalWorker); ok {
-		a.closeExternalWorker(worker, finalState, reason, closedReason, payload.Completion)
+		a.closeExternalWorker(worker, finalState, reason, closedReason, payload.Completion, payload.CleanupAttempt, payload.ForceRelease)
 		return
 	}
 	sub := asSubAgent(rt)

@@ -206,10 +206,12 @@ type SubAgentStateChangedPayload struct {
 }
 
 type SubAgentCloseRequestedPayload struct {
-	Reason       string
-	ClosedReason string
-	FinalState   SubAgentState
-	Completion   *CompletionEnvelope
+	Reason         string
+	ClosedReason   string
+	FinalState     SubAgentState
+	Completion     *CompletionEnvelope
+	CleanupAttempt int
+	ForceRelease   bool
 }
 
 type SubAgentProgressUpdatedPayload struct {

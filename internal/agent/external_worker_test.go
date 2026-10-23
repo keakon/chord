@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -530,7 +531,7 @@ func TestExternalCheckoutCompletionReportsOnlyCheckoutIdentity(t *testing.T) {
 	run("add", "tracked.txt")
 	run("-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
 	baseline := captureExternalCheckoutBaseline(root)
-	if baseline == nil || baseline.Dirty {
+	if baseline == nil || baseline.Dirty || baseline.Branch == "" {
 		t.Fatalf("baseline = %+v", baseline)
 	}
 	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("changed\n"), 0o644); err != nil {
@@ -544,7 +545,7 @@ func TestExternalCheckoutCompletionReportsOnlyCheckoutIdentity(t *testing.T) {
 	if len(env.ActualFilesChanged) != 0 || !env.FileAttributionIncomplete {
 		t.Fatalf("completion must not attribute files: %+v", env)
 	}
-	if env.Worktree == nil || env.Worktree.Base != baseline.Head || env.Worktree.DiffStat == "" {
+	if env.Worktree == nil || env.Worktree.Base != baseline.Head || env.Worktree.Branch != baseline.Branch || env.Worktree.DiffStat == "" {
 		t.Fatalf("completion worktree = %+v", env.Worktree)
 	}
 	run("add", "tracked.txt", "new.txt")
@@ -579,10 +580,7 @@ func TestExternalCheckoutCompletionWithholdsDiffWhenGitStatusFails(t *testing.T)
 	fakeGit(`
 cmd="$3"
 case "$cmd" in
-  rev-parse)
-    if [ "$4" = "--abbrev-ref" ]; then printf 'main\n'; else printf '0123456789abcdef0123456789abcdef01234567\n'; fi
-    exit 0
-    ;;
+  rev-parse) printf '0123456789abcdef0123456789abcdef01234567\nmain\n'; exit 0 ;;
   status) exit 1 ;;
 esac
 exit 1
@@ -601,16 +599,47 @@ exit 1
 	}
 }
 
+func TestExternalCheckoutCompletionReportsUnknownStartupBranch(t *testing.T) {
+	root := t.TempDir()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(`#!/bin/sh
+cmd="$3"
+case "$cmd" in
+  rev-parse) printf '0123456789abcdef0123456789abcdef01234567\n'; exit 0 ;;
+  status) exit 0 ;;
+  diff) exit 0 ;;
+esac
+exit 1
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	baseline := captureExternalCheckoutBaseline(root)
+	if baseline == nil || !baseline.BranchUnknown || baseline.Branch != "" {
+		t.Fatalf("baseline = %+v, want unknown branch", baseline)
+	}
+	env := externalCheckoutCompletion(root, baseline, WorkDirState{Path: root, WorktreeID: "main", Generation: 1}, "done")
+	if env.Worktree == nil || env.Worktree.Branch != "" {
+		t.Fatalf("worktree = %+v, want no fabricated branch", env.Worktree)
+	}
+	found := false
+	for _, limitation := range env.RemainingLimitations {
+		if strings.Contains(limitation, "branch could not be determined") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("RemainingLimitations = %v", env.RemainingLimitations)
+	}
+}
+
 func TestExternalCheckoutCompletionWithholdsDiffWhenGitDiffFails(t *testing.T) {
 	root := t.TempDir()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(`#!/bin/sh
 cmd="$3"
 case "$cmd" in
-  rev-parse)
-    if [ "$4" = "--abbrev-ref" ]; then printf 'main\n'; else printf '0123456789abcdef0123456789abcdef01234567\n'; fi
-    exit 0
-    ;;
+  rev-parse) printf '0123456789abcdef0123456789abcdef01234567\nmain\n'; exit 0 ;;
   status) exit 0 ;;
   diff) exit 1 ;;
 esac
@@ -646,21 +675,138 @@ func TestExternalCompletionRequiresProcessTermination(t *testing.T) {
 	}
 	w.promptMu.Lock()
 	w.processEnded = false
+	w.terminationRetryDelay = time.Hour
 	w.promptMu.Unlock()
-	a.handleAgentDone(Event{SourceID: w.instanceID, Payload: &AgentResult{Summary: "Done."}})
+	w.sessionMu.Lock()
+	w.session = nil
+	w.sessionMu.Unlock()
+	a.closeExternalWorker(w, SubAgentStateFailed, "termination unproven", "termination unproven", nil, 0, false)
 	record := a.taskRecordByTaskID(w.taskID)
 	if len(a.sem) != 1 || isTerminalSubAgentState(SubAgentState(record.State)) || record.LatestSettlement != nil {
-		t.Fatalf("unproven termination released or settled task: %+v", record)
+		t.Fatalf("unproven termination released or settled task before the retry budget: %+v", record)
+	}
+	a.closeExternalWorker(w, SubAgentStateFailed, "termination unproven", "termination unproven", nil, 0, true)
+	record = a.taskRecordByTaskID(w.taskID)
+	if len(a.sem) != 0 || record.State != string(SubAgentStateFailed) || record.ExternalSession == nil ||
+		record.ExternalSession.ProcessEnded || !strings.Contains(record.LastSummary, "released") {
+		t.Fatalf("unproven termination was not released safely: slot=%d record=%+v", len(a.sem), record)
 	}
 	for len(a.outputCh) > 0 {
 		if event, ok := (<-a.outputCh).(AgentNotifyEvent); ok && event.Kind == string(SubAgentMailboxKindCompleted) {
 			t.Fatal("unproven termination emitted a completed mailbox")
 		}
 	}
+}
+
+func TestExternalUnprovenTerminationRetriesThenReleases(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	script := writeFakeClaude(t, `printf '%s\n' '{"type":"result","subtype":"success","result":"Done."}'`)
+	configureExternalTestRuntime(t, a, script, `"*": allow`)
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "external-worker", Description: "Input."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := a.subs.runtime(handle.AgentID).(*externalWorker)
+	select {
+	case <-w.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("process did not finish")
+	}
 	w.promptMu.Lock()
-	w.processEnded = true
+	w.processEnded = false
+	w.terminationRetryAttempts = 2
+	w.terminationRetryDelay = time.Millisecond
 	w.promptMu.Unlock()
-	a.handleAgentDone(Event{SourceID: w.instanceID, Payload: &AgentResult{Summary: "Done."}})
+	w.sessionMu.Lock()
+	w.session = nil
+	w.sessionMu.Unlock()
+	a.closeExternalWorker(w, SubAgentStateFailed, "termination unproven", "termination unproven", nil, 0, false)
+	if len(a.sem) != 1 {
+		t.Fatal("the slot was released before the retry budget was spent")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(a.sem) > 0 && time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Until(deadline))
+		event, eventErr := a.nextEvent(ctx)
+		cancel()
+		if eventErr != nil {
+			t.Fatalf("wait for cleanup retry: %v", eventErr)
+		}
+		a.dispatch(event)
+	}
+	record := a.taskRecordByTaskID(w.taskID)
+	if len(a.sem) != 0 || record == nil || record.State != string(SubAgentStateFailed) ||
+		record.ExternalSession == nil || record.ExternalSession.ProcessEnded {
+		t.Fatalf("retry exhaustion did not release safely: slot=%d record=%+v", len(a.sem), record)
+	}
+}
+
+func TestExternalWorkerWithoutInputFailsClosed(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureExternalTestRuntime(t, a, "claude", `"*": allow`)
+	w, err := a.newExternalWorker(externalWorkerConfig{
+		agentDef: a.agentConfigs["external-worker"], instanceID: "external-1", taskID: "task-1",
+		ctx: context.Background(), cancel: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.runExternalWorker()
+	if state := w.State(); state != SubAgentStateFailed {
+		t.Fatalf("state = %q, want failed", state)
+	}
+	if summary := w.LastSummary(); !strings.Contains(summary, "no input") {
+		t.Fatalf("LastSummary = %q", summary)
+	}
+}
+
+func newStartFailureWorker(t *testing.T, command string) (*MainAgent, *externalWorker, externalTaskInput) {
+	t.Helper()
+	a := newTestMainAgent(t, t.TempDir())
+	configureExternalTestRuntime(t, a, command, `"*": allow`)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	w, err := a.newExternalWorker(externalWorkerConfig{
+		agentDef: a.agentConfigs["external-worker"], instanceID: "external-1", taskID: "task-1",
+		ctx: ctx, cancel: cancel,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := externalTaskInput{ID: "input-1", Content: "Input.", State: message.ToolRecoveryStateNotStarted}
+	w.inputs = []externalTaskInput{input}
+	a.subs.taskRecords[w.taskID] = &DurableTaskRecord{
+		TaskID: w.taskID, LatestInstanceID: w.instanceID,
+		ExternalSession: &ExternalTaskSession{SessionID: w.currentSessionID(), ProcessEnded: true},
+	}
+	return a, w, input
+}
+
+func TestExternalStartFailureWithoutCleanupProofDoesNotClaimEnded(t *testing.T) {
+	_, w, input := newStartFailureWorker(t, "claude")
+	original := startExternalSession
+	startExternalSession = func(externalclaude.ProcessConfig) (*externalclaude.Session, error) {
+		return nil, &externalclaude.StartError{Err: errors.New("injected launch failure"), CleanupProven: false}
+	}
+	t.Cleanup(func() { startExternalSession = original })
+	_, ended, err := w.startSession(input, false)
+	if err == nil {
+		t.Fatal("injected launch failure unexpectedly succeeded")
+	}
+	if ended {
+		t.Fatal("a failed launch without cleanup proof was treated as ended")
+	}
+}
+
+func TestExternalStartRejectionWithReceiptProvesCleanup(t *testing.T) {
+	_, w, input := newStartFailureWorker(t, filepath.Join(t.TempDir(), "missing-claude"))
+	_, ended, err := w.startSession(input, false)
+	if err == nil {
+		t.Fatal("missing external command unexpectedly started")
+	}
+	if !ended {
+		t.Fatal("a rejected launch proven by its receipt was not treated as ended")
+	}
 }
 
 func TestExternalStartupRequiresDurableProcessState(t *testing.T) {
@@ -703,7 +849,7 @@ func TestExternalStartupRequiresDurableProcessState(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, err = w.startSession(input, true)
+			_, _, err = w.startSession(input, true)
 			if err == nil {
 				t.Fatal("initialization unexpectedly succeeded")
 			}

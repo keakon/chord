@@ -47,12 +47,16 @@ func Run(_ []string) int {
 		return ExitOK
 	}
 	if request.Command == "" {
-		return fail(out, request, fmt.Errorf("start request without a command"))
+		return fail(out, request, fmt.Errorf("start request without a command"), false, 0, 0, time.Now(), Cleanup{Proven: true, Note: "launch failed before a process was started"})
 	}
 	killGrace := time.Duration(request.KillGraceMS) * time.Millisecond
 	if killGrace <= 0 {
 		killGrace = defaultKillGrace
 	}
+	return launchManaged(out, request, reader, childStdin, childStdout, childStderr, killGrace)
+}
+
+func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStdin, childStdout, childStderr *os.File, killGrace time.Duration) int {
 	cmd := exec.Command(request.Command, request.Args...)
 	cmd.Dir = request.Dir
 	cmd.Env = request.Env
@@ -65,16 +69,24 @@ func Run(_ []string) int {
 		childStdin.Close()
 		childStdout.Close()
 		childStderr.Close()
-		return fail(out, request, fmt.Errorf("start %s: %w", request.Command, err))
+		return fail(out, request, fmt.Errorf("start %s: %w", request.Command, err), false, 0, 0, startedAt, Cleanup{Proven: true, Note: "launch failed before a process was started"})
 	}
 	// The managed process owns its ends now. Holding any of them would hide
 	// EOF from Chord and make a dead process look alive.
 	closeAll(childStdin, childStdout, childStderr)
-	pid, pgid, err := processGroupID(cmd)
+	pid, pgid, err := managedProcessGroupID(cmd)
 	if err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		return fail(out, request, err)
+		if pgid <= 0 {
+			pgid = pid
+		}
+		cleanup, cleanupErr := cleanupUnboundProcess(cmd, pid, pgid, killGrace)
+		if cleanupErr != nil {
+			cleanup.Proven = false
+			if cleanup.Note == "" {
+				cleanup.Note = cleanupErr.Error()
+			}
+		}
+		return fail(out, request, err, true, pid, pgid, startedAt, cleanup)
 	}
 
 	run := &supervisedRun{
@@ -95,6 +107,39 @@ func Run(_ []string) int {
 		return code
 	}
 	return run.supervise()
+}
+
+var managedProcessGroupID = processGroupID
+
+// cleanupUnboundProcess tears down a launch that started but whose group could
+// not be read. A setsid child leads its own group, so the pid is the group id
+// when the read itself failed; a different reported group is never signalled.
+func cleanupUnboundProcess(cmd *exec.Cmd, pid, pgid int, grace time.Duration) (Cleanup, error) {
+	if cmd == nil || cmd.Process == nil {
+		return Cleanup{}, nil
+	}
+	reaped := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(reaped)
+	}()
+	if pgid != pid {
+		_ = cmd.Process.Kill()
+		waitForReap(reaped, grace)
+		return Cleanup{Note: "managed process did not lead its own process group"}, fmt.Errorf("managed process %d leads group %d", pid, pgid)
+	}
+	cleanup, err := terminateGroup(pid, pgid, grace)
+	waitForReap(reaped, grace)
+	return cleanup, err
+}
+
+func waitForReap(reaped <-chan struct{}, timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-reaped:
+	case <-timer.C:
+	}
 }
 
 // supervisedRun is one managed process the supervisor owns.
@@ -222,19 +267,20 @@ func (r *supervisedRun) finishWith(cleanup Cleanup, err error, reason string, co
 	// not that Chord persisted it before dying. Recovery looks up the receipt by
 	// this run's exact ID; old receipts are pruned by the host.
 	writeReceipt(r.request.ReceiptDir, Receipt{
-		Version:    receiptVersion,
-		RunID:      r.request.RunID,
-		Command:    r.request.Command,
-		Args:       slices.Clone(r.request.Args),
-		Dir:        r.request.Dir,
-		PID:        r.pid,
-		PGID:       r.pgid,
-		StartedAt:  r.startedAt,
-		FinishedAt: time.Now(),
-		Reason:     reason,
-		ExitCode:   code,
-		ExitSignal: sig,
-		Cleanup:    cleanup,
+		Version:        receiptVersion,
+		RunID:          r.request.RunID,
+		Command:        r.request.Command,
+		Args:           slices.Clone(r.request.Args),
+		Dir:            r.request.Dir,
+		ProcessStarted: true,
+		PID:            r.pid,
+		PGID:           r.pgid,
+		StartedAt:      r.startedAt,
+		FinishedAt:     time.Now(),
+		Reason:         reason,
+		ExitCode:       code,
+		ExitSignal:     sig,
+		Cleanup:        cleanup,
 	})
 	if !cleanup.Proven {
 		return ExitFailure
@@ -242,21 +288,24 @@ func (r *supervisedRun) finishWith(cleanup Cleanup, err error, reason string, co
 	return ExitOK
 }
 
-// fail reports a run that never started. There is no process group to tear
-// down, so the only job left is telling Chord and leaving a receipt with the
-// same run identity.
-func fail(out *os.File, request Message, err error) int {
+// fail reports a launch failure and leaves the receipt of that failure. A
+// failed group lookup still started a process, so its cleanup evidence must
+// travel with the receipt instead of being reported as an unbound success.
+func fail(out *os.File, request Message, err error, processStarted bool, pid, pgid int, startedAt time.Time, cleanup Cleanup) int {
 	_ = writeMessage(out, Message{Type: TypeError, RunID: request.RunID, Error: err.Error()})
 	writeReceipt(request.ReceiptDir, Receipt{
-		Version:    receiptVersion,
-		RunID:      request.RunID,
-		Command:    request.Command,
-		Args:       slices.Clone(request.Args),
-		Dir:        request.Dir,
-		StartedAt:  time.Now(),
-		FinishedAt: time.Now(),
-		Reason:     ReasonLaunchFailed,
-		Cleanup:    Cleanup{Proven: true, Note: "launch failed before a process group was bound"},
+		Version:        receiptVersion,
+		RunID:          request.RunID,
+		Command:        request.Command,
+		Args:           slices.Clone(request.Args),
+		Dir:            request.Dir,
+		ProcessStarted: processStarted,
+		PID:            pid,
+		PGID:           pgid,
+		StartedAt:      startedAt,
+		FinishedAt:     time.Now(),
+		Reason:         ReasonLaunchFailed,
+		Cleanup:        cleanup,
 	})
 	if out != nil {
 		_ = out.Close()
@@ -269,7 +318,7 @@ func fail(out *os.File, request Message, err error) int {
 // started for.
 func writeReceipt(dir string, receipt Receipt) {
 	dir = filepath.Clean(dir)
-	if dir == "" || dir == "." {
+	if dir == "" || dir == "." || !ValidRunID(receipt.RunID) {
 		return
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {

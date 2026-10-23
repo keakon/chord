@@ -22,7 +22,7 @@ func startSupervised(cfg ProcessConfig) (*Session, error) {
 		command = "claude"
 	}
 	if err := ValidateEnvironment(cfg.Env); err != nil {
-		return nil, err
+		return nil, &StartError{Err: err, CleanupProven: true}
 	}
 	sup, err := externalsupervisor.Start(externalsupervisor.Config{
 		Command: cfg.Supervisor.Command,
@@ -37,7 +37,11 @@ func startSupervised(cfg ProcessConfig) (*Session, error) {
 		KillGrace:  cfg.KillGrace,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("start external supervisor: %w", err)
+		proven, known := externalsupervisor.StartCleanupProven(err)
+		if !known {
+			proven = true
+		}
+		return nil, &StartError{Err: fmt.Errorf("start external supervisor: %w", err), CleanupProven: proven}
 	}
 	killGrace := cfg.KillGrace
 	if killGrace <= 0 {
@@ -67,20 +71,15 @@ func startSupervised(cfg ProcessConfig) (*Session, error) {
 	return session, nil
 }
 
-// waitSupervised ends a supervised run. Business output is drained first —
-// until both pipes are at EOF the run's output is not complete — and only then
-// does Chord ask the supervisor for the teardown it exists for.
+// waitSupervised ends a supervised run. The supervisor's exit is the run's
+// lifecycle signal; waiting for business pipes first would let a descendant
+// that keeps the pipes open hide the exit forever. Stop then proves the group
+// is gone, so the scanners can drain to EOF and close.
 func (s *Session) waitSupervised() {
-	s.scanWG.Wait()
-	// Business output at EOF is the run's exit signal: the managed process and
-	// everything that inherited its pipes are done writing.
-	close(s.exited)
-	// Stop is idempotent and covers both directions of the split: it asks the
-	// supervisor to tear the group down, and when the supervisor cannot — it is
-	// gone, or it stopped answering — Chord cleans up by the identity it bound
-	// at handshake instead of leaving the group behind. It also waits for the
-	// supervisor's own exit, so the report read afterwards is complete.
+	_ = s.sup.Wait()
 	stopErr := s.sup.Stop(s.killGrace)
+	s.scanWG.Wait()
+	close(s.exited)
 	report := s.sup.Report()
 	if report.Reported {
 		switch {

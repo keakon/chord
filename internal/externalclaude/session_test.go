@@ -35,7 +35,7 @@ func TestSessionInitializationBackpressureCancels(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if err := s.Initialize(ctx, strings.Repeat("x", 2<<20)); err == nil {
+	if _, err := s.Initialize(ctx, strings.Repeat("x", 2<<20)); err == nil {
 		t.Fatal("blocked initialization succeeded")
 	}
 	if time.Since(start) > time.Second {
@@ -83,8 +83,12 @@ printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","del
 printf '%s\n' '{"type":"result","subtype":"success","result":"Done."}'
 exit 0
 `, 0)
-	if err := s.Initialize(context.Background(), "task"); err != nil {
+	deferred, err := s.Initialize(context.Background(), "task")
+	if err != nil {
 		t.Fatalf("Initialize() error = %v", err)
+	}
+	if len(deferred) != 2 || deferred[0].Subtype != "ui_invalidate" || deferred[1].Subtype != "ui_toast" {
+		t.Fatalf("deferred initialization events = %+v", deferred)
 	}
 	var got []Event
 	for event := range s.Events() {

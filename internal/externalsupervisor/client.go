@@ -61,6 +61,30 @@ type ChildSpec struct {
 	Dir     string
 }
 
+// StartError reports a launch that failed after the supervisor process was
+// spawned. CleanupProven says whether the failed launch left no supervised
+// process group behind. A caller that cannot prove cleanup must not treat the
+// run as ended.
+type StartError struct {
+	Err           error
+	CleanupProven bool
+}
+
+func (e *StartError) Error() string { return e.Err.Error() }
+
+func (e *StartError) Unwrap() error { return e.Err }
+
+// StartCleanupProven reports the cleanup evidence of a failed launch. known is
+// false for errors raised before the supervisor was spawned; such a launch
+// cannot have started a managed process.
+func StartCleanupProven(err error) (proven, known bool) {
+	var startErr *StartError
+	if errors.As(err, &startErr) {
+		return startErr.CleanupProven, true
+	}
+	return false, false
+}
+
 // Report is the supervisor's account of the run. Reported is false when the
 // supervisor never described the run, which leaves Chord with nothing but the
 // identity it bound at handshake.
@@ -187,8 +211,17 @@ func Start(cfg Config) (*Supervisor, error) {
 	sup.report.RunID = runID
 	go sup.readLoop(bufio.NewReader(hostOutR))
 	if err := sup.bind(handshakeTimeout, cfg); err != nil {
-		_ = sup.discard()
-		return nil, err
+		proven := sup.discard()
+		// A supervisor that rejected the launch writes a receipt before it
+		// exits. The run id is freshly generated for this launch, so a matching
+		// receipt describes exactly this attempt and can supply the proof that
+		// the unbound host end could not observe.
+		if !proven {
+			if receipt, loadErr := LoadReceipt(sup.receiptDir, sup.runID); loadErr == nil {
+				proven = receipt.Cleanup.Proven
+			}
+		}
+		return nil, &StartError{Err: err, CleanupProven: proven}
 	}
 	return sup, nil
 }
@@ -245,7 +278,7 @@ func (s *Supervisor) bind(timeout time.Duration, cfg Config) error {
 // discard tears a supervisor down after a failed handshake. The run was never
 // bound, but it may already have started a process: ask for the teardown
 // before the supervisor is killed, so nothing it launched is left behind.
-func (s *Supervisor) discard() error {
+func (s *Supervisor) discard() bool {
 	_ = s.write(Message{Type: TypeStop, RunID: s.runID})
 	if !s.awaitExit(s.killGrace) {
 		if s.cmd != nil && s.cmd.Process != nil {
@@ -253,12 +286,12 @@ func (s *Supervisor) discard() error {
 		}
 		s.awaitExit(s.killGrace)
 	}
-	err := s.Wait()
+	_ = s.Wait()
 	if !s.GroupGone() {
 		s.cleanupByIdentity()
 	}
 	closeAll(s.stdin, s.stdout, s.stderr)
-	return err
+	return s.GroupGone()
 }
 
 // Stdin is the host end of the managed process's stdin.
@@ -566,6 +599,9 @@ func LoadReceipt(dir, runID string) (Receipt, error) {
 	}
 	if receipt.RunID != runID {
 		return Receipt{}, fmt.Errorf("supervisor receipt belongs to run %q", receipt.RunID)
+	}
+	if receipt.Cleanup.Proven && receipt.ProcessStarted && (receipt.PID <= 0 || receipt.PGID <= 0) {
+		return Receipt{}, errors.New("supervisor receipt claims proven cleanup without a bound process identity")
 	}
 	return receipt, nil
 }

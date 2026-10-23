@@ -33,6 +33,9 @@ const externalSessionStopGrace = 2 * time.Second
 const (
 	externalProgressMinInterval = 5 * time.Second
 	externalProgressBurstItems  = 8
+
+	externalTerminationRetryAttempts = 10
+	externalTerminationRetryDelay    = 500 * time.Millisecond
 )
 
 // externalWorker executes a subagent task on an external coding-agent process
@@ -90,13 +93,17 @@ type externalWorker struct {
 	sessionID  string
 	resumeNext bool
 
-	started      atomic.Bool
-	closing      atomic.Bool
-	finished     atomic.Bool
-	finishOnce   sync.Once
-	closePending atomic.Bool
-	done         chan struct{}
-	doneOnce     sync.Once
+	started                  atomic.Bool
+	closing                  atomic.Bool
+	finished                 atomic.Bool
+	finishOnce               sync.Once
+	closePending             atomic.Bool
+	terminationRetryPending  atomic.Bool
+	releaseUnproven          atomic.Bool
+	terminationRetryAttempts int
+	terminationRetryDelay    time.Duration
+	done                     chan struct{}
+	doneOnce                 sync.Once
 
 	promptMu           sync.Mutex
 	lastReplyMessageID string
@@ -169,35 +176,37 @@ func (a *MainAgent) newExternalWorker(cfg externalWorkerConfig) (*externalWorker
 		return nil, fmt.Errorf("invalid result_schema: %w", err)
 	}
 	worker := &externalWorker{
-		parent:             a,
-		agentDef:           &defCopy,
-		backend:            backendCopy,
-		instanceID:         cfg.instanceID,
-		taskID:             cfg.taskID,
-		agentDefName:       def.Name,
-		taskDesc:           strings.TrimSpace(cfg.taskDesc),
-		planTaskRef:        strings.TrimSpace(cfg.planTaskRef),
-		semanticTaskKey:    strings.TrimSpace(cfg.semanticTaskKey),
-		color:              def.Color,
-		ownerAgentID:       strings.TrimSpace(cfg.caller.AgentID),
-		ownerTaskID:        strings.TrimSpace(cfg.caller.TaskID),
-		depth:              cfg.caller.Depth + 1,
-		joinToOwner:        !cfg.caller.IsMain && cfg.caller.Delegation.ChildJoinEnabled(),
-		resultSchema:       resultSchema,
-		resultSchemaJSON:   append(json.RawMessage(nil), cfg.resultSchemaJSON...),
-		workDir:            workDir,
-		workDirState:       cfg.caller.WorkDirState,
-		ruleset:            a.buildSubAgentRuleset(def),
-		ctx:                cfg.ctx,
-		cancel:             cfg.cancel,
-		done:               make(chan struct{}),
-		toolNames:          make(map[string]string),
-		toolPreWrites:      make(map[string]externalToolPreWrite),
-		toolSeen:           make(map[string]bool),
-		toolBindings:       make(map[string]*externalToolBinding),
-		ctxMgr:             ctxmgr.NewManager(0, 0),
-		permissionRequests: make(map[string]externalPermissionRequest),
-		permissionOutcomes: make(map[string]*externalPermissionOutcome),
+		parent:                   a,
+		agentDef:                 &defCopy,
+		backend:                  backendCopy,
+		instanceID:               cfg.instanceID,
+		taskID:                   cfg.taskID,
+		agentDefName:             def.Name,
+		taskDesc:                 strings.TrimSpace(cfg.taskDesc),
+		planTaskRef:              strings.TrimSpace(cfg.planTaskRef),
+		semanticTaskKey:          strings.TrimSpace(cfg.semanticTaskKey),
+		color:                    def.Color,
+		ownerAgentID:             strings.TrimSpace(cfg.caller.AgentID),
+		ownerTaskID:              strings.TrimSpace(cfg.caller.TaskID),
+		depth:                    cfg.caller.Depth + 1,
+		joinToOwner:              !cfg.caller.IsMain && cfg.caller.Delegation.ChildJoinEnabled(),
+		resultSchema:             resultSchema,
+		resultSchemaJSON:         append(json.RawMessage(nil), cfg.resultSchemaJSON...),
+		workDir:                  workDir,
+		workDirState:             cfg.caller.WorkDirState,
+		ruleset:                  a.buildSubAgentRuleset(def),
+		ctx:                      cfg.ctx,
+		cancel:                   cfg.cancel,
+		terminationRetryAttempts: externalTerminationRetryAttempts,
+		terminationRetryDelay:    externalTerminationRetryDelay,
+		done:                     make(chan struct{}),
+		toolNames:                make(map[string]string),
+		toolPreWrites:            make(map[string]externalToolPreWrite),
+		toolSeen:                 make(map[string]bool),
+		toolBindings:             make(map[string]*externalToolBinding),
+		ctxMgr:                   ctxmgr.NewManager(0, 0),
+		permissionRequests:       make(map[string]externalPermissionRequest),
+		permissionOutcomes:       make(map[string]*externalPermissionOutcome),
 	}
 	worker.sessionEpoch = a.recoverySessionEpoch()
 	if err := worker.ensureSessionID(); err != nil {
@@ -589,7 +598,7 @@ func (w *externalWorker) terminateForSessionSwitch(reason string) {
 	}
 	// The session switch waits for waitDone before closing the original
 	// transcript manager.
-	w.parent.closeExternalWorker(w, SubAgentStateCancelled, reason, reason, nil)
+	w.parent.closeExternalWorker(w, SubAgentStateCancelled, reason, reason, nil, 0, false)
 }
 
 func (w *externalWorker) finishSuccess(text string) {
@@ -655,15 +664,39 @@ func (w *externalWorker) externalCompletionEnvelope(summary string) *CompletionE
 	return externalCheckoutCompletion(w.workDir, w.baseline, w.workDirState, summary)
 }
 
+func (w *externalWorker) tryCleanupProcess(escalate bool) bool {
+	if w == nil {
+		return false
+	}
+	session := w.currentSession()
+	if session == nil {
+		return false
+	}
+	if !session.TerminationProven() && (!escalate || !session.ForceCleanup()) {
+		return false
+	}
+	w.promptMu.Lock()
+	w.processEnded = true
+	err := w.persistExternalSessionLocked()
+	w.promptMu.Unlock()
+	if err != nil {
+		w.persistence.markDegraded(err)
+	}
+	return true
+}
+
 // closeExternalWorker is the external runtime's terminal close path. It mirrors
 // the SubAgent close handler's ordering: mailbox/status first, then the detached
 // settlement, then runtime and slot teardown.
-func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAgentState, reason, closedReason string, completion *CompletionEnvelope) {
+func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAgentState, reason, closedReason string, completion *CompletionEnvelope, cleanupAttempt int, forceRelease bool) {
 	if a == nil || worker == nil {
 		return
 	}
 	if worker.sessionEpoch != a.recoverySessionEpoch() {
 		return
+	}
+	if cleanupAttempt > 0 {
+		worker.terminationRetryPending.Store(false)
 	}
 	if worker.started.Load() {
 		select {
@@ -692,8 +725,56 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 	ended := worker.processEnded || !worker.started.Load()
 	worker.promptMu.Unlock()
 	if !ended {
-		a.emitToTUI(AgentStatusEvent{AgentID: worker.instanceID, Status: "blocked", Message: "External process termination is not proven; the runtime slot remains held"})
-		return
+		ended = worker.tryCleanupProcess(cleanupAttempt == 0)
+	}
+	if !ended && !forceRelease {
+		attempts := worker.terminationRetryAttempts
+		if attempts <= 0 {
+			attempts = externalTerminationRetryAttempts
+		}
+		if cleanupAttempt < attempts {
+			a.emitToTUI(AgentStatusEvent{AgentID: worker.instanceID, Status: "blocked", Message: "External process termination is not proven; retrying cleanup"})
+			if worker.terminationRetryPending.CompareAndSwap(false, true) {
+				payload := &SubAgentCloseRequestedPayload{
+					Reason:         reason,
+					ClosedReason:   closedReason,
+					FinalState:     finalState,
+					Completion:     completion,
+					CleanupAttempt: cleanupAttempt + 1,
+				}
+				delay := worker.terminationRetryDelay
+				if delay <= 0 {
+					delay = externalTerminationRetryDelay
+				}
+				go func() {
+					timer := time.NewTimer(delay)
+					defer timer.Stop()
+					<-timer.C
+					a.sendEvent(Event{Type: EventSubAgentCloseRequested, SourceID: worker.instanceID, Payload: payload})
+				}()
+			}
+			return
+		}
+		forceRelease = true
+	}
+	if !ended {
+		worker.releaseUnproven.Store(true)
+		worker.terminationRetryPending.Store(false)
+		if finalState == SubAgentStateCompleted || finalState == "" {
+			finalState = SubAgentStateFailed
+		}
+		reason = strings.TrimSpace(reason)
+		if reason == "" {
+			reason = "External process termination is not proven"
+		}
+		reason += "; the runtime slot was released because termination could not be proven, and this checkout must not be resumed"
+		closedReason = "external process termination is not proven"
+		completion = nil
+		worker.promptMu.Lock()
+		worker.processEnded = false
+		_ = worker.persistExternalSessionLocked()
+		worker.promptMu.Unlock()
+		worker.teardown()
 	}
 	if finalState == "" {
 		finalState = SubAgentStateCancelled

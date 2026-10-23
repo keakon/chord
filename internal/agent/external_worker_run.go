@@ -21,6 +21,8 @@ import (
 
 const externalPermissionTimeout = 5 * time.Minute
 
+var startExternalSession = externalclaude.Start
+
 func (w *externalWorker) runExternalWorker() {
 	defer w.doneOnce.Do(func() { close(w.done) })
 	w.promptMu.Lock()
@@ -38,6 +40,10 @@ func (w *externalWorker) runExternalWorker() {
 		}
 	}
 	w.promptMu.Unlock()
+	if strings.TrimSpace(input.ID) == "" {
+		w.finishFailure(fmt.Errorf("external worker has no input to run"))
+		return
+	}
 	for {
 		if w.closing.Load() || w.ctx.Err() != nil {
 			if !w.closePending.Load() {
@@ -45,10 +51,10 @@ func (w *externalWorker) runExternalWorker() {
 			}
 			return
 		}
-		session, err := w.startSession(input, w.resumeNext)
+		session, processEnded, err := w.startSession(input, w.resumeNext)
 		if err != nil {
 			w.promptMu.Lock()
-			w.processEnded = w.currentSession() == nil || w.currentSession().ProcessEnded()
+			w.processEnded = processEnded
 			_ = w.persistExternalSessionLocked()
 			w.promptMu.Unlock()
 			if w.closePending.Load() {
@@ -134,19 +140,19 @@ func (w *externalWorker) setSession(session *externalclaude.Session) {
 	w.sessionMu.Unlock()
 }
 
-func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*externalclaude.Session, error) {
+func (w *externalWorker) startSession(input externalTaskInput, resume bool) (session *externalclaude.Session, processEnded bool, err error) {
 	if w.parent == nil {
-		return nil, fmt.Errorf("external worker has no parent agent")
+		return nil, true, fmt.Errorf("external worker has no parent agent")
 	}
 	if err := w.ensureSessionID(); err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	sessionID := w.currentSessionID()
 	if sessionID != "" && !externalclaude.ValidSessionID(sessionID) {
-		return nil, fmt.Errorf("external session id %q is not a valid UUID", sessionID)
+		return nil, true, fmt.Errorf("external session id %q is not a valid UUID", sessionID)
 	}
 	if resume && sessionID == "" {
-		return nil, fmt.Errorf("external session cannot resume without a session id")
+		return nil, true, fmt.Errorf("external session cannot resume without a session id")
 	}
 	args, err := externalclaude.BuildArgs(externalclaude.LaunchOptions{
 		SessionID:       sessionID,
@@ -155,7 +161,7 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 		LaunchArgs:      w.backend.LaunchArgs,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("external launch arguments: %w", err)
+		return nil, true, fmt.Errorf("external launch arguments: %w", err)
 	}
 	env := make(map[string]string, len(w.backend.Env))
 	for key, value := range w.backend.Env {
@@ -180,17 +186,17 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 	runID, err := externalsupervisor.NewRunID()
 	if err != nil {
 		w.promptMu.Unlock()
-		return nil, err
+		return nil, true, err
 	}
 	w.runID = runID
 	w.processEnded = false
 	err = w.persistExternalSessionLocked()
 	w.promptMu.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	w.parent.pruneExternalSupervisorReceipts()
-	session, err := externalclaude.Start(externalclaude.ProcessConfig{
+	started, err := startExternalSession(externalclaude.ProcessConfig{
 		Command: w.backend.EffectiveCommand(),
 		Args:    args,
 		Env:     env,
@@ -204,8 +210,9 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 		Supervisor: &externalclaude.SupervisorConfig{RunID: runID, ReceiptDir: w.supervisorReceiptDir()},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("start external agent: %w", err)
+		return nil, externalclaude.StartFailureCleanupProven(err), fmt.Errorf("start external agent: %w", err)
 	}
+	session = started
 	w.setSession(session)
 	w.promptMu.Lock()
 	w.processEnded = false
@@ -214,14 +221,15 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 	initialized := false
 	defer func() {
 		if !initialized {
-			session.Stop(externalSessionStopGrace)
-			for range session.Events() {
+			started.Stop(externalSessionStopGrace)
+			for range started.Events() {
 			}
-			_ = session.Wait()
+			_ = started.Wait()
+			processEnded = started.ProcessEnded()
 		}
 	}()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	initCtx, cancel := context.WithTimeout(w.ctx, 15*time.Second)
 	defer cancel()
@@ -229,20 +237,32 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (*ex
 	if block := w.externalResultContractPromptBlock(); block != "" {
 		systemPrompt = strings.TrimSpace(systemPrompt + "\n\n" + block)
 	}
-	if err := session.Initialize(initCtx, systemPrompt); err != nil {
+	initEvents, err := session.Initialize(initCtx, systemPrompt)
+	if err != nil {
 		session.Stop(externalSessionStopGrace)
-		return nil, err
+		return nil, false, err
+	}
+	for _, event := range initEvents {
+		terminal, _ := w.handleExternalEvent(event)
+		if !terminal {
+			continue
+		}
+		session.Stop(externalSessionStopGrace)
+		if resultErr := w.getResultError(); resultErr != nil {
+			return nil, false, resultErr
+		}
+		return nil, false, fmt.Errorf("external initialization failed")
 	}
 	w.beginExternalStreamSegment()
 	if err := w.sendExternalInput(input); err != nil {
 		session.Stop(externalSessionStopGrace)
-		return nil, fmt.Errorf("send external agent prompt: %w", err)
+		return nil, false, fmt.Errorf("send external agent prompt: %w", err)
 	}
 	w.resultSeen = false
 	w.resultText = ""
 	w.setResultError(nil)
 	initialized = true
-	return session, nil
+	return session, false, nil
 }
 
 // supervisorReceiptDir is where a supervisor leaves the lifecycle receipt of

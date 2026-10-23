@@ -95,7 +95,7 @@ func (a *MainAgent) releaseRuntimeSlot(rt subAgentRuntime) {
 		w.promptMu.Lock()
 		ended := w.processEnded
 		w.promptMu.Unlock()
-		if !ended {
+		if !ended && !w.releaseUnproven.Load() {
 			return
 		}
 	}
