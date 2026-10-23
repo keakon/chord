@@ -8,16 +8,27 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func (w *externalWorker) persistExternalSessionLocked() error {
+// cloneExternalTaskRecordLocked returns the recovery owner together with a
+// private copy of the task's current durable record, or an error when this
+// worker no longer owns the durable write. Callers must hold promptMu.
+func (w *externalWorker) cloneExternalTaskRecordLocked() (*recoveryOwnership, *DurableTaskRecord, error) {
 	owner := w.parent.currentRecoveryOwnership()
 	if owner == nil || owner.epoch != w.sessionEpoch {
-		return fmt.Errorf("external task storage belongs to a replaced session")
+		return nil, nil, fmt.Errorf("external task storage belongs to a replaced session")
 	}
 	w.parent.subs.mu.RLock()
 	record := cloneDurableTaskRecord(w.parent.subs.taskRecords[w.taskID])
 	w.parent.subs.mu.RUnlock()
 	if record == nil || record.LatestInstanceID != w.instanceID {
-		return fmt.Errorf("external task instance is no longer current")
+		return nil, nil, fmt.Errorf("external task instance is no longer current")
+	}
+	return owner, record, nil
+}
+
+func (w *externalWorker) persistExternalSessionLocked() error {
+	owner, record, err := w.cloneExternalTaskRecordLocked()
+	if err != nil {
+		return err
 	}
 	record.State = string(w.State())
 	record.ResumePolicy = durableTaskResumePolicy(w.State())

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -208,25 +209,41 @@ func (a *MainAgent) shutdownTimeoutError(timeout time.Duration) error {
 	return fmt.Errorf("agent shutdown timed out after %v", timeout)
 }
 
+// waitForSubAgents waits for live runtimes to stop under the shared shutdown
+// deadline. The waits run concurrently so one slow runtime cannot consume the
+// time another one still needs. External workers wait under the smaller
+// externalShutdownWait budget instead of the full deadline: their teardown
+// continues in the supervisor process after Chord exits, so waiting longer
+// only delays the exit without changing the outcome.
 func (a *MainAgent) waitForSubAgents(remaining func() time.Duration) {
+	var wg sync.WaitGroup
 	for _, runtime := range a.subs.snapshotRuntimes() {
-		wait := remaining()
-		if wait <= 0 {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), wait)
+		var waitDone func(context.Context) error
+		kind, budget := "", remaining()
 		switch worker := runtime.(type) {
 		case *SubAgent:
-			if err := worker.waitDone(ctx); err != nil {
-				log.Warnf("SubAgent did not stop within shutdown budget agent_id=%v error=%v", worker.instanceID, err)
-			}
+			waitDone, kind = worker.waitDone, "SubAgent"
 		case *externalWorker:
-			if err := worker.waitDone(ctx); err != nil {
-				log.Warnf("external worker did not stop within shutdown budget agent_id=%v error=%v", worker.instanceID, err)
-			}
+			waitDone, kind = worker.waitDone, "external worker"
+			budget = min(budget, externalShutdownWait)
+		default:
+			continue
 		}
-		cancel()
+		if budget <= 0 {
+			continue
+		}
+		agentID := runtime.InstanceID()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), budget)
+			defer cancel()
+			if err := waitDone(ctx); err != nil {
+				log.Warnf("%s did not stop within shutdown budget agent_id=%v error=%v", kind, agentID, err)
+			}
+		}()
 	}
+	wg.Wait()
 }
 
 func (a *MainAgent) checkpointDegradedSubAgents() []string {

@@ -273,6 +273,85 @@ func TestShutdownWaitsForStartedSubAgentRunLoop(t *testing.T) {
 	}
 }
 
+// registerExternalRuntimeForWait registers a bare externalWorker whose done
+// channel the test controls (nil means its teardown never settles), so the
+// shutdown wait policy can be exercised without launching a process.
+func registerExternalRuntimeForWait(t *testing.T, a *MainAgent, instanceID string, done chan struct{}) *externalWorker {
+	t.Helper()
+	w := &externalWorker{
+		instanceID: instanceID,
+		parent:     a,
+		done:       done,
+	}
+	w.setState(SubAgentStateRunning, "running")
+	a.subs.mu.Lock()
+	a.subs.subAgents[w.instanceID] = w
+	a.subs.mu.Unlock()
+	t.Cleanup(func() {
+		a.subs.mu.Lock()
+		delete(a.subs.subAgents, w.instanceID)
+		a.subs.mu.Unlock()
+	})
+	return w
+}
+
+// TestWaitForSubAgentsBoundsExternalWorkerWait pins the external shutdown
+// budget: workers whose teardown never settles must wait no longer than
+// externalShutdownWait — the supervisor finishes their teardown after Chord
+// exits — and the waits must run concurrently instead of stacking one budget
+// per worker.
+func TestWaitForSubAgentsBoundsExternalWorkerWait(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	registerExternalRuntimeForWait(t, a, "external-stuck-1", nil)
+	registerExternalRuntimeForWait(t, a, "external-stuck-2", nil)
+
+	deadline := time.Now().Add(2 * time.Second)
+	remaining := func() time.Duration { return time.Until(deadline) }
+	began := time.Now()
+	a.waitForSubAgents(remaining)
+	elapsed := time.Since(began)
+	if elapsed < externalShutdownWait {
+		t.Fatalf("waitForSubAgents returned after %v, before the external budget elapsed", elapsed)
+	}
+	if elapsed > 2*externalShutdownWait-100*time.Millisecond {
+		t.Fatalf("waitForSubAgents took %v for two stuck external workers; waits must stay bounded and concurrent", elapsed)
+	}
+}
+
+// TestWaitForSubAgentsWaitsForExternalWorkerDone pins that the external budget
+// is a budget, not a skip: a worker that settles within it is still awaited.
+func TestWaitForSubAgentsWaitsForExternalWorkerDone(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	done := make(chan struct{})
+	registerExternalRuntimeForWait(t, a, "external-settling", done)
+	time.AfterFunc(200*time.Millisecond, func() { close(done) })
+
+	deadline := time.Now().Add(2 * time.Second)
+	remaining := func() time.Duration { return time.Until(deadline) }
+	a.waitForSubAgents(remaining)
+	select {
+	case <-done:
+	default:
+		t.Fatal("waitForSubAgents returned before the external worker settled within its budget")
+	}
+}
+
+// TestShutdownCompletesWithStuckExternalWorker pins the app-exit outcome: a
+// live external worker left to its supervisor must neither consume the whole
+// shutdown deadline nor turn the exit into a shutdown timeout.
+func TestShutdownCompletesWithStuckExternalWorker(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	registerExternalRuntimeForWait(t, a, "external-stuck", nil)
+
+	began := time.Now()
+	if err := a.Shutdown(2 * time.Second); err != nil {
+		t.Fatalf("Shutdown() error = %v, want nil", err)
+	}
+	if elapsed := time.Since(began); elapsed > 1500*time.Millisecond {
+		t.Fatalf("Shutdown took %v with a stuck external worker; the wait must stay bounded", elapsed)
+	}
+}
+
 // uncancellableBlockingProvider parks in CompleteStream until release is closed
 // and ignores context cancellation, reproducing an LLM request goroutine that is
 // still blocked when the parent shuts down and only runs its post-call writes

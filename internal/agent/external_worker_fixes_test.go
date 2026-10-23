@@ -201,3 +201,49 @@ func TestExternalToolDiffUsesAgentdiffLineNumbers(t *testing.T) {
 		t.Fatalf("diff counts = (+%d, -%d), want (+1, -1)", summary.Added, summary.Removed)
 	}
 }
+
+func TestExternalWorkerPersistsTerminalRecordWithoutEventLoop(t *testing.T) {
+	// A shutdown that stops dispatching events must not leave a delivered
+	// result recorded as running: restore-time normalization would then
+	// misclassify the task as failed.
+	root := t.TempDir()
+	script := writeFakeClaude(t, `
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"11111111-1111-4111-8111-111111111111"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"external done"}'
+`)
+	a := newTestMainAgent(t, root)
+	configureExternalTestRuntime(t, a, script, `"*": allow`)
+
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{
+		Description: "finish without a dispatching event loop",
+		AgentType:   "external-worker",
+	})
+	if err != nil {
+		t.Fatalf("CreateSubAgent: %v", err)
+	}
+	runtime := a.subs.runtime(handle.AgentID)
+	worker, ok := runtime.(*externalWorker)
+	if !ok || worker == nil {
+		t.Fatalf("runtime %T is not an externalWorker", runtime)
+	}
+	select {
+	case <-worker.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("external worker did not finish")
+	}
+
+	records, err := loadDurableTaskRecords(a.SessionDir())
+	if err != nil {
+		t.Fatalf("load persisted task records: %v", err)
+	}
+	record := records[handle.TaskID]
+	if record == nil {
+		t.Fatalf("external task record is missing from %s", a.SessionDir())
+	}
+	if record.State != string(SubAgentStateCompleted) {
+		t.Fatalf("persisted state = %q, want completed without the event loop; record=%+v", record.State, record)
+	}
+	if !record.RuntimeParked {
+		t.Fatalf("persisted record is not parked: %+v", record)
+	}
+}

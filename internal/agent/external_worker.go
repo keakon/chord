@@ -26,6 +26,14 @@ import (
 // --resume turn reads, before Chord escalates to SIGTERM.
 const externalSessionStopGrace = 2 * time.Second
 
+// externalShutdownWait caps how long app shutdown waits for an external
+// worker's teardown before leaving the rest to its supervisor process: the
+// supervisor finishes the escalation (grace, SIGTERM, SIGKILL) and leaves the
+// receipt restore trusts, so waiting longer only delays the exit. A CLI that
+// answers interrupt or stdin EOF settles within this budget; a slower one
+// converges through the restore-time interrupted record instead.
+const externalShutdownWait = 500 * time.Millisecond
+
 // externalProgressMinInterval and externalProgressBurstItems implement the
 // mailbox/TUI progress throttle: at most one update per interval, with a burst
 // of distinct items released every N so heavy tool traffic cannot leave the
@@ -94,11 +102,16 @@ type externalWorker struct {
 	sessionEstablished bool
 	resumeNext         bool
 
-	started                  atomic.Bool
-	closing                  atomic.Bool
-	finished                 atomic.Bool
-	finishOnce               sync.Once
-	closePending             atomic.Bool
+	started      atomic.Bool
+	closing      atomic.Bool
+	finished     atomic.Bool
+	finishOnce   sync.Once
+	closePending atomic.Bool
+	// cancelRequested claims the settlement for an in-flight close request
+	// (user cancel) so the run loop, which wakes on the cancelled context
+	// before the request's event is dispatched, cannot synthesize a competing
+	// close event with a generic reason.
+	cancelRequested          atomic.Bool
 	terminationRetryPending  atomic.Bool
 	releaseUnproven          atomic.Bool
 	terminationRetryAttempts int
@@ -604,6 +617,7 @@ func (w *externalWorker) requestUserCancel(reason string) bool {
 	if w.finished.Load() || w.closing.Load() {
 		return false
 	}
+	w.cancelRequested.Store(true)
 	w.teardown()
 	if w.parent != nil {
 		w.parent.sendEvent(Event{
@@ -648,6 +662,7 @@ func (w *externalWorker) finishSuccess(text string) {
 			summary = "external agent completed without a text result"
 		}
 		w.setState(SubAgentStateCompleted, summary)
+		w.persistExternalTerminalRecord("")
 		envelope := w.externalCompletionEnvelope(summary)
 		result := &AgentResult{Summary: summary, Envelope: envelope}
 		if w.parent != nil {
@@ -664,6 +679,7 @@ func (w *externalWorker) finishFailure(err error) {
 			message = err.Error()
 		}
 		w.setState(SubAgentStateFailed, message)
+		w.persistExternalTerminalRecord("external agent failed")
 		if w.parent != nil {
 			w.parent.sendEvent(Event{
 				Type:     EventSubAgentCloseRequested,
@@ -678,10 +694,23 @@ func (w *externalWorker) finishFailure(err error) {
 	})
 }
 
+// finishCancelledUnlessRequested settles the worker as cancelled unless a
+// close request from outside the run loop (user cancel, session switch) is
+// already carrying the settlement. Synthesizing a second close event here
+// would race that request through the event loop and could overwrite its
+// closed reason.
+func (w *externalWorker) finishCancelledUnlessRequested() {
+	if w.closePending.Load() || w.cancelRequested.Load() {
+		return
+	}
+	w.finishCancelled("external agent cancelled")
+}
+
 func (w *externalWorker) finishCancelled(reason string) {
 	w.finishOnce.Do(func() {
 		w.finished.Store(true)
 		w.setState(SubAgentStateCancelled, reason)
+		w.persistExternalTerminalRecord("external agent cancelled")
 		if w.parent != nil {
 			w.parent.sendEvent(Event{
 				Type:     EventSubAgentCloseRequested,
@@ -694,6 +723,42 @@ func (w *externalWorker) finishCancelled(reason string) {
 			})
 		}
 	})
+}
+
+// persistExternalTerminalRecord stamps the worker's own terminal decision on
+// the durable record from the worker goroutine. The event loop owns terminal
+// truth in memory — the close handler still drives settlement, retries and the
+// slot — so the stamp reaches disk only: a shutdown that stops accepting
+// events would otherwise leave a finished task recorded as running until the
+// next restore, which then misclassifies even a delivered result as failed. A
+// later close overwrites this stamp with the full settlement.
+func (w *externalWorker) persistExternalTerminalRecord(closedReason string) {
+	if w == nil || w.parent == nil {
+		return
+	}
+	w.promptMu.Lock()
+	owner, record, err := w.cloneExternalTaskRecordLocked()
+	if err != nil {
+		w.promptMu.Unlock()
+		log.Debugf("skip external terminal record task=%v instance=%v reason=%v", w.taskID, w.instanceID, err)
+		return
+	}
+	state := w.State()
+	record.State = string(state)
+	record.ResumePolicy = durableTaskResumePolicy(state)
+	record.LastSummary = w.LastSummary()
+	record.RuntimeParked = true
+	if closedReason != "" {
+		record.ClosedReason = closedReason
+	}
+	record.UpdatedAt = time.Now()
+	err = w.parent.persistTaskRegistryRecord(owner.dir, w.taskID, record)
+	w.promptMu.Unlock()
+	if err != nil {
+		// The close path retries the persist with the full settlement; a
+		// failure here only falls back to restore-time normalization.
+		log.Debugf("persist external terminal state task=%v instance=%v error=%v", w.taskID, w.instanceID, err)
+	}
 }
 
 func (w *externalWorker) externalCompletionEnvelope(summary string) *CompletionEnvelope {

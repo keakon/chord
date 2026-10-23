@@ -50,9 +50,7 @@ func (w *externalWorker) runExternalWorker() {
 	}
 	for {
 		if w.closing.Load() || w.ctx.Err() != nil {
-			if !w.closePending.Load() {
-				w.finishCancelled("external agent cancelled")
-			}
+			w.finishCancelledUnlessRequested()
 			return
 		}
 		session, processEnded, err := w.startSession(input, w.resumeNext)
@@ -65,7 +63,7 @@ func (w *externalWorker) runExternalWorker() {
 				return
 			}
 			if w.closing.Load() || w.ctx.Err() != nil {
-				w.finishCancelled("external agent cancelled")
+				w.finishCancelledUnlessRequested()
 			} else {
 				w.finishFailure(err)
 			}
@@ -108,9 +106,7 @@ func (w *externalWorker) runExternalWorker() {
 		}
 		if w.closing.Load() || w.ctx.Err() != nil {
 			_ = w.settleUnresolvedExternalTools()
-			if !w.closePending.Load() {
-				w.finishCancelled("external agent cancelled")
-			}
+			w.finishCancelledUnlessRequested()
 			return
 		}
 		if err := w.getResultError(); err != nil {
