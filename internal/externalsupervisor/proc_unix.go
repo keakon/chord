@@ -41,6 +41,15 @@ func (s GroupState) String() string {
 // unrelated process.
 var ErrIdentityMismatch = errors.New("supervised process identity no longer matches the bound process group")
 
+func lifecycleOutputFile(fd int) (*os.File, error) {
+	// Inherited descriptors arrive in blocking mode. NewFile only registers
+	// nonblocking descriptors with the poller, which enforces write deadlines.
+	if err := syscall.SetNonblock(fd, true); err != nil {
+		return nil, fmt.Errorf("make lifecycle pipe nonblocking: %w", err)
+	}
+	return os.NewFile(uintptr(fd), "lifecycle-out"), nil
+}
+
 // configureProcessGroup makes the managed process lead its own session so the
 // supervisor can signal it and every child it spawns as one unit.
 func configureProcessGroup(cmd *exec.Cmd) {
@@ -70,9 +79,48 @@ func processGroupID(cmd *exec.Cmd) (pid, pgid int, err error) {
 
 // probeGroup resolves a bound identity. It never treats a live pid as proof on
 // its own: the group must still be the one that was bound.
-func probeGroup(pid, pgid int) GroupState {
+func probeGroup(pid, pgid int, startToken string) GroupState {
 	if pgid <= 0 {
 		return GroupUnknown
+	}
+	if startToken != "" {
+		token, err := processStartToken(pid)
+		switch {
+		case err == nil:
+			if token != startToken {
+				return GroupUnknown
+			}
+			actual, err := syscall.Getpgid(pid)
+			if err != nil || actual != pgid {
+				return GroupUnknown
+			}
+			return GroupAlive
+		case errors.Is(err, syscall.EIO):
+			// Darwin reports EIO once the process was reaped. The token is
+			// gone, but the group id may still belong to our leaked child.
+			// Only treat the group as ours when the pid itself is also gone:
+			// a live Getpgid means the pid was recycled and may lead or belong
+			// to another group, so refuse to signal it.
+			if _, gerr := syscall.Getpgid(pid); !errors.Is(gerr, syscall.ESRCH) {
+				return GroupUnknown
+			}
+			if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
+				return GroupGone
+			}
+			return GroupAlive
+		case processStartTokenGone(err):
+			// The leader is gone. The group id can still be held by another
+			// member; if it is, it is the group we bound because no live
+			// process currently owns that pid.
+			if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
+				return GroupGone
+			} else if err != nil {
+				return GroupUnknown
+			}
+			return GroupAlive
+		default:
+			return GroupUnknown
+		}
 	}
 	if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
 		return GroupGone
@@ -95,8 +143,8 @@ func probeGroup(pid, pgid int) GroupState {
 // terminateGroup tears the bound process group down: SIGTERM first, SIGKILL
 // after grace if members remain, and a final proof that the group is gone.
 // It refuses to signal an identity that no longer matches.
-func terminateGroup(pid, pgid int, grace time.Duration) (Cleanup, error) {
-	switch state := probeGroup(pid, pgid); state {
+func terminateGroup(pid, pgid int, startToken string, grace time.Duration) (Cleanup, error) {
+	switch state := probeGroup(pid, pgid, startToken); state {
 	case GroupGone:
 		return Cleanup{Proven: true, Note: "process group was already gone"}, nil
 	case GroupUnknown:
@@ -104,32 +152,36 @@ func terminateGroup(pid, pgid int, grace time.Duration) (Cleanup, error) {
 	}
 	cleanup := Cleanup{Terminated: true}
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
-	if waitGroupGone(pid, pgid, grace) {
+	if waitGroupGone(pid, pgid, startToken, grace) {
 		cleanup.Proven = true
 		return cleanup, nil
 	}
 	cleanup.Killed = true
 	_ = syscall.Kill(-pgid, syscall.SIGKILL)
-	if waitGroupGone(pid, pgid, grace) {
+	if waitGroupGone(pid, pgid, startToken, grace) {
 		cleanup.Proven = true
 		return cleanup, nil
 	}
 	return cleanup, fmt.Errorf("termination of process group %d is not proven", pgid)
 }
 
-func waitGroupGone(pid, pgid int, timeout time.Duration) bool {
+func waitGroupGone(pid, pgid int, startToken string, timeout time.Duration) bool {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
-	for probeGroup(pid, pgid) != GroupGone {
+	for probeGroup(pid, pgid, startToken) != GroupGone {
 		select {
 		case <-ticker.C:
 		case <-deadline.C:
-			return probeGroup(pid, pgid) == GroupGone
+			return probeGroup(pid, pgid, startToken) == GroupGone
 		}
 	}
 	return true
+}
+
+func processStartTokenGone(err error) bool {
+	return errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.ENOENT) || errors.Is(err, os.ErrNotExist)
 }
 
 // setCloseOnExec keeps a descriptor out of every process the supervisor

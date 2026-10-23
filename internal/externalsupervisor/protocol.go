@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"time"
 )
 
@@ -73,8 +74,9 @@ type Message struct {
 	KillGraceMS int64    `json:"kill_grace_ms,omitempty"`
 
 	// started: the process-group identity the supervisor bound for this run.
-	PID  int `json:"pid,omitempty"`
-	PGID int `json:"pgid,omitempty"`
+	PID        int    `json:"pid,omitempty"`
+	PGID       int    `json:"pgid,omitempty"`
+	StartToken string `json:"start_token,omitempty"`
 
 	// stop: how long the managed process may take to go away on its own.
 	GraceMS int64 `json:"grace_ms,omitempty"`
@@ -110,6 +112,7 @@ type Receipt struct {
 	ProcessStarted bool      `json:"process_started,omitempty"`
 	PID            int       `json:"pid"`
 	PGID           int       `json:"pgid"`
+	StartToken     string    `json:"start_token,omitempty"`
 	StartedAt      time.Time `json:"started_at"`
 	FinishedAt     time.Time `json:"finished_at"`
 	Reason         string    `json:"reason"`
@@ -118,7 +121,14 @@ type Receipt struct {
 	Cleanup        Cleanup   `json:"cleanup"`
 }
 
-const receiptVersion = 1
+const receiptVersion = 2
+
+func writeLifecycleMessage(pipe *os.File, message Message, deadline time.Time) error {
+	if err := pipe.SetWriteDeadline(deadline); err != nil {
+		return fmt.Errorf("set lifecycle write deadline: %w", err)
+	}
+	return writeMessage(pipe, message)
+}
 
 func writeMessage(writer io.Writer, message Message) error {
 	data, err := json.Marshal(message)

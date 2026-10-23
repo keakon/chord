@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -99,7 +100,7 @@ func TestSupervisorBindsIdentityAndReportsExit(t *testing.T) {
 	if pgid != pid {
 		t.Fatalf("supervised process %d does not lead its own group %d", pid, pgid)
 	}
-	if got := probeGroup(pid, pgid); got != GroupAlive {
+	if got := probeGroup(pid, pgid, ""); got != GroupAlive {
 		t.Fatalf("group state = %v, want alive", got)
 	}
 	if err := sup.Stop(20 * time.Second); err != nil {
@@ -140,7 +141,7 @@ func TestSupervisorCleansUpWhenHostDisappears(t *testing.T) {
 	if err := sup.Wait(); err == nil {
 		t.Fatal("a supervisor that lost its host reported a settled run")
 	}
-	if got := probeGroup(pid, pgid); got != GroupGone {
+	if got := probeGroup(pid, pgid, ""); got != GroupGone {
 		t.Fatalf("group state after host death = %v, want gone", got)
 	}
 	receipt := readReceipt(t, receiptDir)
@@ -175,7 +176,7 @@ func TestHostCleansUpWhenSupervisorDies(t *testing.T) {
 	if err := sup.Stop(2 * time.Second); err == nil {
 		t.Fatal("a run no supervisor reported ended without an error")
 	}
-	if got := probeGroup(pid, pgid); got != GroupGone {
+	if got := probeGroup(pid, pgid, ""); got != GroupGone {
 		t.Fatalf("group state after supervisor death = %v, want gone", got)
 	}
 }
@@ -196,10 +197,10 @@ func TestTerminateGroupRefusesMismatchedIdentity(t *testing.T) {
 	if foreign == pgid {
 		t.Skip("the test process shares the managed process group")
 	}
-	if _, err := terminateGroup(pid, foreign, 100*time.Millisecond); !errors.Is(err, ErrIdentityMismatch) {
+	if _, err := terminateGroup(pid, foreign, "", 100*time.Millisecond); !errors.Is(err, ErrIdentityMismatch) {
 		t.Fatalf("terminateGroup with a foreign group = %v, want %v", err, ErrIdentityMismatch)
 	}
-	if got := probeGroup(pid, pgid); got != GroupAlive {
+	if got := probeGroup(pid, pgid, ""); got != GroupAlive {
 		t.Fatalf("group state = %v, want alive: a mismatched identity still signalled", got)
 	}
 }
@@ -228,7 +229,7 @@ func TestSupervisorEscalatesToSIGKILL(t *testing.T) {
 		t.Fatalf("close lifecycle channel: %v", err)
 	}
 	_ = sup.Wait()
-	if got := probeGroup(pid, pgid); got != GroupGone {
+	if got := probeGroup(pid, pgid, ""); got != GroupGone {
 		t.Fatalf("group state = %v, want gone", got)
 	}
 	receipt := readReceipt(t, receiptDir)
@@ -456,7 +457,7 @@ func TestLaunchFailureAfterSpawnCleansWholeGroup(t *testing.T) {
 			_ = syscall.Kill(-startedPID, syscall.SIGKILL)
 		}
 	}()
-	code := launchManaged(outW, request, nil, stdinR, stdoutW, stderrW, time.Second)
+	code := launchManaged(outW, request, nil, stdinR, stdoutW, stderrW, nil, time.Second)
 	if code != ExitFailure {
 		t.Fatalf("launch exit = %d, want failure", code)
 	}
@@ -467,7 +468,7 @@ func TestLaunchFailureAfterSpawnCleansWholeGroup(t *testing.T) {
 	if !receipt.Cleanup.Proven {
 		t.Fatalf("receipt cleanup = %+v, want proven", receipt.Cleanup)
 	}
-	if got := probeGroup(receipt.PID, receipt.PGID); got != GroupGone {
+	if got := probeGroup(receipt.PID, receipt.PGID, receipt.StartToken); got != GroupGone {
 		t.Fatalf("group state = %v, want gone", got)
 	}
 }
@@ -528,6 +529,160 @@ func TestStartRejectionReceiptProvesCleanup(t *testing.T) {
 	}
 	if receipt.ProcessStarted || !receipt.Cleanup.Proven {
 		t.Fatalf("rejection receipt = %+v", receipt)
+	}
+}
+
+func TestLifecycleStartWriteTimeout(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll(reader, writer)
+	s := &Supervisor{
+		in: writer, handshake: make(chan Message, 1), readDone: make(chan struct{}),
+		runID: "fixture-run",
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- s.bind(20*time.Millisecond, Config{Child: ChildSpec{
+			Command: "fixture", Env: []string{"FIXTURE=" + strings.Repeat("x", 256<<10)},
+		}})
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("start write = %v, want deadline exceeded", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		writer.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("write did not unblock after pipe close")
+		}
+		t.Fatal("20ms handshake budget did not bound the start request write")
+	}
+}
+
+func TestConcurrentStopSharesCleanup(t *testing.T) {
+	sup := startSupervised(t, "sleep 300\n", "")
+	var calls sync.WaitGroup
+	results := make(chan error, 4)
+	for range cap(results) {
+		calls.Go(func() { results <- sup.Stop(20 * time.Millisecond) })
+	}
+	done := make(chan struct{})
+	go func() { calls.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		sup.retire()
+		t.Fatal("concurrent stop did not finish")
+	}
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatalf("stop = %v", err)
+		}
+	}
+	if !sup.GroupGone() {
+		t.Fatal("concurrent stop left the process group alive")
+	}
+}
+
+func TestLifecycleReplyBackpressureKeepsReceipt(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll(reader, writer)
+	dir := t.TempDir()
+	runID, err := NewRunID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &supervisedRun{
+		out: writer, killGrace: 20 * time.Millisecond,
+		request: Message{RunID: runID, ReceiptDir: dir},
+	}
+	done := make(chan int, 1)
+	go func() {
+		done <- r.finishWith(Cleanup{Note: strings.Repeat("x", 256<<10)}, nil, ReasonChildExit, 0, 0)
+	}()
+	select {
+	case code := <-done:
+		if code != ExitFailure {
+			t.Fatalf("finish = %d, want unproven failure", code)
+		}
+	case <-time.After(200 * time.Millisecond):
+		writer.Close()
+		t.Fatal("reply backpressure blocked supervisor completion")
+	}
+	receipt := readReceipt(t, dir)
+	if receipt.RunID != runID || receipt.Cleanup.Note == "" {
+		t.Fatalf("missing receipt under backpressure: %+v", receipt)
+	}
+}
+
+func TestInheritedLifecycleOutputSupportsDeadlines(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll(reader, writer)
+	fd, err := syscall.Dup(int(writer.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := lifecycleOutputFile(fd)
+	if err != nil {
+		syscall.Close(fd)
+		t.Fatal(err)
+	}
+	defer out.Close()
+	err = writeLifecycleMessage(out, Message{Type: TypeError, Error: strings.Repeat("x", 256<<10)}, time.Now().Add(20*time.Millisecond))
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("inherited pipe write = %v, want deadline exceeded", err)
+	}
+}
+
+func TestLifecycleStopAndDiscardBackpressure(t *testing.T) {
+	for _, operation := range []string{"stop", "discard"} {
+		t.Run(operation, func(t *testing.T) {
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeAll(reader, writer)
+			err = writeLifecycleMessage(writer, Message{Type: TypeError, Error: strings.Repeat("x", 256<<10)}, time.Now().Add(20*time.Millisecond))
+			if !errors.Is(err, os.ErrDeadlineExceeded) {
+				t.Fatalf("fill lifecycle pipe = %v", err)
+			}
+			cmd := exec.Command("true")
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			s := &Supervisor{
+				cmd: cmd, in: writer, runID: "fixture-run", killGrace: 20 * time.Millisecond,
+				readDone: make(chan struct{}), waited: make(chan struct{}),
+			}
+			close(s.readDone)
+			done := make(chan struct{})
+			go func() {
+				if operation == "stop" {
+					_ = s.Stop(20 * time.Millisecond)
+				} else {
+					s.discard()
+				}
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				writer.Close()
+				t.Fatal("lifecycle backpressure blocked " + operation)
+			}
+		})
 	}
 }
 

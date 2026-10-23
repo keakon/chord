@@ -78,8 +78,7 @@ func (e *StartError) Unwrap() error { return e.Err }
 // false for errors raised before the supervisor was spawned; such a launch
 // cannot have started a managed process.
 func StartCleanupProven(err error) (proven, known bool) {
-	var startErr *StartError
-	if errors.As(err, &startErr) {
+	if startErr, ok := errors.AsType[*StartError](err); ok {
 		return startErr.CleanupProven, true
 	}
 	return false, false
@@ -92,6 +91,7 @@ type Report struct {
 	RunID      string
 	PID        int
 	PGID       int
+	StartToken string
 	Reason     string
 	ExitCode   int
 	ExitSignal int
@@ -115,6 +115,7 @@ type Supervisor struct {
 	runID      string
 	receiptDir string
 	killGrace  time.Duration
+	startToken string
 
 	handshake chan Message
 	readDone  chan struct{}
@@ -126,6 +127,9 @@ type Supervisor struct {
 	waitOnce sync.Once
 	waitErr  error
 	waited   chan struct{}
+	writeMu  sync.Mutex
+	stopOnce sync.Once
+	stopErr  error
 }
 
 // Start creates the business pipes and the lifecycle channel, spawns the
@@ -229,6 +233,9 @@ func Start(cfg Config) (*Supervisor, error) {
 // bind runs the startup handshake: Chord asks for one run under a fresh
 // identity and the supervisor answers with the process group it bound.
 func (s *Supervisor) bind(timeout time.Duration, cfg Config) error {
+	deadline := time.Now().Add(timeout)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	request := Message{
 		Type:        TypeStart,
 		RunID:       s.runID,
@@ -239,11 +246,9 @@ func (s *Supervisor) bind(timeout time.Duration, cfg Config) error {
 		ReceiptDir:  s.receiptDir,
 		KillGraceMS: s.killGrace.Milliseconds(),
 	}
-	if err := s.write(request); err != nil {
+	if err := s.write(request, deadline); err != nil {
 		return fmt.Errorf("send supervisor start request: %w", err)
 	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
 	select {
 	case message := <-s.handshake:
 		if message.Type == TypeError {
@@ -260,6 +265,8 @@ func (s *Supervisor) bind(timeout time.Duration, cfg Config) error {
 		}
 		s.mu.Lock()
 		s.report.PID, s.report.PGID = message.PID, message.PGID
+		s.report.StartToken = message.StartToken
+		s.startToken = message.StartToken
 		s.mu.Unlock()
 		return nil
 	case <-s.readDone:
@@ -279,7 +286,7 @@ func (s *Supervisor) bind(timeout time.Duration, cfg Config) error {
 // bound, but it may already have started a process: ask for the teardown
 // before the supervisor is killed, so nothing it launched is left behind.
 func (s *Supervisor) discard() bool {
-	_ = s.write(Message{Type: TypeStop, RunID: s.runID})
+	_ = s.write(Message{Type: TypeStop, RunID: s.runID}, time.Now().Add(s.killGrace))
 	if !s.awaitExit(s.killGrace) {
 		if s.cmd != nil && s.cmd.Process != nil {
 			_ = s.cmd.Process.Kill()
@@ -329,7 +336,10 @@ func (s *Supervisor) GroupGone() bool {
 	if !ok {
 		return false
 	}
-	return probeGroup(pid, pgid) == GroupGone
+	s.mu.Lock()
+	startToken := s.startToken
+	s.mu.Unlock()
+	return probeGroup(pid, pgid, startToken) == GroupGone
 }
 
 // KillGroup tears the bound process group down from Chord's side, for the case
@@ -340,7 +350,10 @@ func (s *Supervisor) KillGroup() (bool, error) {
 	if !ok {
 		return false, fmt.Errorf("supervised process identity is unknown: %w", ErrIdentityMismatch)
 	}
-	cleanup, err := terminateGroup(pid, pgid, s.killGrace)
+	s.mu.Lock()
+	startToken := s.startToken
+	s.mu.Unlock()
+	cleanup, err := terminateGroup(pid, pgid, startToken, s.killGrace)
 	s.mu.Lock()
 	s.report.Cleanup = cleanup
 	s.mu.Unlock()
@@ -355,12 +368,17 @@ func (s *Supervisor) KillGroup() (bool, error) {
 // and cleaning it up itself when the supervisor did not. A supervisor that
 // never answers within grace is retired the same way.
 func (s *Supervisor) Stop(grace time.Duration) error {
+	s.stopOnce.Do(func() { s.stopErr = s.stop(grace) })
+	return s.stopErr
+}
+
+func (s *Supervisor) stop(grace time.Duration) error {
 	if grace <= 0 {
 		grace = s.killGrace
 	}
 	// A supervisor that already died cannot read this, and the write error is
 	// not a failure: the fallback below is what covers that case.
-	_ = s.write(Message{Type: TypeStop, RunID: s.runID, GraceMS: grace.Milliseconds()})
+	_ = s.write(Message{Type: TypeStop, RunID: s.runID, GraceMS: grace.Milliseconds()}, time.Now().Add(s.killGrace))
 	// The supervisor spends `grace` waiting for the managed process to leave on
 	// its own and then escalates on its own budget — SIGTERM, killGrace,
 	// SIGKILL, killGrace — before it reaps the child and answers. Waiting only
@@ -505,6 +523,8 @@ func (s *Supervisor) apply(message Message) {
 		s.report.RunID = message.RunID
 		s.report.PID = message.PID
 		s.report.PGID = message.PGID
+		s.report.StartToken = message.StartToken
+		s.startToken = message.StartToken
 	case TypeExited:
 		s.report.Reason = message.Reason
 		s.report.ExitCode = message.ExitCode
@@ -527,11 +547,13 @@ func (s *Supervisor) notify(message Message) {
 	}
 }
 
-func (s *Supervisor) write(message Message) error {
+func (s *Supervisor) write(message Message, deadline time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if s.in == nil {
 		return errors.New("lifecycle channel is closed")
 	}
-	return writeMessage(s.in, message)
+	return writeLifecycleMessage(s.in, message, deadline)
 }
 
 func (s *Supervisor) record(err error) {
@@ -600,8 +622,13 @@ func LoadReceipt(dir, runID string) (Receipt, error) {
 	if receipt.RunID != runID {
 		return Receipt{}, fmt.Errorf("supervisor receipt belongs to run %q", receipt.RunID)
 	}
-	if receipt.Cleanup.Proven && receipt.ProcessStarted && (receipt.PID <= 0 || receipt.PGID <= 0) {
-		return Receipt{}, errors.New("supervisor receipt claims proven cleanup without a bound process identity")
+	if receipt.Cleanup.Proven && receipt.ProcessStarted {
+		if receipt.PID <= 0 || receipt.PGID <= 0 {
+			return Receipt{}, errors.New("supervisor receipt claims proven cleanup without a bound process identity")
+		}
+		if receipt.StartToken == "" {
+			return Receipt{}, errors.New("supervisor receipt claims proven cleanup without a process start token")
+		}
 	}
 	return receipt, nil
 }

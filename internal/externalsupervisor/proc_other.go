@@ -46,14 +46,18 @@ func processGroupID(_ *exec.Cmd) (int, int, error) {
 	return 0, 0, ErrUnsupportedProcessGroup
 }
 
-func probeGroup(_, _ int) GroupState { return GroupUnknown }
+func probeGroup(_, _ int, _ string) GroupState { return GroupUnknown }
 
-func terminateGroup(pid, pgid int, _ time.Duration) (Cleanup, error) {
+func terminateGroup(pid, pgid int, _ string, _ time.Duration) (Cleanup, error) {
 	return Cleanup{}, fmt.Errorf("%w: process group %d of pid %d is %s",
-		ErrUnsupportedProcessGroup, pgid, pid, probeGroup(pid, pgid))
+		ErrUnsupportedProcessGroup, pgid, pid, probeGroup(pid, pgid, ""))
 }
 
+func processStartToken(int) (string, error) { return "", ErrUnsupportedProcessGroup }
+
 func setCloseOnExec(_ ...*os.File) {}
+
+func lifecycleOutputFile(int) (*os.File, error) { return nil, ErrUnsupportedProcessGroup }
 
 func shutdownSignals() []os.Signal { return []os.Signal{os.Interrupt} }
 

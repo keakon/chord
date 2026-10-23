@@ -29,7 +29,10 @@ const (
 // the conversation and the settlement, the supervisor owns the process.
 func Run(_ []string) int {
 	in := os.NewFile(LifecycleInFD, "lifecycle-in")
-	out := os.NewFile(LifecycleOutFD, "lifecycle-out")
+	out, err := lifecycleOutputFile(LifecycleOutFD)
+	if err != nil {
+		return ExitFailure
+	}
 	childStdin := os.NewFile(ChildStdinFD, "managed-stdin")
 	childStdout := os.NewFile(ChildStdoutFD, "managed-stdout")
 	childStderr := os.NewFile(ChildStderrFD, "managed-stderr")
@@ -46,17 +49,28 @@ func Run(_ []string) int {
 		// Chord never asked for a process, so there is nothing to clean up.
 		return ExitOK
 	}
+	// Install the shutdown handler before the managed process exists. The
+	// supervisor may otherwise receive SIGHUP/SIGQUIT in the launch window
+	// and die without tearing the child group down or writing a receipt.
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, shutdownSignals()...)
+	defer signal.Stop(signals)
+	select {
+	case <-signals:
+		return ExitOK
+	default:
+	}
 	if request.Command == "" {
-		return fail(out, request, fmt.Errorf("start request without a command"), false, 0, 0, time.Now(), Cleanup{Proven: true, Note: "launch failed before a process was started"})
+		return fail(out, request, fmt.Errorf("start request without a command"), false, 0, 0, "", time.Now(), Cleanup{Proven: true, Note: "launch failed before a process was started"})
 	}
 	killGrace := time.Duration(request.KillGraceMS) * time.Millisecond
 	if killGrace <= 0 {
 		killGrace = defaultKillGrace
 	}
-	return launchManaged(out, request, reader, childStdin, childStdout, childStderr, killGrace)
+	return launchManaged(out, request, reader, childStdin, childStdout, childStderr, signals, killGrace)
 }
 
-func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStdin, childStdout, childStderr *os.File, killGrace time.Duration) int {
+func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStdin, childStdout, childStderr *os.File, signals <-chan os.Signal, killGrace time.Duration) int {
 	cmd := exec.Command(request.Command, request.Args...)
 	cmd.Dir = request.Dir
 	cmd.Env = request.Env
@@ -65,44 +79,77 @@ func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStd
 	cmd.Stderr = childStderr
 	configureProcessGroup(cmd)
 	startedAt := time.Now()
+	select {
+	case <-signals:
+		return ExitOK
+	default:
+	}
 	if err := cmd.Start(); err != nil {
 		childStdin.Close()
 		childStdout.Close()
 		childStderr.Close()
-		return fail(out, request, fmt.Errorf("start %s: %w", request.Command, err), false, 0, 0, startedAt, Cleanup{Proven: true, Note: "launch failed before a process was started"})
+		return fail(out, request, fmt.Errorf("start %s: %w", request.Command, err), false, 0, 0, "", startedAt, Cleanup{Proven: true, Note: "launch failed before a process was started"})
 	}
+	// One reaper owns cmd.Wait for the rest of the run. The handshake-failure
+	// and supervision paths share it: a zombie leader is still a group member,
+	// so without reaping first the cleanup probe waits out both grace periods
+	// and reports an unproven receipt for a group that is already empty.
+	childDone := make(chan error, 1)
+	go func() { childDone <- cmd.Wait() }()
 	// The managed process owns its ends now. Holding any of them would hide
 	// EOF from Chord and make a dead process look alive.
 	closeAll(childStdin, childStdout, childStderr)
 	pid, pgid, err := managedProcessGroupID(cmd)
 	if err != nil {
+		startToken, _ := processStartToken(pid)
 		if pgid <= 0 {
 			pgid = pid
 		}
-		cleanup, cleanupErr := cleanupUnboundProcess(cmd, pid, pgid, killGrace)
+		cleanup, cleanupErr := cleanupUnboundProcess(cmd, pid, pgid, startToken, killGrace, childDone)
 		if cleanupErr != nil {
 			cleanup.Proven = false
 			if cleanup.Note == "" {
 				cleanup.Note = cleanupErr.Error()
 			}
 		}
-		return fail(out, request, err, true, pid, pgid, startedAt, cleanup)
+		return fail(out, request, err, true, pid, pgid, startToken, startedAt, cleanup)
+	}
+	startToken, tokenErr := processStartToken(pid)
+	if tokenErr != nil {
+		cleanup, cleanupErr := cleanupUnboundProcess(cmd, pid, pgid, "", killGrace, childDone)
+		if cleanupErr != nil {
+			cleanup.Proven = false
+			if cleanup.Note == "" {
+				cleanup.Note = cleanupErr.Error()
+			}
+		}
+		return fail(out, request, fmt.Errorf("read managed process identity: %w", tokenErr), true, pid, pgid, "", startedAt, cleanup)
 	}
 
 	run := &supervisedRun{
-		request:   request,
-		out:       out,
-		reader:    reader,
-		cmd:       cmd,
-		pid:       pid,
-		pgid:      pgid,
-		killGrace: killGrace,
-		startedAt: startedAt,
+		request:    request,
+		out:        out,
+		reader:     reader,
+		cmd:        cmd,
+		pid:        pid,
+		pgid:       pgid,
+		startToken: startToken,
+		childDone:  childDone,
+		signals:    signals,
+		killGrace:  killGrace,
+		startedAt:  startedAt,
+	}
+	// A signal can arrive between cmd.Start and supervise. Consume it before
+	// the handshake so this run still tears down the group it just created.
+	select {
+	case <-signals:
+		return run.finish(ReasonSignal)
+	default:
 	}
 	if err := run.handshake(); err != nil {
 		// Chord is gone before the run was even acknowledged: clean up and
 		// leave the receipt as the only trace.
-		code := run.finish(ReasonHostGone, 0, 0)
+		code := run.finish(ReasonHostGone)
 		_ = run.out.Close()
 		return code
 	}
@@ -114,56 +161,53 @@ var managedProcessGroupID = processGroupID
 // cleanupUnboundProcess tears down a launch that started but whose group could
 // not be read. A setsid child leads its own group, so the pid is the group id
 // when the read itself failed; a different reported group is never signalled.
-func cleanupUnboundProcess(cmd *exec.Cmd, pid, pgid int, grace time.Duration) (Cleanup, error) {
+func cleanupUnboundProcess(cmd *exec.Cmd, pid, pgid int, startToken string, grace time.Duration, childDone <-chan error) (Cleanup, error) {
 	if cmd == nil || cmd.Process == nil {
 		return Cleanup{}, nil
 	}
-	reaped := make(chan struct{})
-	go func() {
-		_ = cmd.Wait()
-		close(reaped)
-	}()
 	if pgid != pid {
 		_ = cmd.Process.Kill()
-		waitForReap(reaped, grace)
+		waitForReap(childDone, grace)
 		return Cleanup{Note: "managed process did not lead its own process group"}, fmt.Errorf("managed process %d leads group %d", pid, pgid)
 	}
-	cleanup, err := terminateGroup(pid, pgid, grace)
-	waitForReap(reaped, grace)
+	cleanup, err := terminateGroup(pid, pgid, startToken, grace)
+	waitForReap(childDone, grace)
 	return cleanup, err
 }
 
-func waitForReap(reaped <-chan struct{}, timeout time.Duration) {
+func waitForReap(childDone <-chan error, timeout time.Duration) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
-	case <-reaped:
+	case <-childDone:
 	case <-timer.C:
 	}
 }
 
 // supervisedRun is one managed process the supervisor owns.
 type supervisedRun struct {
-	request   Message
-	out       *os.File
-	reader    *bufio.Reader
-	cmd       *exec.Cmd
-	pid       int
-	pgid      int
-	killGrace time.Duration
-	startedAt time.Time
+	request    Message
+	out        *os.File
+	reader     *bufio.Reader
+	cmd        *exec.Cmd
+	pid        int
+	pgid       int
+	startToken string
+	childDone  chan error
+	signals    <-chan os.Signal
+	killGrace  time.Duration
+	startedAt  time.Time
+	reaped     bool
+	childErr   error
 }
 
 // handshake binds the run to Chord: until it answers, the worker must not be
 // treated as runnable.
 func (r *supervisedRun) handshake() error {
-	return writeMessage(r.out, Message{Type: TypeStarted, RunID: r.request.RunID, PID: r.pid, PGID: r.pgid})
+	return writeLifecycleMessage(r.out, Message{Type: TypeStarted, RunID: r.request.RunID, PID: r.pid, PGID: r.pgid, StartToken: r.startToken}, time.Now().Add(r.killGrace))
 }
 
 func (r *supervisedRun) supervise() int {
-	childDone := make(chan error, 1)
-	go func() { childDone <- r.cmd.Wait() }()
-
 	stop := make(chan time.Duration, 1)
 	hostGone := make(chan struct{})
 	go func() {
@@ -189,36 +233,30 @@ func (r *supervisedRun) supervise() int {
 		}
 	}()
 
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, shutdownSignals()...)
-	defer signal.Stop(signals)
-
 	reason := ReasonChildExit
-	var childErr error
-	reaped := false
 	select {
-	case childErr = <-childDone:
-		reaped = true
+	case r.childErr = <-r.childDone:
+		r.reaped = true
 	case grace := <-stop:
 		reason = ReasonStopRequested
 		// Give the managed process its grace period to go on its own before
 		// the teardown below escalates.
 		select {
-		case childErr = <-childDone:
-			reaped = true
+		case r.childErr = <-r.childDone:
+			r.reaped = true
 		case <-time.After(grace):
 		}
 	case <-hostGone:
 		reason = ReasonHostGone
-	case <-signals:
+	case <-r.signals:
 		// A terminal interrupt or a shutdown of the supervisor's own group
 		// must not orphan the managed process either.
 		reason = ReasonSignal
 	}
 	// The teardown has to happen before the status is read: a process that is
 	// still running has no exit status yet.
-	cleanup, err := terminateGroup(r.pid, r.pgid, r.killGrace)
-	code, sig := r.reap(childDone, reaped, childErr)
+	cleanup, err := terminateGroup(r.pid, r.pgid, r.startToken, r.killGrace)
+	code, sig := r.reap()
 	result := r.finishWith(cleanup, err, reason, code, sig)
 	_ = r.out.Close()
 	return result
@@ -227,21 +265,23 @@ func (r *supervisedRun) supervise() int {
 // reap waits for the managed process after teardown so its status can be
 // reported. A process that outlives SIGKILL is reported as unproven instead of
 // blocking the supervisor forever.
-func (r *supervisedRun) reap(childDone chan error, reaped bool, childErr error) (code, sig int) {
-	if !reaped {
+func (r *supervisedRun) reap() (code, sig int) {
+	if !r.reaped {
 		select {
-		case childErr = <-childDone:
+		case r.childErr = <-r.childDone:
+			r.reaped = true
 		case <-time.After(r.killGrace):
 			return 0, 0
 		}
 	}
-	return exitStatus(childErr)
+	return exitStatus(r.childErr)
 }
 
 // finish tears the process group down and reports how the run ended. Chord
 // gets the report; when it cannot, the receipt is what is left behind.
-func (r *supervisedRun) finish(reason string, code, sig int) int {
-	cleanup, err := terminateGroup(r.pid, r.pgid, r.killGrace)
+func (r *supervisedRun) finish(reason string) int {
+	cleanup, err := terminateGroup(r.pid, r.pgid, r.startToken, r.killGrace)
+	code, sig := r.reap()
 	return r.finishWith(cleanup, err, reason, code, sig)
 }
 
@@ -261,7 +301,6 @@ func (r *supervisedRun) finishWith(cleanup Cleanup, err error, reason string, co
 		ExitSignal: sig,
 		Cleanup:    &cleanup,
 	}
-	_ = writeMessage(r.out, message)
 	// The receipt is written for every run, not only when delivery failed: a
 	// successful pipe write only means Chord's supervisor client read the exit,
 	// not that Chord persisted it before dying. Recovery looks up the receipt by
@@ -275,6 +314,7 @@ func (r *supervisedRun) finishWith(cleanup Cleanup, err error, reason string, co
 		ProcessStarted: true,
 		PID:            r.pid,
 		PGID:           r.pgid,
+		StartToken:     r.startToken,
 		StartedAt:      r.startedAt,
 		FinishedAt:     time.Now(),
 		Reason:         reason,
@@ -282,6 +322,7 @@ func (r *supervisedRun) finishWith(cleanup Cleanup, err error, reason string, co
 		ExitSignal:     sig,
 		Cleanup:        cleanup,
 	})
+	_ = writeLifecycleMessage(r.out, message, time.Now().Add(r.killGrace))
 	if !cleanup.Proven {
 		return ExitFailure
 	}
@@ -291,8 +332,7 @@ func (r *supervisedRun) finishWith(cleanup Cleanup, err error, reason string, co
 // fail reports a launch failure and leaves the receipt of that failure. A
 // failed group lookup still started a process, so its cleanup evidence must
 // travel with the receipt instead of being reported as an unbound success.
-func fail(out *os.File, request Message, err error, processStarted bool, pid, pgid int, startedAt time.Time, cleanup Cleanup) int {
-	_ = writeMessage(out, Message{Type: TypeError, RunID: request.RunID, Error: err.Error()})
+func fail(out *os.File, request Message, err error, processStarted bool, pid, pgid int, startToken string, startedAt time.Time, cleanup Cleanup) int {
 	writeReceipt(request.ReceiptDir, Receipt{
 		Version:        receiptVersion,
 		RunID:          request.RunID,
@@ -302,12 +342,18 @@ func fail(out *os.File, request Message, err error, processStarted bool, pid, pg
 		ProcessStarted: processStarted,
 		PID:            pid,
 		PGID:           pgid,
+		StartToken:     startToken,
 		StartedAt:      startedAt,
 		FinishedAt:     time.Now(),
 		Reason:         ReasonLaunchFailed,
 		Cleanup:        cleanup,
 	})
 	if out != nil {
+		grace := time.Duration(request.KillGraceMS) * time.Millisecond
+		if grace <= 0 {
+			grace = defaultKillGrace
+		}
+		_ = writeLifecycleMessage(out, Message{Type: TypeError, RunID: request.RunID, Error: err.Error()}, time.Now().Add(grace))
 		_ = out.Close()
 	}
 	return ExitFailure
