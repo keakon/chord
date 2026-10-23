@@ -144,7 +144,7 @@ Enter `/context` to inspect the focused task’s latest request: input compositi
 
 Subagents can also use an [external Claude Code process](external-agents.md). The main agent always uses Chord's internal runtime.
 
-Each child task shows its current state through the status icon: `○` running, `?` awaiting its owner (the coordinating agent), `⇣` awaiting its own child tasks, `✓` delivered, `✗` failed, `⊘` cancelled, `…` idle, or `◇` unknown. The header counts each icon separately and excludes the main agent. `✓` means that attempt has handed back its result; it does not mean the overall task has passed review.
+Each child task shows its current state through the status icon: `○` running, `?` awaiting its owner (the coordinating agent), `⇣` awaiting its own child tasks, `✓` delivered, `✗` failed, `⊘` cancelled, `…` idle, or `◇` unknown. The header shows one plain count of child tasks and excludes the main agent; each row already carries its own icon. `✓` means that attempt has handed back its result; it does not mean the overall task has passed review.
 
 A task awaiting its owner can show one line from its current coordination request. Click the task or its reason to open that agent's conversation and read the full request. The reason disappears when the request is resolved or the task resumes.
 

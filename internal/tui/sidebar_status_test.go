@@ -23,7 +23,7 @@ func TestSidebarStatusCategories(t *testing.T) {
 	} {
 		s.agents = append(s.agents, SidebarEntry{ID: state, Status: state})
 	}
-	want := "1 ? · 2 ✗ · 1 ⇣ · 1 ○ · 1 … · 2 ✓ · 1 ⊘ · 2 ◇"
+	want := "11"
 	if got := s.AgentsSummary(); got != want {
 		t.Fatalf("summary=%q want=%q", got, want)
 	}

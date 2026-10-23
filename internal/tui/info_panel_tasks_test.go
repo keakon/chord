@@ -333,7 +333,7 @@ func TestRenderInfoPanelAgentsRefreshWhenFocusChangesWithoutModelChange(t *testi
 	}
 }
 
-func TestRenderInfoPanelAgentsCountFailuresByIcon(t *testing.T) {
+func TestRenderInfoPanelAgentsHeaderShowsPlainCount(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)
 	subs := make([]agent.SubAgentInfo, 0, 3)
@@ -346,8 +346,8 @@ func TestRenderInfoPanelAgentsCountFailuresByIcon(t *testing.T) {
 	}
 
 	plain := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
-	if !strings.Contains(plain, "AGENTS · 3 ✗") {
-		t.Fatalf("AGENTS header should count failures by icon, got %q", plain)
+	if !strings.Contains(plain, "AGENTS · 3") || strings.Contains(plain, "AGENTS · 3 ✗") {
+		t.Fatalf("AGENTS header should show a plain child count, got %q", plain)
 	}
 	if strings.Contains(plain, "failed") {
 		t.Fatalf("AGENTS rows should not spell out failure state, got %q", plain)
@@ -361,8 +361,8 @@ func TestRenderInfoPanelCollapsedAgentsShowsHeaderOnly(t *testing.T) {
 	m.infoPanelCollapsedSections[infoPanelSectionAgents] = true
 
 	plain := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
-	if !strings.Contains(plain, "▶ AGENTS") || !strings.Contains(plain, "1 ◇") {
-		t.Fatalf("collapsed AGENTS header should include compact count, got %q", plain)
+	if !strings.Contains(plain, "▶ AGENTS · 1") {
+		t.Fatalf("collapsed AGENTS header should include a plain count, got %q", plain)
 	}
 	section := infoPanelSectionLines(infoPanelPlainLines(plain), "▶ AGENTS")
 	if len(section) != 0 {

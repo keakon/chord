@@ -10,34 +10,20 @@ import (
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
-// AgentsSummary counts only child tasks by their status icon, keeping
-// attention-requiring states first.
+// AgentsSummary reports the child count for the section header. Each agent row
+// already carries its own status icon, so the header stays a plain count for
+// consistency with the LSP and MCP headers.
 func (s Sidebar) AgentsSummary() string {
-	counts := make(map[string]int)
+	count := 0
 	for _, entry := range s.agents {
 		if entry.ID != "main" {
-			counts[statusIndicator(entry.Status)]++
+			count++
 		}
 	}
-	var parts []string
-	for _, icon := range []string{
-		statusIndicator(string(agent.SubAgentStateWaitingMain)),
-		statusIndicator(string(agent.SubAgentStateFailed)),
-		statusIndicator(string(agent.SubAgentStateWaitingDescendant)),
-		statusIndicator(string(agent.SubAgentStateRunning)),
-		statusIndicator(string(agent.SubAgentStateIdle)),
-		statusIndicator(string(agent.SubAgentStateCompleted)),
-		statusIndicator(string(agent.SubAgentStateCancelled)),
-		statusIndicator(""),
-	} {
-		if n := counts[icon]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", n, icon))
-		}
-	}
-	if len(parts) == 0 {
+	if count == 0 {
 		return "0 agents"
 	}
-	return strings.Join(parts, " · ")
+	return fmt.Sprint(count)
 }
 
 // sidebarEntryText computes plain text only; containers supply their own styles.
