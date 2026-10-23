@@ -171,10 +171,89 @@ func TestBackendRemovedFieldsRejected(t *testing.T) {
 	}
 }
 
+func TestBackendZeroValueFieldsStillRejected(t *testing.T) {
+	// Presence, not value, is the declaration. Zero values used to slip past
+	// the decoded-field checks and silently do nothing.
+	for _, field := range []string{
+		"temperature: 0", "max_tokens: 0", "variant: \"\"", "mcp: {}",
+		"prompt_preset: \"\"", "model_pools: []",
+	} {
+		t.Run(field, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "reviewer.yaml")
+			content := "name: reviewer\nmode: subagent\nbackend:\n  kind: claude-code\n" + field + "\n"
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadAgentConfig(path); err == nil || !strings.Contains(err.Error(), "backend agents must not declare") {
+				t.Fatalf("LoadAgentConfig() = %v, want a forbidden-field error", err)
+			}
+		})
+	}
+}
+
 func TestValidateAgentBackendIgnoresInternalAgents(t *testing.T) {
 	cfg := &AgentConfig{Name: "reviewer", Mode: AgentModeSubAgent}
 	if err := validateAgentBackend("reviewer.md", cfg); err != nil {
 		t.Fatalf("validateAgentBackend() error = %v, want nil", err)
+	}
+}
+
+func TestAgentConfigBackendEffectiveDeclarations(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, wantErr string
+		external               bool
+	}{
+		{"internal merge", "base: &base\n  mode: subagent\n  temperature: 0.5\n<<: *base\n", "", false},
+		{"inherited backend", "base: &base\n  backend:\n    kind: claude-code\nmode: subagent\n<<: *base\n", "", true},
+		{"backend alias", "base: &base\n  kind: claude-code\nmode: subagent\nbackend: *base\n", "", true},
+		{"backend merge", "base: &base\n  kind: claude-code\nmode: subagent\nbackend:\n  <<: *base\n", "", true},
+		{"inherited conflict", "base: &base\n  temperature: 0\nmode: subagent\nbackend: {kind: claude-code}\n<<: *base\n", "backend agents must not declare", true},
+		{"inherited backend conflict", "base: &base\n  backend: {kind: claude-code}\nmode: subagent\n<<: *base\nmax_tokens: 0\n", "backend agents must not declare", true},
+		{"inherited unknown backend field", "base: &base\n  unknown: true\nmode: subagent\nbackend:\n  kind: claude-code\n  <<: *base\n", "unsupported backend field unknown", true},
+		{"explicit backend precedence", "base: &base\n  backend: null\nmode: subagent\n<<: *base\nbackend: {kind: claude-code}\n", "", true},
+		{"merge sequence precedence", "first: &first\n  backend: {kind: claude-code}\nsecond: &second\n  backend: null\nmode: subagent\n<<: [*first, *second]\n", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "reviewer.yaml")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadAgentConfig(path)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("LoadAgentConfig() = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.IsExternalBackend() != tc.external || !cfg.IsSubAgent() {
+				t.Fatalf("unexpected configuration: %+v", cfg)
+			}
+			if tc.name == "internal merge" && cfg.Temperature != 0.5 {
+				t.Fatalf("temperature = %v, want 0.5", cfg.Temperature)
+			}
+		})
+	}
+}
+
+func TestBackendNullValueRejectedAsNonMapping(t *testing.T) {
+	// `backend:` with nothing behind it used to decode to nil and be silently
+	// ignored, or trigger a misleading forbidden-field error first.
+	for name, content := range map[string]string{
+		"null backend":       "name: reviewer\nmode: subagent\nbackend:\n",
+		"null with conflict": "name: reviewer\nmode: subagent\nbackend:\ntemperature: 1\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "reviewer.yaml")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadAgentConfig(path); err == nil || !strings.Contains(err.Error(), "backend must be a mapping") {
+				t.Fatalf("LoadAgentConfig() = %v, want a backend mapping error", err)
+			}
+		})
 	}
 }
 

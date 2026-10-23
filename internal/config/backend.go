@@ -28,15 +28,24 @@ type BackendConfig struct {
 	Env        map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
 }
 
+// errBackendMustBeMapping is shared by the agent-level presence scan and the
+// backend decoder so both report one wording for a non-mapping backend node.
+func errBackendMustBeMapping() error {
+	return fmt.Errorf("backend must be a mapping")
+}
+
 func (b *BackendConfig) UnmarshalYAML(node *yaml.Node) error {
 	allowed := map[string]bool{"kind": true, "command": true, "launch_args": true, "env": true}
 	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("backend must be a mapping")
+		return errBackendMustBeMapping()
 	}
-	for i := 0; i < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		if !allowed[key] {
-			return fmt.Errorf("unsupported backend field %s", key)
+	entries, err := YAMLMappingEntries(node)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !allowed[entry.Key] {
+			return fmt.Errorf("unsupported backend field %s", entry.Key)
 		}
 	}
 	type plain BackendConfig

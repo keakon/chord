@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -57,6 +58,45 @@ type AgentConfig struct {
 	// add project conventions without taking over maintenance of the whole
 	// block. SystemPrompt keeps its replacing semantics.
 	PromptAppend string `json:"-" yaml:"prompt_append,omitempty"`
+}
+
+// UnmarshalYAML rejects external-backend declarations that would be silently
+// ignored. Presence, not value, is what matters: temperature: 0 and
+// max_tokens: 0 are still declarations that the external agent owns those
+// settings, and mcp: {} or prompt_preset: "" would otherwise pass the
+// zero-value checks after decoding. Effective declarations include inherited
+// fields, with explicit keys taking precedence over YAML merges.
+func (c *AgentConfig) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("agent config must be a mapping")
+	}
+	entries, err := YAMLMappingEntries(node)
+	if err != nil {
+		return err
+	}
+	var backendNode *yaml.Node
+	for _, entry := range entries {
+		if entry.Key == "backend" {
+			backendNode = entry.Val
+		}
+	}
+	if backendNode != nil {
+		if backendNode.Kind == yaml.AliasNode {
+			backendNode = backendNode.Alias
+		}
+		// A null or non-mapping backend would silently decode to nothing, so
+		// it is rejected here instead of falling through to value validation.
+		if backendNode.Kind != yaml.MappingNode {
+			return errBackendMustBeMapping()
+		}
+		for _, entry := range entries {
+			if conflict, ok := backendAgentConflictFor(entry.Key); ok {
+				return errors.New(conflict.message)
+			}
+		}
+	}
+	type plain AgentConfig
+	return node.Decode((*plain)(c))
 }
 
 type DelegationConfig struct {
