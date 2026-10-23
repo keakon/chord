@@ -916,6 +916,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	// mis-anchored against it, so this run stays on top-level injection.
 	a.forceFullMCPToolInjection()
 	a.setTaskRecords(loaded.TaskRecords)
+	a.normalizeRestoredExternalTaskRecords()
 	a.resetTaskCoordination(a.sessionEpoch, loaded.TaskSettlements)
 	a.resetAgentRequests(loaded.AgentRequests)
 	a.guardDegradedAgentRequestSeq(loaded.AgentRequestsDegraded)

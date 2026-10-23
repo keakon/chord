@@ -45,6 +45,10 @@ type ExternalTaskSession struct {
 	LaunchArgs   []string     `json:"launch_args,omitempty"`
 	EnvKeys      []string     `json:"env_keys,omitempty"`
 	ProcessEnded bool         `json:"process_ended"`
+	// SessionEstablished records that the CLI acknowledged initialize for
+	// this session. A generated session id alone does not prove a transcript
+	// exists; resume must not use --resume until this is true.
+	SessionEstablished bool `json:"session_established,omitempty"`
 	// RunID identifies the last supervisor run launched for this task. It is
 	// persisted before the launch, so a receipt of exactly this run proves
 	// whether its process group was torn down.
@@ -1037,7 +1041,10 @@ func (a *MainAgent) taskInfosForCompaction() []SubAgentInfo {
 
 	var historical []SubAgentInfo
 	for taskID, rec := range records {
-		if rec == nil {
+		if rec == nil || rec.ExternalSession != nil {
+			// External coding agents own their context and compaction. Chord
+			// keeps their task metadata for focus and history, but must not
+			// feed an external agent's work into its own compaction request.
 			continue
 		}
 		if _, ok := seenTaskIDs[taskID]; ok {

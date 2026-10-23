@@ -317,12 +317,21 @@ func (a *MainAgent) settleDetachedTerminalTaskGuarded(taskID string, state SubAg
 		if recorded := SubAgentState(previous.State); isTerminalSubAgentState(recorded) && recorded != state {
 			settlement.Outcome = previous.State
 			settlement.Summary = strings.TrimSpace(previous.LastSummary)
+		}
+		// closeExternalWorker persists the completion envelope on the record
+		// before minting the settlement. A new settlement must carry that
+		// envelope forward: replacing it with nil would erase result_type,
+		// result_ref, files_changed and the checkout baseline from the durable
+		// record that restore and coordination read.
+		if settlement.Completion == nil {
 			settlement.Completion = normalizeCompletionEnvelope(previous.LastCompletion)
+		}
+		if len(settlement.ArtifactRefs) == 0 {
 			settlement.ArtifactRefs = mergeArtifactRefs(nil, previous.LastArtifactRefs)
-			if settlement.Completion != nil && settlement.Completion.ResultRef != nil {
-				ref := *settlement.Completion.ResultRef
-				settlement.ResultRef = &ref
-			}
+		}
+		if settlement.Completion != nil && settlement.Completion.ResultRef != nil {
+			ref := *settlement.Completion.ResultRef
+			settlement.ResultRef = &ref
 		}
 		journalRollbackOffset, persistErr = appendTaskSettlementWithRollbackOffset(a.sessionDir, settlement)
 		durable = persistErr == nil

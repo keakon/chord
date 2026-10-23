@@ -19,6 +19,13 @@ func (w *externalWorker) persistExternalSessionLocked() error {
 	if record == nil || record.LatestInstanceID != w.instanceID {
 		return fmt.Errorf("external task instance is no longer current")
 	}
+	record.State = string(w.State())
+	record.ResumePolicy = durableTaskResumePolicy(w.State())
+	record.LastSummary = w.LastSummary()
+	record.Persistence = w.PersistenceHealth()
+	record.ExternalSession.SessionID = w.currentSessionID()
+	record.ExternalSession.SessionEstablished = w.currentSessionEstablished()
+	record.ExternalSession.WorkDir = w.workDir
 	record.ExternalSession.Inputs = slices.Clone(w.inputs)
 	record.ExternalSession.ProcessEnded = w.processEnded
 	record.ExternalSession.RunID = w.runID

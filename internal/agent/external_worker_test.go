@@ -313,6 +313,25 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"s
 		t.Fatalf("task state = %q, want completed", record.State)
 	}
 
+	// Tool calls are live status and permission work; they must not enter the
+	// owner's progress mailbox as routine notifications.
+	var leakedToolProgress string
+	a.subAgentMailboxIDsMu.Lock()
+	for _, msg := range a.subAgentInbox.progress {
+		if strings.HasPrefix(msg.Summary, "External tool:") {
+			leakedToolProgress = msg.Summary
+		}
+	}
+	for _, msg := range a.subAgentInbox.progressQueue {
+		if strings.HasPrefix(msg.Summary, "External tool:") {
+			leakedToolProgress = msg.Summary
+		}
+	}
+	a.subAgentMailboxIDsMu.Unlock()
+	if leakedToolProgress != "" {
+		t.Fatalf("external tool progress entered the mailbox: %q", leakedToolProgress)
+	}
+
 	type streamStep struct {
 		kind   string
 		text   string

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -45,7 +46,16 @@ func (a *MainAgent) sendMessageToExternalTask(record *DurableTaskRecord, callerA
 
 func (a *MainAgent) resumeQueuedExternalInputs(taskID string) {
 	record := a.taskRecordByTaskID(taskID)
-	if record == nil || record.ExternalSession == nil || SubAgentState(record.State) != SubAgentStateCompleted {
+	if record == nil || record.ExternalSession == nil {
+		return
+	}
+	// A message can arrive after the result was sealed but before a failed
+	// settlement lands. The documented contract is that it runs as the next
+	// attempt once the process exits; completed and failed are both terminal
+	// states that can be followed by an explicit rehydration.
+	switch SubAgentState(strings.TrimSpace(record.State)) {
+	case SubAgentStateCompleted, SubAgentStateFailed:
+	default:
 		return
 	}
 	for _, input := range record.ExternalSession.Inputs {
@@ -103,13 +113,27 @@ func (a *MainAgent) externalSessionReceiptProvesEnded(record *DurableTaskRecord)
 	if err != nil {
 		return false
 	}
+	if receipt.Dir != "" && binding.WorkDir != "" && filepath.Clean(receipt.Dir) != filepath.Clean(binding.WorkDir) {
+		return false
+	}
 	return receipt.Cleanup.Proven
 }
 
 func (a *MainAgent) rehydrateExternalTaskLeader(record *DurableTaskRecord, activation *subAgentActivation, admissionEpoch uint64, text string, metadata *message.MailboxMetadata) (w *externalWorker, err error) {
 	binding := record.ExternalSession
-	if binding == nil || binding.Backend != config.BackendKindClaudeCode || !externalclaude.ValidSessionID(binding.SessionID) {
+	if binding == nil || binding.Backend != config.BackendKindClaudeCode {
 		return nil, fmt.Errorf("external task has no valid session binding")
+	}
+	sessionID := strings.TrimSpace(binding.SessionID)
+	if sessionID != "" && !externalclaude.ValidSessionID(sessionID) {
+		return nil, fmt.Errorf("external task has an invalid session binding")
+	}
+	// A task that failed before Initialize acknowledged the session has no
+	// transcript to resume. Its follow-up must start a fresh CLI session
+	// instead of passing --resume with a generated but unestablished id.
+	resume := binding.SessionEstablished && sessionID != ""
+	if !resume {
+		sessionID = ""
 	}
 	if !binding.ProcessEnded {
 		if !a.externalSessionReceiptProvesEnded(record) {
@@ -162,7 +186,8 @@ func (a *MainAgent) rehydrateExternalTaskLeader(record *DurableTaskRecord, activ
 			prepared.abortStartup()
 		}
 	}()
-	w.sessionID, w.resumeNext, w.processEnded, w.runID = binding.SessionID, true, true, binding.RunID
+	w.sessionID, w.resumeNext, w.processEnded, w.runID = sessionID, resume, true, binding.RunID
+	w.sessionEstablished = resume
 	w.ownerAgentID, w.ownerTaskID, w.depth, w.joinToOwner = record.OwnerAgentID, record.OwnerTaskID, record.Depth, record.JoinToOwner
 	w.workDirState = binding.WorkDirState
 	w.ctxMgr.RestoreMessages(history)

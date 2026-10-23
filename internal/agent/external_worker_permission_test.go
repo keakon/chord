@@ -573,3 +573,102 @@ func TestExternalConcurrentPermissionCancellation(t *testing.T) {
 		}
 	}
 }
+
+func TestExternalCancelledPermissionReplay(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	script := writeFakeClaude(t, `
+IFS= read -r decision
+printf '%s\n' "$decision"
+`)
+	configureExternalTestRuntime(t, a, script, `"*": ask`)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := externalclaude.Start(externalclaude.ProcessConfig{Command: script, KillGrace: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		session.Stop(20 * time.Millisecond)
+		for range session.Events() {
+		}
+		_ = session.Wait()
+	})
+	if _, err := session.Initialize(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.WriteUserMessage(ctx, "Fixture."); err != nil {
+		t.Fatal(err)
+	}
+	w, err := a.newExternalWorker(externalWorkerConfig{
+		agentDef: a.agentConfigs["external-worker"], instanceID: "external-1", taskID: "task-1",
+		ctx: ctx, cancel: cancel,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.setSession(session)
+	event := externalclaude.Event{RequestID: "request-1", Request: &externalclaude.ControlRequest{
+		ToolName: "Write", ToolUseID: "call-1", Input: json.RawMessage(`{"file_path":"sample.txt","content":"Text."}`),
+	}}
+	w.beginExternalPermission(event)
+	var confirm ConfirmRequestEvent
+	for confirm.RequestID == "" {
+		select {
+		case out := <-a.outputCh:
+			if c, ok := out.(ConfirmRequestEvent); ok {
+				confirm = c
+			}
+		case <-ctx.Done():
+			t.Fatal("confirmation did not arrive")
+		}
+	}
+	// Hold snapshot publication after the pre-authorization context check.
+	w.toolMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			w.toolMu.Unlock()
+		}
+	}()
+	a.ResolveConfirm("allow", confirm.ArgsJSON, "", "", confirm.RequestID)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if !w.externalToolStateMu.TryLock() {
+				goto authorizing
+			}
+			w.externalToolStateMu.Unlock()
+		case <-ctx.Done():
+			t.Fatal("authorization did not reach the final section")
+		}
+	}
+authorizing:
+	w.cancelExternalPermissions(event.RequestID)
+	w.toolMu.Unlock()
+	locked = false
+	settled := make(chan struct{})
+	go func() { w.permissionWG.Wait(); close(settled) }()
+	select {
+	case <-settled:
+	case <-ctx.Done():
+		t.Fatal("cancelled authorization did not settle")
+	}
+	w.beginExternalPermission(event)
+	select {
+	case replay := <-session.Events():
+		if replay.Response == nil {
+			t.Fatalf("unexpected replay: %+v", replay)
+		}
+		var decision externalclaude.PermissionDecision
+		if err := json.Unmarshal(replay.Response.Response, &decision); err != nil {
+			t.Fatal(err)
+		}
+		if decision.Behavior != externalclaude.PermissionBehaviorDeny {
+			t.Fatalf("cancelled request replay authorized execution: %+v", decision)
+		}
+	case <-ctx.Done():
+		t.Fatal("replay did not arrive")
+	}
+}

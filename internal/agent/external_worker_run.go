@@ -23,6 +23,10 @@ const externalPermissionTimeout = 5 * time.Minute
 
 var startExternalSession = externalclaude.Start
 
+var forceExternalProcessCleanup = func(session *externalclaude.Session) bool {
+	return session.ForceCleanup()
+}
+
 func (w *externalWorker) runExternalWorker() {
 	defer w.doneOnce.Do(func() { close(w.done) })
 	w.promptMu.Lock()
@@ -180,6 +184,14 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 	if w.baseline == nil {
 		w.baseline = capturedBaseline
 	}
+	// Prune before persisting the new run id. If Chord dies after the durable
+	// record says a run exists but before a supervisor was spawned, no receipt
+	// can ever prove that run ended and the task would stay unresumable. Doing
+	// the scan first keeps that crash window on the harmless side: a record
+	// without a run id never claims a process was launched.
+	w.promptMu.Unlock()
+	w.parent.pruneExternalSupervisorReceipts()
+	w.promptMu.Lock()
 	// The run identity is persisted before the supervisor exists: a crash
 	// between the spawn and Chord persisting the exit can then be matched to
 	// exactly one receipt, and a missing receipt keeps resume refused.
@@ -195,7 +207,6 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 	if err != nil {
 		return nil, true, err
 	}
-	w.parent.pruneExternalSupervisorReceipts()
 	started, err := startExternalSession(externalclaude.ProcessConfig{
 		Command: w.backend.EffectiveCommand(),
 		Args:    args,
@@ -242,6 +253,7 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 		session.Stop(externalSessionStopGrace)
 		return nil, false, err
 	}
+	w.markSessionEstablished("")
 	for _, event := range initEvents {
 		terminal, _ := w.handleExternalEvent(event)
 		if !terminal {
@@ -371,6 +383,7 @@ func (w *externalWorker) handleExternalEvent(event externalclaude.Event) (termin
 	switch event.Type {
 	case externalclaude.TypeSystem:
 		if event.Subtype == "init" {
+			w.markSessionEstablished(event.SessionID)
 			if event.ClaudeCodeVersion != "" {
 				// Diagnostic only: the client version never gates a launch, but a
 				// failure report should be able to name the release that produced it.
@@ -496,8 +509,10 @@ func (w *externalWorker) handleExternalStreamEvent(event externalclaude.Event) b
 				Text: stream.Delta.Text, AgentID: w.instanceID,
 				TurnID: turnID, RequestSeq: requestSeq,
 			})
-		case "input_json_delta", "thinking_delta", "signature_delta":
-			// Tool input and Claude's reasoning are not visible answer text.
+		case "input_json_delta", "thinking_delta", "signature_delta", "citations_delta":
+			// Tool input, Claude's reasoning, signatures and citations are not
+			// visible answer text. A citation is normal output metadata; killing
+			// the task for it would discard a result the CLI can still complete.
 		default:
 			w.finishExternalStream()
 			w.setResultError(fmt.Errorf("unsupported external stream delta type %q", stream.Delta.Type))
@@ -558,7 +573,7 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (bool,
 		w.commitExternalStream(text)
 	}
 	w.finishExternalStream()
-	if event.IsError {
+	if event.Failed() {
 		reason := text
 		if reason == "" {
 			reason = event.TerminalReason
@@ -579,6 +594,11 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (bool,
 			w.setResultError(err)
 			return true, externalTaskInput{}
 		}
+		// A failed result still ends this input: a message that arrives while
+		// the process exits belongs to the next attempt, not to this stdin.
+		w.promptMu.Lock()
+		w.inputClosed = true
+		w.promptMu.Unlock()
 		w.setResultError(fmt.Errorf("external agent failed: %s", reason))
 		return true, externalTaskInput{}
 	}
@@ -676,8 +696,10 @@ func (w *externalWorker) handleExternalToolUse(use externalclaude.ContentBlock) 
 	if use.Name != "" && use.Name != name {
 		summary = fmt.Sprintf("%s (%s)", name, use.Name)
 	}
+	// Tool calls are live status. Authorization goes through the permission
+	// path, and routine tool activity must not wake the owner through mailbox
+	// progress messages.
 	w.updateProgress("External tool: " + summary)
-	w.emitProgress("External tool: "+summary, "tool")
 }
 
 func (w *externalWorker) handleExternalToolResult(block externalclaude.ContentBlock) bool {
@@ -768,10 +790,11 @@ func (w *externalWorker) derivedDisallowedTools() []string {
 		if !mapped {
 			// Chord has no equivalent, so evaluateExternalPermission only
 			// authorizes it through a rule that names the Claude tool itself;
-			// a wildcard allow is not enough. Without such a rule every call is
-			// denied, so leaving the tool visible only invites the model to
-			// retry a call that can never succeed.
-			if !externalToolHasNamedRule(ruleset, name) {
+			// a wildcard allow is not enough. Without such a rule, or when the
+			// role explicitly disables it, every call can only be denied, so
+			// leaving the tool visible only invites the model to retry a call
+			// that can never succeed.
+			if !externalToolHasNamedRule(ruleset, name) || ruleset.IsDisabled(name) {
 				disallowed = append(disallowed, name)
 			}
 			continue

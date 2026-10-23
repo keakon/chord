@@ -23,8 +23,11 @@ type externalPermissionRequest struct {
 // replaying the decision keeps that retry from hanging while still refusing a
 // second authorization for the same tool call.
 type externalPermissionOutcome struct {
-	frame externalclaude.Frame
-	done  bool
+	toolUseID   string
+	toolName    string
+	fingerprint [32]byte
+	frame       externalclaude.Frame
+	done        bool
 }
 
 // externalPermissionOutcomeLimit bounds the replay cache. A replayed request id
@@ -60,15 +63,22 @@ type externalToolBinding struct {
 	settled     bool
 }
 
-func (w *externalWorker) bindExternalTool(id, name string, input json.RawMessage, request bool) bool {
+func externalToolFingerprint(name string, input json.RawMessage) ([32]byte, bool) {
 	data, err := json.Marshal(struct {
 		Name  string
 		Input json.RawMessage
 	}{name, input})
 	if err != nil {
+		return [32]byte{}, false
+	}
+	return sha256.Sum256(data), true
+}
+
+func (w *externalWorker) bindExternalTool(id, name string, input json.RawMessage, request bool) bool {
+	fingerprint, ok := externalToolFingerprint(name, input)
+	if !ok {
 		return false
 	}
-	fingerprint := sha256.Sum256(data)
 	if binding := w.toolBindings[id]; binding != nil {
 		if binding.fingerprint != fingerprint || request && binding.requested {
 			return false
@@ -81,16 +91,44 @@ func (w *externalWorker) bindExternalTool(id, name string, input json.RawMessage
 }
 
 func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
+	request := event.Request
+	if request == nil || strings.TrimSpace(event.RequestID) == "" || strings.TrimSpace(request.ToolUseID) == "" {
+		// An empty request id cannot be correlated with a later replay, and an
+		// empty tool id cannot bind the response to one tool call. Denying
+		// without caching keeps a malformed request from becoming a reusable
+		// authorization.
+		w.redeliverExternalPermission(externalclaude.DenyPermission(event.RequestID, "invalid external permission request identity"))
+		return
+	}
+	fingerprint, ok := externalToolFingerprint(request.ToolName, request.Input)
+	if !ok {
+		w.redeliverExternalPermission(externalclaude.DenyPermission(event.RequestID, "invalid external permission request input"))
+		return
+	}
 	w.permissionMu.Lock()
 	if outcome := w.permissionOutcomes[event.RequestID]; outcome != nil {
+		matches := outcome.toolUseID == request.ToolUseID &&
+			outcome.toolName == request.ToolName &&
+			outcome.fingerprint == fingerprint
 		frame, done := outcome.frame, outcome.done
 		w.permissionMu.Unlock()
+		if !matches {
+			// A repeated request id with a different tool or input is not a
+			// retry. Replaying the first decision would authorize a different
+			// tool call without evaluating it.
+			w.redeliverExternalPermission(externalclaude.DenyPermission(event.RequestID, "external permission request id was reused for a different tool call"))
+			return
+		}
 		if done {
 			w.redeliverExternalPermission(frame)
 		}
 		return
 	}
-	outcome := &externalPermissionOutcome{}
+	outcome := &externalPermissionOutcome{
+		toolUseID:   request.ToolUseID,
+		toolName:    request.ToolName,
+		fingerprint: fingerprint,
+	}
 	w.permissionOutcomes[event.RequestID] = outcome
 	ctx, cancel := context.WithCancel(w.ctx)
 	w.permissionRequests[event.RequestID] = externalPermissionRequest{cancel: cancel}
@@ -101,11 +139,8 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 		frame := w.evaluateExternalPermission(ctx, event)
 		w.permissionMu.Lock()
 		_, active := w.permissionRequests[event.RequestID]
-		if active {
-			delete(w.permissionRequests, event.RequestID)
-		}
-		if len(w.permissionRequests) == 0 && w.State() == SubAgentStateWaitingMain {
-			w.setState(SubAgentStateRunning, "external agent running")
+		if !active || ctx.Err() != nil {
+			frame = externalclaude.DenyPermission(event.RequestID, "external permission request cancelled")
 		}
 		w.permissionMu.Unlock()
 		// The write can block on stdin backpressure, so it must not hold the lock
@@ -119,9 +154,21 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 			writeCancel()
 		}
 		w.permissionMu.Lock()
+		_, active = w.permissionRequests[event.RequestID]
+		if !active || ctx.Err() != nil {
+			frame = externalclaude.DenyPermission(event.RequestID, "external permission request cancelled")
+		}
+		delete(w.permissionRequests, event.RequestID)
 		outcome.frame, outcome.done = frame, true
 		pruneExternalPermissionOutcomesLocked(w.permissionOutcomes)
+		resumed := false
+		if len(w.permissionRequests) == 0 && w.State() == SubAgentStateWaitingMain {
+			resumed = w.setState(SubAgentStateRunning, "external agent running")
+		}
 		w.permissionMu.Unlock()
+		if resumed {
+			w.persistExternalLifecycleState()
+		}
 		cancel()
 		if writeFailed {
 			w.teardown()
@@ -149,6 +196,12 @@ func (w *externalWorker) cancelExternalPermissions(requestID string) {
 		if requestID == "" || requestID == id {
 			request.cancel()
 			delete(w.permissionRequests, id)
+		}
+	}
+	for id, outcome := range w.permissionOutcomes {
+		if requestID == "" || requestID == id {
+			outcome.frame = externalclaude.DenyPermission(id, "external permission request cancelled")
+			outcome.done = true
 		}
 	}
 	w.permissionMu.Unlock()
@@ -209,9 +262,16 @@ func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event e
 	ctx = tools.WithToolCallID(ctx, request.ToolUseID)
 	if action == permission.ActionAsk || evaluationName == "ExitPlanMode" {
 		w.setState(SubAgentStateWaitingMain, externalPermissionSummary(request.ToolName))
-		response, err := w.parent.AwaitConfirmWithRuleContext(ctx, name, string(args), externalPermissionTimeout,
+		w.persistExternalLifecycleState()
+		// The 5-minute bound must cover waiting in the global confirm queue too,
+		// not only the modal wait that starts after the queue admits this
+		// request. Otherwise a long-running native confirm can park the worker
+		// indefinitely before its own timer ever starts.
+		confirmCtx, cancel := context.WithTimeout(ctx, externalPermissionTimeout)
+		response, err := w.parent.AwaitConfirmWithRuleContext(confirmCtx, name, string(args), externalPermissionTimeout,
 			decision.NeedsApprovalPaths, decision.AlreadyAllowedPaths, decision.NeedsApprovalRules, decision.AlreadyAllowedRules,
 			externalPermissionSummary(request.ToolName))
+		cancel()
 		if err != nil {
 			return deny("external permission request cancelled")
 		}
@@ -222,8 +282,12 @@ func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event e
 			return deny("edited external arguments require a new tool request")
 		}
 		if response.RuleIntent != nil {
-			w.parent.processRuleIntent(name, response.RuleIntent, w.agentDefName)
-			w.setRuleset(w.parent.buildSubAgentRuleset(w.agentDef))
+			w.parent.processRuleIntent(evaluationName, response.RuleIntent, w.agentDefName)
+			def := w.agentDef
+			if current := w.parent.snapshotAgentConfigByName(w.agentDefName); current != nil {
+				def = current
+			}
+			w.setRuleset(w.parent.buildSubAgentRuleset(def))
 		}
 	}
 	updatedInput := request.Input
@@ -252,6 +316,10 @@ func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event e
 	}
 	w.toolBindings[request.ToolUseID].started = true
 	w.captureToolPreWrite(request.ToolUseID, name, args)
+	if ctx.Err() != nil {
+		w.settleExternalTool(request.ToolUseID, name, "external permission request cancelled", message.ToolStatusError, message.ToolRecoveryStateNotStarted)
+		return externalclaude.DenyPermission(event.RequestID, "external permission request cancelled")
+	}
 	return externalclaude.AllowPermission(event.RequestID, updatedInput)
 }
 

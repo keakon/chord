@@ -76,7 +76,11 @@ func (a *MainAgent) syncTaskRecordFromMailbox(msg SubAgentMailboxMessage) {
 		rec.State = string(SubAgentStateWaitingMain)
 		rec.ResumePolicy = taskResumePolicyNotify
 	case SubAgentMailboxKindProgress:
-		if rec.State == "" {
+		// A registration written before startRuntime records the runtime's
+		// default idle state. Real progress is authoritative: promote it (and
+		// a legacy empty record) so a running external task is never persisted
+		// as idle.
+		if rec.State == "" || rec.State == string(SubAgentStateIdle) {
 			rec.State = string(SubAgentStateRunning)
 			rec.ResumePolicy = taskResumePolicyLiveOnly
 		}

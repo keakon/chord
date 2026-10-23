@@ -88,10 +88,11 @@ type externalWorker struct {
 	semBorrowed bool
 	semBypassed bool
 
-	sessionMu  sync.Mutex
-	session    *externalclaude.Session
-	sessionID  string
-	resumeNext bool
+	sessionMu          sync.Mutex
+	session            *externalclaude.Session
+	sessionID          string
+	sessionEstablished bool
+	resumeNext         bool
 
 	started                  atomic.Bool
 	closing                  atomic.Bool
@@ -344,7 +345,24 @@ func (w *externalWorker) startRuntime() {
 		return
 	}
 	w.runtimeState.set(SubAgentStateRunning, "external agent starting")
+	// The registration record is written before the runtime starts, so its
+	// state is still idle at that point. Persist the running transition now:
+	// a crash before the first input write must not restore a live task as an
+	// idle record that the sidebar and coordination snapshot cannot see.
+	w.persistExternalLifecycleState()
 	go w.runExternalWorker()
+}
+
+func (w *externalWorker) persistExternalLifecycleState() {
+	if w == nil {
+		return
+	}
+	w.promptMu.Lock()
+	err := w.persistExternalSessionLocked()
+	w.promptMu.Unlock()
+	if err != nil {
+		log.Warnf("persist external task lifecycle state task_id=%v state=%v error=%v", w.taskID, w.State(), err)
+	}
 }
 
 func (w *externalWorker) abortStartup() {
@@ -393,8 +411,8 @@ func (w *externalWorker) buildTaskRecord(previous *DurableTaskRecord, closedReas
 	envKeys := slices.Sorted(maps.Keys(w.backend.Env))
 	rec.ExternalSession = &ExternalTaskSession{
 		Backend:   config.BackendKindClaudeCode,
-		SessionID: w.currentSessionID(),
-		WorkDir:   w.workDir, WorkDirState: w.workDirState, Prompt: strings.TrimSpace(w.agentDef.SystemPrompt + "\n\n" + w.agentDef.PromptAppend),
+		SessionID: w.currentSessionID(), SessionEstablished: w.currentSessionEstablished(),
+		WorkDir: w.workDir, WorkDirState: w.workDirState, Prompt: strings.TrimSpace(w.agentDef.SystemPrompt + "\n\n" + w.agentDef.PromptAppend),
 		Command: w.backend.EffectiveCommand(), LaunchArgs: slices.Clone(w.backend.LaunchArgs),
 		EnvKeys: envKeys, ProcessEnded: w.processEnded, RunID: w.runID, Inputs: slices.Clone(w.inputs),
 		Baseline: w.baseline,
@@ -413,6 +431,24 @@ func (w *externalWorker) currentSessionID() string {
 	w.sessionMu.Lock()
 	defer w.sessionMu.Unlock()
 	return w.sessionID
+}
+
+func (w *externalWorker) currentSessionEstablished() bool {
+	w.sessionMu.Lock()
+	defer w.sessionMu.Unlock()
+	return w.sessionEstablished
+}
+
+// markSessionEstablished records that the CLI completed initialize. Only then
+// does the generated session id name a transcript that --resume can load.
+func (w *externalWorker) markSessionEstablished(sessionID string) {
+	w.sessionMu.Lock()
+	if externalclaude.ValidSessionID(sessionID) {
+		w.sessionID = sessionID
+	}
+	w.sessionEstablished = true
+	w.sessionMu.Unlock()
+	w.persistExternalLifecycleState()
 }
 
 func (w *externalWorker) persistRegistration(sessionDir string, record *DurableTaskRecord) error {
@@ -672,7 +708,7 @@ func (w *externalWorker) tryCleanupProcess(escalate bool) bool {
 	if session == nil {
 		return false
 	}
-	if !session.TerminationProven() && (!escalate || !session.ForceCleanup()) {
+	if !session.TerminationProven() && (!escalate || !forceExternalProcessCleanup(session)) {
 		return false
 	}
 	w.promptMu.Lock()
@@ -724,7 +760,28 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 	worker.promptMu.Lock()
 	ended := worker.processEnded || !worker.started.Load()
 	worker.promptMu.Unlock()
+	cleanupRequest := func(attempt int) *SubAgentCloseRequestedPayload {
+		return &SubAgentCloseRequestedPayload{
+			Reason:         reason,
+			ClosedReason:   closedReason,
+			FinalState:     finalState,
+			Completion:     completion,
+			CleanupAttempt: attempt,
+		}
+	}
 	if !ended {
+		if cleanupAttempt == 0 && !forceRelease {
+			// The first attempt escalates cleanup and can wait out the
+			// supervisor's kill grace. Running it inline would stall every
+			// task event behind one unresponsive process.
+			if worker.terminationRetryPending.CompareAndSwap(false, true) {
+				go func() {
+					worker.tryCleanupProcess(true)
+					a.sendEvent(Event{Type: EventSubAgentCloseRequested, SourceID: worker.instanceID, Payload: cleanupRequest(1)})
+				}()
+			}
+			return
+		}
 		ended = worker.tryCleanupProcess(cleanupAttempt == 0)
 	}
 	if !ended && !forceRelease {
@@ -735,13 +792,7 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 		if cleanupAttempt < attempts {
 			a.emitToTUI(AgentStatusEvent{AgentID: worker.instanceID, Status: "blocked", Message: "External process termination is not proven; retrying cleanup"})
 			if worker.terminationRetryPending.CompareAndSwap(false, true) {
-				payload := &SubAgentCloseRequestedPayload{
-					Reason:         reason,
-					ClosedReason:   closedReason,
-					FinalState:     finalState,
-					Completion:     completion,
-					CleanupAttempt: cleanupAttempt + 1,
-				}
+				payload := cleanupRequest(cleanupAttempt + 1)
 				delay := worker.terminationRetryDelay
 				if delay <= 0 {
 					delay = externalTerminationRetryDelay

@@ -192,6 +192,137 @@ func writeSupervisorReceipt(t *testing.T, dir string, receipt externalsupervisor
 	}
 }
 
+func TestExternalTaskResumeWithoutEstablishedSessionStartsFresh(t *testing.T) {
+	root := t.TempDir()
+	launches := filepath.Join(root, "launches.txt")
+	script := writeFakeClaude(t, strings.NewReplacer("__LAUNCHES__", launches).Replace(`
+printf '%s\n' "$*" >> "__LAUNCHES__"
+printf '%s\n' '{"type":"result","subtype":"success","result":"Done."}'
+`))
+	a := newTestMainAgent(t, root)
+	configureExternalTestRuntime(t, a, script, `"*": allow`)
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "external-worker", Description: "Initial input."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := driveExternalTask(t, a, handle.TaskID)
+	if first.ExternalSession == nil || first.ExternalSession.SessionID == "" || !first.ExternalSession.SessionEstablished {
+		t.Fatalf("first attempt binding = %+v", first.ExternalSession)
+	}
+	oldSessionID := first.ExternalSession.SessionID
+	// A run that died before Initialize acknowledged the session leaves a
+	// generated id with no transcript. Resuming it with --resume would fail
+	// every follow-up, so the next attempt must start a fresh CLI session.
+	a.subs.mu.Lock()
+	record := a.subs.taskRecords[handle.TaskID]
+	record.ExternalSession.SessionEstablished = false
+	record.ExternalSession.ProcessEnded = true
+	a.subs.mu.Unlock()
+	if _, err := a.rehydrateExternalTask(record, "Fresh input.", nil); err != nil {
+		t.Fatalf("fresh-session rehydrate: %v", err)
+	}
+	second := driveExternalTask(t, a, handle.TaskID)
+	if second.Attempt != 2 || second.State != string(SubAgentStateCompleted) {
+		t.Fatalf("fresh-session attempt = %+v", second)
+	}
+	data, err := os.ReadFile(launches)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("launch count = %d, want 2: %s", len(lines), data)
+	}
+	if strings.Contains(lines[1], "--resume") {
+		t.Fatalf("unestablished session was resumed: %s", lines[1])
+	}
+	newSessionID := second.ExternalSession.SessionID
+	if newSessionID == "" || newSessionID == oldSessionID {
+		t.Fatalf("fresh session id = %q, old %q", newSessionID, oldSessionID)
+	}
+	if !strings.Contains(lines[1], "--session-id "+newSessionID) {
+		t.Fatalf("fresh launch did not bind a new session: %s", lines[1])
+	}
+}
+
+func TestExternalFailedSettlementRunsQueuedInput(t *testing.T) {
+	root := t.TempDir()
+	launches := filepath.Join(root, "launches.txt")
+	inputs := filepath.Join(root, "inputs.txt")
+	release := filepath.Join(root, "release")
+	script := writeFakeClaude(t, strings.NewReplacer(
+		"__LAUNCHES__", launches, "__INPUTS__", inputs, "__RELEASE__", release,
+	).Replace(`
+printf '%s\n' "$*" >> "__LAUNCHES__"
+printf '%s\n' "$prompt" >> "__INPUTS__"
+launches=$(wc -l < "__LAUNCHES__")
+if [ "$launches" -eq 1 ]; then
+  printf '%s\n' '{"type":"result","subtype":"error","is_error":true,"result":"boom"}'
+  while [ ! -f "__RELEASE__" ]; do sleep 0.01; done
+  exit 1
+fi
+printf '%s\n' '{"type":"result","subtype":"success","result":"Recovered."}'
+`))
+	a := newTestMainAgent(t, root)
+	configureExternalTestRuntime(t, a, script, `"*": allow`)
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "external-worker", Description: "Initial input."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := a.subs.runtime(handle.AgentID).(*externalWorker)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		w.promptMu.Lock()
+		sealed := w.inputClosed
+		w.promptMu.Unlock()
+		if sealed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("input did not seal")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	next, err := a.sendMessageToSubAgentNow("", "", handle.TaskID, "Queued input.", string(SubAgentMailboxKindDecisionRequired))
+	if err != nil || next.Status != "queued" {
+		t.Fatalf("sealed followup = %+v %v", next, err)
+	}
+	if len(a.sem) != 1 || a.taskRecordByTaskID(handle.TaskID).Attempt != 1 {
+		t.Fatal("slot released or new attempt started before process exit")
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(15 * time.Second)
+	var record *DurableTaskRecord
+	for {
+		record = a.taskRecordByTaskID(handle.TaskID)
+		if record != nil && record.Attempt == 2 && isTerminalSubAgentState(SubAgentState(record.State)) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queued input did not run after failed settlement; record=%+v", record)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Until(deadline))
+		event, eventErr := a.nextEvent(ctx)
+		cancel()
+		if eventErr != nil {
+			t.Fatalf("wait for queued rerun: %v", eventErr)
+		}
+		a.dispatch(event)
+	}
+	if record.State != string(SubAgentStateCompleted) {
+		t.Fatalf("queued rerun = %+v, want completed", record)
+	}
+	data, err := os.ReadFile(inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), "Queued input.") != 1 {
+		t.Fatalf("queued input delivery = %s", data)
+	}
+}
+
 func TestExternalTaskResumesAfterProvenSupervisorReceipt(t *testing.T) {
 	root := t.TempDir()
 	script := writeFakeClaude(t, `printf '%s\n' '{"type":"result","subtype":"success","result":"Done."}'`)

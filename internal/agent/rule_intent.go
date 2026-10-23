@@ -140,30 +140,51 @@ func (a *MainAgent) syncSubAgentOverlay() {
 	if a == nil || a.overlay == nil {
 		return
 	}
-	type subAgentRulesetUpdate struct {
+	type runtimeRulesetUpdate struct {
 		instanceID string
-		sub        *SubAgent
+		runtime    subAgentRuntime
 		ruleset    permission.Ruleset
 	}
 	a.subs.mu.RLock()
-	updates := make([]subAgentRulesetUpdate, 0, a.subs.liveCountLocked())
-	for _, sub := range a.subs.subAgentsLocked() {
-		if sub == nil {
-			continue
+	updates := make([]runtimeRulesetUpdate, 0, a.subs.liveCountLocked())
+	for _, rt := range a.subs.snapshotRuntimesLocked() {
+		switch runtime := rt.(type) {
+		case *SubAgent:
+			if runtime == nil {
+				continue
+			}
+			updates = append(updates, runtimeRulesetUpdate{
+				instanceID: runtime.instanceID,
+				runtime:    runtime,
+				ruleset:    a.buildSubAgentRuleset(a.agentConfigs[runtime.agentDefName]),
+			})
+		case *externalWorker:
+			if runtime == nil {
+				continue
+			}
+			def := runtime.agentDef
+			if current := a.agentConfigs[runtime.agentDefName]; current != nil {
+				def = current
+			}
+			updates = append(updates, runtimeRulesetUpdate{
+				instanceID: runtime.instanceID,
+				runtime:    runtime,
+				ruleset:    a.buildSubAgentRuleset(def),
+			})
 		}
-		updates = append(updates, subAgentRulesetUpdate{
-			instanceID: sub.instanceID,
-			sub:        sub,
-			ruleset:    a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName]),
-		})
 	}
 	a.subs.mu.RUnlock()
 
 	a.subs.mu.Lock()
 	defer a.subs.mu.Unlock()
 	for _, update := range updates {
-		if current := a.subs.subAgentLocked(update.instanceID); current == update.sub {
-			current.setRuleset(update.ruleset)
+		if current := a.subs.runtimeLocked(update.instanceID); current == update.runtime {
+			switch runtime := current.(type) {
+			case *SubAgent:
+				runtime.setRuleset(update.ruleset)
+			case *externalWorker:
+				runtime.setRuleset(update.ruleset)
+			}
 		}
 	}
 }
