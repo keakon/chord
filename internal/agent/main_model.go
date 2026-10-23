@@ -248,7 +248,7 @@ func (a *MainAgent) syncRunningModelRefToCursorHead(llmClient *llm.Client) {
 }
 
 func (a *MainAgent) focusedModelPools(target focusedAgentSnapshot) (string, []string) {
-	if a.modelPoolPolicy == nil {
+	if a.modelPoolPolicy == nil || externalBackendForTarget(target) != "" {
 		return "", nil
 	}
 	cfg := a.currentActiveConfig()
@@ -271,7 +271,7 @@ func (a *MainAgent) focusedModelPools(target focusedAgentSnapshot) (string, []st
 // to start its next LLM request.
 func (a *MainAgent) NextRequestModelRef() string {
 	target := a.focusedAgentSnapshot()
-	if target.parked || target.settled {
+	if target.parked || target.settled || externalBackendForTarget(target) != "" {
 		return ""
 	}
 	client, state := a.modelStateForTarget(target)
@@ -697,6 +697,10 @@ func (a *MainAgent) handleModelsStatus() {
 }
 
 func (a *MainAgent) handleModelsSetCurrentView(pool string) {
+	if backend := a.focusedExternalBackend(); backend != "" {
+		a.emitToTUI(ErrorEvent{Err: externalModelPoolSwitchError(backend)})
+		return
+	}
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		if err := a.setAgentModelPool(sub.agentDefName, pool); err != nil {
 			a.emitToTUI(ErrorEvent{Err: err})
@@ -782,6 +786,9 @@ func (a *MainAgent) switchMainModelForPoolIfNeeded(cfg *config.AgentConfig, pool
 }
 
 func (a *MainAgent) setCurrentModelPool(pool string) error {
+	if backend := a.focusedExternalBackend(); backend != "" {
+		return externalModelPoolSwitchError(backend)
+	}
 	finish, err := a.beginSessionStructural(a.parentCtx, false)
 	if err != nil {
 		return err

@@ -183,10 +183,13 @@ func (a *MainAgent) parkedSubAgentInfo(rec *DurableTaskRecord) SubAgentInfo {
 		artifact = tools.NormalizeArtifactRef(rec.LastArtifactRefs[0])
 	}
 	selectedRef := a.restoredSubAgentModelRef(rec)
+	runningRef := restoredRunningModelRef(rec, selectedRef)
 	backend := ""
 	if rec.ExternalSession != nil {
+		// The external CLI owns its model; the record has no Chord refs to show.
 		backend = rec.ExternalSession.Backend
 		selectedRef = ""
+		runningRef = ""
 	}
 	return SubAgentInfo{
 		InstanceID:       rec.LatestInstanceID,
@@ -199,7 +202,7 @@ func (a *MainAgent) parkedSubAgentInfo(rec *DurableTaskRecord) SubAgentInfo {
 		Persistence:      rec.Persistence,
 		SelectedRef:      selectedRef,
 		Backend:          backend,
-		RunningRef:       restoredRunningModelRef(rec, selectedRef),
+		RunningRef:       runningRef,
 		State:            rec.State,
 		LastSummary:      rec.LastSummary,
 		UrgentInboxCount: a.subAgentUrgentInboxCountLocked(rec.LatestInstanceID),

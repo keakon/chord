@@ -16,12 +16,16 @@ import (
 // GetSidebarWalltimeStats returns wall-clock time stats for the TUI-focused
 // agent only (main, live SubAgent, or a parked/settled task viewed through its
 // durable record), mirroring GetSidebarUsageStats routing. All buckets are zero
-// when no walltime has been recorded for the focused agent.
+// when no walltime has been recorded for the focused agent, and always zero for
+// an external backend, whose work Chord does not schedule or time.
 func (a *MainAgent) GetSidebarWalltimeStats() analytics.WalltimeStats {
 	if a.walltime == nil {
 		return analytics.WalltimeStats{}
 	}
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return analytics.WalltimeStats{}
+	}
 	if target.sub != nil {
 		return a.walltime.statsForAgent(target.sub.instanceID)
 	}
@@ -40,7 +44,9 @@ func (a *MainAgent) GetUsageStats() analytics.SessionStats {
 }
 
 // GetSidebarUsageStats returns usage for the TUI-focused agent only (main or
-// SubAgent), matching GetContextStats / GetTokenUsage routing.
+// SubAgent), matching GetContextStats / GetTokenUsage routing. A focused
+// external backend reports zero because its model calls do not pass through
+// Chord's usage ledger.
 //
 // A focused worker is billed per task, not per runtime instance: a task resumed
 // for a second attempt runs under a new instance ID, and reporting only that
@@ -51,6 +57,10 @@ func (a *MainAgent) GetSidebarUsageStats() analytics.SessionStats {
 		return analytics.SessionStats{}
 	}
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		// The external CLI call is not billed or counted by Chord.
+		return analytics.SessionStats{}
+	}
 	if target.sub == nil && target.task == nil {
 		return a.usageTracker.SessionStatsForAgent(identity.MainAgentID)
 	}
@@ -118,9 +128,13 @@ func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord, liveInstanceID str
 // GetContextUsageState, until a new response replaces it —
 // a switch, or a failing request after it, does not blank the display.
 // Focused SubAgents report the same frame from their own context manager;
-// parked and settled targets have no live context manager and report zero.
+// parked, settled, and external targets have no context manager Chord observes
+// and report zero.
 func (a *MainAgent) GetContextStats() (current, limit int) {
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return 0, 0
+	}
 	if target.sub != nil {
 		return target.sub.GetContextStats()
 	}
@@ -137,6 +151,9 @@ func (a *MainAgent) GetContextStats() (current, limit int) {
 // a plain zero.
 func (a *MainAgent) GetContextUsageState() ctxmgr.ContextUsageState {
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return ctxmgr.ContextUsageUnknown
+	}
 	if target.sub != nil {
 		return target.sub.GetContextUsageState()
 	}
@@ -173,6 +190,9 @@ func (a *MainAgent) ContextPressureLinesForModelRef(modelRef string) (reminder, 
 // GetContextMessageCount returns the number of messages in the focused agent's context (for sidebar).
 func (a *MainAgent) GetContextMessageCount() int {
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return 0
+	}
 	if target.sub != nil {
 		return target.sub.GetContextMessageCount()
 	}
@@ -189,6 +209,9 @@ func (a *MainAgent) GetContextMessageCount() int {
 
 func (a *MainAgent) GetContextBytes() int {
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return 0
+	}
 	if target.sub != nil {
 		return target.sub.GetContextBytes()
 	}

@@ -45,6 +45,8 @@ func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIn
 	// Model identity and provider data share the render pass's snapshot.
 	modelState := m.focusedModelState()
 	keysConfirmed, keysTotal := modelState.KeysConfirmed, modelState.KeysTotal
+	b.WriteString(modelState.Backend)
+	appendSep()
 	b.WriteString(modelState.DisplayRef)
 	appendSep()
 	b.WriteString(modelState.RunningRef)

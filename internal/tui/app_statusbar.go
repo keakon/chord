@@ -82,6 +82,7 @@ type statusBarAgentSnapshot struct {
 	viewingLabel     string
 	viewingColor     string
 	sessionID        string
+	backend          string
 	modelRef         string
 	proxyInUse       bool
 	effectiveTier    config.ServiceTier
@@ -235,7 +236,9 @@ func (m *Model) computeStatusBarCurrentAgentColor() string {
 
 func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 	modelState := m.focusedModelState()
-	if m.statusBarAgentSnapshot.modelRef != modelState.DisplayRef || m.statusBarAgentSnapshot.effectiveTier != modelState.EffectiveTier {
+	if m.statusBarAgentSnapshot.backend != modelState.Backend ||
+		m.statusBarAgentSnapshot.modelRef != modelState.DisplayRef ||
+		m.statusBarAgentSnapshot.effectiveTier != modelState.EffectiveTier {
 		m.statusBarAgentSnapshotDirty = true
 	}
 	if !m.statusBarAgentSnapshotDirty {
@@ -249,6 +252,7 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 		if summary := m.agent.GetSessionSummary(); summary != nil {
 			snap.sessionID = strings.TrimSpace(summary.ID)
 		}
+		snap.backend = modelState.Backend
 		snap.modelRef = modelState.DisplayRef
 		snap.effectiveTier = modelState.EffectiveTier
 		snap.proxyInUse = m.agent.ProxyInUseForRef(modelState.DisplayRef)
@@ -513,6 +517,8 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		statusActivity.Deadline.UnixNano(), m.activityStartTime[inputs.StatusActiveID].UnixNano(),
 		m.requestProgress[inputs.StatusActiveID].BaseBytes, m.requestProgress[inputs.StatusActiveID].BaseEvents,
 		m.requestProgress[inputs.StatusActiveID].Done)
+	b.WriteByte('|')
+	b.WriteString(snap.backend)
 	b.WriteByte('|')
 	b.WriteString(snap.modelRef)
 	b.WriteByte('|')

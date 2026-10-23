@@ -28,6 +28,10 @@ func (a *MainAgent) FocusedModelState() FocusedModelState {
 func (a *MainAgent) modelStateForTarget(target focusedAgentSnapshot) (*llm.Client, FocusedModelState) {
 	state := FocusedModelState{}
 	var client *llm.Client
+	if backend := externalBackendForTarget(target); backend != "" {
+		state.Backend = backend
+		return nil, state
+	}
 	if target.sub != nil {
 		client, _ = target.sub.llmSnapshot()
 		if client != nil {

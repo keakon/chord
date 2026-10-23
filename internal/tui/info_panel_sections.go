@@ -86,6 +86,12 @@ func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
 
 func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 	modelState := m.focusedModelState()
+	if strings.TrimSpace(modelState.Backend) != "" {
+		// The external CLI picks and calls its own model; Chord has no model
+		// identity to show. Omit the MODEL section entirely rather than render
+		// a placeholder or leak the main agent's model.
+		return ""
+	}
 	provider, model, variant := modelref.SplitRunningModelRef(modelState.DisplayRef)
 	modelShown := modelref.FormatModelVariantForDisplay(model, variant, lineW)
 	modelLines := []string{
@@ -147,6 +153,10 @@ func keyPoolHealthSeverity(healthy, total int) keyPoolSeverity {
 }
 
 func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
+	if m.focusedModelState().Backend != "" {
+		// Context and token usage belong to a model Chord sent requests to.
+		return ""
+	}
 	// current is the usage-only reading the auto-compaction decision compares
 	// against its threshold: the last observed post-response baseline, the
 	// single frozen estimate when the latest response missed usage, or 0 when
@@ -238,6 +248,10 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 }
 
 func (m *Model) buildInfoPanelTimeBlock(lineW int) string {
+	if m.focusedModelState().Backend != "" {
+		// Chord does not schedule or time the external process's work.
+		return ""
+	}
 	stats := m.agent.GetSidebarWalltimeStats()
 	if stats.IsZero() {
 		// No walltime recorded for the focused agent: hide the whole section.

@@ -221,6 +221,9 @@ func (a *MainAgent) effectiveSubAgentModels(agentDef *config.AgentConfig) []stri
 
 func (a *MainAgent) focusedAgentConfig() *config.AgentConfig {
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return nil
+	}
 	agentDefName := ""
 	if target.sub != nil {
 		agentDefName = target.sub.agentDefName
@@ -280,8 +283,15 @@ func (a *MainAgent) PoolNames() []string {
 	return cfg.PoolNames()
 }
 
+func externalModelPoolSwitchError(backend string) error {
+	return fmt.Errorf("/models: model pools do not apply to external agents (%s); set the model in the backend launch args", backend)
+}
+
 func (a *MainAgent) SetCurrentModelPool(pool string) error {
 	target := a.focusedAgentSnapshot()
+	if backend := externalBackendForTarget(target); backend != "" {
+		return externalModelPoolSwitchError(backend)
+	}
 	if target.parked && target.task != nil {
 		return a.SetAgentModelPool(target.task.AgentDefName, pool)
 	}

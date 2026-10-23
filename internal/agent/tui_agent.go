@@ -104,6 +104,12 @@ type ModelSelector interface {
 // FocusedModelState is one consistent view of the model configuration for the
 // agent currently shown by the TUI, including restored parked SubAgents.
 type FocusedModelState struct {
+	// Backend names the external coding-agent backend executing the focused
+	// target. It is empty when Chord runs the target itself, where the model
+	// fields below describe what Chord will send. An external backend owns the
+	// model, context, usage, and skills outside Chord, so every display field
+	// stays empty rather than describing the main agent.
+	Backend     string
 	SelectedRef string
 	RunningRef  string
 	// DisplayRef is a complete provider/model@variant identity: the current

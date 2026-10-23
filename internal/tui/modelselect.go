@@ -108,6 +108,9 @@ func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) tea.Cmd
 	)
 	if target.Kind == agent.ModelPoolSelectorTargetCurrentView {
 		if m.focusedAgentID != "" {
+			if backend := strings.TrimSpace(m.focusedModelState().Backend); backend != "" {
+				return m.enqueueToast(fmt.Sprintf("Model pools do not apply to external agents (%s); set the model in the backend launch args", backend), "warn")
+			}
 			target.Kind = agent.ModelPoolSelectorTargetAgentOverride
 			target.AgentName = strings.TrimSpace(m.agent.FocusedAgentName())
 			if target.AgentName == "" {

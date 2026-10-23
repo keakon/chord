@@ -139,7 +139,7 @@ backend:
 
 ## Differences from native subagents
 
-- The external model call does not use Chord model pools or key rotation and does not produce Chord usage statistics.
+- The external model call does not use Chord model pools or key rotation and does not produce Chord usage statistics. While you view the worker, the info panel shows a BACKEND section in place of MODEL and hides USAGE, TIME, and SKILLS; the status bar omits its model, tier, and usage pills; and `/models` reports that model pools do not apply to external agents.
 - Chord sends `interrupt`, closes input, and gives the CLI a short grace period to flush its transcript and exit before terminating the process group. Existing changes are not rolled back; tools without a receipt show an unknown outcome.
 - Every external worker is backed by a dedicated supervisor process that owns its process group. If Chord is forcibly killed, the supervisor sees the lifecycle channel close and tears that group down, leaving a lifecycle receipt named after the run under `external-supervisor/` in the state directory. Chord writes a receipt for every run, including runs it settled itself: reading the exit report does not prove Chord persisted it. Receipts older than 30 days are pruned. If Chord and the supervisor are killed together nothing guarantees cleanup, so the receipt may be missing or may describe a run that never proved cleanup. Resume does not clean up orphaned processes; it only accepts the receipt of the exact run the task last launched.
 - Pause is not supported. Stop and restart the task instead.

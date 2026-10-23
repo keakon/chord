@@ -78,6 +78,10 @@ func (a *MainAgent) CallableSkills() []*skill.Meta { return a.callableSkillsSnap
 // do not change when the user switches sidebar focus.
 func (a *MainAgent) FocusedSkills() []*skill.Meta {
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		// Chord's skills do not apply to an external backend's own process.
+		return nil
+	}
 	if target.sub != nil {
 		return target.sub.userSkillsSnapshot()
 	}
@@ -92,6 +96,9 @@ func (a *MainAgent) FocusedSkills() []*skill.Meta {
 // selector lists the same entries.
 func (a *MainAgent) FocusedSkillInvocationStates() []skill.InvocationState {
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return nil
+	}
 	if target.sub != nil {
 		return target.sub.skillInvocationStates()
 	}
@@ -182,6 +189,9 @@ func (a *MainAgent) resetInvokedSkillsFromMessages(msgs []message.Message) {
 
 func (a *MainAgent) InvokedSkills() []*skill.Meta {
 	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return nil
+	}
 	if target.sub != nil {
 		return target.sub.InvokedSkills()
 	}

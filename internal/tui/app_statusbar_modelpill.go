@@ -35,6 +35,11 @@ func formatCost(cost float64) string {
 }
 
 func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSnapshot, effectiveWidth, leftWidth int) []string {
+	if snap.backend != "" {
+		// An external backend owns its model, provider, tier, and usage; Chord
+		// has no reading to show, and "unknown" would describe the wrong thing.
+		return pills
+	}
 	modelRef := snap.modelRef
 
 	const modelPillPrefixRunes = 2

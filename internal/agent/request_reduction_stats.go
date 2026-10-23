@@ -210,8 +210,12 @@ func (a *MainAgent) GetContextReductionStats() ContextReductionStats {
 	if a == nil {
 		return ContextReductionStats{}
 	}
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		return sub.GetContextReductionStats()
+	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return ContextReductionStats{}
+	}
+	if target.sub != nil {
+		return target.sub.GetContextReductionStats()
 	}
 	return a.currentMainContextReductionStats()
 }

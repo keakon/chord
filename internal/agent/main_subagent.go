@@ -1362,6 +1362,30 @@ type focusedAgentSnapshot struct {
 	settled bool
 }
 
+// externalBackendForTarget names the external coding-agent backend executing a
+// focused target, or "" when Chord runs it itself. An external backend owns its
+// model, context, usage, and skills, so focused facades must report those as
+// unavailable instead of falling back to the main agent.
+func externalBackendForTarget(target focusedAgentSnapshot) string {
+	if target.external != nil {
+		if kind := strings.TrimSpace(target.external.backend.Kind); kind != "" {
+			return kind
+		}
+		return config.BackendKindClaudeCode
+	}
+	if target.task != nil && target.task.ExternalSession != nil {
+		if kind := strings.TrimSpace(target.task.ExternalSession.Backend); kind != "" {
+			return kind
+		}
+		return config.BackendKindClaudeCode
+	}
+	return ""
+}
+
+func (a *MainAgent) focusedExternalBackend() string {
+	return externalBackendForTarget(a.focusedAgentSnapshot())
+}
+
 func (a *MainAgent) focusedConversationTarget() ConversationTarget {
 	if sub := a.validFocusedSubAgent(); sub != nil {
 		return ConversationTarget{AgentID: sub.instanceID, TaskID: sub.taskID}
