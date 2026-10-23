@@ -88,6 +88,7 @@ func TestIMESwitchIfTransitionOnlyTriggersForNormalModes(t *testing.T) {
 		{ModeInsert, ModeNormal, true},
 		{ModeInsert, ModeDirectory, true},
 		{ModeInsert, ModeSessionSelect, true},
+		{ModeInsert, ModeModelSelect, true},
 		{ModeInsert, ModeConfirm, true},
 		{ModeInsert, ModeQuestion, true},
 		{ModeInsert, ModeRules, true},
@@ -102,6 +103,59 @@ func TestIMESwitchIfTransitionOnlyTriggersForNormalModes(t *testing.T) {
 		if got != tc.wantCmd {
 			t.Errorf("runIMESwitchIfTransition(%v→%v): cmd!=nil = %v, want %v", tc.from, tc.to, got, tc.wantCmd)
 		}
+	}
+}
+
+func TestOpenModelSelectSwitchesAndRestoresIME(t *testing.T) {
+	orig := imeQueryCurrent
+	defer func() { imeQueryCurrent = orig }()
+	imeQueryCurrent = func() (string, error) { return "zh-orig", nil }
+
+	backend := &sessionControlAgent{mainModelPoolNames: []string{"alpha"}, mainModelPool: "alpha"}
+	m := NewModelWithSize(backend, 120, 24)
+	m.mode = ModeInsert
+	m.ime.switchTarget = "com.apple.keylayout.ABC"
+	m.terminalAppFocused = true
+	preventIMEApplyInTests(&m)
+
+	cmd := m.openModelSelect()
+	if m.mode != ModeModelSelect {
+		t.Fatalf("mode = %v, want ModeModelSelect", m.mode)
+	}
+	if cmd == nil {
+		t.Fatal("opening model select from Insert should query the current IME")
+	}
+	updated, _ := m.Update(cmd())
+	model := updated.(*Model)
+	if model.ime.beforeNormal != "zh-orig" {
+		t.Fatalf("imeBeforeNormal = %q, want zh-orig", model.ime.beforeNormal)
+	}
+	if !model.ime.pending || model.ime.pendingTarget != "com.apple.keylayout.ABC" {
+		t.Fatalf("pending IME apply = (%v, %q), want (true, com.apple.keylayout.ABC)", model.ime.pending, model.ime.pendingTarget)
+	}
+
+	_ = model.handleModelSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if model.mode != ModeInsert {
+		t.Fatalf("mode after Enter = %v, want ModeInsert", model.mode)
+	}
+	if !model.ime.pending || model.ime.pendingTarget != "zh-orig" {
+		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", model.ime.pending, model.ime.pendingTarget)
+	}
+}
+
+func TestModelSelectEscapeRestoresOriginalIME(t *testing.T) {
+	m := NewModel(nil)
+	m.mode = ModeModelSelect
+	m.modelSelect.prevMode = ModeInsert
+	m.ime.beforeNormal = "zh-orig"
+	preventIMEApplyInTests(&m)
+
+	_ = m.handleModelSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if m.mode != ModeInsert {
+		t.Fatalf("mode after Esc = %v, want ModeInsert", m.mode)
+	}
+	if !m.ime.pending || m.ime.pendingTarget != "zh-orig" {
+		t.Fatalf("pending IME restore = (%v, %q), want (true, zh-orig)", m.ime.pending, m.ime.pendingTarget)
 	}
 }
 
@@ -587,6 +641,7 @@ func TestFocusMsgReappliesEnglishIMEForConfirmAndQuestionModes(t *testing.T) {
 		{name: "normal", mode: ModeNormal},
 		{name: "confirm", mode: ModeConfirm},
 		{name: "question", mode: ModeQuestion},
+		{name: "model select", mode: ModeModelSelect},
 		{name: "rules", mode: ModeRules},
 	}
 	for _, tc := range cases {

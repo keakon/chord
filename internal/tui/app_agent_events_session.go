@@ -29,7 +29,7 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		return true, effects
 	case agent.ModelSelectEvent:
 		m.inflightDraft = nil
-		m.openModelSelectFor(evt.Target)
+		effects.addFollowup(m.openModelSelectFor(evt.Target))
 		return true, effects
 	case agent.RoleSelectEvent:
 		m.inflightDraft = nil

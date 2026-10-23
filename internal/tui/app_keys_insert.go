@@ -564,8 +564,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		return m.pageTranscript(-1)
 
 	case keyMatches(key, m.keyMap.SwitchModel):
-		m.openModelSelect()
-		return nil
+		return m.openModelSelect()
 
 	case keyMatches(key, m.keyMap.InsertAttachClipboard):
 		return m.pasteAttachmentFromClipboard()

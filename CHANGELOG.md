@@ -134,6 +134,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - A `grep` or `glob` card no longer loses its pattern when the call was written with a tolerated alias instead of the schema spelling. The header decodes the arguments with the tool's own reader, so a `grep` call that sent a plural `patterns` list shows the alternation it searched with, and the singular `path`/`glob` (grep) and `pattern` (glob) spellings join the option group — the card used to fall back to a bare “4 matches · 1 file” once the result arrived, even though the call had run. Arguments the audit already reports as discarded or missing keep their diagnostic rendering (`ignored patterns=…`, `<missing>`), and a search header with no subject now keeps the option group ahead of the count summary instead of dropping the search scope along with the empty pattern slot. A tolerated alias sent beside the canonical key it renames to is dropped from the option group, so the scope is named once. Edit's tolerated `filePath` spelling is read the same way, so the streaming preview shows the path while the arguments are still arriving instead of only once they complete.
 
+- Opening the model pool selector from Insert mode now switches to `ime_switch_target` and restores the previous input method after you choose a pool or close the dialog.
+
 ## 0.8.2 - 2026-10-11
 
 ### Highlights

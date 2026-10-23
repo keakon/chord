@@ -90,13 +90,13 @@ func (m *Model) switchModelPoolNow(target agent.ModelPoolSelectorTarget, pool st
 	}
 }
 
-func (m *Model) openModelSelect() {
-	m.openModelSelectFor(agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetCurrentView})
+func (m *Model) openModelSelect() tea.Cmd {
+	return m.openModelSelectFor(agent.ModelPoolSelectorTarget{Kind: agent.ModelPoolSelectorTargetCurrentView})
 }
 
-func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
+func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) tea.Cmd {
 	if m.agent == nil {
-		return
+		return nil
 	}
 	if target.Kind == "" {
 		target.Kind = agent.ModelPoolSelectorTargetCurrentView
@@ -111,7 +111,7 @@ func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
 			target.Kind = agent.ModelPoolSelectorTargetAgentOverride
 			target.AgentName = strings.TrimSpace(m.agent.FocusedAgentName())
 			if target.AgentName == "" {
-				return
+				return nil
 			}
 		} else {
 			target.Kind = agent.ModelPoolSelectorTargetMainRole
@@ -141,8 +141,6 @@ func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
 	if prevMode == ModeModelSelect {
 		prevMode = m.modelSelect.prevMode
 	}
-	m.clearActiveSearch()
-	m.clearChordState()
 
 	var list *overlaylist.List
 	if len(poolNames) > 0 {
@@ -158,11 +156,9 @@ func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
 		prevMode:    prevMode,
 	}
 	m.modelSelect.selector.list = list
-	if m.mode == ModeInsert {
-		m.input.Blur()
-	}
-	m.mode = ModeModelSelect
+	cmd := m.switchModeWithIME(ModeModelSelect)
 	m.recalcViewportSize()
+	return cmd
 }
 
 func (m *Model) handleModelSelectKey(msg tea.KeyMsg) tea.Cmd {
