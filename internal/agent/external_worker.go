@@ -34,10 +34,10 @@ const externalSessionStopGrace = 2 * time.Second
 // converges through the restore-time interrupted record instead.
 const externalShutdownWait = 500 * time.Millisecond
 
-// externalProgressMinInterval and externalProgressBurstItems implement the
-// mailbox/TUI progress throttle: at most one update per interval, with a burst
-// of distinct items released every N so heavy tool traffic cannot leave the
-// owner on a stale summary.
+// externalProgressMinInterval and externalProgressBurstItems implement the TUI
+// status throttle: at most one update per interval, with a burst of distinct
+// items released every N so heavy tool traffic cannot leave the status line on
+// a stale summary. They never gate an owner-facing message.
 const (
 	externalProgressMinInterval = 5 * time.Second
 	externalProgressBurstItems  = 8
@@ -507,6 +507,7 @@ func (w *externalWorker) updateProgress(summary string) {
 	}
 	if w.runtimeState.updateProgress(summary) {
 		w.markActivity()
+		w.emitProgressStatus(summary)
 	}
 }
 
@@ -519,7 +520,6 @@ func (w *externalWorker) noteAssistantText(text string) {
 	w.lastAssistant = text
 	w.lastAssistantMu.Unlock()
 	w.updateProgress(text)
-	w.emitProgress(text)
 }
 
 func (w *externalWorker) lastAssistantText() string {
@@ -528,7 +528,12 @@ func (w *externalWorker) lastAssistantText() string {
 	return w.lastAssistant
 }
 
-func (w *externalWorker) emitProgress(summary string) {
+// emitProgressStatus refreshes the TUI status line only. The owner is not told
+// about routine tool or assistant progress: like a native SubAgent, whose
+// summary only advances on an explicit Notify, an external worker reaches the
+// main agent only through Notify, a terminal report, or a stall alert. The
+// external CLI has no Notify tool, so it notifies solely by stopping.
+func (w *externalWorker) emitProgressStatus(summary string) {
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return
@@ -558,19 +563,6 @@ func (w *externalWorker) emitProgress(summary string) {
 		return
 	}
 	w.parent.emitToTUI(AgentStatusEvent{AgentID: w.instanceID, Status: "running", Message: summary})
-	ownerAgentID, ownerTaskID, _, _ := w.OwnerSnapshot()
-	mailbox := &SubAgentMailboxMessage{
-		AgentID:      w.instanceID,
-		TaskID:       w.taskID,
-		OwnerAgentID: ownerAgentID,
-		OwnerTaskID:  ownerTaskID,
-		Kind:         SubAgentMailboxKindProgress,
-		MessageType:  AgentMessageTypeProgress,
-		Priority:     SubAgentMailboxPriorityNotify,
-		Summary:      summary,
-		Payload:      summary,
-	}
-	w.parent.sendEvent(Event{Type: EventSubAgentMailbox, SourceID: w.instanceID, Payload: mailbox})
 }
 
 func (w *externalWorker) rememberToolName(id, name string) {

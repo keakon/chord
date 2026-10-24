@@ -84,11 +84,19 @@ func completionAlreadyDeliveredByMailbox(rec *DurableTaskRecord, injectedMailbox
 	return ok
 }
 
+// isRelevantCoordinationTask reports whether a task record carries something
+// the owner must act on or be told about. A worker that is merely running is
+// not coordination state: like a native SubAgent, an external worker reports
+// only through Notify, a terminal outcome, or a stall alert, so listing its
+// progress would turn the owner into a poller and bill routine tool activity to
+// every request. The same rule hides the turns counters below, which only ever
+// measured that polling.
 func isRelevantCoordinationTask(rec *DurableTaskRecord, currentTurn uint64) bool {
 	if rec == nil || strings.TrimSpace(rec.TaskID) == "" {
 		return false
 	}
-	if isNonTerminalTaskState(rec.State) {
+	switch SubAgentState(strings.TrimSpace(rec.State)) {
+	case SubAgentStateWaitingMain, SubAgentStateWaitingDescendant:
 		return true
 	}
 	if strings.TrimSpace(rec.SuspectedStallReason) != "" {
@@ -223,9 +231,6 @@ func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxID
 		if strings.TrimSpace(rec.SuspectedStallReason) != "" {
 			b.WriteString("\n  suspected_stall: ")
 			b.WriteString(rec.SuspectedStallReason)
-		}
-		if rec.LastUpdatedTurn != 0 || rec.CreatedTurn != 0 {
-			b.WriteString(fmt.Sprintf("\n  turns: created=%d updated=%d current=%d", rec.CreatedTurn, rec.LastUpdatedTurn, currentTurn))
 		}
 	}
 	return b.String()

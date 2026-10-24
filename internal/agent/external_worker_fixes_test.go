@@ -136,36 +136,110 @@ done
 	}
 }
 
-// TestExternalWorkerProgressThrottle pins M3: identical progress lines are
-// dropped, and distinct lines within the interval accumulate until a burst
-// release so the latest state stays visible under heavy tool traffic.
+// TestExternalWorkerProgressThrottle pins the TUI status throttle: identical
+// progress lines are dropped, and distinct lines within the interval accumulate
+// until a burst release so the latest state stays visible under heavy tool
+// traffic. The throttle only gates TUI status; it never creates an owner
+// message.
 func TestExternalWorkerProgressThrottle(t *testing.T) {
 	w := &externalWorker{}
-	w.emitProgress("one")
+	w.emitProgressStatus("one")
 	if w.lastProgress != "one" || w.progressItems != 0 {
 		t.Fatalf("first progress = (%q, %d), want (one, 0)", w.lastProgress, w.progressItems)
 	}
 
-	w.emitProgress("one")
+	w.emitProgressStatus("one")
 	if w.lastProgress != "one" || w.progressItems != 0 {
 		t.Fatalf("duplicate progress = (%q, %d), want (one, 0) unchanged", w.lastProgress, w.progressItems)
 	}
 
 	for i := range externalProgressBurstItems - 1 {
-		w.emitProgress(fmt.Sprintf("item-%d", i))
+		w.emitProgressStatus(fmt.Sprintf("item-%d", i))
 	}
 	if w.progressItems != externalProgressBurstItems-1 || w.lastProgress != "one" {
 		t.Fatalf("accumulated progress = (%q, %d), want (one, %d)", w.lastProgress, w.progressItems, externalProgressBurstItems-1)
 	}
-	w.emitProgress("item-final")
+	w.emitProgressStatus("item-final")
 	if w.lastProgress != "item-final" || w.progressItems != 0 {
 		t.Fatalf("burst release = (%q, %d), want (item-final, 0)", w.lastProgress, w.progressItems)
 	}
 
 	w.lastProgressAt = time.Now().Add(-externalProgressMinInterval - time.Second)
-	w.emitProgress("later")
+	w.emitProgressStatus("later")
 	if w.lastProgress != "later" || w.progressItems != 0 {
 		t.Fatalf("interval release = (%q, %d), want (later, 0)", w.lastProgress, w.progressItems)
+	}
+}
+
+// TestExternalWorkerProgressStaysOutOfOwnerMailbox pins the notification
+// boundary: routine tool and assistant progress refresh only the TUI status and
+// the activity heartbeat. A native SubAgent's summary advances only on an
+// explicit Notify; an external worker has no Notify tool, so it reaches the
+// owner solely by stopping, through its terminal mailbox or a stall alert.
+func TestExternalWorkerProgressStaysOutOfOwnerMailbox(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	taskID := "task-external-progress"
+	w := newTestExternalRuntime(t, a, taskID)
+
+	w.noteAssistantText("I've read the core lifecycle files.")
+	w.updateProgress("External tool: shell")
+	w.updateProgress("External tool finished: shell")
+
+	a.subAgentMailboxIDsMu.Lock()
+	progressRows := len(a.subAgentInbox.progress)
+	queuedRows := len(a.subAgentInbox.progressQueue)
+	a.subAgentMailboxIDsMu.Unlock()
+	if progressRows != 0 || queuedRows != 0 {
+		t.Fatalf("external progress entered the owner mailbox: progress=%d queued=%d", progressRows, queuedRows)
+	}
+
+	// The durable record is not a progress feed either: the snapshot and the
+	// restore path must not inherit routine tool or assistant text from it.
+	a.subs.mu.RLock()
+	summary := ""
+	if rec := a.subs.taskRecords[taskID]; rec != nil {
+		summary = rec.LastSummary
+	}
+	a.subs.mu.RUnlock()
+	for _, leaked := range []string{"I've read the core lifecycle files.", "External tool: shell", "External tool finished: shell"} {
+		if summary == leaked {
+			t.Fatalf("routine progress became the durable record summary: %q", summary)
+		}
+	}
+}
+
+// TestCoordinationSnapshotListsOnlyActionableTasks pins the request overlay to
+// action and terminal state only. A running worker is deliberately absent: the
+// owner learns about work through Notify or a terminal/stall notification, not
+// by polling the snapshot every request.
+func TestCoordinationSnapshotListsOnlyActionableTasks(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"task-running": {
+			TaskID:           "task-running",
+			AgentDefName:     "external-worker",
+			LatestInstanceID: "worker-running",
+			State:            string(SubAgentStateRunning),
+			LastSummary:      "I've read the core lifecycle files.",
+		},
+		"task-waiting": {
+			TaskID:           "task-waiting",
+			AgentDefName:     "external-worker",
+			LatestInstanceID: "worker-waiting",
+			State:            string(SubAgentStateWaitingMain),
+			LastSummary:      "needs a decision",
+		},
+	})
+
+	block := a.buildCoordinationSnapshotOverlayForRequest(nil)
+	if strings.Contains(block, "task-running") || strings.Contains(block, "I've read the core lifecycle files.") {
+		t.Fatalf("running task or its progress leaked into the coordination snapshot:\n%s", block)
+	}
+	if !strings.Contains(block, "task-waiting") || !strings.Contains(block, "needs a decision") {
+		t.Fatalf("actionable waiting task missing from the coordination snapshot:\n%s", block)
+	}
+	if strings.Contains(block, "turns:") {
+		t.Fatalf("coordination snapshot still reports turns:\n%s", block)
 	}
 }
 
