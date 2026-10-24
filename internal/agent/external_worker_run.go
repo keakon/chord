@@ -19,7 +19,10 @@ import (
 	"github.com/keakon/chord/internal/permission"
 )
 
-const externalPermissionTimeout = 5 * time.Minute
+// externalPermissionTimeout bounds one external permission wait, including the
+// time spent queued behind other confirms. It is a variable so tests can
+// exercise the timeout outcome without waiting minutes.
+var externalPermissionTimeout = 5 * time.Minute
 
 var startExternalSession = externalclaude.Start
 
