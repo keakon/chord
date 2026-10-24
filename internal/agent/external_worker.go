@@ -138,6 +138,13 @@ type externalWorker struct {
 	lastProgress   string
 	progressItems  int
 
+	// activityMu serializes the activity feed shared by the run loop and the
+	// permission goroutine; lastActivity keeps same-phase repeats from moving
+	// the status bar's elapsed-time anchor.
+	activityMu         sync.Mutex
+	lastActivity       ActivityType
+	lastActivityDetail string
+
 	toolMu              sync.Mutex
 	toolNames           map[string]string
 	toolPreWrites       map[string]externalToolPreWrite

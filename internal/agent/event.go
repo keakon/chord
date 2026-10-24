@@ -888,6 +888,22 @@ type AgentStatusEvent struct {
 
 func (AgentStatusEvent) agentEvent() {}
 
+// SubAgentInputDeliveryEvent reports the outcome of a follow-up sent to a
+// subagent task without a reply channel (focused TUI input). The composer
+// optimistically marks that input in flight; this event retires the marker when
+// the message becomes a queued next attempt or is rejected outright.
+type SubAgentInputDeliveryEvent struct {
+	AgentID string
+	Status  string // SubAgentInputDeliveryQueued or SubAgentInputDeliveryFailed
+}
+
+func (SubAgentInputDeliveryEvent) agentEvent() {}
+
+const (
+	SubAgentInputDeliveryQueued = externalInputQueued
+	SubAgentInputDeliveryFailed = "failed"
+)
+
 // ModelPoolSelectorTargetKind identifies which runtime model-pool setting the
 // TUI selector should edit.
 type ModelPoolSelectorTargetKind string

@@ -152,5 +152,34 @@ func (a *MainAgent) respondPausedFollowup(payload *SubAgentSendMessagePayload, h
 	if payload.Reply == nil && err != nil {
 		a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn"})
 	}
+	a.emitExternalInputDelivery(payload, handle, err)
 	respondSubAgentControl(payload.Reply, handle, err)
+}
+
+// emitExternalInputDelivery retires the TUI's optimistic draft for a follow-up
+// that will not run right away. Only focused input (no reply channel) tracks a
+// draft, and only external tasks need it: an internal worker reports its own
+// phases, while a queued external message has no process to report from.
+func (a *MainAgent) emitExternalInputDelivery(payload *SubAgentSendMessagePayload, handle tools.TaskHandle, err error) {
+	if payload == nil || payload.Reply != nil {
+		return
+	}
+	record := a.taskRecordByTaskID(strings.TrimSpace(payload.TaskID))
+	if record == nil || record.ExternalSession == nil {
+		return
+	}
+	status := ""
+	switch {
+	case err != nil:
+		status = SubAgentInputDeliveryFailed
+	case handle.Status == externalInputQueued:
+		status = SubAgentInputDeliveryQueued
+	default:
+		return
+	}
+	agentID := strings.TrimSpace(handle.AgentID)
+	if agentID == "" {
+		agentID = record.LatestInstanceID
+	}
+	a.emitToTUI(SubAgentInputDeliveryEvent{AgentID: agentID, Status: status})
 }

@@ -195,6 +195,19 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			m.setFocusedAgent("")
 		}
 		return true, effects
+	case agent.SubAgentInputDeliveryEvent:
+		// Focused input carries no reply channel, so this is the only signal
+		// that the optimistic draft stopped running. A queued message is
+		// persisted for the next attempt; showing it as in flight would leave a
+		// timer running for work that has not started.
+		if m.inflightDraftBelongsToAgent(evt.AgentID) {
+			m.inflightDraft = nil
+		}
+		if evt.Status == agent.SubAgentInputDeliveryQueued {
+			effects.addFollowup(m.enqueueToast("Message queued for the next attempt", "info"))
+		}
+		m.stopActiveAnimationIfIdle()
+		return true, effects
 	case agent.AgentActivityEvent:
 		prev := m.activities[evt.AgentID]
 		tbk := turnBusyKey(evt.AgentID)

@@ -53,6 +53,7 @@ func (w *externalWorker) runExternalWorker() {
 			w.finishCancelledUnlessRequested()
 			return
 		}
+		w.emitExternalActivity(ActivityPreparing, "")
 		session, processEnded, err := w.startSession(input, w.resumeNext)
 		if err != nil {
 			w.promptMu.Lock()
@@ -268,6 +269,7 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 		session.Stop(externalSessionStopGrace)
 		return nil, false, fmt.Errorf("send external agent prompt: %w", err)
 	}
+	w.emitExternalActivity(ActivityWaitingToken, "")
 	w.resultSeen = false
 	w.resultText = ""
 	w.setResultError(nil)
@@ -501,6 +503,9 @@ func (w *externalWorker) handleExternalStreamEvent(event externalclaude.Event) b
 			if stream.Delta.Text == "" {
 				return false
 			}
+			if !w.streamActive {
+				w.emitExternalActivity(ActivityStreaming, "")
+			}
 			w.streamActive = true
 			turnID, requestSeq := w.streamIdentity()
 			w.parent.emitToTUI(StreamTextEvent{
@@ -534,6 +539,9 @@ func (w *externalWorker) commitExternalStream(text string) {
 	// A commit without streamed deltas (a complete assistant message or a
 	// distinct closing result) still opens a card, so the segment stays active
 	// until its end event settles that card.
+	if !w.streamActive {
+		w.emitExternalActivity(ActivityStreaming, "")
+	}
 	w.streamActive = true
 	turnID, requestSeq := w.streamIdentity()
 	w.parent.emitToTUI(StreamTextCommitEvent{
@@ -706,6 +714,7 @@ func (w *externalWorker) handleExternalToolUse(use externalclaude.ContentBlock) 
 	// path, and routine tool activity must not wake the owner through mailbox
 	// progress messages.
 	w.updateProgress("External tool: " + summary)
+	w.emitExternalActivity(ActivityExecuting, summary)
 }
 
 func (w *externalWorker) handleExternalToolResult(block externalclaude.ContentBlock) bool {
@@ -730,6 +739,14 @@ func (w *externalWorker) handleExternalToolResult(block externalclaude.ContentBl
 	}
 	w.settleExternalTool(id, name, text, string(status), recoveryState)
 	w.updateProgress("External tool finished: " + name)
+	// Parallel tool calls keep the worker in the executing phase until every
+	// authorized call has its result; the last one hands the turn back to the
+	// model.
+	if running := w.runningExternalToolsLocked(); running > 0 {
+		w.emitExternalActivity(ActivityExecuting, fmt.Sprintf("%d tools", running))
+	} else {
+		w.emitExternalActivity(ActivityWaitingToken, "")
+	}
 	return true
 }
 
