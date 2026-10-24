@@ -102,3 +102,15 @@ func requireInputDeliveryEvent(t *testing.T, events []AgentEvent) SubAgentInputD
 	t.Fatal("no SubAgentInputDeliveryEvent emitted")
 	return SubAgentInputDeliveryEvent{}
 }
+
+// TestInputDeliveryEventIsReliable pins that a dropped delivery event cannot
+// leave the composer's draft in flight: both queued and failed deliveries have
+// to survive a full TUI output channel.
+func TestInputDeliveryEventIsReliable(t *testing.T) {
+	for _, status := range []string{SubAgentInputDeliveryQueued, SubAgentInputDeliveryFailed} {
+		evt := SubAgentInputDeliveryEvent{AgentID: "agent-1", Status: status}
+		if _, _, ok := reliableOutputEventLog(evt); !ok {
+			t.Errorf("reliableOutputEventLog(%q) = not reliable, want blocking delivery", status)
+		}
+	}
+}
