@@ -233,15 +233,13 @@ func (a *MainAgent) waitForSubAgents(remaining func() time.Duration) {
 			continue
 		}
 		agentID := runtime.InstanceID()
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), budget)
 			defer cancel()
 			if err := waitDone(ctx); err != nil {
 				log.Warnf("%s did not stop within shutdown budget agent_id=%v error=%v", kind, agentID, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

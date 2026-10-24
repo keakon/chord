@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/keakon/chord/internal/message"
@@ -50,9 +51,7 @@ func (w *externalWorker) persistExternalToolStarted(id, name string, audit *mess
 func (w *externalWorker) settleUnresolvedExternalTools() error {
 	w.toolMu.Lock()
 	names := make(map[string]string, len(w.toolNames))
-	for id, name := range w.toolNames {
-		names[id] = name
-	}
+	maps.Copy(names, w.toolNames)
 	w.toolMu.Unlock()
 	for id, name := range names {
 		state := message.ToolRecoveryStateNotStarted

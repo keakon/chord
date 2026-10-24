@@ -181,13 +181,11 @@ func (w *externalWorker) redeliverExternalPermission(frame externalclaude.Frame)
 	if session == nil {
 		return
 	}
-	w.permissionWG.Add(1)
-	go func() {
-		defer w.permissionWG.Done()
+	w.permissionWG.Go(func() {
 		ctx, cancel := context.WithTimeout(w.ctx, 5*time.Second)
 		defer cancel()
 		_ = session.WriteFrameContext(ctx, frame)
-	}()
+	})
 }
 
 func (w *externalWorker) cancelExternalPermissions(requestID string) {
