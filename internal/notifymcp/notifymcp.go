@@ -17,7 +17,8 @@ const (
 	ToolName   = "notify"
 
 	protocolVersion = "2024-11-05"
-	maxMessageBytes = 32 * 1024
+	// MaxMessageBytes bounds one notify message and its structured payload.
+	MaxMessageBytes = 32 * 1024
 )
 
 // Request is one notification accepted from the notify tool.
@@ -81,6 +82,15 @@ func Handle(ctx context.Context, message json.RawMessage, deliver DeliverFunc) j
 	default:
 		return errorResponse(request.ID, -32601, "method not found")
 	}
+}
+
+// Unavailable answers a request that reached a server Chord does not serve, or
+// a tool the role disabled. The request id is echoed so the client can
+// correlate the failure instead of waiting for a reply keyed to null.
+func Unavailable(message json.RawMessage, reason string) json.RawMessage {
+	var request rpcRequest
+	_ = json.Unmarshal(message, &request)
+	return errorResponse(request.ID, -32601, reason)
 }
 
 func initializeResult(params json.RawMessage) json.RawMessage {
@@ -155,8 +165,8 @@ func callTool(ctx context.Context, params json.RawMessage, deliver DeliverFunc) 
 	if arguments.Message == "" {
 		return toolError("message must not be empty"), nil
 	}
-	if len(arguments.Message) > maxMessageBytes {
-		return toolError(fmt.Sprintf("message exceeds %d bytes", maxMessageBytes)), nil
+	if len(arguments.Message) > MaxMessageBytes {
+		return toolError(fmt.Sprintf("message exceeds %d bytes", MaxMessageBytes)), nil
 	}
 	kind := strings.TrimSpace(arguments.Kind)
 	if kind == "" {
@@ -167,7 +177,7 @@ func callTool(ctx context.Context, params json.RawMessage, deliver DeliverFunc) 
 	}
 	payload := bytes.TrimSpace(arguments.Payload)
 	if len(payload) > 0 && string(payload) != "null" {
-		if len(payload) > maxMessageBytes || payload[0] != '{' {
+		if len(payload) > MaxMessageBytes || payload[0] != '{' {
 			return toolError("payload must be a JSON object within 32 KiB"), nil
 		}
 		var object map[string]json.RawMessage

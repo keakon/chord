@@ -161,6 +161,7 @@ func TestExternalNotifyMCPRejectsUnknownOrDisabledServer(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			raw := call()
 			var decoded struct {
+				ID    json.RawMessage `json:"id"`
 				Error struct {
 					Code int `json:"code"`
 				} `json:"error"`
@@ -170,6 +171,9 @@ func TestExternalNotifyMCPRejectsUnknownOrDisabledServer(t *testing.T) {
 			}
 			if decoded.Error.Code != -32601 {
 				t.Fatalf("MCP rejection = %s, want -32601", raw)
+			}
+			if string(decoded.ID) != "1" {
+				t.Fatalf("MCP rejection = %s, want the request id echoed instead of null", raw)
 			}
 		})
 	}

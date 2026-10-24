@@ -11,14 +11,17 @@ import (
 	"github.com/keakon/chord/internal/toolname"
 )
 
-const externalNotifyMaxMessage = maxAgentMessagePayloadBytes
+const externalNotifyMaxMessage = notifymcp.MaxMessageBytes
 
 // handleExternalMCP serves the private SDK MCP server over Claude Code's
 // control channel. The session read loop calls it before dispatching events,
 // so a notify never re-enters the worker event loop.
 func (w *externalWorker) handleExternalMCP(ctx context.Context, serverName string, message json.RawMessage) json.RawMessage {
-	if serverName != notifymcp.ServerName || !w.notifyEnabled() {
-		return json.RawMessage(`{"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"unknown MCP server"}}`)
+	if serverName != notifymcp.ServerName {
+		return notifymcp.Unavailable(message, "unknown MCP server")
+	}
+	if !w.notifyEnabled() {
+		return notifymcp.Unavailable(message, "notify is disabled for this role")
 	}
 	return notifymcp.Handle(ctx, message, w.deliverExternalNotify)
 }
