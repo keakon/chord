@@ -113,6 +113,11 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		}
 		effects.addFollowup(m.handleConfirmRequest(confirmRequestMsg{request: req}))
 		return true, effects
+	case agent.ConfirmResolvedEvent:
+		// The wait already ended (auto-deny on timeout or cancellation); a
+		// dialog still showing the request must close without answering.
+		effects.addFollowup(m.dismissResolvedConfirm(evt.RequestID))
+		return true, effects
 	case agent.QuestionTranscriptEvent:
 		for _, block := range messagesToBlocks([]message.Message{evt.Message}, &m.nextBlockID) {
 			block.MsgIndex = evt.MessageIndex

@@ -125,7 +125,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`image_result`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`confirm_resolved`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`image_result`。
 
 ### `status`
 
@@ -276,6 +276,8 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 
 `action` 要与模型/运行时提供的选项一致（如 `allow`、`deny`、`allow_once` 等）。可选的 `rule_pattern` + `rule_scope`（`session` / `project` / `user_global`）会在这次答复的同时安装一条权限规则；两者都省略时表示一次性决策。`session` 只在当前会话内生效；`project` 写入当前项目的 `.chord/agents/<role>.yaml`；`user_global` 写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。
 
+每条送达客户端的 `confirm_request` 之后都会进入终态，并以 `confirm_resolved` 事件推送：`approved` / `denied` 是客户端作答的回执；`timeout` 表示到期后无人作答、已自动拒绝；`cancelled` 表示等待提前结束。收到该事件就收起提示，不要再回答——对已终结的请求发 `confirm`，运行时只会忽略。
+
 ### `question`
 
 通过稳定 ID 操作题目。选择使用 `option_ids` 中的 ID，自定义文字用 `custom: true`：
@@ -377,6 +379,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 | `idle`               | 主 agent 与所有 SubAgent 均已全局静默，可再次接收输入 | `last_outcome`（`completed` / `cancelled` / `error`）、`suppress_user_notification`（除非 agent 在上一次 idle 事件后运行过，否则为 `true`）、`running_jobs`（与 `status_response` 同口径；大于 0 时，每个计入的 job 结束后 agent 都会再跑一轮，随后再发一条 `idle`，等待工作结束的集成方应继续读取事件） |
 | `done_completion`   | Done 工具完成并给出最终报告。只在 loop 运行期间产生——`done` 仅在此时挂载；`mode` 字段目前恒为 `normal` | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
 | `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`agent_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`timeout_ms` |
+| `confirm_resolved`   | 确认进入终态，`request_id` 不再可操作，应直接关闭而不是再回答；`approved` / `denied` 是客户端作答回执，`timeout` 是到期自动拒绝，`cancelled` 是提前结束 | `request_id`、`agent_id`、`tool_name`、`outcome`（`approved` / `denied` / `timeout` / `cancelled`） |
 | `question_request` | 题目可供回答 | `request_id`、`binding_id`、`task_id`、`request_scope_id`、`version`、`header`、`question`、`options`、`option_ids`、`option_details`、`multiple`、`response_policy`、`default_option_id`、`timer`、`duration_seconds`，可选 `deadline` |
 | `question_updated` | 计时、介入、要求处置或历史补答发生变化 | 完整题目快照；历史补答附带含独立 `result_id` 的 `revision_result` |
 | `question_resolved` | 题目进入终态 | 完整快照；`reason` 为 `answered`、`defaulted`、`no_response`、`superseded`、`cancelled` 或 `error` |

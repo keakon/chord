@@ -1085,6 +1085,36 @@ type ConfirmRequestEvent struct {
 
 func (ConfirmRequestEvent) agentEvent() {}
 
+// Confirm resolution outcomes carried by ConfirmResolvedEvent.Outcome.
+const (
+	// ConfirmOutcomeApproved / ConfirmOutcomeDenied mean a client answered
+	// through ResolveConfirm.
+	ConfirmOutcomeApproved = "approved"
+	ConfirmOutcomeDenied   = "denied"
+	// ConfirmOutcomeTimeout means the wait deadline expired and the call was
+	// auto-denied without an answer. Clients with no local countdown (headless
+	// control plane) learn the request stopped being actionable only from this
+	// event.
+	ConfirmOutcomeTimeout = "timeout"
+	// ConfirmOutcomeCancelled means the wait ended early: the turn or agent was
+	// cancelled, or shutdown began.
+	ConfirmOutcomeCancelled = "cancelled"
+)
+
+// ConfirmResolvedEvent tells clients that a confirmation reached a terminal
+// outcome and its request id is no longer actionable. A client that still shows
+// the request must close it without answering; a late ResolveConfirm for the
+// same id is a no-op. Emitted for every ConfirmRequestEvent that was delivered
+// to a consumer, whatever ends the wait (answer, deadline, cancellation).
+type ConfirmResolvedEvent struct {
+	RequestID string
+	ToolName  string
+	AgentID   string
+	Outcome   string
+}
+
+func (ConfirmResolvedEvent) agentEvent() {}
+
 // Question close reasons that are not model-visible question outcomes. They
 // mean the request was closed by the system rather than answered or timed out.
 const (

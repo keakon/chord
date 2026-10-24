@@ -33,7 +33,7 @@ func TestWalltimeUserWaitSettlesOnConfirmResolution(t *testing.T) {
 	requestID := "req-user-wait"
 	ch := b.registerConfirm(requestID, rec.captureAt(agentID, "", 0))
 	go b.resolveConfirm(requestID, ConfirmResponse{Approved: true})
-	resp, err := b.awaitConfirm(context.Background(), ch, 0, "read")
+	resp, err, _ := b.awaitConfirm(context.Background(), ch, 0, "read")
 	if err != nil || !resp.Approved {
 		t.Fatalf("awaitConfirm = (%#v, %v), want approved response", resp, err)
 	}
@@ -65,7 +65,7 @@ func TestWalltimeUserWaitSettlesOnConfirmTimeout(t *testing.T) {
 
 	const agentID = "worker-2"
 	ch := b.registerConfirm("req-timeout", rec.captureAt(agentID, "", 0))
-	resp, err := b.awaitConfirm(context.Background(), ch, 2*time.Millisecond, "read")
+	resp, err, _ := b.awaitConfirm(context.Background(), ch, 2*time.Millisecond, "read")
 	if err != nil || resp.Approved {
 		t.Fatalf("awaitConfirm = (%#v, %v), want auto-denied timeout", resp, err)
 	}
@@ -115,7 +115,7 @@ func TestWalltimeUserWaitAttribution(t *testing.T) {
 	toolCtx := tools.WithAgentID(context.Background(), a.instanceID)
 	ch := b.registerConfirm("req-main", a.walltime.captureAt(a.agentIDForInteraction(toolCtx), a.currentAgentName(), a.currentTurnID()))
 	go b.resolveConfirm("req-main", ConfirmResponse{Approved: true})
-	if _, err := b.awaitConfirm(context.Background(), ch, 0, "read"); err != nil {
+	if _, err, _ := b.awaitConfirm(context.Background(), ch, 0, "read"); err != nil {
 		t.Fatalf("awaitConfirm: %v", err)
 	}
 	b.unregisterConfirm("req-main")

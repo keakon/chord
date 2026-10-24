@@ -301,6 +301,19 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"agent_id":              e.AgentID,
 			}})
 		}
+	case agent.ConfirmResolvedEvent:
+		if state.pendingConfirm != nil && state.pendingConfirm.RequestID == e.RequestID {
+			touch()
+			state.pendingConfirm = nil
+		}
+		if state.isSubscribed("confirm_resolved") {
+			out = append(out, &headlessEnvelope{Type: "confirm_resolved", Payload: map[string]any{
+				"request_id": e.RequestID,
+				"tool_name":  e.ToolName,
+				"agent_id":   e.AgentID,
+				"outcome":    e.Outcome,
+			}})
+		}
 	case agent.QuestionTranscriptEvent:
 		var fact agent.QuestionFact
 		if json.Unmarshal(e.Message.Question, &fact) == nil && fact.Operation == agent.QuestionOpRevise && fact.Result != nil && len(fact.Updates) == 1 {

@@ -155,16 +155,18 @@ func (b *interactionBroker) unregisterConfirm(requestID string) {
 
 // awaitConfirm blocks until a response arrives on ch, the timeout fires
 // (timeout <= 0 means wait indefinitely), ctx is cancelled, or shutdown
-// begins. A timeout auto-denies; toolName is used only for the warning log.
-func (b *interactionBroker) awaitConfirm(ctx context.Context, ch <-chan ConfirmResponse, timeout time.Duration, toolName string) (ConfirmResponse, error) {
+// begins. A timeout auto-denies. The returned outcome names how the wait ended
+// (ConfirmOutcomeApproved / Denied / Timeout / Cancelled) so the caller can
+// report the terminal state; toolName is used only for the warning log.
+func (b *interactionBroker) awaitConfirm(ctx context.Context, ch <-chan ConfirmResponse, timeout time.Duration, toolName string) (ConfirmResponse, error, string) {
 	if timeout <= 0 {
 		select {
 		case resp := <-ch:
-			return resp, nil
+			return resp, nil, confirmOutcomeFor(resp)
 		case <-ctx.Done():
-			return ConfirmResponse{}, ctx.Err()
+			return ConfirmResponse{}, ctx.Err(), ConfirmOutcomeCancelled
 		case <-b.stoppingCh:
-			return ConfirmResponse{}, ErrAgentShutdown
+			return ConfirmResponse{}, ErrAgentShutdown, ConfirmOutcomeCancelled
 		}
 	}
 
@@ -173,15 +175,22 @@ func (b *interactionBroker) awaitConfirm(ctx context.Context, ch <-chan ConfirmR
 
 	select {
 	case resp := <-ch:
-		return resp, nil
+		return resp, nil, confirmOutcomeFor(resp)
 	case <-timer.C:
 		log.Warnf("tool confirmation timed out, auto-denying tool=%v timeout=%v", toolName, timeout)
-		return ConfirmResponse{Approved: false}, nil
+		return ConfirmResponse{Approved: false}, nil, ConfirmOutcomeTimeout
 	case <-ctx.Done():
-		return ConfirmResponse{}, ctx.Err()
+		return ConfirmResponse{}, ctx.Err(), ConfirmOutcomeCancelled
 	case <-b.stoppingCh:
-		return ConfirmResponse{}, ErrAgentShutdown
+		return ConfirmResponse{}, ErrAgentShutdown, ConfirmOutcomeCancelled
 	}
+}
+
+func confirmOutcomeFor(resp ConfirmResponse) string {
+	if resp.Approved {
+		return ConfirmOutcomeApproved
+	}
+	return ConfirmOutcomeDenied
 }
 
 // resolveConfirm delivers resp to the waiter registered under requestID. It is

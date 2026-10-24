@@ -460,6 +460,30 @@ func (m *Model) handleConfirmEditKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
+// dismissResolvedConfirm closes a dialog whose wait already ended on the agent
+// side (auto-deny timeout or cancellation raced ahead of the local countdown).
+// It must not answer again: the broker has no waiter for that request id, and
+// a resolve would run the rule-intent path for a request nobody is waiting on.
+func (m *Model) dismissResolvedConfirm(requestID string) tea.Cmd {
+	if m.confirm.request == nil || m.confirm.requestID != requestID {
+		return nil
+	}
+	if m.mode == ModeContentViewer && m.contentViewer.prevMode == ModeConfirm {
+		// Drop the viewer state without restoring its mode so finishDialog
+		// restores the mode the confirm was opened over.
+		m.contentViewer = contentViewerState{}
+	}
+	prevMode := m.confirm.prevMode
+	m.confirm = confirmState{}
+	m.terminalTitleRequestSeen = false
+	m.recalcViewportSize()
+	cmds := []tea.Cmd{waitForConfirmRequest(m.confirmCh), m.syncTerminalTitleState()}
+	if m.displayState == stateBackground {
+		cmds = append(cmds, m.updateBackgroundIdleSweepState())
+	}
+	return m.finishDialog(prevMode, cmds...)
+}
+
 // resolveConfirm sends the result back via confirmResultCh or agent.ResolveConfirm
 // for request-ID based interactions, clears the confirm state, restores the
 // previous mode, and returns a tea.Cmd that re-subscribes to the confirm channel

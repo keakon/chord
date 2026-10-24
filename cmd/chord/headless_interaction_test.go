@@ -253,6 +253,91 @@ func TestHeadlessPendingConfirmClearedAfterConfirm(t *testing.T) {
 	}
 }
 
+// TestHeadlessConfirmResolvedMatchingClearsAndForwards pins the terminal push a
+// client without a local countdown depends on: a confirmation that ended on the
+// runtime side (auto-deny timeout or cancellation) clears the cached pending
+// request and is forwarded with its outcome.
+func TestHeadlessConfirmResolvedMatchingClearsAndForwards(t *testing.T) {
+	state := &headlessState{
+		subscriptions: map[string]bool{"confirm_resolved": true},
+		pendingConfirm: &headlessConfirmPayload{
+			ToolName:  "Read",
+			RequestID: "req-1",
+		},
+	}
+
+	envs := filterHeadlessEvent(agent.ConfirmResolvedEvent{RequestID: "req-1", ToolName: "Read", AgentID: "main", Outcome: agent.ConfirmOutcomeTimeout}, state)
+
+	env := findHeadlessEnvelope(envs, "confirm_resolved")
+	if env == nil {
+		t.Fatalf("confirm_resolved envelope not emitted: %v", envs)
+	}
+	payload, ok := env.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload type = %T", env.Payload)
+	}
+	if payload["request_id"] != "req-1" || payload["outcome"] != "timeout" || payload["tool_name"] != "Read" || payload["agent_id"] != "main" {
+		t.Fatalf("payload = %#v, want req-1 timeout for main Read", payload)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pendingConfirm != nil {
+		t.Fatalf("pendingConfirm = %+v, want nil after a matching resolution", state.pendingConfirm)
+	}
+	if state.updatedAt.IsZero() {
+		t.Fatal("updatedAt should be refreshed by the resolution")
+	}
+}
+
+// TestHeadlessConfirmResolvedWithoutSubscriptionStillClears mirrors the
+// handoff cancellation rule: the cached state drops the stale request even
+// when the client never subscribed to the resolution event.
+func TestHeadlessConfirmResolvedWithoutSubscriptionStillClears(t *testing.T) {
+	state := &headlessState{
+		subscriptions: map[string]bool{"idle": true},
+		pendingConfirm: &headlessConfirmPayload{
+			ToolName:  "Read",
+			RequestID: "req-1",
+		},
+	}
+
+	envs := filterHeadlessEvent(agent.ConfirmResolvedEvent{RequestID: "req-1", Outcome: agent.ConfirmOutcomeCancelled}, state)
+	if env := findHeadlessEnvelope(envs, "confirm_resolved"); env != nil {
+		t.Fatalf("confirm_resolved should not be forwarded without a subscription: %v", env)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pendingConfirm != nil {
+		t.Fatalf("pendingConfirm = %+v, want nil even without a subscription", state.pendingConfirm)
+	}
+}
+
+// TestHeadlessConfirmResolvedMismatchKeepsPendingButForwards covers a
+// resolution for an older request while a newer one is already pending: the
+// newer request stays actionable, the terminal fact is still forwarded.
+func TestHeadlessConfirmResolvedMismatchKeepsPendingButForwards(t *testing.T) {
+	state := &headlessState{
+		subscriptions: map[string]bool{"confirm_resolved": true},
+		pendingConfirm: &headlessConfirmPayload{
+			ToolName:  "Edit",
+			RequestID: "req-2",
+		},
+	}
+
+	envs := filterHeadlessEvent(agent.ConfirmResolvedEvent{RequestID: "req-1", Outcome: agent.ConfirmOutcomeTimeout}, state)
+	if env := findHeadlessEnvelope(envs, "confirm_resolved"); env == nil {
+		t.Fatalf("confirm_resolved envelope not emitted: %v", envs)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.pendingConfirm == nil || state.pendingConfirm.RequestID != "req-2" {
+		t.Fatalf("pendingConfirm = %+v, want the newer req-2 kept", state.pendingConfirm)
+	}
+}
+
 func TestHeadlessConfirmSupportsRuleIntent(t *testing.T) {
 	state := &headlessState{
 		pendingConfirm: &headlessConfirmPayload{

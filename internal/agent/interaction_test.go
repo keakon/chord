@@ -16,6 +16,130 @@ func testWalltimeTarget(agentID string) *walltimeTarget {
 	return newWalltimeRecorder(nil, nil, nil).captureAt(agentID, "", 0)
 }
 
+// collectConfirmEvents drains the agent output until both a confirm request
+// and its resolution arrived, or the deadline passes.
+func collectConfirmEvents(t *testing.T, a *MainAgent) (ConfirmRequestEvent, ConfirmResolvedEvent, bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var request ConfirmRequestEvent
+	var resolved ConfirmResolvedEvent
+	for time.Now().Before(deadline) {
+		for _, evt := range drainAgentEvents(a.outputCh) {
+			switch e := evt.(type) {
+			case ConfirmRequestEvent:
+				request = e
+			case ConfirmResolvedEvent:
+				resolved = e
+			}
+		}
+		if request.RequestID != "" && resolved.RequestID != "" {
+			return request, resolved, true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return request, resolved, false
+}
+
+// TestAwaitConfirmTimeoutEmitsResolvedEvent pins the terminal push a client
+// without a local countdown depends on: when the wait deadline fires and the
+// call is auto-denied, the request id is reported as resolved with the timeout
+// outcome so stale prompts can be retired instead of answered.
+func TestAwaitConfirmTimeoutEmitsResolvedEvent(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+
+	done := make(chan ConfirmResponse, 1)
+	go func() {
+		resp, err := a.AwaitConfirm(context.Background(), "Read", `{"path":"x"}`, 20*time.Millisecond, nil, nil)
+		if err != nil {
+			t.Errorf("AwaitConfirm: %v", err)
+		}
+		done <- resp
+	}()
+
+	request, resolved, ok := collectConfirmEvents(t, a)
+	if !ok {
+		t.Fatal("confirm request and resolution events not both emitted")
+	}
+	if resolved.RequestID != request.RequestID {
+		t.Fatalf("resolved request id = %q, want the requested %q", resolved.RequestID, request.RequestID)
+	}
+	if resolved.Outcome != ConfirmOutcomeTimeout {
+		t.Fatalf("outcome = %q, want %q", resolved.Outcome, ConfirmOutcomeTimeout)
+	}
+	if resolved.ToolName != "Read" || resolved.AgentID != "main" {
+		t.Fatalf("resolved event = %+v, want tool Read for main", resolved)
+	}
+	select {
+	case resp := <-done:
+		if resp.Approved {
+			t.Fatal("timeout must auto-deny")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AwaitConfirm did not return after the resolution event")
+	}
+}
+
+// TestAwaitConfirmAnswerEmitsResolvedEvent covers the answered path: a client
+// resolution is echoed as an approved terminal event for the same request id.
+func TestAwaitConfirmAnswerEmitsResolvedEvent(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+
+	done := make(chan ConfirmResponse, 1)
+	go func() {
+		resp, err := a.AwaitConfirm(context.Background(), "Read", `{"path":"x"}`, 5*time.Second, nil, nil)
+		if err != nil {
+			t.Errorf("AwaitConfirm: %v", err)
+		}
+		done <- resp
+	}()
+
+	var request ConfirmRequestEvent
+	deadline := time.Now().Add(5 * time.Second)
+	for request.RequestID == "" && time.Now().Before(deadline) {
+		for _, evt := range drainAgentEvents(a.outputCh) {
+			if e, ok := evt.(ConfirmRequestEvent); ok {
+				request = e
+			}
+		}
+		if request.RequestID == "" {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if request.RequestID == "" {
+		t.Fatal("confirm request not emitted")
+	}
+	a.ResolveConfirm("allow", `{"path":"x"}`, "", "", request.RequestID)
+
+	var resolved ConfirmResolvedEvent
+	deadline = time.Now().Add(5 * time.Second)
+	for resolved.RequestID == "" && time.Now().Before(deadline) {
+		for _, evt := range drainAgentEvents(a.outputCh) {
+			if e, ok := evt.(ConfirmResolvedEvent); ok {
+				resolved = e
+			}
+		}
+		if resolved.RequestID == "" {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if resolved.RequestID == "" {
+		t.Fatal("resolution event not emitted after answering")
+	}
+	if resolved.RequestID != request.RequestID || resolved.Outcome != ConfirmOutcomeApproved {
+		t.Fatalf("resolved event = %+v, want id %q approved", resolved, request.RequestID)
+	}
+	select {
+	case resp := <-done:
+		if !resp.Approved {
+			t.Fatal("expected the allow answer to reach the waiter")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AwaitConfirm did not return after answering")
+	}
+}
+
 func TestResolveConfirmUnknownActionDenies(t *testing.T) {
 	a := &MainAgent{interaction: newInteractionBroker(nil)}
 
@@ -77,12 +201,15 @@ func TestInteractionBrokerAwaitConfirmResolves(t *testing.T) {
 
 	go b.resolveConfirm("req-1", ConfirmResponse{Approved: true})
 
-	resp, err := b.awaitConfirm(context.Background(), ch, time.Second, "Read")
+	resp, err, outcome := b.awaitConfirm(context.Background(), ch, time.Second, "Read")
 	if err != nil {
 		t.Fatalf("awaitConfirm: %v", err)
 	}
 	if !resp.Approved {
 		t.Fatal("expected approved response")
+	}
+	if outcome != ConfirmOutcomeApproved {
+		t.Fatalf("outcome = %q, want %q", outcome, ConfirmOutcomeApproved)
 	}
 }
 
@@ -93,12 +220,15 @@ func TestInteractionBrokerAwaitConfirmTimeoutDenies(t *testing.T) {
 	ch := b.registerConfirm("req-1", testWalltimeTarget("main"))
 	defer b.unregisterConfirm("req-1")
 
-	resp, err := b.awaitConfirm(context.Background(), ch, time.Millisecond, "Read")
+	resp, err, outcome := b.awaitConfirm(context.Background(), ch, time.Millisecond, "Read")
 	if err != nil {
 		t.Fatalf("awaitConfirm: %v", err)
 	}
 	if resp.Approved {
 		t.Fatal("expected timeout to auto-deny")
+	}
+	if outcome != ConfirmOutcomeTimeout {
+		t.Fatalf("outcome = %q, want %q", outcome, ConfirmOutcomeTimeout)
 	}
 }
 
@@ -112,7 +242,7 @@ func TestInteractionBrokerAwaitStops(t *testing.T) {
 
 	close(stopCh)
 
-	if _, err := b.awaitConfirm(context.Background(), ch, 0, "Read"); err != ErrAgentShutdown {
+	if _, err, _ := b.awaitConfirm(context.Background(), ch, 0, "Read"); err != ErrAgentShutdown {
 		t.Fatalf("err = %v, want ErrAgentShutdown", err)
 	}
 }

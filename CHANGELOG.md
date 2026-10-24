@@ -38,6 +38,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - MainAgent supports persistent after-completion inputs with Alt+Enter, a `/queue` editor and explicit pause/resume, plus headless queue snapshots and revision-checked controls.
 
 - Take over a live local session between TUI and a gateway on macOS and Linux. Chord waits for already-started work with the status bar reporting how long the wait has run; when a wait budget ends before the source releases, the status bar keeps confirming the hand-off and completes the restore on its own. Queued inputs are saved, and the session is restored paused until you explicitly continue.
+- Headless clients receive a `confirm_resolved` push when a delivered `confirm_request` reaches a terminal outcome: `approved` and `denied` echo the client's answer, `timeout` means the deadline auto-denied with no answer, and `cancelled` means the wait ended early. Integrations without a local countdown no longer hold an unanswered confirmation actionable until the next idle; retire the prompt when the event arrives — a late `confirm` for a resolved request is ignored by the runtime.
 
 ### Improvements
 

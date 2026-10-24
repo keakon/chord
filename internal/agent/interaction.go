@@ -111,5 +111,10 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 		return ConfirmResponse{}, err
 	}
 	a.emitToTUI(NotificationEvent{Reason: NotificationReasonUserInputRequired, Message: "Chord: Permission confirmation required"})
-	return a.interaction.awaitConfirm(ctx, ch, timeout, toolName)
+	resp, err, outcome := a.interaction.awaitConfirm(ctx, ch, timeout, toolName)
+	// The request was delivered, so every consumer must learn it is no longer
+	// actionable — an unanswered timeout or cancellation leaves a client with
+	// no local countdown holding a stale request whose answer would be a no-op.
+	a.emitToTUI(ConfirmResolvedEvent{RequestID: requestID, ToolName: toolName, AgentID: ownerID, Outcome: outcome})
+	return resp, err
 }

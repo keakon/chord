@@ -127,7 +127,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`, `image_result`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `confirm_resolved`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`, `image_result`.
 
 ### `status`
 
@@ -278,6 +278,8 @@ Resolve a pending `confirm_request`. Use the `request_id` from the request.
 
 `action` follows whatever the model/runtime offered (`allow`, `deny`, `allow_once`, …). Optional `rule_pattern` + `rule_scope` (`session` / `project` / `user_global`) installs a permission rule along with the answer; omit both for one-shot decisions. `session` applies only to the current session; `project` writes to the current project's `.chord/agents/<role>.yaml`; `user_global` writes to the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`).
 
+Every delivered `confirm_request` later reaches a terminal outcome, pushed as a `confirm_resolved` event: `approved` / `denied` echo a client answer, while `timeout` (the deadline auto-denied with no answer) and `cancelled` mean the request stopped being actionable without one. Retire the prompt when that event arrives instead of answering it; a late `confirm` for a resolved request is a no-op on the runtime side.
+
 ### `question`
 
 Operate on a stable question ID. Selections use IDs from `option_ids`; free text uses `custom: true`:
@@ -379,6 +381,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `idle`                  | The main agent and all SubAgents are globally quiescent and ready for input                         | `last_outcome` (`completed` / `cancelled` / `error`), `suppress_user_notification` (`true` unless the agent ran since the previous idle event), `running_jobs` (same count as `status_response`; while it is above zero, each counted job wakes the agent again when it ends and a new `idle` follows, so an integration waiting for the work to end should keep reading events) |
 | `done_completion`      | Done tool completed with a final report. Emitted only while a loop is running, since that is the only time `done` is mounted; the `mode` field is currently always `normal` | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `agent_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `needs_approval_rules`, `already_allowed_rules`, `timeout_ms` |
+| `confirm_resolved`      | A confirmation reached a terminal outcome and its `request_id` is no longer actionable; close it instead of answering (`approved` and `denied` are echoes of a client answer, `timeout` is the auto-deny deadline, `cancelled` ended early) | `request_id`, `agent_id`, `tool_name`, `outcome` (`approved` / `denied` / `timeout` / `cancelled`) |
 | `question_request` | A question becomes available | `request_id`, `binding_id`, `task_id`, `request_scope_id`, `version`, `header`, `question`, `options`, `option_ids`, `option_details`, `multiple`, `response_policy`, `default_option_id`, `timer`, `duration_seconds`, optional `deadline` |
 | `question_updated` | Timing, interaction, requirement disposition, or historical revision changes | Full question snapshot; historical replies add `revision_result` with a distinct `result_id` |
 | `question_resolved` | A question reaches a terminal outcome | Full snapshot; `reason` is `answered`, `defaulted`, `no_response`, `superseded`, `cancelled`, or `error` |

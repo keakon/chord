@@ -225,6 +225,7 @@ var headlessEventTypes = map[string]bool{
 	"assistant_message":      true,
 	"idle":                   true,
 	"confirm_request":        true,
+	"confirm_resolved":       true,
 	"question_request":       true,
 	"question_resolved":      true,
 	"question_updated":       true,

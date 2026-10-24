@@ -133,6 +133,7 @@ type sessionControlAgent struct {
 	contextLimit            int
 	todos                   []tools.TodoItem
 	sentMessages            []string
+	confirmResolutions      []string
 	contextMessages         []message.Message
 	sentMultipart           [][]message.ContentPart
 	queuedDraftIDs          []string
@@ -209,6 +210,7 @@ func (s *sessionControlAgent) RemoveSubAgentDraft(draftID string) bool {
 	return true
 }
 func (s *sessionControlAgent) ResolveConfirm(action, finalArgsJSON, editSummary, denyReason, requestID string) {
+	s.confirmResolutions = append(s.confirmResolutions, action+" "+requestID)
 }
 func (s *sessionControlAgent) ApplyQuestionOperation(context.Context, agent.QuestionOperation) (agent.QuestionReceipt, error) {
 	return agent.QuestionReceipt{Accepted: true}, nil
