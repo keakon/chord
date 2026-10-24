@@ -78,7 +78,13 @@ func processGroupID(cmd *exec.Cmd) (pid, pgid int, err error) {
 }
 
 // probeGroup resolves a bound identity. It never treats a live pid as proof on
-// its own: the group must still be the one that was bound.
+// its own: the group must still be the one that was bound. Once the leader is
+// gone and its start token cannot be read, a live group id is attributed to the
+// bound group: the members that keep it alive inherited it from that leader.
+// Ruling out a recycled pid leading a new group under the same id needs a
+// pidfd, which is not available on every supported platform. The alternative,
+// refusing every unverifiable group, would leave Chord's own leaked children
+// running and fail the task, so cleanup accepts that narrow window instead.
 func probeGroup(pid, pgid int, startToken string) GroupState {
 	if pgid <= 0 {
 		return GroupUnknown
@@ -109,9 +115,8 @@ func probeGroup(pid, pgid int, startToken string) GroupState {
 			}
 			return GroupAlive
 		case processStartTokenGone(err):
-			// The leader is gone. The group id can still be held by another
-			// member; if it is, it is the group we bound because no live
-			// process currently owns that pid.
+			// The leader is gone; a live group id means members still hold the
+			// group it named.
 			if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
 				return GroupGone
 			} else if err != nil {
