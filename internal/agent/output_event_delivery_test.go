@@ -534,3 +534,36 @@ func TestSubAgentDisplayReliableDeliveryReleasesRequestLocks(t *testing.T) {
 		})
 	}
 }
+
+func TestEmitToTUIConfirmResolvedWaitsForSpace(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	for range cap(a.outputCh) {
+		a.outputCh <- StreamTextEvent{Text: "busy"}
+	}
+
+	delivered := make(chan struct{})
+	go func() {
+		a.emitToTUI(ConfirmResolvedEvent{RequestID: "req-1", Outcome: ConfirmOutcomeCancelled})
+		close(delivered)
+	}()
+
+	select {
+	case <-delivered:
+		t.Fatal("ConfirmResolvedEvent send completed while output channel was full")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	for range cap(a.outputCh) {
+		<-a.outputCh
+	}
+	select {
+	case <-delivered:
+	case <-time.After(time.Second):
+		t.Fatal("ConfirmResolvedEvent was not delivered after space became available")
+	}
+
+	event, ok := (<-a.outputCh).(ConfirmResolvedEvent)
+	if !ok || event.RequestID != "req-1" || event.Outcome != ConfirmOutcomeCancelled {
+		t.Fatalf("event = %#v, want req-1/cancelled ConfirmResolvedEvent", event)
+	}
+}

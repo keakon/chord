@@ -201,7 +201,7 @@ func TestInteractionBrokerAwaitConfirmResolves(t *testing.T) {
 
 	go b.resolveConfirm("req-1", ConfirmResponse{Approved: true})
 
-	resp, err, outcome := b.awaitConfirm(context.Background(), ch, time.Second, "Read")
+	resp, outcome, err := b.awaitConfirm(context.Background(), ch, time.Second, "Read")
 	if err != nil {
 		t.Fatalf("awaitConfirm: %v", err)
 	}
@@ -220,12 +220,35 @@ func TestInteractionBrokerAwaitConfirmTimeoutDenies(t *testing.T) {
 	ch := b.registerConfirm("req-1", testWalltimeTarget("main"))
 	defer b.unregisterConfirm("req-1")
 
-	resp, err, outcome := b.awaitConfirm(context.Background(), ch, time.Millisecond, "Read")
+	resp, outcome, err := b.awaitConfirm(context.Background(), ch, time.Millisecond, "Read")
 	if err != nil {
 		t.Fatalf("awaitConfirm: %v", err)
 	}
 	if resp.Approved {
 		t.Fatal("expected timeout to auto-deny")
+	}
+	if outcome != ConfirmOutcomeTimeout {
+		t.Fatalf("outcome = %q, want %q", outcome, ConfirmOutcomeTimeout)
+	}
+}
+
+// TestInteractionBrokerAwaitConfirmDeadlineIsTimeout verifies a context
+// deadline settles as the timeout outcome instead of a user cancellation, so a
+// caller that bounds both the queue wait and the modal wait reports one
+// deterministic terminal state.
+func TestInteractionBrokerAwaitConfirmDeadlineIsTimeout(t *testing.T) {
+	b := newInteractionBroker(nil)
+	ch := b.registerConfirm("req-1", testWalltimeTarget("main"))
+	defer b.unregisterConfirm("req-1")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	resp, outcome, err := b.awaitConfirm(ctx, ch, time.Minute, "Read")
+	if err != nil {
+		t.Fatalf("awaitConfirm: %v", err)
+	}
+	if resp.Approved {
+		t.Fatal("deadline must auto-deny")
 	}
 	if outcome != ConfirmOutcomeTimeout {
 		t.Fatalf("outcome = %q, want %q", outcome, ConfirmOutcomeTimeout)
@@ -242,7 +265,7 @@ func TestInteractionBrokerAwaitStops(t *testing.T) {
 
 	close(stopCh)
 
-	if _, err, _ := b.awaitConfirm(context.Background(), ch, 0, "Read"); err != ErrAgentShutdown {
+	if _, _, err := b.awaitConfirm(context.Background(), ch, 0, "Read"); err != ErrAgentShutdown {
 		t.Fatalf("err = %v, want ErrAgentShutdown", err)
 	}
 }

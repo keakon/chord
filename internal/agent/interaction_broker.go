@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -169,18 +170,26 @@ func (b *interactionBroker) unregisterConfirm(requestID string) {
 
 // awaitConfirm blocks until a response arrives on ch, the timeout fires
 // (timeout <= 0 means wait indefinitely), ctx is cancelled, or shutdown
-// begins. A timeout auto-denies. The returned outcome names how the wait ended
-// (ConfirmOutcomeApproved / Denied / Timeout / Cancelled) so the caller can
-// report the terminal state; toolName is used only for the warning log.
-func (b *interactionBroker) awaitConfirm(ctx context.Context, ch <-chan ConfirmResponse, timeout time.Duration, toolName string) (ConfirmResponse, error, string) {
+// begins. A timeout auto-denies. A context deadline is the same terminal state
+// as the timer: callers that bound the wait both ways (the external permission
+// queue) must report one deterministic timeout outcome instead of racing the
+// deadline against the timer and sometimes reporting a user cancellation. The
+// returned outcome names how the wait ended (ConfirmOutcomeApproved / Denied /
+// Timeout / Cancelled) so the caller can report the terminal state; toolName is
+// used only for the warning log.
+func (b *interactionBroker) awaitConfirm(ctx context.Context, ch <-chan ConfirmResponse, timeout time.Duration, toolName string) (ConfirmResponse, string, error) {
 	if timeout <= 0 {
 		select {
 		case resp := <-ch:
-			return resp, nil, confirmOutcomeFor(resp)
+			return resp, confirmOutcomeFor(resp), nil
 		case <-ctx.Done():
-			return ConfirmResponse{}, ctx.Err(), ConfirmOutcomeCancelled
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				log.Warnf("tool confirmation deadline reached, auto-denying tool=%v", toolName)
+				return ConfirmResponse{Approved: false}, ConfirmOutcomeTimeout, nil
+			}
+			return ConfirmResponse{}, ConfirmOutcomeCancelled, ctx.Err()
 		case <-b.stoppingCh:
-			return ConfirmResponse{}, ErrAgentShutdown, ConfirmOutcomeCancelled
+			return ConfirmResponse{}, ConfirmOutcomeCancelled, ErrAgentShutdown
 		}
 	}
 
@@ -189,14 +198,18 @@ func (b *interactionBroker) awaitConfirm(ctx context.Context, ch <-chan ConfirmR
 
 	select {
 	case resp := <-ch:
-		return resp, nil, confirmOutcomeFor(resp)
+		return resp, confirmOutcomeFor(resp), nil
 	case <-timer.C:
 		log.Warnf("tool confirmation timed out, auto-denying tool=%v timeout=%v", toolName, timeout)
-		return ConfirmResponse{Approved: false}, nil, ConfirmOutcomeTimeout
+		return ConfirmResponse{Approved: false}, ConfirmOutcomeTimeout, nil
 	case <-ctx.Done():
-		return ConfirmResponse{}, ctx.Err(), ConfirmOutcomeCancelled
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			log.Warnf("tool confirmation deadline reached, auto-denying tool=%v", toolName)
+			return ConfirmResponse{Approved: false}, ConfirmOutcomeTimeout, nil
+		}
+		return ConfirmResponse{}, ConfirmOutcomeCancelled, ctx.Err()
 	case <-b.stoppingCh:
-		return ConfirmResponse{}, ErrAgentShutdown, ConfirmOutcomeCancelled
+		return ConfirmResponse{}, ConfirmOutcomeCancelled, ErrAgentShutdown
 	}
 }
 
