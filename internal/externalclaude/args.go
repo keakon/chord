@@ -4,6 +4,7 @@
 package externalclaude
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -19,11 +20,20 @@ const (
 	FlagPermissionPromptTool = "--permission-prompt-tool"
 	FlagPermissionMode       = "--permission-mode"
 	FlagDisallowedTools      = "--disallowedTools"
+	FlagAllowedTools         = "--allowedTools"
+	FlagMCPConfig            = "--mcp-config"
+	FlagStrictMCPConfig      = "--strict-mcp-config"
 
 	OutputFormatStreamJSON = "stream-json"
 	InputFormatStreamJSON  = "stream-json"
 	PermissionModeDefault  = "default"
 	PermissionPromptStdio  = "stdio"
+
+	// MCPNotifyServerName and MCPNotifyToolName are the private MCP surface
+	// Chord injects into Claude Code. --strict-mcp-config keeps every other
+	// MCP server out of the process.
+	MCPNotifyServerName = "chord"
+	MCPNotifyToolName   = "mcp__chord__notify"
 )
 
 // LaunchOptions is the Chord-derived launch contract for one Claude Code process.
@@ -32,6 +42,7 @@ type LaunchOptions struct {
 	Resume          bool
 	DisallowedTools []string
 	LaunchArgs      []string
+	Notify          bool
 }
 
 // BuildArgs returns the full argv (excluding argv[0]) for one session.
@@ -40,12 +51,26 @@ func BuildArgs(opts LaunchOptions) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	mcpConfig, err := buildMCPConfig(opts.Notify)
+	if err != nil {
+		return nil, err
+	}
+	// --safe-mode disables user-configured MCP servers, but an SDK MCP server
+	// declared by --mcp-config is part of the control channel and still
+	// connects. --bare is not usable here: it also disables OAuth and keychain
+	// authentication, while safe mode leaves authentication unchanged.
 	args := []string{FlagPrint, FlagOutputFormat, OutputFormatStreamJSON, FlagVerbose,
 		FlagInputFormat, InputFormatStreamJSON,
 		FlagPermissionPromptTool, PermissionPromptStdio, FlagPermissionMode, PermissionModeDefault,
-		"--safe-mode", "--restricted", "--setting-sources", "", "--strict-mcp-config",
-		"--mcp-config", `{"mcpServers":{}}`, "--tools", strings.Join(managedTools, ","),
+		"--safe-mode", "--restricted", "--setting-sources", "", FlagStrictMCPConfig,
+		FlagMCPConfig, mcpConfig, "--tools", strings.Join(managedTools, ","),
 		"--settings", managedSettings(),
+	}
+	if opts.Notify {
+		// The MCP tool is the one tool Chord wants available without a control
+		// round-trip. Restricting the allow rule to its exact name keeps every
+		// built-in call on the permission path.
+		args = append(args, FlagAllowedTools, MCPNotifyToolName)
 	}
 	if sessionID := strings.TrimSpace(opts.SessionID); sessionID != "" {
 		if opts.Resume {
@@ -62,6 +87,24 @@ func BuildArgs(opts LaunchOptions) ([]string, error) {
 	}
 	args = append(args, user.args...)
 	return args, nil
+}
+
+// buildMCPConfig renders the only MCP configuration a launch may use. Without
+// notify the map stays empty; --strict-mcp-config then prevents any user,
+// project, or plugin MCP server from leaking into the process.
+func buildMCPConfig(notify bool) (string, error) {
+	servers := map[string]any{}
+	if notify {
+		servers[MCPNotifyServerName] = map[string]string{
+			"type": "sdk",
+			"name": MCPNotifyServerName,
+		}
+	}
+	data, err := json.Marshal(map[string]any{"mcpServers": servers})
+	if err != nil {
+		return "", fmt.Errorf("encode MCP configuration: %w", err)
+	}
+	return string(data), nil
 }
 
 // ValidSessionID reports whether value is a canonical 8-4-4-4-12 hexadecimal

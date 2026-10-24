@@ -27,6 +27,11 @@ func (a *MainAgent) emitSubAgentMailboxUI(msg SubAgentMailboxMessage) {
 	case SubAgentMailboxKindDirectionChange:
 		a.emitToTUI(AgentStatusEvent{AgentID: msg.AgentID, Status: "waiting_main", Message: msg.Summary})
 		a.emitToTUI(ToastEvent{Message: msg.Summary, Level: "warn", AgentID: msg.AgentID})
+	case SubAgentMailboxKindNotice:
+		a.emitToTUI(AgentStatusEvent{AgentID: msg.AgentID, Status: "running", Message: msg.Summary})
+		if msg.Priority == SubAgentMailboxPriorityInterrupt {
+			a.emitToTUI(ToastEvent{Message: msg.Summary, Level: "warn", AgentID: msg.AgentID})
+		}
 	}
 }
 

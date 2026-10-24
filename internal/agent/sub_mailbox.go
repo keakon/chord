@@ -21,6 +21,10 @@ const (
 	SubAgentMailboxKindDecisionRequired SubAgentMailboxKind = "decision_required"
 	SubAgentMailboxKindRiskAlert        SubAgentMailboxKind = "risk_alert"
 	SubAgentMailboxKindDirectionChange  SubAgentMailboxKind = "direction_change_request"
+	// SubAgentMailboxKindNotice is a worker's own non-blocking report. It is
+	// report-only: unlike a decision or risk alert it never implies that the
+	// worker parked, and it must not flip the task record.
+	SubAgentMailboxKindNotice SubAgentMailboxKind = "notice"
 	// SubAgentMailboxKindBackgroundResult carries a finished background job's
 	// result to its owner's transcript. It is not a SubAgent lifecycle
 	// message: it has no sender agent or task (AgentID and TaskID stay empty),

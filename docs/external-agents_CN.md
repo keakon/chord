@@ -61,15 +61,18 @@ permission:
 -p --output-format stream-json --verbose --input-format stream-json
 [--session-id <uuid> | --resume <uuid>] --permission-prompt-tool stdio
 --permission-mode default --safe-mode --restricted
---setting-sources "" --strict-mcp-config --mcp-config '{"mcpServers":{}}'
+--setting-sources "" --strict-mcp-config --mcp-config <空配置或私有 SDK MCP server>
+[--allowedTools mcp__chord__notify]
 --tools <受管工具> --settings <受管设置 JSON>
 ```
 
 `launch_args` 支持 `--model`、`--effort`、`--max-turns`、`--max-budget-usd`、`--include-partial-messages`、`--replay-user-messages`，以及追加禁用工具的 `--disallowedTools` / `--disallowed-tools`。长选项可以使用 `--flag=value`。
 
-覆盖协议、系统提示词、权限模式或会话选择的参数会被拒绝。`--allowedTools`、权限绕过、位置参数、`--add-dir`、CLI 自建 worktree、后台入口、设置源、插件和 MCP 参数都不支持；未分类参数同样报错。
+覆盖协议、系统提示词、权限模式或会话选择的参数会被拒绝。用户自定义的 `--allowedTools`、权限绕过、位置参数、`--add-dir`、CLI 自建 worktree、后台入口、设置源、插件和 MCP 参数都不支持；未分类参数同样报错。
 
 用户追加的禁用工具与角色派生的禁用集合合并，不能解除角色限制。环境变量覆盖仅支持 Anthropic 凭据、模型与地址、Claude OAuth token、HTTP 代理和 CA 证书配置；运行期注入变量会被拒绝。
+
+角色保留 `notify` 工具时，Chord 会注册一个私有 SDK MCP server，名为 `chord`，只暴露 `mcp__chord__notify`，并用 `--allowedTools mcp__chord__notify` 精确预授权。Claude Code 通过已有的 stream-json 控制通道发送 MCP JSON-RPC 请求，Chord 在进程内直接应答：没有子 MCP 进程，也不开 socket 或端口。`--safe-mode` 仍会加载 `--mcp-config` 声明的 SDK MCP server，只跳过用户和项目级 MCP server 以及其他自定义内容。这里不用 `--bare`，因为它会禁用 OAuth 和 keychain 认证。一次调用会变成 owner 邮箱里的 report-only 通知：`kind: notice` 不阻塞，`kind: decision` 提高投递优先级并弹警告 toast，但 worker 会继续运行。最终任务结果仍应放在收尾答复里。角色禁用 `notify` 时，这个 server 和 allow 规则都不会注入；进程里也不会加载其他 MCP server。
 
 ## 权限
 
@@ -90,13 +93,13 @@ permission:
 
 上面的规则只放行 `notes/` 下的 notebook，与 Edit 的同路径规则效果一致。`question` 规则若判定为 `ask`，按 `allow` 处理：问题界面本身就是确认。
 
-受管工具集合包括 Read、Edit、Write、NotebookEdit、Bash、Glob、Grep、WebFetch、WebSearch、TodoWrite、Agent、AskUserQuestion 和 ExitPlanMode。Claude 的 `Task` 写法按 `Agent` 的别名处理。没有 Chord 映射的工具需要使用其原名声明明确角色规则，通配 `allow` 不会放行它们。`AskUserQuestion` 使用 Chord 问题界面，每次最多回答四个问题并回填给 Claude。`ExitPlanMode` 只有在角色规则把它判定为 allow 或 ask 时才会请求用户确认，且不切换 Chord 主角色；规则判定为 deny，或 allowlist 里没有点名它的规则时，该工具会被直接隐藏。在 `default` 权限模式下，Claude 可能在请求宿主授权之前就按不可用拒绝它。
+受管工具集合包括 Read、Edit、Write、NotebookEdit、Bash、Glob、Grep、WebFetch、WebSearch、TodoWrite、Agent、AskUserQuestion 和 ExitPlanMode。Claude 的 `Task` 写法按 `Agent` 的别名处理。私有的 `mcp__chord__notify` 映射为 Chord 的 `notify` 卡片，是唯一通过 `--allowedTools` 预授权的工具；它的 handler 仍会在 worker 开始收尾后拒绝通知。没有 Chord 映射的工具需要使用其原名声明明确角色规则，通配 `allow` 不会放行它们。`AskUserQuestion` 使用 Chord 问题界面，每次最多回答四个问题并回填给 Claude。`ExitPlanMode` 只有在角色规则把它判定为 allow 或 ask 时才会请求用户确认，且不切换 Chord 主角色；规则判定为 deny，或 allowlist 里没有点名它的规则时，该工具会被直接隐藏。在 `default` 权限模式下，Claude 可能在请求宿主授权之前就按不可用拒绝它。
 
 角色规则判定为禁用的工具会通过 `--disallowedTools` 传给 CLI，不会出现在 Claude 自己的工具列表里；保留下来的调用仍逐次经过确认。判定沿用通用的规则匹配顺序：当最后一条匹配该工具名的规则是通配 deny 时才隐藏该工具，因此带具体路径 pattern 的 deny 规则不会隐藏它。所以通配 `deny` 兜底要写在具体放行规则之前，正如上面的示例。
 
 Claude 自身也可能先于宿主授权拒绝工具——某些工具在 CLI 自己的受管模式下不可用。Chord 不会绕过这些限制。
 
-Chord 禁用项目和用户自定义、hooks、外部 MCP、插件及 sandbox 自动批准。逐调用授权依赖 CLI 在执行前请求 `can_use_tool`；事后发现未授权结果，不能证明没有发生副作用。外部命令和管理员策略仍是受信任边界，角色权限不是操作系统沙箱。shell 规则采用最后匹配优先；宽泛的 `git *` 不等于只读权限，`go test` 也会执行仓库代码。
+Chord 禁用项目和用户自定义、hooks、用户/项目/插件 MCP server、插件及 sandbox 自动批准；进程里唯一的 MCP server 是 Chord 私有的 notify 桥。除这条进程内的 notify 桥外，逐调用授权依赖 CLI 在执行前请求 `can_use_tool`；事后发现未授权结果，不能证明没有发生副作用。外部命令和管理员策略仍是受信任边界，角色权限不是操作系统沙箱。shell 规则采用最后匹配优先；宽泛的 `git *` 不等于只读权限，`go test` 也会执行仓库代码。
 
 ## 额度与凭据
 

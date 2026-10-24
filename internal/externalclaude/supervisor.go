@@ -63,6 +63,7 @@ func startSupervised(cfg ProcessConfig) (*Session, error) {
 		cleanupDone: make(chan struct{}),
 		killGrace:   killGrace,
 		onStderr:    cfg.OnStderr,
+		mcpHandler:  cfg.MCPHandler,
 	}
 	session.scanWG.Add(2)
 	go session.scanStdout(session.stdout, maxLineBytes)

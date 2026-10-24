@@ -159,6 +159,7 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 		Resume:          resume,
 		DisallowedTools: w.derivedDisallowedTools(),
 		LaunchArgs:      w.backend.LaunchArgs,
+		Notify:          w.notifyEnabled(),
 	})
 	if err != nil {
 		return nil, true, fmt.Errorf("external launch arguments: %w", err)
@@ -211,6 +212,7 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 		OnStderr: func(line string) {
 			log.Warnf("external agent stderr instance=%v line=%v", w.instanceID, externalclaude.RedactDiagnostic(line, env))
 		},
+		MCPHandler: w.handleExternalMCP,
 		// The process runs under its own supervisor: Chord can be killed
 		// mid-task, and only a process that outlives it can still tear the
 		// worker's process group down.
@@ -680,6 +682,14 @@ func (w *externalWorker) handleExternalToolUse(use externalclaude.ContentBlock) 
 		return
 	}
 	w.rememberToolName(use.ID, name)
+	if use.Name == externalclaude.MCPNotifyToolName {
+		// The private notify MCP tool is preapproved through --allowedTools,
+		// so Claude Code executes it without a can_use_tool round-trip. The
+		// in-process MCP handler is the authorization boundary for its side
+		// effect; marking the binding started keeps the normal tool_result
+		// path from treating a successful notify as an unauthorized call.
+		w.toolBindings[use.ID].started = true
+	}
 	if w.parent != nil {
 		w.parent.emitToTUI(ToolCallStartEvent{
 			ID:       use.ID,

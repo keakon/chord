@@ -61,15 +61,18 @@ Chord owns the protocol, session identity, and permission channel:
 -p --output-format stream-json --verbose --input-format stream-json
 [--session-id <uuid> | --resume <uuid>] --permission-prompt-tool stdio
 --permission-mode default --safe-mode --restricted
---setting-sources "" --strict-mcp-config --mcp-config '{"mcpServers":{}}'
+--setting-sources "" --strict-mcp-config --mcp-config <empty or private SDK MCP server>
+[--allowedTools mcp__chord__notify]
 --tools <managed tools> --settings <managed settings JSON>
 ```
 
 Supported `launch_args` are `--model`, `--effort`, `--max-turns`, `--max-budget-usd`, `--include-partial-messages`, `--replay-user-messages`, and additional tool prohibitions through `--disallowedTools` / `--disallowed-tools`. Long options also accept `--flag=value`.
 
-Options that override the protocol, system prompt, permission mode, or session selection are rejected. `--allowedTools`, permission bypass, positional arguments, `--add-dir`, CLI worktrees, background entry points, settings sources, plugins, and MCP options are unsupported. Unclassified options are rejected too.
+Options that override the protocol, system prompt, permission mode, or session selection are rejected. User-supplied `--allowedTools`, permission bypass, positional arguments, `--add-dir`, CLI worktrees, background entry points, settings sources, plugins, and MCP options are unsupported. Unclassified options are rejected too.
 
 User tool prohibitions are merged with role-derived prohibitions and cannot remove them. Environment overrides support Anthropic credentials, models and endpoints, the Claude OAuth token, HTTP proxies, and CA certificates. Runtime injection variables are rejected.
+
+When the worker role keeps `notify` enabled, Chord registers one private SDK MCP server named `chord` and exposes `mcp__chord__notify`; `--allowedTools mcp__chord__notify` preapproves exactly that tool. Claude Code sends the MCP JSON-RPC requests over the existing stream-json control channel, so Chord serves them in-process: there is no child MCP process, socket, or port. Safe mode still loads SDK MCP servers declared through `--mcp-config`; it skips user and project MCP servers and the other customizations. `--bare` is not used because it disables OAuth and keychain authentication. A call becomes a report-only notice in the owner mailbox. `kind: notice` is non-blocking; `kind: decision` raises delivery priority and shows a warning toast, but the worker keeps running. The final task result still belongs in the worker's closing answer. If the role disables `notify`, both the server and the allow rule are omitted. No other MCP server is loaded.
 
 ## Permissions
 
@@ -90,13 +93,13 @@ permission:
 
 This allows NotebookEdit only for notebooks under `notes/`, matching the same paths as an Edit rule. A `question` rule that resolves to `ask` is treated as `allow`: the question UI itself is the confirmation.
 
-The managed set contains Read, Edit, Write, NotebookEdit, Bash, Glob, Grep, WebFetch, WebSearch, TodoWrite, Agent, AskUserQuestion, and ExitPlanMode. Claude's `Task` spelling is accepted as an alias for `Agent`. Unmapped tools require an explicit role rule using their original name; wildcard `allow` does not allow them. `AskUserQuestion` uses Chord's question UI, answers up to four questions per call, and returns the answers to Claude. `ExitPlanMode` asks the user only when the role ruleset resolves it to allow or ask, and it does not switch Chord's main role; a rule that denies it, or an allowlist with no rule naming it, hides the tool instead. In `default` permission mode Claude may reject it as unavailable before any host authorization.
+The managed set contains Read, Edit, Write, NotebookEdit, Bash, Glob, Grep, WebFetch, WebSearch, TodoWrite, Agent, AskUserQuestion, and ExitPlanMode. Claude's `Task` spelling is accepted as an alias for `Agent`. The private `mcp__chord__notify` tool maps to Chord's `notify` card and is the only tool preapproved through `--allowedTools`; its handler refuses a call after the worker starts settling. Other unmapped tools require an explicit role rule using their original name; wildcard `allow` does not allow them. `AskUserQuestion` uses Chord's question UI, answers up to four questions per call, and returns the answers to Claude. `ExitPlanMode` asks the user only when the role ruleset resolves it to allow or ask, and it does not switch Chord's main role; a rule that denies it, or an allowlist with no rule naming it, hides the tool instead. In `default` permission mode Claude may reject it as unavailable before any host authorization.
 
 A tool the role ruleset disables is passed to the CLI through `--disallowedTools`, so it never appears in Claude's own tool list; the calls that remain are still gated one by one. That decision follows the normal rule matching order: Chord hides a tool when the last rule matching its name is a wildcard deny, so a deny rule carrying a specific path pattern does not hide it. A wildcard `deny` fallback therefore belongs before the specific rules that re-enable tools, as in the example above.
 
 Claude can also reject a tool on its own side before requesting host authorization — some tools are unavailable in the CLI's own managed mode. Chord does not bypass these restrictions.
 
-Chord disables project and user customization, hooks, external MCP, plugins, and sandbox auto-approval. Authorization depends on the CLI requesting `can_use_tool` before execution. Detecting an unauthorized result afterward cannot prove that no side effect occurred. The command and administrator policy remain trusted boundaries; role permissions are not an operating-system sandbox. Shell rules use last-match precedence: `git *` is not read-only, and `go test` executes repository code.
+Chord disables project and user customization, hooks, user/project/plugin MCP servers, plugins, and sandbox auto-approval; the only MCP server in the process is Chord's private notify bridge. Apart from that in-process notify bridge, authorization depends on the CLI requesting `can_use_tool` before execution. Detecting an unauthorized result afterward cannot prove that no side effect occurred. The command and administrator policy remain trusted boundaries; role permissions are not an operating-system sandbox. Shell rules use last-match precedence: `git *` is not read-only, and `go test` executes repository code.
 
 ## Quota and credentials
 

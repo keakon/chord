@@ -41,6 +41,8 @@ func MapTool(claudeName string, input json.RawMessage) (mapping Mapping, chordIn
 		return Mapping{ChordName: toolname.WebSearch}, remapFields(input, nil), true
 	case "TodoWrite":
 		return Mapping{ChordName: toolname.TodoWrite}, remapFields(input, nil), true
+	case MCPNotifyToolName:
+		return Mapping{ChordName: toolname.Notify}, input, true
 	default:
 		return Mapping{}, input, false
 	}

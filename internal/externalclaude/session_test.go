@@ -4,6 +4,7 @@ package externalclaude
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,6 +112,56 @@ exit 0
 		if event.StreamEvent == nil || event.StreamEvent.Delta == nil || event.StreamEvent.Delta.Text != text {
 			t.Fatalf("stream event %d = %+v", i, event)
 		}
+	}
+}
+
+func TestSessionServesSDKMCPDuringInitialization(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fixture")
+	body := `#!/bin/sh
+IFS= read -r line
+printf '%s\n' '{"type":"control_request","request_id":"mcp-1","request":{"subtype":"mcp_message","server_name":"chord","message":{"jsonrpc":"2.0","id":1,"method":"tools/list"}}}'
+IFS= read -r response
+case "$response" in
+  *'"mcp_response"'*) ;;
+  *) exit 7 ;;
+esac
+printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"chord-initialize"}}'
+exit 0
+`
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	calls := make(chan string, 1)
+	s, err := Start(ProcessConfig{
+		Command: path,
+		MCPHandler: func(_ context.Context, serverName string, message json.RawMessage) json.RawMessage {
+			calls <- serverName + ":" + string(message)
+			return json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}`)
+		},
+		KillGrace: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		s.Terminate()
+		for range s.Events() {
+		}
+		_ = s.Wait()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.Initialize(ctx, "task"); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	select {
+	case call := <-calls:
+		if !strings.Contains(call, "chord:") || !strings.Contains(call, "tools/list") {
+			t.Fatalf("MCP handler call = %q", call)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SDK MCP request was not handled during initialization")
 	}
 }
 

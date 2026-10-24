@@ -21,7 +21,10 @@ func NormalizeToolName(name string) string {
 	return name
 }
 
-func ManagedTool(name string) bool { return slices.Contains(managedTools, NormalizeToolName(name)) }
+func ManagedTool(name string) bool {
+	name = NormalizeToolName(name)
+	return slices.Contains(managedTools, name) || name == MCPNotifyToolName
+}
 
 func ManagedToolNames() []string { return slices.Clone(managedTools) }
 

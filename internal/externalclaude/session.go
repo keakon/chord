@@ -35,6 +35,9 @@ type ProcessConfig struct {
 	// MaxLineBytes bounds one stdout JSON line. Zero uses 16 MiB.
 	MaxLineBytes int
 	KillGrace    time.Duration
+	// MCPHandler serves SDK MCP requests sent by Claude Code over the control
+	// channel. Nil rejects such requests without blocking initialization.
+	MCPHandler MCPHandler
 	// Supervisor runs the process under an independent lifecycle supervisor.
 	// Nil keeps it in Chord's own process table, which cannot clean it up once
 	// Chord is killed.
@@ -102,6 +105,7 @@ type Session struct {
 	cleanupDone   chan struct{}
 	killGrace     time.Duration
 	onStderr      func(string)
+	mcpHandler    MCPHandler
 }
 
 // Start launches the process and begins streaming events. The caller must
@@ -187,6 +191,7 @@ func startDirect(cfg ProcessConfig) (*Session, error) {
 		cleanupDone: make(chan struct{}),
 		killGrace:   killGrace,
 		onStderr:    cfg.OnStderr,
+		mcpHandler:  cfg.MCPHandler,
 	}
 	session.scanWG.Add(2)
 	go session.scanStdout(stdout, maxLineBytes)
@@ -484,6 +489,10 @@ func (s *Session) scanStdout(reader io.Reader, maxLineBytes int) {
 			s.Terminate()
 			return
 		}
+		if event.Type == TypeControlRequest && event.Request != nil && event.Request.Subtype == ControlSubtypeMCPMessage {
+			s.handleMCPControlRequest(event)
+			continue
+		}
 		select {
 		case s.events <- event:
 		default:
@@ -496,6 +505,20 @@ func (s *Session) scanStdout(reader io.Reader, maxLineBytes int) {
 	}
 	if err := scanner.Err(); err != nil {
 		s.recordReadError(fmt.Errorf("external stdout read: %w", err))
+		s.Terminate()
+	}
+}
+
+func (s *Session) handleMCPControlRequest(event Event) {
+	response := json.RawMessage(nil)
+	if s.mcpHandler != nil {
+		response = s.mcpHandler(context.Background(), event.Request.ServerName, event.Request.Message)
+	}
+	if len(response) == 0 {
+		response = json.RawMessage(`{"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"MCP server is unavailable"}}`)
+	}
+	if err := s.WriteFrame(MCPMessageResponse(event.RequestID, response)); err != nil {
+		s.recordReadError(fmt.Errorf("answer MCP control request: %w", err))
 		s.Terminate()
 	}
 }

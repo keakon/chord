@@ -1,6 +1,7 @@
 package externalclaude
 
 import (
+	"context"
 	"encoding/json"
 )
 
@@ -9,6 +10,7 @@ const (
 	ControlSubtypeCanUseTool = "can_use_tool"
 	ControlSubtypeInterrupt  = "interrupt"
 	ControlSubtypeInitialize = "initialize"
+	ControlSubtypeMCPMessage = "mcp_message"
 
 	ControlResponseSuccess = "success"
 
@@ -30,7 +32,15 @@ type ControlRequest struct {
 	AgentID               string          `json:"agent_id,omitempty"`
 
 	AppendSystemPrompt string `json:"appendSystemPrompt,omitempty"`
+
+	ServerName string          `json:"server_name,omitempty"`
+	Message    json.RawMessage `json:"message,omitempty"`
 }
+
+// MCPHandler serves one JSON-RPC message from an SDK MCP server. Claude Code
+// sends these requests over the control channel, so the host never needs a
+// child MCP process or socket.
+type MCPHandler func(ctx context.Context, serverName string, message json.RawMessage) json.RawMessage
 
 // ControlResponseBody is the body of a control_response frame.
 type ControlResponseBody struct {
@@ -97,5 +107,23 @@ func InitializeRequest(requestID, appendSystemPrompt string) Frame {
 	return Frame{
 		Type: TypeControlRequest, RequestID: requestID,
 		Request: &ControlRequest{Subtype: ControlSubtypeInitialize, AppendSystemPrompt: appendSystemPrompt},
+	}
+}
+
+// MCPMessageResponse wraps one JSON-RPC response for the SDK MCP transport.
+func MCPMessageResponse(requestID string, response json.RawMessage) Frame {
+	if len(response) == 0 {
+		response = json.RawMessage(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"MCP handler returned no response"}}`)
+	}
+	body, _ := json.Marshal(struct {
+		MCPResponse json.RawMessage `json:"mcp_response"`
+	}{MCPResponse: response})
+	return Frame{
+		Type: TypeControlResponse,
+		Response: &ControlResponseBody{
+			Subtype:   ControlResponseSuccess,
+			RequestID: requestID,
+			Response:  body,
+		},
 	}
 }

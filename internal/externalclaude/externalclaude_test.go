@@ -19,6 +19,7 @@ func TestBuildArgsBase(t *testing.T) {
 		{"--permission-prompt-tool", "stdio"}, {"--permission-mode", "default"},
 		{"--safe-mode", "--restricted", "--setting-sources", "", "--strict-mcp-config"},
 		{"--settings", managedSettings()},
+		{"--mcp-config", `{"mcpServers":{}}`},
 	} {
 		if !containsSequence(args, want) {
 			t.Fatalf("args %v missing %v", args, want)
@@ -466,6 +467,97 @@ func TestSessionStreamsEventsAndStderr(t *testing.T) {
 	}
 	if len(stderr) != 1 || !strings.Contains(stderr[0], "guard line") {
 		t.Fatalf("stderr = %v", stderr)
+	}
+}
+
+func TestBuildArgsNotifyMCP(t *testing.T) {
+	args, err := BuildArgs(LaunchOptions{Notify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsSequence(args, []string{"--safe-mode"}) || containsSequence(args, []string{"--bare"}) {
+		t.Fatalf("args %v must keep --safe-mode; --bare disables OAuth and keychain auth", args)
+	}
+	if !containsSequence(args, []string{FlagAllowedTools, MCPNotifyToolName}) {
+		t.Fatalf("args %v missing preapproved notify MCP tool", args)
+	}
+	var raw string
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == FlagMCPConfig {
+			raw = args[i+1]
+			break
+		}
+	}
+	if raw == "" {
+		t.Fatalf("args %v missing %s", args, FlagMCPConfig)
+	}
+	var config struct {
+		MCPServers map[string]struct {
+			Type    string `json:"type"`
+			Name    string `json:"name"`
+			Command string `json:"command"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		t.Fatalf("decode mcp config %q: %v", raw, err)
+	}
+	if len(config.MCPServers) != 1 {
+		t.Fatalf("mcp servers = %+v, want exactly the private notify server", config.MCPServers)
+	}
+	server, ok := config.MCPServers[MCPNotifyServerName]
+	if !ok {
+		t.Fatalf("mcp servers = %+v, missing %q", config.MCPServers, MCPNotifyServerName)
+	}
+	if server.Type != "sdk" || server.Name != MCPNotifyServerName {
+		t.Fatalf("notify server = %+v, want an in-process SDK server", server)
+	}
+	if server.Command != "" {
+		t.Fatalf("notify server command = %q, want no child process", server.Command)
+	}
+}
+
+func TestBuildArgsWithoutNotifyKeepsMCPClosed(t *testing.T) {
+	args, err := BuildArgs(LaunchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsSequence(args, []string{FlagAllowedTools}) {
+		t.Fatalf("args %v unexpectedly preapprove a tool", args)
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] != FlagMCPConfig {
+			continue
+		}
+		var config struct {
+			MCPServers map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal([]byte(args[i+1]), &config); err != nil {
+			t.Fatalf("decode mcp config %q: %v", args[i+1], err)
+		}
+		if len(config.MCPServers) != 0 {
+			t.Fatalf("mcp servers = %+v, want none", config.MCPServers)
+		}
+		return
+	}
+	t.Fatalf("args %v missing %s", args, FlagMCPConfig)
+}
+
+func TestNotifyMCPToolMapping(t *testing.T) {
+	if !ManagedTool(MCPNotifyToolName) {
+		t.Fatalf("ManagedTool(%q) = false", MCPNotifyToolName)
+	}
+	for _, name := range ManagedToolNames() {
+		if name == MCPNotifyToolName {
+			t.Fatalf("built-in tool list must not include the private MCP tool: %v", ManagedToolNames())
+		}
+	}
+	input := json.RawMessage(`{"message":"status"}`)
+	mapping, chordInput, ok := MapTool(MCPNotifyToolName, input)
+	if !ok || mapping.ChordName != toolname.Notify {
+		t.Fatalf("MapTool(%q) = %+v, ok=%v; want %q", MCPNotifyToolName, mapping, ok, toolname.Notify)
+	}
+	if string(chordInput) != string(input) {
+		t.Fatalf("MapTool input = %s, want unchanged %s", chordInput, input)
 	}
 }
 
