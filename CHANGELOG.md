@@ -25,6 +25,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Native Gemini endpoints support opt-in continuation across requests and recovery with a fixed target. Local tools wait for final confirmation; multi-request billing and context-window observations are tracked separately.
 
+- One `question` call can carry up to four questions instead of three, matching what an external Claude Code worker may ask in a single `AskUserQuestion`.
+
 - Responses providers gain two compatibility switches for gateways that reject Chord's explicit prompt-cache fields: `compat.responses.send_prompt_cache_options` omits the top-level `prompt_cache_options`, and `compat.responses.send_prompt_cache_breakpoint` omits the `prompt_cache_breakpoint` markers (and the top-level field, which only selects the breakpoint policy). Without them a GPT-5.6-or-later model alias behind such a gateway fails every request.
 
 - Added `chord sessions list --json` for recent session metadata, using the configured storage and shared repository session scope without starting an agent.
