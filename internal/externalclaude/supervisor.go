@@ -75,11 +75,12 @@ func startSupervised(cfg ProcessConfig) (*Session, error) {
 // waitSupervised ends a supervised run. The supervisor's exit is the run's
 // lifecycle signal; waiting for business pipes first would let a descendant
 // that keeps the pipes open hide the exit forever. Stop then proves the group
-// is gone, so the scanners can drain to EOF and close.
+// is gone, and the scanners drain to EOF within a bounded grace even when a
+// descendant escaped the group holding the write ends.
 func (s *Session) waitSupervised() {
 	_ = s.sup.Wait()
 	stopErr := s.sup.Stop(s.killGrace)
-	s.scanWG.Wait()
+	s.drainStreams()
 	close(s.exited)
 	report := s.sup.Report()
 	if report.Reported {

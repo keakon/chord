@@ -11,7 +11,10 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/externalsupervisor"
 )
@@ -19,6 +22,11 @@ import (
 const (
 	defaultMaxLineBytes = 16 << 20
 	defaultKillGrace    = 5 * time.Second
+	// streamDrainGrace bounds how long the scanners may keep reading after the
+	// process group is gone. It stays below the stop grace callers use, so the
+	// run ends here instead of flipping a delivered result into a teardown
+	// failure.
+	streamDrainGrace = time.Second
 )
 
 // ProcessConfig describes one Claude Code process.
@@ -99,6 +107,10 @@ type Session struct {
 	exited   chan struct{}
 	errMu    sync.Mutex
 	readErr  error
+	// streamAbandoned marks pipes Chord closed because a descendant that left
+	// the process group kept them open. Read errors from that close are
+	// expected and must not be reported as a worker failure.
+	streamAbandoned atomic.Bool
 
 	terminateOnce sync.Once
 	gracefulOnce  sync.Once
@@ -404,7 +416,7 @@ func (s *Session) wait() {
 	}
 	// The scanners own the read ends and finish on EOF or when stopScanning
 	// unblocked a full channel; only then is the event stream complete.
-	s.scanWG.Wait()
+	s.drainStreams()
 	s.errMu.Lock()
 	if s.waitErr == nil {
 		s.waitErr = s.readErr
@@ -412,6 +424,33 @@ func (s *Session) wait() {
 	s.errMu.Unlock()
 	close(s.events)
 	close(s.done)
+}
+
+// drainStreams waits for the scanners to finish reading, but only for a bounded
+// time. Once the process group is gone, a pipe that still has no EOF can only
+// be held by a descendant that left the group (its own session or process
+// group). Waiting for that process would keep the run alive as long as it
+// lives, so Chord closes the read ends instead: the CLI is already gone, and
+// any data still arriving belongs to a process Chord never owned.
+func (s *Session) drainStreams() {
+	drained := make(chan struct{})
+	go func() {
+		s.scanWG.Wait()
+		close(drained)
+	}()
+	timer := time.NewTimer(streamDrainGrace)
+	defer timer.Stop()
+	select {
+	case <-drained:
+		return
+	case <-timer.C:
+	}
+	log.Warnf("external streams stayed open after the process group exited; closing them")
+	s.streamAbandoned.Store(true)
+	s.stopScanning()
+	_ = s.stdout.Close()
+	_ = s.stderr.Close()
+	<-drained
 }
 
 // ProcessEnded reports whether the process group is known to be gone after Wait.
@@ -503,7 +542,7 @@ func (s *Session) scanStdout(reader io.Reader, maxLineBytes int) {
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !s.streamAbandoned.Load() {
 		s.recordReadError(fmt.Errorf("external stdout read: %w", err))
 		s.Terminate()
 	}
@@ -541,7 +580,7 @@ func (s *Session) scanStderr(reader io.Reader) {
 	for scanner.Scan() {
 		s.reportStderr(scanner.Text())
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !s.streamAbandoned.Load() {
 		s.recordReadError(fmt.Errorf("external stderr read: %w", err))
 		s.Terminate()
 	}

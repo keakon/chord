@@ -115,3 +115,77 @@ exit 0
 		t.Fatal("a child left behind by the managed process survived the run")
 	}
 }
+
+// startEscapedSession starts a fixture that leaves one descendant outside the
+// managed process group while that descendant keeps the business pipes open.
+// The group kill cannot reach it, so only Chord closing the read ends can end
+// the run.
+func startEscapedSession(t *testing.T, supervised bool) *Session {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate test binary: %v", err)
+	}
+	ready := filepath.Join(t.TempDir(), "escaped-ready")
+	cfg := ProcessConfig{
+		Command: writeSupervisedFixture(t, `
+IFS= read -r init
+printf '%s\n' '{"type":"control_response","response":{"subtype":"success","request_id":"chord-initialize","response":{}}}'
+IFS= read -r prompt
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"escaped done"}'
+"$1" escaped-descendant-test-helper "$2" &
+while [ ! -f "$2" ]; do sleep 0.01; done
+exit 0
+`),
+		Args:      []string{exe, ready},
+		KillGrace: time.Second,
+	}
+	if supervised {
+		cfg.Supervisor = &SupervisorConfig{}
+	}
+	session, err := Start(cfg)
+	if err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	return session
+}
+
+// A result that was already delivered stays a result even when an escaped
+// descendant keeps the pipes open: the run ends once Chord stops reading
+// instead of waiting for that process or turning the teardown into a failure.
+func assertEscapedDescendantRunEnds(t *testing.T, session *Session) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := session.Initialize(ctx, ""); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	if err := session.WriteUserMessage(ctx, "go"); err != nil {
+		t.Fatalf("send prompt: %v", err)
+	}
+	if event := <-session.Events(); event.Type != TypeResult {
+		t.Fatalf("event = %+v", event)
+	}
+	session.Finish(5 * time.Second)
+	waited := make(chan error, 1)
+	go func() { waited <- session.Wait() }()
+	select {
+	case err := <-waited:
+		if err != nil {
+			t.Fatalf("an escaped descendant turned a delivered result into a failure: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the session never ended while an escaped descendant held the streams")
+	}
+	if !session.TerminationProven() {
+		t.Fatal("the managed process group survived the run")
+	}
+}
+
+func TestSupervisedSessionEndsWhenEscapedDescendantHoldsStreams(t *testing.T) {
+	assertEscapedDescendantRunEnds(t, startEscapedSession(t, true))
+}
+
+func TestDirectSessionEndsWhenEscapedDescendantHoldsStreams(t *testing.T) {
+	assertEscapedDescendantRunEnds(t, startEscapedSession(t, false))
+}
