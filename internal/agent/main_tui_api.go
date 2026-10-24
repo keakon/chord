@@ -153,15 +153,12 @@ func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, con
 		kind := "follow_up"
 		if focused.State() == SubAgentStateWaitingMain {
 			kind = "reply"
-		} else if state := focused.State(); isTerminalSubAgentState(state) {
+		} else if isTerminalSubAgentState(focused.State()) {
 			// A finished worker still holding its runtime (settlement landed
 			// before parking) must be resumed through the explicit new-attempt
 			// machinery — a plain delivery may never revive the settled
-			// attempt. Cancelled stays cancelled.
-			if state == SubAgentStateCancelled {
-				a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s was cancelled; delegate the work again if it should still be done", focused.taskID), Level: "warn", AgentID: focused.instanceID})
-				return
-			}
+			// attempt. User input is the explicit act that opens the next
+			// attempt; the cancelled attempt keeps its own settlement.
 			if err := a.beginNextTaskAttemptForLiveSub(focused); err != nil {
 				a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: focused.instanceID})
 				return
@@ -322,7 +319,19 @@ func (a *MainAgent) AppendContextMessage(msg message.Message) {
 		return
 	}
 	msg.Role = "user"
+	// Context appends never change a task's lifecycle. A finished or cancelled
+	// task stays terminal, and an external backend has no Chord context to
+	// append to; falling through to the main session in either case would leak
+	// worker-scoped output into the wrong conversation.
+	if rec := a.focusedDurableTask(); rec != nil && rec.ExternalSession != nil {
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s runs on an external agent and does not accept context-only appends", rec.TaskID), Level: "warn", AgentID: rec.LatestInstanceID})
+		return
+	}
 	if focused := a.validFocusedSubAgent(); focused != nil {
+		if isTerminalSubAgentState(focused.State()) {
+			a.emitTerminalContextAppendRefused(focused.State(), focused.taskID, focused.instanceID)
+			return
+		}
 		if !a.enqueueRegisteredSubAgent(focused, func(sub *SubAgent) bool {
 			return sub.TryEnqueueContextAppend(msg)
 		}) {
@@ -331,6 +340,10 @@ func (a *MainAgent) AppendContextMessage(msg message.Message) {
 		return
 	}
 	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
+		if state := SubAgentState(strings.TrimSpace(rec.State)); isTerminalSubAgentState(state) {
+			a.emitTerminalContextAppendRefused(state, rec.TaskID, rec.LatestInstanceID)
+			return
+		}
 		sub, _, err := a.rehydrateTask(rec)
 		if err != nil {
 			log.Warnf("parked subagent context append rehydrate failed task_id=%v error=%v", rec.TaskID, err)
@@ -347,26 +360,35 @@ func (a *MainAgent) AppendContextMessage(msg message.Message) {
 		// A settled task has no runtime and cannot be rehydrated; appending to
 		// the main session would leak a worker-scoped message into the main
 		// context, so the settled transcript stays strictly read-only.
-		log.Warnf("subagent context append rejected: task %v has settled and is read-only", rec.TaskID)
+		a.emitTerminalContextAppendRefused(SubAgentState(strings.TrimSpace(rec.State)), rec.TaskID, rec.LatestInstanceID)
+		return
+	}
+	if rec := a.focusedDurableTask(); rec != nil {
+		// The focused task has no reachable runtime in a state that accepts
+		// context. Never fall through to the main session on its behalf.
+		log.Warnf("subagent context append rejected: task %v has no live runtime task_state=%v", rec.TaskID, rec.State)
 		return
 	}
 	a.sendEvent(Event{Type: EventAppendContext, Payload: msg})
+}
+
+func (a *MainAgent) emitTerminalContextAppendRefused(state SubAgentState, taskID, agentID string) {
+	outcome := "has finished"
+	if state == SubAgentStateCancelled {
+		outcome = "was cancelled"
+	}
+	a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s %s; context was not appended", taskID, outcome), Level: "warn", AgentID: agentID})
 }
 
 func (a *MainAgent) reactivateFocusedSubAgentForManualInput(sub *SubAgent) bool {
 	if sub == nil || sub.State() == SubAgentStateRunning {
 		return true
 	}
-	if state := sub.State(); isTerminalSubAgentState(state) {
+	if isTerminalSubAgentState(sub.State()) {
 		// A settled runtime can only accept input again through the explicit
 		// new-attempt machinery (attempt bump plus reset to Idle), never by
-		// flipping it straight back to Running. A cancelled task stays
-		// cancelled: the user stopped it, so a follow-up must be a fresh
-		// delegation instead.
-		if state == SubAgentStateCancelled {
-			a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s was cancelled; delegate the work again if it should still be done", sub.taskID), Level: "warn", AgentID: sub.instanceID})
-			return false
-		}
+		// flipping it straight back to Running. A cancelled task keeps that
+		// attempt's settlement; the user's explicit input starts the next one.
 		if err := a.beginNextTaskAttemptForLiveSub(sub); err != nil {
 			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: sub.instanceID})
 			return false

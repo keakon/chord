@@ -68,6 +68,26 @@ func (a *MainAgent) resumeQueuedExternalInputs(taskID string) {
 	}
 }
 
+// discardQueuedExternalInputs marks unstarted inputs as dropped when the task
+// is cancelled. A cancelled task cannot resume, so these inputs would either
+// sit queued forever or be replayed by a later attempt that the user never
+// asked for. Dropping them keeps the cancellation decision intact and lets the
+// close path report exactly how many messages were not run.
+func discardQueuedExternalInputs(record *DurableTaskRecord) int {
+	if record == nil || record.ExternalSession == nil {
+		return 0
+	}
+	dropped := 0
+	for i := range record.ExternalSession.Inputs {
+		switch record.ExternalSession.Inputs[i].State {
+		case message.ToolRecoveryStateNotStarted, externalInputQueued:
+			record.ExternalSession.Inputs[i].State = externalInputDropped
+			dropped++
+		}
+	}
+	return dropped
+}
+
 func (a *MainAgent) rehydrateExternalTask(record *DurableTaskRecord, text string, metadata *message.MailboxMetadata) (worker *externalWorker, err error) {
 	finish, err := a.beginSessionStructural(a.parentCtx, false)
 	if err != nil {

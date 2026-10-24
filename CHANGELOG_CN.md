@@ -21,7 +21,7 @@
 
 ### 新功能
 
-- 子 Agent 可以运行在外部 Claude Code 进程上，主 Agent 仍使用 Chord 内部运行时。在子 Agent 定义中设置 `backend.kind: claude-code`，Chord 保留任务记录、完成邮箱和工具授权；完成后可以发送定向消息继续外部会话。Chord 被强制终止时，专属监督进程仍会清理 worker 的进程组并留下最小生命周期回执；监督进程先退出时，Chord 按启动前绑定的进程身份完成清理。恢复只接受能证明同一会话与工作目录已完成清理的回执；进程或输入结果未知时不自动重放。支持 Linux 和 macOS 上较新的 Claude Code 版本：受管传输面向 `stream-json` 协议本身，不锁定单一版本；`stream_event` 载荷不完整或 delta 类型未知时，对应任务带着具体原因失败。不支持外部 hooks、MCP 或插件。`delegate` 也接受这类 Agent 的 `result_schema`：契约在初始化阶段随角色指令送给外部进程，最终答复不是满足它的 JSON 对象时任务带着违规项失败。
+- 子 Agent 可以运行在外部 Claude Code 进程上，主 Agent 仍使用 Chord 内部运行时。在子 Agent 定义中设置 `backend.kind: claude-code`，Chord 保留任务记录、完成邮箱和工具授权；完成后可以发送定向消息继续外部会话；取消的任务不会恢复，取消时尚未开始执行的排队输入会被丢弃。Chord 被强制终止时，专属监督进程仍会清理 worker 的进程组并留下最小生命周期回执；监督进程先退出时，Chord 按启动前绑定的进程身份完成清理。恢复只接受能证明同一会话与工作目录已完成清理的回执；进程或输入结果未知时不自动重放。支持 Linux 和 macOS 上较新的 Claude Code 版本：受管传输面向 `stream-json` 协议本身，不锁定单一版本；`stream_event` 载荷不完整或 delta 类型未知时，对应任务带着具体原因失败。不支持外部 hooks、MCP 或插件。`delegate` 也接受这类 Agent 的 `result_schema`：契约在初始化阶段随角色指令送给外部进程，最终答复不是满足它的 JSON 对象时任务带着违规项失败。
 
 - 原生 Gemini 接口支持显式启用跨请求续传与固定目标断流恢复；工具等待最终确认后执行，多次请求的计费与上下文窗口分别统计。
 

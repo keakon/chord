@@ -16,6 +16,36 @@ import (
 	"github.com/keakon/chord/internal/recovery"
 )
 
+func TestPausedFollowupRejectsExternalTask(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.setTaskRecords(map[string]*DurableTaskRecord{
+		"external-1": {
+			TaskID: "external-1", Attempt: 1, State: string(SubAgentStateCompleted),
+			LatestInstanceID: "external-agent-1", RuntimeParked: true,
+			ResumePolicy:    taskResumePolicyNotify,
+			ExternalSession: &ExternalTaskSession{Backend: config.BackendKindClaudeCode, ProcessEnded: true},
+		},
+	})
+	a.executionGate = &executiongate.Gate{}
+	a.executionGate.Freeze()
+	reply := make(chan subAgentControlResult, 1)
+	a.queuePausedFollowup(&SubAgentSendMessagePayload{
+		Ctx: context.Background(), TaskID: "external-1", Message: "Follow-up.", Kind: "follow_up", Reply: reply,
+	})
+	select {
+	case response := <-reply:
+		if response.Err == nil || !strings.Contains(response.Err.Error(), "while the session is paused") {
+			t.Fatalf("paused external follow-up error = %v, want the paused-session refusal", response.Err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("paused external follow-up did not settle")
+	}
+	if len(a.pause.resumeFollowups) != 0 || len(a.pause.parkedInputs) != 0 {
+		t.Fatalf("paused follow-up was queued for an external task: followups=%d inputs=%d", len(a.pause.resumeFollowups), len(a.pause.parkedInputs))
+	}
+}
+
 func TestPausedTargetedFollowupSavesBeforeDispatchAndKeepsInputOrder(t *testing.T) {
 	t.Parallel()
 	a, mainProvider := scenarioAgent(t)

@@ -42,6 +42,13 @@ func (a *MainAgent) queuePausedFollowup(payload *SubAgentSendMessagePayload) {
 		a.respondPausedFollowup(payload, tools.TaskHandle{}, fmt.Errorf("task %s cannot accept a follow-up in state %s", taskID, record.State))
 		return
 	}
+	if record.ExternalSession != nil {
+		// External workers resume through their own durable input path, which
+		// requires an active session. Persisting a paused follow-up here would
+		// land it in the internal checkpoint and never reach the worker.
+		a.respondPausedFollowup(payload, tools.TaskHandle{}, fmt.Errorf("external task %s cannot take a follow-up while the session is paused; continue the session first, then send the message", taskID))
+		return
+	}
 	if a.recoveryManager() == nil {
 		a.respondPausedFollowup(payload, tools.TaskHandle{}, fmt.Errorf("paused session recovery writer is unavailable"))
 		return

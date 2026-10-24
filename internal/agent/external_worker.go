@@ -920,6 +920,10 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 	if finalState == SubAgentStateFailed || finalState == SubAgentStateCancelled {
 		record.ClosedReason = closedReason
 	}
+	droppedInputs := 0
+	if finalState == SubAgentStateCancelled {
+		droppedInputs = discardQueuedExternalInputs(record)
+	}
 	a.subs.mu.Lock()
 	a.subs.taskRecords[worker.taskID] = record
 	a.subs.notifyTaskChangeLocked()
@@ -951,6 +955,9 @@ func (a *MainAgent) closeExternalWorker(worker *externalWorker, finalState SubAg
 		status = "cancelled"
 	}
 	a.emitToTUI(AgentStatusEvent{AgentID: worker.instanceID, Status: status, Message: reason})
+	if droppedInputs > 0 {
+		a.emitToTUI(ToastEvent{AgentID: worker.instanceID, Message: fmt.Sprintf("Task %s was cancelled; %d queued input(s) were not run", worker.taskID, droppedInputs), Level: "warn"})
+	}
 	a.resumeQueuedExternalInputs(worker.taskID)
 }
 

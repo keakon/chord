@@ -176,6 +176,64 @@ esac
 	}
 }
 
+// TestExternalCancelDropsQueuedInputs pins the cancellation decision for the
+// external backend: a cancelled task never resumes, so an input queued after
+// the current turn sealed must be dropped instead of being replayed by a later
+// attempt the user never asked for.
+func TestExternalCancelDropsQueuedInputs(t *testing.T) {
+	root := t.TempDir()
+	script := writeFakeClaude(t, `
+printf '%s\n' '{"type":"result","subtype":"success","result":"Done."}'
+sleep 60
+`)
+	a := newTestMainAgent(t, root)
+	configureExternalTestRuntime(t, a, script, `"*": allow`)
+	handle, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "external-worker", Description: "Initial input."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := a.subs.runtime(handle.AgentID).(*externalWorker)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		w.promptMu.Lock()
+		sealed := w.inputClosed
+		w.promptMu.Unlock()
+		if sealed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("input did not seal")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	next, err := a.sendMessageToSubAgentNow("", "", handle.TaskID, "Queued input.", string(SubAgentMailboxKindDecisionRequired))
+	if err != nil || next.Status != "queued" {
+		t.Fatalf("sealed followup = %+v %v", next, err)
+	}
+	if !a.interruptSubAgentTurnsForUserCancel() {
+		t.Fatal("interruptSubAgentTurnsForUserCancel = false, want the live external worker reported")
+	}
+	record := driveExternalTask(t, a, handle.TaskID)
+	if record.State != string(SubAgentStateCancelled) {
+		t.Fatalf("task state = %q, want cancelled (closed_reason=%q)", record.State, record.ClosedReason)
+	}
+	if record.ExternalSession == nil {
+		t.Fatal("cancelled external task lost its session record")
+	}
+	dropped := 0
+	for _, input := range record.ExternalSession.Inputs {
+		switch input.State {
+		case externalInputQueued:
+			t.Fatalf("queued input survived cancellation: %+v", record.ExternalSession.Inputs)
+		case externalInputDropped:
+			dropped++
+		}
+	}
+	if dropped != 1 {
+		t.Fatalf("dropped input count = %d, want 1: %+v", dropped, record.ExternalSession.Inputs)
+	}
+}
+
 func writeSupervisorReceipt(t *testing.T, dir string, receipt externalsupervisor.Receipt) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

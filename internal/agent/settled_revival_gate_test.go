@@ -45,7 +45,7 @@ func TestManualDeliveryToLiveTerminalWorkerRefusedWithoutNewAttempt(t *testing.T
 	}
 }
 
-func TestSendUserMessageToCancelledLiveWorkerIsRefused(t *testing.T) {
+func TestSendUserMessageToCancelledLiveWorkerStartsNewAttempt(t *testing.T) {
 	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -61,15 +61,22 @@ func TestSendUserMessageToCancelledLiveWorkerIsRefused(t *testing.T) {
 	}
 	a.SwitchFocus(sub.instanceID)
 
-	a.SendUserMessage("late reply after cancel")
+	a.SendUserMessage("continue the cancelled work")
 
-	if got := sub.State(); got != SubAgentStateCancelled {
-		t.Fatalf("sub.State() = %q, want cancelled (a cancel must not be undone by a late message)", got)
+	if got := sub.State(); got != SubAgentStateRunning {
+		t.Fatalf("sub.State() = %q, want running on a new attempt", got)
+	}
+	rec := a.taskRecordByTaskID(taskID)
+	if rec == nil || rec.Attempt != 2 {
+		t.Fatalf("record after explicit resume = %#v, want a bumped attempt 2 with the cancelled attempt kept", rec)
 	}
 	select {
-	case <-sub.inputCh:
-		t.Fatal("message was queued for a cancelled task")
+	case msg := <-sub.inputCh:
+		if text := pendingUserMessageText(msg); text != "[follow_up] continue the cancelled work" {
+			t.Fatalf("queued message = %q, want %q", text, "[follow_up] continue the cancelled work")
+		}
 	default:
+		t.Fatal("expected the new attempt to receive the follow-up input")
 	}
 }
 
