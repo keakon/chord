@@ -7,10 +7,19 @@ import (
 
 	"github.com/keakon/golog"
 
+	"github.com/keakon/chord/internal/externalsupervisor"
 	"github.com/keakon/chord/internal/logtest"
 )
 
 func TestMain(m *testing.M) {
+	// Host-level external-agent tests launch a real supervised worker. The
+	// supervisor re-executes the running executable, which under `go test` is
+	// this binary, so it must serve the hidden supervisor command before the
+	// testing framework sees the argument. Same interception as the agent and
+	// externalclaude test mains.
+	if len(os.Args) > 1 && os.Args[1] == externalsupervisor.CommandName {
+		os.Exit(externalsupervisor.Run(os.Args[2:]))
+	}
 	os.Exit(runTestsWithTemporaryRoot(m))
 }
 
