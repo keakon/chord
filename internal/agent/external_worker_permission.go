@@ -1,12 +1,16 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/externalclaude"
 	"github.com/keakon/chord/internal/message"
@@ -24,7 +28,6 @@ type externalPermissionRequest struct {
 // second authorization for the same tool call.
 type externalPermissionOutcome struct {
 	toolUseID   string
-	toolName    string
 	fingerprint [32]byte
 	frame       externalclaude.Frame
 	done        bool
@@ -63,31 +66,71 @@ type externalToolBinding struct {
 	settled     bool
 }
 
-func externalToolFingerprint(name string, input json.RawMessage) ([32]byte, bool) {
+var (
+	errExternalToolInputInvalid     = errors.New("external tool input is not valid JSON")
+	errExternalToolIdentityMismatch = errors.New("external tool identity was reused with different arguments")
+	errExternalToolDuplicateRequest = errors.New("external permission was already requested for this tool call")
+)
+
+// canonicalExternalToolInput rewrites a tool input into one stable JSON text so
+// semantically identical inputs hash identically. Claude Code may re-serialize
+// the same tool_use input when it sends the can_use_tool request, which can
+// reorder object members and change whitespace; JSON object order is not part
+// of the value. Number literals are kept as written, so 1 and 1.0 stay distinct
+// and fingerprint equality never merges arguments the tool could tell apart.
+func canonicalExternalToolInput(input json.RawMessage) (json.RawMessage, error) {
+	if !json.Valid(input) {
+		return nil, errExternalToolInputInvalid
+	}
+	decoder := json.NewDecoder(bytes.NewReader(input))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, errExternalToolInputInvalid
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("external tool input is not valid JSON: %w", err)
+	}
+	return canonical, nil
+}
+
+func externalToolFingerprint(name string, input json.RawMessage) ([32]byte, error) {
+	canonical, err := canonicalExternalToolInput(input)
+	if err != nil {
+		return [32]byte{}, err
+	}
 	data, err := json.Marshal(struct {
 		Name  string
 		Input json.RawMessage
-	}{name, input})
+	}{externalclaude.NormalizeToolName(name), canonical})
 	if err != nil {
-		return [32]byte{}, false
+		return [32]byte{}, err
 	}
-	return sha256.Sum256(data), true
+	return sha256.Sum256(data), nil
 }
 
-func (w *externalWorker) bindExternalTool(id, name string, input json.RawMessage, request bool) bool {
-	fingerprint, ok := externalToolFingerprint(name, input)
-	if !ok {
-		return false
+func (w *externalWorker) bindExternalTool(id, name string, input json.RawMessage, request bool) error {
+	fingerprint, err := externalToolFingerprint(name, input)
+	if err != nil {
+		return err
 	}
 	if binding := w.toolBindings[id]; binding != nil {
-		if binding.fingerprint != fingerprint || request && binding.requested {
-			return false
+		if binding.fingerprint != fingerprint {
+			log.Debugf("external tool binding mismatch task=%v instance=%v tool_use_id=%v tool=%v bound=%x received=%x",
+				w.taskID, w.instanceID, id, name, binding.fingerprint[:4], fingerprint[:4])
+			return errExternalToolIdentityMismatch
+		}
+		if request && binding.requested {
+			log.Debugf("external permission request repeated task=%v instance=%v tool_use_id=%v tool=%v",
+				w.taskID, w.instanceID, id, name)
+			return errExternalToolDuplicateRequest
 		}
 		binding.requested = binding.requested || request
-		return true
+		return nil
 	}
 	w.toolBindings[id] = &externalToolBinding{fingerprint: fingerprint, requested: request}
-	return true
+	return nil
 }
 
 func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
@@ -100,16 +143,14 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 		w.redeliverExternalPermission(externalclaude.DenyPermission(event.RequestID, "invalid external permission request identity"))
 		return
 	}
-	fingerprint, ok := externalToolFingerprint(request.ToolName, request.Input)
-	if !ok {
+	fingerprint, err := externalToolFingerprint(request.ToolName, request.Input)
+	if err != nil {
 		w.redeliverExternalPermission(externalclaude.DenyPermission(event.RequestID, "invalid external permission request input"))
 		return
 	}
 	w.permissionMu.Lock()
 	if outcome := w.permissionOutcomes[event.RequestID]; outcome != nil {
-		matches := outcome.toolUseID == request.ToolUseID &&
-			outcome.toolName == request.ToolName &&
-			outcome.fingerprint == fingerprint
+		matches := outcome.toolUseID == request.ToolUseID && outcome.fingerprint == fingerprint
 		frame, done := outcome.frame, outcome.done
 		w.permissionMu.Unlock()
 		if !matches {
@@ -126,7 +167,6 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 	}
 	outcome := &externalPermissionOutcome{
 		toolUseID:   request.ToolUseID,
-		toolName:    request.ToolName,
 		fingerprint: fingerprint,
 	}
 	w.permissionOutcomes[event.RequestID] = outcome
@@ -220,9 +260,9 @@ func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event e
 		return deny("invalid external permission request")
 	}
 	w.externalToolStateMu.Lock()
-	if !w.bindExternalTool(request.ToolUseID, request.ToolName, request.Input, true) {
+	if err := w.bindExternalTool(request.ToolUseID, request.ToolName, request.Input, true); err != nil {
 		w.externalToolStateMu.Unlock()
-		return deny("external tool identity was reused")
+		return deny(err.Error())
 	}
 	w.handleExternalToolUse(externalclaude.ContentBlock{ID: request.ToolUseID, Name: request.ToolName, Input: request.Input})
 	registered = true

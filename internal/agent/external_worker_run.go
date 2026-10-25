@@ -667,8 +667,8 @@ func (w *externalWorker) handleExternalToolUse(use externalclaude.ContentBlock) 
 	if strings.TrimSpace(use.ID) == "" {
 		return
 	}
-	if !w.bindExternalTool(use.ID, use.Name, use.Input, false) {
-		w.setResultError(fmt.Errorf("external tool identity was reused with different arguments"))
+	if err := w.bindExternalTool(use.ID, use.Name, use.Input, false); err != nil {
+		w.setResultError(err)
 		w.teardown()
 		return
 	}

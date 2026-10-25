@@ -194,6 +194,7 @@ func TestExternalQuestionFullCycleThroughRunLoop(t *testing.T) {
 	decisionFile := filepath.Join(root, "decision.txt")
 	script := writeFakeClaude(t, strings.ReplaceAll(`
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"88888888-8888-4888-8888-888888888888"}'
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-question","name":"AskUserQuestion","input":{"questions":[{"question":"Choose an option","header":"Choice","options":[{"description":"First","label":"Alpha"},{"description":"Second","label":"Beta"}]},{"question":"Provide a value","header":"Text","options":[{"description":"Default value","label":"Default"}]}]}}]}}'
 printf '%s\n' '{"type":"control_request","request_id":"perm-question","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"header":"Choice","question":"Choose an option","options":[{"label":"Alpha","description":"First"},{"label":"Beta","description":"Second"}]},{"header":"Text","question":"Provide a value","options":[{"label":"Default","description":"Default value"}]}]},"tool_use_id":"tool-question"}}'
 IFS= read -r line
 printf '%s' "$line" > "__DECISION_FILE__"
