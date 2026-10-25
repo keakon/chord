@@ -173,7 +173,7 @@ func (m *Model) renderRulePicker(maxWidth int) string {
 		}
 		line := fmt.Sprintf("%s %s %s", cursor, checked, c.Pattern)
 		if c.Tool != "" {
-			line = fmt.Sprintf("%s %s %s %s", cursor, checked, c.Tool, c.Pattern)
+			line = fmt.Sprintf("%s %s %s %s", cursor, checked, currentStyles.ConfirmToolStyle.Render(c.Tool), c.Pattern)
 		}
 		if c.Summary != "" {
 			line += " — " + c.Summary
