@@ -255,7 +255,7 @@ func TestLastSpecificMatchPathMirrorsEvaluatePathSelection(t *testing.T) {
 	if !match.Found || match.Rule.Permission != "edit" || match.Rule.Action != ActionAsk {
 		t.Fatalf("match = %#v, want the edit ask rule", match)
 	}
-	// A same-tool rule wins over the counterpart.
+	// No counterpart rule matches this path, so the same-tool rule is used.
 	match = rs.LastSpecificMatchPath("apply_patch", "src/a.md", testScope)
 	if !match.Found || match.Rule.Permission != "apply_patch" {
 		t.Fatalf("match = %#v, want the apply_patch rule", match)
@@ -268,6 +268,29 @@ func TestLastSpecificMatchPathMirrorsEvaluatePathSelection(t *testing.T) {
 	// counterpart inheritance.
 	if match := rs.LastSpecificMatchPath("apply_patch", "docs/a.md", PathScope{}); match.Found {
 		t.Fatalf("match = %#v, want not found under a degenerate scope", match)
+	}
+	// A counterpart rule and a same-tool rule both match: the same-tool rule
+	// wins, and the mirror must report it and agree with the action
+	// EvaluatePath resolves.
+	rs = Ruleset{
+		{Permission: "edit", Pattern: "docs/*", Action: ActionAsk},
+		{Permission: "apply_patch", Pattern: "docs/*", Action: ActionAllow},
+	}
+	match = rs.LastSpecificMatchPath("apply_patch", "docs/a.md", testScope)
+	if !match.Found || match.Rule.Permission != "apply_patch" {
+		t.Fatalf("match = %#v, want the same-tool apply_patch rule", match)
+	}
+	if got := rs.EvaluatePath("apply_patch", "docs/a.md", testScope); got != match.Rule.Action {
+		t.Fatalf("matched rule action = %v, want EvaluatePath's %v", match.Rule.Action, got)
+	}
+	// A wildcard-tool rule decides the action but names no tool, so it is
+	// reported as not found while EvaluatePath still applies it.
+	wildcard := Ruleset{{Permission: "*", Pattern: "docs/*", Action: ActionAllow}}
+	if match := wildcard.LastSpecificMatchPath("apply_patch", "docs/a.md", testScope); match.Found {
+		t.Fatalf("match = %#v, want a wildcard default reported as not found", match)
+	}
+	if got := wildcard.EvaluatePath("apply_patch", "docs/a.md", testScope); got != ActionAllow {
+		t.Fatalf("EvaluatePath = %v, want the wildcard allow", got)
 	}
 }
 
