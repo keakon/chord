@@ -68,6 +68,7 @@ func TestRunningExternalToolsCountsOnlyStartedUnsettledCalls(t *testing.T) {
 	w := &externalWorker{
 		toolNames: map[string]string{
 			"pending": toolname.Read, "first": toolname.Read, "second": toolname.Read,
+			"unbound": toolname.Read,
 		},
 		toolBindings: map[string]*externalToolBinding{
 			"pending": {}, "first": {started: true}, "second": {started: true},

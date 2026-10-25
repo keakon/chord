@@ -275,7 +275,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 }
 ```
 
-`action` 要与模型/运行时提供的选项一致（如 `allow`、`deny`、`allow_once` 等）。可选的 `rule_pattern` + `rule_scope`（`session` / `project` / `user_global`）会在这次答复的同时安装一条权限规则；可选的 `rule_tool` 指定规则所属的工具，缺省为本次确认的工具——拦截来自 write/delete 规则时（例如 apply_patch 移动源路径触发 delete ask）需要用它把规则装到对应工具下。`rule_pattern` 与 `rule_scope` 都省略时表示一次性决策。`session` 只在当前会话内生效；`project` 写入当前项目的 `.chord/agents/<role>.yaml`；`user_global` 写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。
+`action` 要与模型/运行时提供的选项一致（如 `allow`、`deny`、`allow_once` 等）。可选的 `rule_pattern` + `rule_scope`（`session` / `project` / `user_global`）会在这次答复的同时安装一条权限规则；可选的 `rule_tool` 指定规则所属的工具，缺省为本次确认的工具——拦截来自 write/delete 规则时（例如 apply_patch 移动源路径触发 delete ask）需要用它把规则装到对应工具下。`confirm_request` 会在 `needs_approval_rule_items` 和 `already_allowed_rule_items` 里带上匹配到的 `{tool, pattern}`，客户端把对应项的 tool 传给 `rule_tool` 即可。想一次安装多条建议时，改用 `rule_items` 替代单条 `rule_pattern`/`rule_tool`；每项可带 `tool`（缺省为本次确认的工具），`pattern` 必填。所有规则字段都省略时表示一次性决策。`session` 只在当前会话内生效；`project` 写入当前项目的 `.chord/agents/<role>.yaml`；`user_global` 写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。
 
 只要 headless 会话和事件流仍处于活动状态，每条送达客户端的 `confirm_request` 都会进入终态，并以 `confirm_resolved` 事件推送：`approved` / `denied` 是客户端作答的回执；`timeout` 表示到期后无人作答、已自动拒绝；`cancelled` 表示等待提前结束。收到该事件就收起提示，不要再回答——对已终结的请求发 `confirm`，运行时只会忽略。服务端关闭时可能在终态事件发送前停止事件投递；事件流或会话关闭后，客户端应清除本地未决确认。
 
@@ -379,7 +379,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 | `assistant_message`  | 一条完整 assistant 消息可供消费              | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`text`、`tool_calls`；main agent 的委托字段为空 |
 | `idle`               | 主 agent 与所有 SubAgent 均已全局静默，可再次接收输入 | `last_outcome`（`completed` / `cancelled` / `error`）、`suppress_user_notification`（除非 agent 在上一次 idle 事件后运行过，否则为 `true`）、`running_jobs`（与 `status_response` 同口径；大于 0 时，每个计入的 job 结束后 agent 都会再跑一轮，随后再发一条 `idle`，等待工作结束的集成方应继续读取事件） |
 | `done_completion`   | Done 工具完成并给出最终报告。只在 loop 运行期间产生——`done` 仅在此时挂载；`mode` 字段目前恒为 `normal` | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
-| `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`agent_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`timeout_ms` |
+| `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`agent_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`needs_approval_rule_items`、`already_allowed_rule_items`、`timeout_ms` |
 | `confirm_resolved`   | 确认进入终态，`request_id` 不再可操作，应直接关闭而不是再回答；`approved` / `denied` 是客户端作答回执，`timeout` 是到期自动拒绝，`cancelled` 是提前结束 | `request_id`、`agent_id`、`tool_name`、`outcome`（`approved` / `denied` / `timeout` / `cancelled`） |
 | `question_request` | 题目可供回答 | `request_id`、`binding_id`、`task_id`、`request_scope_id`、`version`、`header`、`question`、`options`、`option_ids`、`option_details`、`multiple`、`response_policy`、`default_option_id`、`timer`、`duration_seconds`，可选 `deadline` |
 | `question_updated` | 计时、介入、要求处置或历史补答发生变化 | 完整题目快照；历史补答附带含独立 `result_id` 的 `revision_result` |

@@ -18,7 +18,8 @@ import (
 )
 
 type externalPermissionRequest struct {
-	cancel context.CancelFunc
+	cancel  context.CancelFunc
+	settled bool
 }
 
 // externalPermissionOutcome remembers the answer to a request id. Claude Code
@@ -153,19 +154,19 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 		defer w.permissionWG.Done()
 		frame := w.evaluateExternalPermission(ctx, event, fingerprint)
 		w.permissionMu.Lock()
-		_, active := w.permissionRequests[event.RequestID]
+		request, active := w.permissionRequests[event.RequestID]
 		if !active || ctx.Err() != nil {
 			frame = externalclaude.DenyPermission(event.RequestID, "external permission request cancelled")
 		}
 		// The request must read as settled before its answer reaches the
 		// process: the external agent acts on the frame the moment the write
-		// lands and can overtake this goroutine with its result, and a result
-		// that arrives while the request still reads pending fails the run as
-		// unsettled. The write can block on stdin backpressure, so it must not
-		// hold the lock that result handling needs to inspect pending
-		// permissions; cancellation stays observable through ctx, which
-		// cancelExternalPermissions cancels for every pending request.
-		delete(w.permissionRequests, event.RequestID)
+		// lands and can overtake this goroutine with its result. It stays in
+		// permissionRequests until the write finishes so cancellation can
+		// still cancel ctx and the context hook can close stdin.
+		if active {
+			request.settled = true
+			w.permissionRequests[event.RequestID] = request
+		}
 		w.permissionWrites++
 		w.permissionMu.Unlock()
 		writeFailed := false
@@ -180,6 +181,7 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 		if ctx.Err() != nil {
 			frame = externalclaude.DenyPermission(event.RequestID, "external permission request cancelled")
 		}
+		delete(w.permissionRequests, event.RequestID)
 		w.permissionWrites--
 		outcome.frame, outcome.done = frame, true
 		pruneExternalPermissionOutcomesLocked(w.permissionOutcomes)
@@ -215,7 +217,8 @@ func (w *externalWorker) cancelExternalPermissions(requestID string) {
 	for id, request := range w.permissionRequests {
 		if requestID == "" || requestID == id {
 			request.cancel()
-			delete(w.permissionRequests, id)
+			request.settled = true
+			w.permissionRequests[id] = request
 		}
 	}
 	for id, outcome := range w.permissionOutcomes {
@@ -225,6 +228,20 @@ func (w *externalWorker) cancelExternalPermissions(requestID string) {
 		}
 	}
 	w.permissionMu.Unlock()
+}
+
+// unsettledExternalPermissionsLocked counts requests whose answer has not
+// started writing. A settled request may still be in permissionRequests while
+// its frame is in flight, so length alone would reject a result that overtook
+// the write.
+func (w *externalWorker) unsettledExternalPermissionsLocked() int {
+	pending := 0
+	for _, request := range w.permissionRequests {
+		if !request.settled {
+			pending++
+		}
+	}
+	return pending
 }
 
 func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event externalclaude.Event, fingerprint [32]byte) externalclaude.Frame {

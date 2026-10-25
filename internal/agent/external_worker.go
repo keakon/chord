@@ -155,8 +155,8 @@ type externalWorker struct {
 	permissionWG        sync.WaitGroup
 	permissionRequests  map[string]externalPermissionRequest
 	// permissionWrites counts answers being written back to the process. A
-	// request leaves permissionRequests before its write, so the write must be
-	// counted apart to tell "no permission work left" from "no request left".
+	// settled request stays in permissionRequests until its write finishes so
+	// cancellation can still cancel its context.
 	permissionWrites   int
 	permissionOutcomes map[string]*externalPermissionOutcome
 	historyMu          sync.Mutex

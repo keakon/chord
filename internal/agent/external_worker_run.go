@@ -619,7 +619,7 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (stop 
 	}
 	w.resultText = text
 	w.permissionMu.Lock()
-	pendingPermissions := len(w.permissionRequests)
+	pendingPermissions := w.unsettledExternalPermissionsLocked()
 	w.permissionMu.Unlock()
 	if pendingPermissions != 0 {
 		w.cancelExternalPermissions("")

@@ -678,3 +678,32 @@ authorizing:
 		t.Fatal("replay did not arrive")
 	}
 }
+
+func TestExternalResultAcceptsSettledPermissionWrite(t *testing.T) {
+	_, w := newExternalInputTestWorker(t)
+	w.resultSchema = nil
+	w.permissionRequests["request-1"] = externalPermissionRequest{settled: true, cancel: func() {}}
+
+	stop, next := w.handleExternalResult(externalclaude.Event{Type: externalclaude.TypeResult, Result: "Sample result"})
+	if !stop || next.ID != "" || !w.inputClosed || w.getResultError() != nil {
+		t.Fatalf("settled permission write rejected result: stop=%t next=%+v closed=%t err=%v", stop, next, w.inputClosed, w.getResultError())
+	}
+}
+
+func TestCancelExternalPermissionKeepsWriterCancellation(t *testing.T) {
+	_, w := newExternalInputTestWorker(t)
+	canceled := false
+	w.permissionRequests["request-1"] = externalPermissionRequest{cancel: func() { canceled = true }}
+
+	w.cancelExternalPermissions("request-1")
+	request, ok := w.permissionRequests["request-1"]
+	if !canceled {
+		t.Fatal("cancelExternalPermissions did not cancel the request context")
+	}
+	if !ok || !request.settled {
+		t.Fatalf("canceled request = %#v, present=%t; want a settled entry kept for its writer", request, ok)
+	}
+	if got := w.unsettledExternalPermissionsLocked(); got != 0 {
+		t.Fatalf("unsettled permissions = %d, want 0 after cancellation", got)
+	}
+}

@@ -317,7 +317,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		state.mu.Unlock()
 
 	case "confirm":
-		ruleIntent, err := parseHeadlessRuleIntent(cmd.RulePattern, cmd.RuleTool, cmd.RuleScope)
+		ruleIntent, err := parseHeadlessRuleIntent(cmd.RulePattern, cmd.RuleTool, cmd.RuleScope, cmd.RuleItems)
 		if err != nil {
 			out.emit(headlessEnvelope{
 				Type: "error",
@@ -394,15 +394,18 @@ func defaultHandoffAgent(options []agent.HandoffAgentOption) string {
 	return ""
 }
 
-func parseHeadlessRuleIntent(pattern, tool, scope string) (*agent.ConfirmRuleIntent, error) {
+func parseHeadlessRuleIntent(pattern, tool, scope string, items []headlessRuleItem) (*agent.ConfirmRuleIntent, error) {
 	pattern = strings.TrimSpace(pattern)
 	tool = strings.TrimSpace(tool)
 	scope = strings.TrimSpace(scope)
-	if pattern == "" && tool == "" && scope == "" {
+	if pattern == "" && tool == "" && scope == "" && len(items) == 0 {
 		return nil, nil
 	}
-	if pattern == "" {
-		return nil, fmt.Errorf("confirm rule intent requires non-empty rule_pattern")
+	if pattern == "" && len(items) == 0 {
+		return nil, fmt.Errorf("confirm rule intent requires non-empty rule_pattern or rule_items")
+	}
+	if pattern == "" && tool != "" {
+		return nil, fmt.Errorf("rule_tool requires rule_pattern; use rule_items for structured rules")
 	}
 	if scope == "" {
 		scope = "session"
@@ -418,8 +421,16 @@ func parseHeadlessRuleIntent(pattern, tool, scope string) (*agent.ConfirmRuleInt
 	default:
 		return nil, fmt.Errorf("invalid rule_scope %q (expected session|project|user_global)", scope)
 	}
-	return &agent.ConfirmRuleIntent{
-		Rules: []agent.ConfirmRule{{Tool: tool, Pattern: pattern}},
-		Scope: ruleScope,
-	}, nil
+	rules := make([]agent.ConfirmRule, 0, len(items)+1)
+	for _, item := range items {
+		itemPattern := strings.TrimSpace(item.Pattern)
+		if itemPattern == "" {
+			return nil, fmt.Errorf("confirm rule item requires non-empty pattern")
+		}
+		rules = append(rules, agent.ConfirmRule{Tool: strings.TrimSpace(item.Tool), Pattern: itemPattern})
+	}
+	if pattern != "" {
+		rules = append(rules, agent.ConfirmRule{Tool: tool, Pattern: pattern})
+	}
+	return &agent.ConfirmRuleIntent{Rules: rules, Scope: ruleScope}, nil
 }

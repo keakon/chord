@@ -75,13 +75,15 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 	defer a.interaction.unregisterConfirm(requestID)
 
 	a.fireHookBackground(ctx, hook.OnWaitConfirm, turnID, map[string]any{
-		hook.DataKeyToolName:    toolName,
-		"args_json":             argsJSON,
-		"timeout_ms":            timeout.Milliseconds(),
-		"needs_approval":        append([]string(nil), needsApproval...),
-		"already_allowed":       append([]string(nil), alreadyAllowed...),
-		"needs_approval_rules":  permission.RulePatterns(needsApprovalRules),
-		"already_allowed_rules": permission.RulePatterns(alreadyAllowedRules),
+		hook.DataKeyToolName:         toolName,
+		"args_json":                  argsJSON,
+		"timeout_ms":                 timeout.Milliseconds(),
+		"needs_approval":             append([]string(nil), needsApproval...),
+		"already_allowed":            append([]string(nil), alreadyAllowed...),
+		"needs_approval_rules":       permission.RulePatterns(needsApprovalRules),
+		"already_allowed_rules":      permission.RulePatterns(alreadyAllowedRules),
+		"needs_approval_rule_items":  append([]permission.Rule(nil), needsApprovalRules...),
+		"already_allowed_rule_items": append([]permission.Rule(nil), alreadyAllowedRules...),
 	})
 
 	summaryVal := ""

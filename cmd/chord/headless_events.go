@@ -286,25 +286,32 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		if strings.TrimSpace(e.DoneReport) != "" {
 			doneReport = strings.TrimSpace(e.DoneReport)
 		}
-		// The headless protocol exposes matched rules as plain patterns; the
-		// per-rule tool stays internal and is reported through rule_tool when a
-		// client installs a rule.
-		needsApprovalRules := permission.RulePatterns(e.NeedsApprovalRules)
-		alreadyAllowedRules := permission.RulePatterns(e.AlreadyAllowedRules)
-		state.pendingConfirm = &headlessConfirmPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed, NeedsApprovalRules: needsApprovalRules, AlreadyAllowedRules: alreadyAllowedRules, DoneReport: doneReport, DoneReason: doneReason, AgentID: e.AgentID}
+		needsApprovalRuleItems := headlessRuleItems(e.NeedsApprovalRules)
+		alreadyAllowedRuleItems := headlessRuleItems(e.AlreadyAllowedRules)
+		state.pendingConfirm = &headlessConfirmPayload{
+			ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID,
+			TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval,
+			AlreadyAllowed:         e.AlreadyAllowed,
+			NeedsApprovalRules:     permission.RulePatterns(e.NeedsApprovalRules),
+			AlreadyAllowedRules:    permission.RulePatterns(e.AlreadyAllowedRules),
+			NeedsApprovalRuleItems: needsApprovalRuleItems, AlreadyAllowedRuleItems: alreadyAllowedRuleItems,
+			DoneReport: doneReport, DoneReason: doneReason, AgentID: e.AgentID,
+		}
 		if state.isSubscribed("confirm_request") {
 			out = append(out, &headlessEnvelope{Type: "confirm_request", Payload: map[string]any{
-				"tool_name":             e.ToolName,
-				"args_json":             e.ArgsJSON,
-				"request_id":            e.RequestID,
-				"timeout_ms":            e.Timeout.Milliseconds(),
-				"needs_approval":        e.NeedsApproval,
-				"already_allowed":       e.AlreadyAllowed,
-				"needs_approval_rules":  needsApprovalRules,
-				"already_allowed_rules": alreadyAllowedRules,
-				"done_report":           doneReport,
-				"done_reason":           doneReason,
-				"agent_id":              e.AgentID,
+				"tool_name":                  e.ToolName,
+				"args_json":                  e.ArgsJSON,
+				"request_id":                 e.RequestID,
+				"timeout_ms":                 e.Timeout.Milliseconds(),
+				"needs_approval":             e.NeedsApproval,
+				"already_allowed":            e.AlreadyAllowed,
+				"needs_approval_rules":       permission.RulePatterns(e.NeedsApprovalRules),
+				"already_allowed_rules":      permission.RulePatterns(e.AlreadyAllowedRules),
+				"needs_approval_rule_items":  needsApprovalRuleItems,
+				"already_allowed_rule_items": alreadyAllowedRuleItems,
+				"done_report":                doneReport,
+				"done_reason":                doneReason,
+				"agent_id":                   e.AgentID,
 			}})
 		}
 	case agent.ConfirmResolvedEvent:
@@ -523,6 +530,17 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	}
 	state.stampHeadlessSeq(true, out...)
 	return out
+}
+
+func headlessRuleItems(rules []permission.Rule) []headlessRuleItem {
+	if len(rules) == 0 {
+		return nil
+	}
+	items := make([]headlessRuleItem, 0, len(rules))
+	for _, rule := range rules {
+		items = append(items, headlessRuleItem{Tool: rule.Permission, Pattern: rule.Pattern})
+	}
+	return items
 }
 
 func parseHeadlessDoneArgs(argsJSON string) (reason, report string) {

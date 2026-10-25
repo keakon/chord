@@ -382,10 +382,6 @@ func allTargetsInRuleScope(paths []string, scope permission.PathScope) bool {
 	return found
 }
 
-// patchPathCandidatesPerTool caps each tool group so a patch blocked by
-// several tools still leaves every group's candidates visible.
-const patchPathCandidatesPerTool = 2
-
 // suggestApplyPatchPatterns builds candidates from the paths that asked and
 // the specific rules that raised the ask. A patch writes and removes files, so
 // the standalone write/delete rules apply alongside apply_patch's own rules
@@ -434,10 +430,29 @@ func suggestApplyPatchPatterns(toolName string, needsApproval []string, rules []
 		}
 	}
 
+	groups := []struct {
+		tool  string
+		paths []string
+	}{
+		{toolname.Delete, deletePaths},
+		{toolname.Write, writePaths},
+		{toolname.ApplyPatch, patchPaths},
+	}
+	activeGroups := 0
+	for _, group := range groups {
+		if len(group.paths) > 0 {
+			activeGroups++
+		}
+	}
+	perGroup := maxPatternCandidates
+	if activeGroups > 0 {
+		perGroup = max(1, maxPatternCandidates/activeGroups)
+	}
+
 	candidates := make([]Candidate, 0, maxPatternCandidates)
-	candidates = append(candidates, tagCandidates(patchPathCandidates(deletePaths, scope), toolname.Delete)...)
-	candidates = append(candidates, tagCandidates(patchPathCandidates(writePaths, scope), toolname.Write)...)
-	candidates = append(candidates, tagCandidates(patchPathCandidates(patchPaths, scope), toolname.ApplyPatch)...)
+	for _, group := range groups {
+		candidates = append(candidates, tagCandidates(patchPathCandidates(group.paths, scope, group.tool, perGroup), group.tool)...)
+	}
 	if len(candidates) == 0 {
 		candidates = append(candidates, Candidate{Tool: toolname.Normalize(toolName), Pattern: "*", Summary: "any " + toolName + " call", Broad: true, Default: true})
 	}
@@ -452,13 +467,19 @@ func tagCandidates(candidates []Candidate, tool string) []Candidate {
 }
 
 // patchPathCandidates groups the given paths into the narrowest reusable
-// directory rules, ranked by coverage. Every candidate is default-selected:
-// a patch that touched several directories must cover all of them, or its
-// next identical call still asks for the directories left out. Paths at the
-// directory root fall back to exact-file rules.
-func patchPathCandidates(paths []string, scope permission.PathScope) []Candidate {
+// directory rules, ranked by coverage. limit bounds one tool group so a patch
+// blocked by several tools still leaves every group's candidates visible.
+// Every returned candidate is default-selected and together they cover every
+// requested path: when the narrow rules hit the limit, the group falls back to
+// an ancestor, exact files, or a tool-wide wildcard rather than leaving paths
+// that would ask again on the next identical patch. Paths at the directory
+// root fall back to exact-file rules.
+func patchPathCandidates(paths []string, scope permission.PathScope, tool string, limit int) []Candidate {
 	if len(paths) == 0 {
 		return nil
+	}
+	if limit < 1 {
+		limit = 1
 	}
 	normalized := dedupePaths(normalizeRulePaths(paths, scope))
 	type directoryCandidate struct {
@@ -492,10 +513,10 @@ func patchPathCandidates(paths []string, scope permission.PathScope) []Candidate
 		return directories[i].dir < directories[j].dir
 	})
 
-	candidates := make([]Candidate, 0, min(len(directories), patchPathCandidatesPerTool))
-	selected := make([]string, 0, cap(candidates))
+	candidates := make([]Candidate, 0, limit)
+	selected := make([]string, 0, limit)
 	for _, directory := range directories {
-		if len(candidates) >= patchPathCandidatesPerTool {
+		if len(selected) >= limit {
 			break
 		}
 		covered := false
@@ -518,11 +539,67 @@ func patchPathCandidates(paths []string, scope permission.PathScope) []Candidate
 		})
 	}
 	if len(candidates) == 0 {
-		for _, p := range normalized[:min(len(normalized), patchPathCandidatesPerTool)] {
-			candidates = append(candidates, Candidate{Pattern: p, Summary: "this exact file", Default: true})
+		if len(normalized) <= limit {
+			for _, p := range normalized {
+				candidates = append(candidates, Candidate{Pattern: p, Summary: "this exact file", Default: true})
+			}
+			return candidates
+		}
+		return []Candidate{{Pattern: "*", Summary: "any " + tool + " path", Broad: true, Default: true}}
+	}
+
+	var uncovered []string
+	for _, p := range normalized {
+		covered := false
+		for _, dir := range selected {
+			if strings.HasPrefix(p, dir+"/") {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			uncovered = append(uncovered, p)
 		}
 	}
-	return candidates
+	if len(uncovered) == 0 {
+		return candidates
+	}
+	if len(candidates)+len(uncovered) <= limit {
+		for _, p := range uncovered {
+			candidates = append(candidates, Candidate{Pattern: p, Summary: "this exact file", Default: true})
+		}
+		return candidates
+	}
+	if len(candidates) >= limit {
+		candidates = candidates[:len(candidates)-1]
+	}
+	if ancestor := commonPathAncestor(normalized); ancestor != "" {
+		return append(candidates, Candidate{
+			Pattern: pathpkg.Join(ancestor, "*"),
+			Summary: "any path under " + ancestor + "/",
+			Default: true,
+		})
+	}
+	return append(candidates, Candidate{Pattern: "*", Summary: "any " + tool + " path", Broad: true, Default: true})
+}
+
+// commonPathAncestor returns the deepest directory containing every path.
+// Root and working-directory ancestors are not reusable rule patterns, so they
+// return an empty string and callers fall back to a tool-wide wildcard.
+func commonPathAncestor(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	ancestor := pathpkg.Dir(paths[0])
+	for _, p := range paths[1:] {
+		for ancestor != "." && ancestor != "/" && ancestor != "" && p != ancestor && !strings.HasPrefix(p, ancestor+"/") {
+			ancestor = pathpkg.Dir(ancestor)
+		}
+		if ancestor == "." || ancestor == "/" || ancestor == "" {
+			return ""
+		}
+	}
+	return ancestor
 }
 
 func normalizeRulePaths(paths []string, scope permission.PathScope) []string {

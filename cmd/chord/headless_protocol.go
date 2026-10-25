@@ -38,18 +38,25 @@ type headlessHandoffPayload struct {
 	Agents    []agent.HandoffAgentOption `json:"agents"`
 }
 
+type headlessRuleItem struct {
+	Tool    string `json:"tool,omitempty"`
+	Pattern string `json:"pattern"`
+}
+
 type headlessConfirmPayload struct {
-	ToolName            string   `json:"tool_name"`
-	ArgsJSON            string   `json:"args_json"`
-	RequestID           string   `json:"request_id,omitempty"`
-	TimeoutMS           int64    `json:"timeout_ms,omitempty"`
-	NeedsApproval       []string `json:"needs_approval,omitempty"`
-	AlreadyAllowed      []string `json:"already_allowed,omitempty"`
-	NeedsApprovalRules  []string `json:"needs_approval_rules,omitempty"`
-	AlreadyAllowedRules []string `json:"already_allowed_rules,omitempty"`
-	DoneReport          string   `json:"done_report,omitempty"`
-	DoneReason          string   `json:"done_reason,omitempty"`
-	AgentID             string   `json:"agent_id,omitempty"`
+	ToolName                string             `json:"tool_name"`
+	ArgsJSON                string             `json:"args_json"`
+	RequestID               string             `json:"request_id,omitempty"`
+	TimeoutMS               int64              `json:"timeout_ms,omitempty"`
+	NeedsApproval           []string           `json:"needs_approval,omitempty"`
+	AlreadyAllowed          []string           `json:"already_allowed,omitempty"`
+	NeedsApprovalRules      []string           `json:"needs_approval_rules,omitempty"`
+	AlreadyAllowedRules     []string           `json:"already_allowed_rules,omitempty"`
+	NeedsApprovalRuleItems  []headlessRuleItem `json:"needs_approval_rule_items,omitempty"`
+	AlreadyAllowedRuleItems []headlessRuleItem `json:"already_allowed_rule_items,omitempty"`
+	DoneReport              string             `json:"done_report,omitempty"`
+	DoneReason              string             `json:"done_reason,omitempty"`
+	AgentID                 string             `json:"agent_id,omitempty"`
 }
 
 type headlessQuestionPayload struct {
@@ -192,31 +199,32 @@ type headlessCommand struct {
 	DeliveryPolicy        recovery.InputDeliveryPolicy `json:"delivery_policy,omitempty"`
 	ContentPresent        bool                         `json:"-"`
 
-	BindingID           string   `json:"binding_id"`
-	QuestionsAfterID    string   `json:"questions_after_id,omitempty"`
-	QuestionIDs         []string `json:"question_ids,omitempty"`
-	Type                string   `json:"type"`
-	Content             string   `json:"content,omitempty"`
-	Command             string   `json:"command,omitempty"`
-	RequestID           string   `json:"request_id,omitempty"`
-	Action              string   `json:"action,omitempty"`
-	Agent               string   `json:"agent,omitempty"`
-	Pool                string   `json:"pool,omitempty"`
-	Role                string   `json:"role,omitempty"`
-	FinalArgsJSON       string   `json:"final_args_json,omitempty"`
-	EditSummary         string   `json:"edit_summary,omitempty"`
-	DenyReason          string   `json:"deny_reason,omitempty"`
-	RulePattern         string   `json:"rule_pattern,omitempty"`
-	RuleTool            string   `json:"rule_tool,omitempty"`  // defaults to the confirmed tool
-	RuleScope           string   `json:"rule_scope,omitempty"` // session | project | user_global
-	Answers             []string `json:"answers,omitempty"`
-	OperationID         string   `json:"operation_id,omitempty"`
-	Version             uint64   `json:"version,omitempty"`
-	Custom              bool     `json:"custom,omitempty"`
-	ReplacementID       string   `json:"replacement_id,omitempty"`
-	UserText            string   `json:"user_text,omitempty"`
-	SupportsInteraction bool     `json:"supports_interaction,omitempty"`
-	Events              []string `json:"events,omitempty"` // for subscribe command
+	BindingID           string             `json:"binding_id"`
+	QuestionsAfterID    string             `json:"questions_after_id,omitempty"`
+	QuestionIDs         []string           `json:"question_ids,omitempty"`
+	Type                string             `json:"type"`
+	Content             string             `json:"content,omitempty"`
+	Command             string             `json:"command,omitempty"`
+	RequestID           string             `json:"request_id,omitempty"`
+	Action              string             `json:"action,omitempty"`
+	Agent               string             `json:"agent,omitempty"`
+	Pool                string             `json:"pool,omitempty"`
+	Role                string             `json:"role,omitempty"`
+	FinalArgsJSON       string             `json:"final_args_json,omitempty"`
+	EditSummary         string             `json:"edit_summary,omitempty"`
+	DenyReason          string             `json:"deny_reason,omitempty"`
+	RulePattern         string             `json:"rule_pattern,omitempty"`
+	RuleTool            string             `json:"rule_tool,omitempty"`  // defaults to the confirmed tool
+	RuleItems           []headlessRuleItem `json:"rule_items,omitempty"` // structured alternative for multiple rules
+	RuleScope           string             `json:"rule_scope,omitempty"` // session | project | user_global
+	Answers             []string           `json:"answers,omitempty"`
+	OperationID         string             `json:"operation_id,omitempty"`
+	Version             uint64             `json:"version,omitempty"`
+	Custom              bool               `json:"custom,omitempty"`
+	ReplacementID       string             `json:"replacement_id,omitempty"`
+	UserText            string             `json:"user_text,omitempty"`
+	SupportsInteraction bool               `json:"supports_interaction,omitempty"`
+	Events              []string           `json:"events,omitempty"` // for subscribe command
 }
 
 // All available push event types that can be subscribed to.

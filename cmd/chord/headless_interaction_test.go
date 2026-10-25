@@ -415,6 +415,46 @@ func TestHeadlessConfirmRuleIntentNamesTool(t *testing.T) {
 	}
 }
 
+func TestHeadlessConfirmSupportsMultipleRuleItems(t *testing.T) {
+	state := &headlessState{
+		pendingConfirm: &headlessConfirmPayload{
+			ToolName:  "apply_patch",
+			RequestID: "req-1",
+		},
+	}
+	to := newTestOut(t)
+	backend := &mockBackend{}
+
+	cmd := headlessCommand{
+		Type:      "confirm",
+		Action:    "allow",
+		RequestID: "req-1",
+		RuleItems: []headlessRuleItem{
+			{Tool: "delete", Pattern: ".chord/notes/*"},
+			{Tool: "write", Pattern: ".chord/notes/*"},
+		},
+		RuleScope: "session",
+	}
+	handleHeadlessCommand(cmd, backend, state, to.writer())
+
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if len(backend.confirmCalls) != 1 {
+		t.Fatalf("confirm calls = %d, want 1", len(backend.confirmCalls))
+	}
+	call := backend.confirmCalls[0]
+	if call.ruleIntent == nil {
+		t.Fatal("expected rule intent in confirm call")
+	}
+	want := []agent.ConfirmRule{
+		{Tool: "delete", Pattern: ".chord/notes/*"},
+		{Tool: "write", Pattern: ".chord/notes/*"},
+	}
+	if !reflect.DeepEqual(call.ruleIntent.Rules, want) {
+		t.Fatalf("rule intent rules = %#v, want %#v", call.ruleIntent.Rules, want)
+	}
+}
+
 func TestHeadlessConfirmRejectsInvalidRuleScope(t *testing.T) {
 	state := &headlessState{}
 	to := newTestOut(t)
@@ -1007,6 +1047,12 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	if got := stringSliceFromAny(t, payload["already_allowed_rules"]); !reflect.DeepEqual(got, permission.RulePatterns(ev.AlreadyAllowedRules)) {
 		t.Errorf("already_allowed_rules = %#v, want %#v", got, permission.RulePatterns(ev.AlreadyAllowedRules))
 	}
+	if got, want := headlessRuleItemsFromAny(t, payload["needs_approval_rule_items"]), headlessRuleItems(ev.NeedsApprovalRules); !reflect.DeepEqual(got, want) {
+		t.Errorf("needs_approval_rule_items = %#v, want %#v", got, want)
+	}
+	if got, want := headlessRuleItemsFromAny(t, payload["already_allowed_rule_items"]), headlessRuleItems(ev.AlreadyAllowedRules); !reflect.DeepEqual(got, want) {
+		t.Errorf("already_allowed_rule_items = %#v, want %#v", got, want)
+	}
 
 	state.mu.Lock()
 	pc := state.pendingConfirm
@@ -1027,6 +1073,25 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	if !reflect.DeepEqual(pc.AlreadyAllowedRules, permission.RulePatterns(ev.AlreadyAllowedRules)) {
 		t.Errorf("pendingConfirm.AlreadyAllowedRules = %#v, want %#v", pc.AlreadyAllowedRules, permission.RulePatterns(ev.AlreadyAllowedRules))
 	}
+	if want := headlessRuleItems(ev.NeedsApprovalRules); !reflect.DeepEqual(pc.NeedsApprovalRuleItems, want) {
+		t.Errorf("pendingConfirm.NeedsApprovalRuleItems = %#v, want %#v", pc.NeedsApprovalRuleItems, want)
+	}
+	if want := headlessRuleItems(ev.AlreadyAllowedRules); !reflect.DeepEqual(pc.AlreadyAllowedRuleItems, want) {
+		t.Errorf("pendingConfirm.AlreadyAllowedRuleItems = %#v, want %#v", pc.AlreadyAllowedRuleItems, want)
+	}
+}
+
+func headlessRuleItemsFromAny(t *testing.T, v any) []headlessRuleItem {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal rule items: %v", err)
+	}
+	var items []headlessRuleItem
+	if err := json.Unmarshal(data, &items); err != nil {
+		t.Fatalf("unmarshal rule items: %v", err)
+	}
+	return items
 }
 
 func TestHeadlessQuestionRequestEventPayload(t *testing.T) {

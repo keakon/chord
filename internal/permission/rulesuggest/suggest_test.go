@@ -662,6 +662,73 @@ func TestSuggestRulePatterns_ApplyPatchWildcardDefaultAskOffersPatchRule(t *test
 	}
 }
 
+func TestSuggestRulePatterns_ApplyPatchCoversEveryTouchedDirectory(t *testing.T) {
+	paths := []string{"alpha/a.go", "bravo/b.go", "charlie/c.go"}
+	candidates := Suggest("apply_patch", `{}`, paths, nil, cwdScope("/home/user/project"))
+	want := []string{"alpha/*", "bravo/*", "charlie/*"}
+	if len(candidates) != len(want) {
+		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), len(want), candidates)
+	}
+	for i, pattern := range want {
+		candidate := candidates[i]
+		if candidate.Tool != toolname.ApplyPatch || candidate.Pattern != pattern || !candidate.Default {
+			t.Fatalf("candidate[%d] = %#v, want default apply_patch %q", i, candidate, pattern)
+		}
+	}
+}
+
+func TestSuggestRulePatterns_ApplyPatchFallbackCoversTruncatedDirectories(t *testing.T) {
+	paths := make([]string, 0, 7)
+	for _, dir := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		paths = append(paths, "src/"+dir+"/file.go")
+	}
+	candidates := Suggest("apply_patch", `{}`, paths, nil, cwdScope("/home/user/project"))
+	if len(candidates) != maxPatternCandidates {
+		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), maxPatternCandidates, candidates)
+	}
+	foundCoverage := false
+	for _, candidate := range candidates {
+		if candidate.Pattern == "src/*" && candidate.Default {
+			foundCoverage = true
+		}
+	}
+	if !foundCoverage {
+		t.Fatalf("expected default src/* fallback covering all paths: %+v", candidates)
+	}
+}
+
+func TestSuggestRulePatterns_ApplyPatchKeepsEveryBlockedToolGroup(t *testing.T) {
+	paths := []string{"src/a/a.go", "src/b/b.go", "src/c/c.go"}
+	rules := []permission.Rule{
+		{Permission: toolname.Delete, Pattern: "*", Action: permission.ActionAsk},
+		{Permission: toolname.Write, Pattern: "*", Action: permission.ActionAsk},
+		{Permission: toolname.ApplyPatch, Pattern: "*", Action: permission.ActionAsk},
+	}
+	candidates := Suggest("apply_patch", `{}`, paths, rules, cwdScope("/home/user/project"))
+	if len(candidates) != maxPatternCandidates {
+		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), maxPatternCandidates, candidates)
+	}
+	counts := make(map[string]int, 3)
+	coverage := make(map[string]bool, 3)
+	for _, candidate := range candidates {
+		if !candidate.Default {
+			t.Fatalf("candidate should be default-selected: %#v", candidate)
+		}
+		counts[candidate.Tool]++
+		if candidate.Pattern == "src/*" {
+			coverage[candidate.Tool] = true
+		}
+	}
+	for _, tool := range []string{toolname.Delete, toolname.Write, toolname.ApplyPatch} {
+		if counts[tool] != 2 {
+			t.Fatalf("%s candidate count = %d, want 2: %+v", tool, counts[tool], candidates)
+		}
+		if !coverage[tool] {
+			t.Fatalf("%s group lacks a fallback covering all paths: %+v", tool, candidates)
+		}
+	}
+}
+
 func TestSuggestRulePatterns_ApplyPatchOutOfScopePathOffersAbsoluteRule(t *testing.T) {
 	candidates := Suggest("apply_patch", `{"patch":"*** Begin Patch\n*** Delete File: /home/shared/a.md\n*** End Patch"}`,
 		[]string{"/home/shared/a.md"},
