@@ -30,9 +30,12 @@ func (w *externalWorker) runningExternalToolsLocked() int {
 	running := 0
 	for id := range w.toolNames {
 		binding := w.toolBindings[id]
-		if binding.started && !binding.settled {
-			running++
+		// toolNames is the active set: a tool whose binding is gone was
+		// unbound rather than left running, so it must not be counted.
+		if binding == nil || !binding.started || binding.settled {
+			continue
 		}
+		running++
 	}
 	return running
 }

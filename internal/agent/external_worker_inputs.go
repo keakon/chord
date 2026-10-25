@@ -25,6 +25,17 @@ func (w *externalWorker) cloneExternalTaskRecordLocked() (*recoveryOwnership, *D
 	return owner, record, nil
 }
 
+// persistExternalSessionLocked publishes and persists the worker's durable
+// input state. Callers hold promptMu; under it the lock order is
+// promptMu -> taskRegistryPersistMu -> subs.mu, the same tail order
+// persistTaskRegistryRecord takes, so no path may acquire them in reverse.
+//
+// The record is published to the registry before it is written: a mailbox that
+// arrives during the write can then extend this record without a later stale
+// publication replacing its fields. A failed write therefore leaves the
+// registry ahead of the file. That is deliberate: the caller marks persistence
+// degraded and recovery reads the file, so the task fails loudly instead of the
+// registry quietly reporting state no restart would see.
 func (w *externalWorker) persistExternalSessionLocked() error {
 	a := w.parent
 	a.taskRegistryPersistMu.Lock()
