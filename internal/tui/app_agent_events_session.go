@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -105,8 +106,8 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 			Timeout:             evt.Timeout,
 			NeedsApproval:       append([]string(nil), evt.NeedsApproval...),
 			AlreadyAllowed:      append([]string(nil), evt.AlreadyAllowed...),
-			NeedsApprovalRules:  append([]string(nil), evt.NeedsApprovalRules...),
-			AlreadyAllowedRules: append([]string(nil), evt.AlreadyAllowedRules...),
+			NeedsApprovalRules:  append([]permission.Rule(nil), evt.NeedsApprovalRules...),
+			AlreadyAllowedRules: append([]permission.Rule(nil), evt.AlreadyAllowedRules...),
 			ForceDenyReason:     evt.ForceDenyReason,
 			AgentID:             evt.AgentID,
 			PathScope:           evt.PathScope,

@@ -196,7 +196,7 @@ func TestHandleLLMResponseDoesNotPromoteReadOnlyShellBehindAskGatedCommit(t *tes
 
 	confirmEntered := make(chan struct{})
 	releaseConfirm := make(chan struct{})
-	a.confirmFn = func(ctx context.Context, toolName, argsJSON string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error) {
+	a.confirmFn = func(ctx context.Context, toolName, argsJSON string, needsApproval []string, alreadyAllowed []string, needsApprovalRules, alreadyAllowedRules []permission.Rule) (ConfirmResponse, error) {
 		close(confirmEntered)
 		<-releaseConfirm
 		return ConfirmResponse{Approved: true}, nil

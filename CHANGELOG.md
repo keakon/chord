@@ -76,6 +76,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Remembering a rule from a permission confirmation now suggests rules that actually stop the repeat prompt. apply_patch confirmations report the write/delete rules that blocked the call — for example a delete ask on a moved source path — and the picker offers preselected directory rules named for that tool instead of a broad apply_patch rule that could not lift the ask. Headless clients can pass `rule_tool` with `confirm` to install the rule under the blocking tool.
+
 - MCP servers unloaded after an idle period now reconnect on the next request instead of staying unavailable until Chord restarts. An explicit close still shuts the runtime down.
 
 - The card shown while a session is resumed or switched no longer renders its interior in two background colours. Its headline is assembled from separately styled segments, and their resets dropped the card background, so the icon and the inner padding kept the card colour while the title and session id fell back to the terminal background and looked like separate blocks; the whole interior now shares one surface.

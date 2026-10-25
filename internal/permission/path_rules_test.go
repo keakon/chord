@@ -243,3 +243,53 @@ func TestEvaluatePathViewImageCWDScoped(t *testing.T) {
 		t.Errorf("out-of-cwd view_image = %q, want deny under '**'", got)
 	}
 }
+
+func TestLastSpecificMatchPathMirrorsEvaluatePathSelection(t *testing.T) {
+	rs := Ruleset{
+		{Permission: "edit", Pattern: "docs/*", Action: ActionAsk},
+		{Permission: "apply_patch", Pattern: "src/*", Action: ActionAllow},
+	}
+	// Counterpart inheritance: an edit rule governs apply_patch on the same
+	// path, the way EvaluatePath selects it.
+	match := rs.LastSpecificMatchPath("apply_patch", "docs/a.md", testScope)
+	if !match.Found || match.Rule.Permission != "edit" || match.Rule.Action != ActionAsk {
+		t.Fatalf("match = %#v, want the edit ask rule", match)
+	}
+	// A same-tool rule wins over the counterpart.
+	match = rs.LastSpecificMatchPath("apply_patch", "src/a.md", testScope)
+	if !match.Found || match.Rule.Permission != "apply_patch" {
+		t.Fatalf("match = %#v, want the apply_patch rule", match)
+	}
+	// No specific rule matches: the action would come from a wildcard default.
+	if match := rs.LastSpecificMatchPath("apply_patch", "other/a.md", testScope); match.Found {
+		t.Fatalf("match = %#v, want not found", match)
+	}
+	// The degenerate scope degrades to lexical matching, which has no
+	// counterpart inheritance.
+	if match := rs.LastSpecificMatchPath("apply_patch", "docs/a.md", PathScope{}); match.Found {
+		t.Fatalf("match = %#v, want not found under a degenerate scope", match)
+	}
+}
+
+func TestRuleCoversPathMirrorsPathRuleMatching(t *testing.T) {
+	rule := Rule{Permission: "delete", Pattern: ".chord/*", Action: ActionAsk}
+	if !rule.CoversPath("delete", ".chord/notes/a.md", testScope) {
+		t.Fatal("expected the rule to cover its own relative path")
+	}
+	// An in-scope absolute spelling normalizes to the same relative form.
+	if !rule.CoversPath("delete", filepath.Join(testCWD, ".chord/notes/a.md"), testScope) {
+		t.Fatal("expected the rule to cover the absolute in-cwd spelling")
+	}
+	if rule.CoversPath("write", ".chord/notes/a.md", testScope) {
+		t.Fatal("expected a different tool not to be covered")
+	}
+	// Relative rules never match out-of-scope absolute paths.
+	if rule.CoversPath("delete", "/elsewhere/.chord/a.md", testScope) {
+		t.Fatal("expected an out-of-scope path not to be covered")
+	}
+	// The literal "*" path rule matches every spelling, including out-of-scope.
+	any := Rule{Permission: "delete", Pattern: "*", Action: ActionAsk}
+	if !any.CoversPath("delete", "/elsewhere/a.md", testScope) {
+		t.Fatal("expected the wildcard path rule to cover any spelling")
+	}
+}

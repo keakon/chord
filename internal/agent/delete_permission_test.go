@@ -162,6 +162,34 @@ delete: allow
 	})
 }
 
+// The rule picker must see which tool's rule raised the ask: an apply_patch
+// allow cannot lift a delete ask on a moved source path, so the ask report has
+// to name the delete rule for the suggestion to offer a rule that works.
+func TestEvaluateToolPermissionApplyPatchAttributesBlockingRule(t *testing.T) {
+	node := parsePermissionNode(t, `
+"*": allow
+apply_patch: allow
+delete:
+  ".chord/*": ask
+`)
+	ruleset := permission.ParsePermission(&node)
+	args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: .chord/notes/a.md\n*** Move to: .chord/notes/archive/a.md\n@@\n-old\n+new\n*** End Patch"}`)
+
+	got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, args, permission.PathScope{})
+	if got.Action != permission.ActionAsk {
+		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
+	}
+	if want := []string{".chord/notes/a.md"}; !reflect.DeepEqual(got.NeedsApprovalPaths, want) {
+		t.Fatalf("needs approval = %#v, want %#v", got.NeedsApprovalPaths, want)
+	}
+	if want := []permission.Rule{{Permission: "delete", Pattern: ".chord/*", Action: permission.ActionAsk}}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
+		t.Fatalf("needs approval rules = %#v, want %#v", got.NeedsApprovalRules, want)
+	}
+	if want := []permission.Rule{{Permission: "apply_patch", Pattern: "*", Action: permission.ActionAllow}}; !reflect.DeepEqual(got.AlreadyAllowedRules, want) {
+		t.Fatalf("already allowed rules = %#v, want %#v", got.AlreadyAllowedRules, want)
+	}
+}
+
 func TestEvaluateToolPermissionApplyPatchLayersHiddenOperationRules(t *testing.T) {
 	t.Run("add inherits explicit write threshold", func(t *testing.T) {
 		node := parsePermissionNode(t, `
@@ -353,13 +381,13 @@ shell:
 	if want := []string{"pwd"}; !reflect.DeepEqual(got.NeedsApprovalPaths, want) {
 		t.Fatalf("needs approval = %#v, want %#v", got.NeedsApprovalPaths, want)
 	}
-	if want := []string{"*"}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
+	if want := []permission.Rule{{Permission: "shell", Pattern: "*", Action: permission.ActionAsk}}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
 		t.Fatalf("needs approval rules = %#v, want %#v", got.NeedsApprovalRules, want)
 	}
 	if want := []string{"git status"}; !reflect.DeepEqual(got.AlreadyAllowedPaths, want) {
 		t.Fatalf("already allowed = %#v, want %#v", got.AlreadyAllowedPaths, want)
 	}
-	if want := []string{"git *"}; !reflect.DeepEqual(got.AlreadyAllowedRules, want) {
+	if want := []permission.Rule{{Permission: "shell", Pattern: "git *", Action: permission.ActionAllow}}; !reflect.DeepEqual(got.AlreadyAllowedRules, want) {
 		t.Fatalf("already allowed rules = %#v, want %#v", got.AlreadyAllowedRules, want)
 	}
 }
@@ -382,7 +410,11 @@ shell:
 	if want := []string{"git reset HEAD^", "git add CHANGELOG.md", "git commit -m fix"}; !reflect.DeepEqual(got.NeedsApprovalPaths, want) {
 		t.Fatalf("needs approval = %#v, want %#v", got.NeedsApprovalPaths, want)
 	}
-	if want := []string{"git reset *", "git add *", "git commit *"}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
+	if want := []permission.Rule{
+		{Permission: "shell", Pattern: "git reset *", Action: permission.ActionAsk},
+		{Permission: "shell", Pattern: "git add *", Action: permission.ActionAsk},
+		{Permission: "shell", Pattern: "git commit *", Action: permission.ActionAsk},
+	}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
 		t.Fatalf("needs approval rules = %#v, want %#v", got.NeedsApprovalRules, want)
 	}
 }
@@ -492,7 +524,7 @@ shell:
 	if got.MatchArgument != `git status; "` {
 		t.Fatalf("match argument = %q, want full command", got.MatchArgument)
 	}
-	if want := []string{"*"}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
+	if want := []permission.Rule{{Permission: "shell", Pattern: "*", Action: permission.ActionAsk}}; !reflect.DeepEqual(got.NeedsApprovalRules, want) {
 		t.Fatalf("needs approval rules = %#v, want %#v", got.NeedsApprovalRules, want)
 	}
 	if len(got.AlreadyAllowedPaths) != 0 || len(got.AlreadyAllowedRules) != 0 {

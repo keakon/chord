@@ -405,7 +405,7 @@ func TestConfirmationEditsRebindPermissionAndExecution(t *testing.T) {
 			editedArgs, _ := json.Marshal(map[string]string{"path": edited, "content": "edited"})
 			call := message.ToolCall{ID: "write", Name: tools.NameWrite, Args: originalArgs}
 			ruleset := permissionRuleset(t, "write: ask")
-			pipeline := toolExecutionPipeline{registry: registry, toolBaseDir: checkout, machineStateRoot: root, currentRuleset: func() permission.Ruleset { return ruleset }, confirm: func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
+			pipeline := toolExecutionPipeline{registry: registry, toolBaseDir: checkout, machineStateRoot: root, currentRuleset: func() permission.Ruleset { return ruleset }, confirm: func(context.Context, string, string, []string, []string, []permission.Rule, []permission.Rule) (ConfirmResponse, error) {
 				return ConfirmResponse{Approved: true, FinalArgsJSON: string(editedArgs)}, nil
 			}}
 			pipeline = pipeline.withMachineStateBaseDir(call)

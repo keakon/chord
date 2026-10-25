@@ -150,7 +150,7 @@ func TestWalltimeConfirmRejectionClassifiesAsUserWaitOnly(t *testing.T) {
 	parent.tools = reg
 	// Mirror the production wiring (common_runtime_setup.go): confirmFn routes
 	// through the interaction broker so the user wait settles into UserWait.
-	parent.SetConfirmFunc(func(ctx context.Context, toolName, args string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (ConfirmResponse, error) {
+	parent.SetConfirmFunc(func(ctx context.Context, toolName, args string, needsApproval, alreadyAllowed []string, needsApprovalRules, alreadyAllowedRules []permission.Rule) (ConfirmResponse, error) {
 		return parent.AwaitConfirmWithRuleContext(ctx, toolName, args, 0, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 	})
 	parent.ruleset = permission.Ruleset{{Permission: "RequiredValue", Pattern: "*", Action: permission.ActionAsk}}

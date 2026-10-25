@@ -1071,8 +1071,8 @@ func TestResolveConfirmRemoteWithRuleIntentUsesExtendedResolver(t *testing.T) {
 	_ = m.resolveConfirm(ConfirmResult{
 		Action: ConfirmAllow,
 		RuleIntent: &ConfirmRuleIntent{
-			Patterns: []string{"git *"},
-			Scope:    permission.ScopeProject,
+			Rules: []ConfirmRule{{Pattern: "git *"}},
+			Scope: permission.ScopeProject,
 		},
 	})
 
@@ -1088,7 +1088,7 @@ func TestResolveConfirmRemoteWithRuleIntentUsesExtendedResolver(t *testing.T) {
 	if backend.lastRuleIntent == nil {
 		t.Fatal("expected rule intent forwarded to extended resolver")
 	}
-	if !reflect.DeepEqual(backend.lastRuleIntent.Patterns, []string{"git *"}) || backend.lastRuleIntent.Scope != int(permission.ScopeProject) {
+	if !reflect.DeepEqual(backend.lastRuleIntent.Rules, []agent.ConfirmRule{{Pattern: "git *"}}) || backend.lastRuleIntent.Scope != int(permission.ScopeProject) {
 		t.Fatalf("rule intent = %#v, want pattern=git * scope=%d", backend.lastRuleIntent, int(permission.ScopeProject))
 	}
 }
@@ -1097,10 +1097,14 @@ func TestConfirmRulePickerAllowsMultiplePatternSelection(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
 	m.confirm.request = &ConfirmRequest{
-		ToolName:           "shell",
-		ArgsJSON:           `{"command":"git reset HEAD^ && git add CHANGELOG.md && git commit -m fix"}`,
-		NeedsApproval:      []string{"git reset HEAD^", "git add CHANGELOG.md", "git commit -m fix"},
-		NeedsApprovalRules: []string{"git reset *", "git add *", "git commit *"},
+		ToolName:      "shell",
+		ArgsJSON:      `{"command":"git reset HEAD^ && git add CHANGELOG.md && git commit -m fix"}`,
+		NeedsApproval: []string{"git reset HEAD^", "git add CHANGELOG.md", "git commit -m fix"},
+		NeedsApprovalRules: []permission.Rule{
+			{Permission: "shell", Pattern: "git reset *", Action: permission.ActionAsk},
+			{Permission: "shell", Pattern: "git add *", Action: permission.ActionAsk},
+			{Permission: "shell", Pattern: "git commit *", Action: permission.ActionAsk},
+		},
 	}
 
 	m.enterRulePicker()
@@ -1133,9 +1137,9 @@ func TestConfirmRulePickerAllowsMultiplePatternSelection(t *testing.T) {
 		if result.RuleIntent == nil {
 			t.Fatal("expected rule intent")
 		}
-		want := []string{"git reset *", "git add *", "git commit *", "git *"}
-		if !reflect.DeepEqual(result.RuleIntent.Patterns, want) {
-			t.Fatalf("patterns = %#v, want %#v", result.RuleIntent.Patterns, want)
+		want := []ConfirmRule{{Pattern: "git reset *"}, {Pattern: "git add *"}, {Pattern: "git commit *"}, {Pattern: "git *"}}
+		if !reflect.DeepEqual(result.RuleIntent.Rules, want) {
+			t.Fatalf("rules = %#v, want %#v", result.RuleIntent.Rules, want)
 		}
 	default:
 		t.Fatal("expected confirm result")
@@ -1146,10 +1150,13 @@ func TestConfirmRulePickerPreselectsAllMatchedAskRules(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
 	m.confirm.request = &ConfirmRequest{
-		ToolName:           "shell",
-		ArgsJSON:           `{"command":"git add internal/tui/x.go && git commit -m fix"}`,
-		NeedsApproval:      []string{"git add internal/tui/x.go", "git commit -m fix"},
-		NeedsApprovalRules: []string{"git add *", "git commit *"},
+		ToolName:      "shell",
+		ArgsJSON:      `{"command":"git add internal/tui/x.go && git commit -m fix"}`,
+		NeedsApproval: []string{"git add internal/tui/x.go", "git commit -m fix"},
+		NeedsApprovalRules: []permission.Rule{
+			{Permission: "shell", Pattern: "git add *", Action: permission.ActionAsk},
+			{Permission: "shell", Pattern: "git commit *", Action: permission.ActionAsk},
+		},
 	}
 
 	m.enterRulePicker()
@@ -1179,9 +1186,58 @@ func TestConfirmRulePickerPreselectsAllMatchedAskRules(t *testing.T) {
 		if result.RuleIntent == nil {
 			t.Fatal("expected rule intent")
 		}
-		want := []string{"git add *", "git commit *"}
-		if !reflect.DeepEqual(result.RuleIntent.Patterns, want) {
-			t.Fatalf("patterns = %#v, want %#v", result.RuleIntent.Patterns, want)
+		want := []ConfirmRule{{Pattern: "git add *"}, {Pattern: "git commit *"}}
+		if !reflect.DeepEqual(result.RuleIntent.Rules, want) {
+			t.Fatalf("rules = %#v, want %#v", result.RuleIntent.Rules, want)
+		}
+	default:
+		t.Fatal("expected confirm result")
+	}
+}
+
+// A patch blocked by a delete rule must offer and submit a delete rule: the
+// picker used to suggest only apply_patch patterns, so the session rule it
+// installed never lifted the delete ask and the next identical patch asked
+// again.
+func TestConfirmRulePickerApplyPatchSubmitsDeleteRule(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirmResultCh = make(chan ConfirmResult, 1)
+	m.confirm.request = &ConfirmRequest{
+		ToolName:           tools.NameApplyPatch,
+		ArgsJSON:           `{"patch":"*** Begin Patch\n*** Update File: .chord/notes/a.md\n*** Move to: .chord/notes/archive/a.md\n@@\n-old\n+new\n*** End Patch"}`,
+		NeedsApproval:      []string{".chord/notes/a.md"},
+		NeedsApprovalRules: []permission.Rule{{Permission: tools.NameDelete, Pattern: ".chord/*", Action: permission.ActionAsk}},
+	}
+
+	m.enterRulePicker()
+	if !m.confirm.pickingRule {
+		t.Fatal("expected rule picker to open")
+	}
+	if len(m.confirm.candidates) == 0 {
+		t.Fatal("expected candidates")
+	}
+	first := m.confirm.candidates[0]
+	if first.Tool != tools.NameDelete || first.Pattern != ".chord/notes/*" || !first.Default {
+		t.Fatalf("first candidate = %#v, want default delete .chord/notes/*", first)
+	}
+	for _, c := range m.confirm.candidates {
+		if c.Tool == tools.NameApplyPatch {
+			t.Fatalf("unexpected apply_patch candidate for a delete-only ask: %#v", m.confirm.candidates)
+		}
+	}
+
+	_ = m.handleConfirmRulePickerKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	select {
+	case result := <-m.confirmResultCh:
+		if result.RuleIntent == nil {
+			t.Fatal("expected rule intent")
+		}
+		want := []ConfirmRule{{Tool: tools.NameDelete, Pattern: ".chord/notes/*"}}
+		if !reflect.DeepEqual(result.RuleIntent.Rules, want) {
+			t.Fatalf("rules = %#v, want %#v", result.RuleIntent.Rules, want)
+		}
+		if result.RuleIntent.Scope != permission.ScopeSession {
+			t.Fatalf("scope = %v, want session", result.RuleIntent.Scope)
 		}
 	default:
 		t.Fatal("expected confirm result")

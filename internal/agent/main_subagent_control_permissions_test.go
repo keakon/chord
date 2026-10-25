@@ -164,8 +164,8 @@ func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
 
 	pipeline := sub.toolExecutionPipeline()
 	refreshed := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
-		Patterns: []string{"*"},
-		Scope:    int(permission.ScopeSession),
+		Rules: []ConfirmRule{{Pattern: "*"}},
+		Scope: int(permission.ScopeSession),
 	})
 
 	if got := refreshed.Evaluate(tools.NameShell, "git status --short"); got != permission.ActionAllow {
@@ -199,8 +199,8 @@ func TestSubAgentRuleIntentProjectRuleArchivedToSubAgentRole(t *testing.T) {
 
 	pipeline := sub.toolExecutionPipeline()
 	pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
-		Patterns: []string{"*"},
-		Scope:    int(permission.ScopeProject),
+		Rules: []ConfirmRule{{Pattern: "*"}},
+		Scope: int(permission.ScopeProject),
 	})
 
 	workerPath := filepath.Join(projectRoot, ".chord", "agents", "worker.yaml")
@@ -240,8 +240,8 @@ func TestSubAgentRuleIntentSessionRuleSurvivesMainRoleSwitch(t *testing.T) {
 
 	pipeline := sub.toolExecutionPipeline()
 	refreshed := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
-		Patterns: []string{"*"},
-		Scope:    int(permission.ScopeSession),
+		Rules: []ConfirmRule{{Pattern: "*"}},
+		Scope: int(permission.ScopeSession),
 	})
 	if got := refreshed.Evaluate(tools.NameShell, "git status --short"); got != permission.ActionAllow {
 		t.Fatalf("subagent Shell permission = %q, want allow", got)

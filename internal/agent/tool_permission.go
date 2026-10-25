@@ -15,18 +15,18 @@ type toolPermissionDecision struct {
 	Action              permission.Action
 	MatchArgument       string
 	NeedsApprovalPaths  []string
-	NeedsApprovalRules  []string
+	NeedsApprovalRules  []permission.Rule
 	AlreadyAllowedPaths []string
-	AlreadyAllowedRules []string
+	AlreadyAllowedRules []permission.Rule
 }
 
 type permissionAggregateItem struct {
 	Argument      string
 	Action        permission.Action
 	AskList       []string
-	AskRuleList   []string
+	AskRuleList   []permission.Rule
 	AllowList     []string
-	AllowRuleList []string
+	AllowRuleList []permission.Rule
 }
 
 func normalizeToolPermissionAction(toolName string, action permission.Action) permission.Action {
@@ -358,18 +358,24 @@ func evaluateApplyPatchPermissionInDir(ruleset permission.Ruleset, args json.Raw
 	items := make([]permissionAggregateItem, 0, len(paths))
 	for _, path := range dedupeStrings(paths) {
 		action := ruleset.EvaluatePath(tools.NameApplyPatch, path, scope)
+		item := permissionAggregateItem{Argument: path}
+		if match := ruleset.LastSpecificMatchPath(tools.NameApplyPatch, path, scope); match.Found {
+			item.recordMatchedRule(match.Rule)
+		}
 		// apply_patch subsumes write/delete for patch-native models. Preserve any
 		// explicit operation-specific threshold when those standalone tools are
 		// hidden; wildcard defaults remain represented by the patch evaluation.
 		for _, toolName := range []string{tools.NameWrite, tools.NameDelete} {
 			applies := toolName == tools.NameWrite && writePaths[path] || toolName == tools.NameDelete && deletePaths[path]
-			if applies {
-				if match := ruleset.LastSpecificToolMatchPath(toolName, path, scope); match.Found {
-					action = permission.StricterAction(action, match.Rule.Action)
-				}
+			if !applies {
+				continue
+			}
+			if match := ruleset.LastSpecificToolMatchPath(toolName, path, scope); match.Found {
+				action = permission.StricterAction(action, match.Rule.Action)
+				item.recordMatchedRule(match.Rule)
 			}
 		}
-		item := permissionAggregateItem{Argument: path, Action: action}
+		item.Action = action
 		switch action {
 		case permission.ActionAsk:
 			item.AskList = []string{path}
@@ -379,6 +385,19 @@ func evaluateApplyPatchPermissionInDir(ruleset permission.Ruleset, args json.Raw
 		items = append(items, item)
 	}
 	return aggregatePermissionItems(items, permission.ActionAllow, "*")
+}
+
+// recordMatchedRule remembers a specific rule that participated in a path's
+// decision, grouped by the action it contributed. Suggestions use the ask
+// rules to name the tool whose rule must be relaxed for the next call to stop
+// asking.
+func (item *permissionAggregateItem) recordMatchedRule(rule permission.Rule) {
+	switch rule.Action {
+	case permission.ActionAsk:
+		item.AskRuleList = append(item.AskRuleList, rule)
+	case permission.ActionAllow:
+		item.AllowRuleList = append(item.AllowRuleList, rule)
+	}
 }
 
 func evaluateDeleteToolPermissionInDir(ruleset permission.Ruleset, args json.RawMessage, scope permission.PathScope) toolPermissionDecision {
@@ -482,8 +501,8 @@ func aggregatePermissionItems(items []permissionAggregateItem, initial permissio
 	if len(items) > 0 && decision.MatchArgument == fallbackMatch {
 		decision.MatchArgument = items[0].Argument
 	}
-	decision.NeedsApprovalRules = dedupeStrings(decision.NeedsApprovalRules)
-	decision.AlreadyAllowedRules = dedupeStrings(decision.AlreadyAllowedRules)
+	decision.NeedsApprovalRules = dedupeRules(decision.NeedsApprovalRules)
+	decision.AlreadyAllowedRules = dedupeRules(decision.AlreadyAllowedRules)
 	return decision
 }
 
@@ -517,6 +536,22 @@ func dedupeStrings(values []string) []string {
 		}
 		seen[value] = struct{}{}
 		result = append(result, value)
+	}
+	return result
+}
+
+func dedupeRules(rules []permission.Rule) []permission.Rule {
+	if len(rules) < 2 {
+		return rules
+	}
+	seen := make(map[permission.Rule]struct{}, len(rules))
+	result := make([]permission.Rule, 0, len(rules))
+	for _, rule := range rules {
+		if _, ok := seen[rule]; ok {
+			continue
+		}
+		seen[rule] = struct{}{}
+		result = append(result, rule)
 	}
 	return result
 }

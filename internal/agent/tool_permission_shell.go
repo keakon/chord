@@ -29,10 +29,10 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		switch exact.Rule.Action {
 		case permission.ActionAsk:
 			decision.NeedsApprovalPaths = []string{rawCommand}
-			decision.NeedsApprovalRules = []string{exact.Rule.Pattern}
+			decision.NeedsApprovalRules = []permission.Rule{exact.Rule}
 		case permission.ActionAllow:
 			decision.AlreadyAllowedPaths = []string{rawCommand}
-			decision.AlreadyAllowedRules = []string{exact.Rule.Pattern}
+			decision.AlreadyAllowedRules = []permission.Rule{exact.Rule}
 		}
 		return decision
 	}
@@ -49,12 +49,12 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		case permission.ActionAsk:
 			decision.NeedsApprovalPaths = []string{rawCommand}
 			if match.Found {
-				decision.NeedsApprovalRules = []string{match.Rule.Pattern}
+				decision.NeedsApprovalRules = []permission.Rule{match.Rule}
 			}
 		case permission.ActionAllow:
 			decision.AlreadyAllowedPaths = []string{rawCommand}
 			if match.Found {
-				decision.AlreadyAllowedRules = []string{match.Rule.Pattern}
+				decision.AlreadyAllowedRules = []permission.Rule{match.Rule}
 			}
 		}
 		return decision
@@ -99,12 +99,12 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		case permission.ActionAsk:
 			last.AskList = []string{last.Argument}
 			if match.Found {
-				last.AskRuleList = []string{match.Rule.Pattern}
+				last.AskRuleList = []permission.Rule{match.Rule}
 			}
 		case permission.ActionAllow:
 			last.AllowList = []string{last.Argument}
 			if match.Found {
-				last.AllowRuleList = []string{match.Rule.Pattern}
+				last.AllowRuleList = []permission.Rule{match.Rule}
 			}
 		}
 	}

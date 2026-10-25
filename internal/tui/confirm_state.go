@@ -18,11 +18,19 @@ const (
 	ConfirmDeny                       // deny this invocation
 )
 
-// ConfirmRuleIntent captures the user's intent to add a permission rule
-// alongside the approval decision.
+// ConfirmRuleIntent captures the user's intent to add permission rules
+// alongside the approval decision. Each rule may name a tool other than the
+// confirmed one (an apply_patch blocked by a delete rule needs a delete rule
+// to stop asking).
 type ConfirmRuleIntent struct {
-	Patterns []string
-	Scope    permission.RuleScope
+	Rules []ConfirmRule
+	Scope permission.RuleScope
+}
+
+// ConfirmRule is one rule to install. An empty Tool means the confirmed tool.
+type ConfirmRule struct {
+	Tool    string
+	Pattern string
 }
 
 // ConfirmRequest is sent from the agent to the TUI when a tool has "ask"
@@ -38,8 +46,8 @@ type ConfirmRequest struct {
 	Timeout             time.Duration
 	NeedsApproval       []string
 	AlreadyAllowed      []string
-	NeedsApprovalRules  []string
-	AlreadyAllowedRules []string
+	NeedsApprovalRules  []permission.Rule
+	AlreadyAllowedRules []permission.Rule
 	ForceDenyReason     bool
 	// AgentID is the asking agent's instance id ("main" for the main agent),
 	// carried through from ConfirmRequestEvent so the TUI can switch focus to

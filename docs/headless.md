@@ -271,12 +271,13 @@ Resolve a pending `confirm_request`. Use the `request_id` from the request.
   "final_args_json": "{\"path\":\"...\"}",
   "edit_summary": "",
   "deny_reason": "",
-  "rule_pattern": "shell:^git status$",
+  "rule_tool": "delete",
+  "rule_pattern": ".chord/notes/*",
   "rule_scope": "session"
 }
 ```
 
-`action` follows whatever the model/runtime offered (`allow`, `deny`, `allow_once`, …). Optional `rule_pattern` + `rule_scope` (`session` / `project` / `user_global`) installs a permission rule along with the answer; omit both for one-shot decisions. `session` applies only to the current session; `project` writes to the current project's `.chord/agents/<role>.yaml`; `user_global` writes to the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`).
+`action` follows whatever the model/runtime offered (`allow`, `deny`, `allow_once`, …). Optional `rule_pattern` + `rule_scope` (`session` / `project` / `user_global`) installs a permission rule along with the answer; optional `rule_tool` names the tool the rule applies to and defaults to the confirmed tool — use it when the block came from a write/delete rule (for example a delete ask raised by an apply_patch move). Omitting `rule_pattern` and `rule_scope` means a one-shot decision. `session` applies only to the current session; `project` writes to the current project's `.chord/agents/<role>.yaml`; `user_global` writes to the user config directory's `agents/<role>.yaml` (default: `~/.config/chord/agents/<role>.yaml`).
 
 While the headless session and event stream remain active, every delivered `confirm_request` reaches a terminal outcome pushed as a `confirm_resolved` event: `approved` / `denied` echo a client answer, while `timeout` (the deadline auto-denied with no answer) and `cancelled` mean the request stopped being actionable without one. Retire the prompt when that event arrives instead of answering it; a late `confirm` for a resolved request is a no-op on the runtime side. Shutdown may stop event delivery before a terminal event is sent. When the event stream or session closes, discard any locally pending confirmation.
 

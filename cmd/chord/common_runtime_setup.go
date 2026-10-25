@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/power"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -63,7 +64,7 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 }
 
 func wireMainAgentRuntime(ctx context.Context, mainAgent *agent.MainAgent, reg *tools.Registry, confirmTimeout time.Duration, modelDrivenCompaction, acpMode bool) {
-	mainAgent.SetConfirmFunc(func(ctx context.Context, toolName, args string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (agent.ConfirmResponse, error) {
+	mainAgent.SetConfirmFunc(func(ctx context.Context, toolName, args string, needsApproval, alreadyAllowed []string, needsApprovalRules, alreadyAllowedRules []permission.Rule) (agent.ConfirmResponse, error) {
 		resp, err := mainAgent.AwaitConfirmWithRuleContext(ctx, toolName, args, confirmTimeout, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 		if err != nil {
 			return agent.ConfirmResponse{}, err

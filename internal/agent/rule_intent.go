@@ -16,16 +16,36 @@ import (
 // role when the MainAgent triggered the confirm, or the SubAgent's own agent
 // definition name when a SubAgent did.
 func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent, ownerRole string) {
-	if intent == nil {
-		return
+	for _, rule := range ruleIntentPermissions(toolName, intent) {
+		a.addPermissionRule(rule, permission.RuleScope(intent.Scope), ownerRole)
 	}
-	for _, pattern := range intent.Patterns {
-		pattern = strings.TrimSpace(pattern)
+}
+
+// ruleIntentPermissions resolves the rules an intent installs. A rule without
+// a tool inherits the confirmed tool; a rule that names one installs for that
+// tool, which is how an apply_patch confirmation can relax the delete rule
+// that blocked a moved source path.
+func ruleIntentPermissions(toolName string, intent *ConfirmRuleIntent) []permission.Rule {
+	if intent == nil {
+		return nil
+	}
+	fallback := strings.TrimSpace(toolName)
+	rules := make([]permission.Rule, 0, len(intent.Rules))
+	for _, want := range intent.Rules {
+		pattern := strings.TrimSpace(want.Pattern)
 		if pattern == "" {
 			continue
 		}
-		a.addPermissionRule(permission.Rule{Permission: toolName, Pattern: pattern, Action: permission.ActionAllow}, permission.RuleScope(intent.Scope), ownerRole)
+		tool := strings.TrimSpace(want.Tool)
+		if tool == "" {
+			tool = fallback
+		}
+		if tool == "" {
+			continue
+		}
+		rules = append(rules, permission.Rule{Permission: tool, Pattern: pattern, Action: permission.ActionAllow})
 	}
+	return rules
 }
 
 // AddOverlayRule adds a permission rule from the /rules UI and refreshes runtime state.

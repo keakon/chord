@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -53,11 +54,11 @@ func (a *MainAgent) AwaitForceDenyConfirm(ctx context.Context, toolName, argsJSO
 	return a.awaitConfirm(ctx, toolName, argsJSON, timeout, needsApproval, alreadyAllowed, nil, nil, true, summary...)
 }
 
-func (a *MainAgent) AwaitConfirmWithRuleContext(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string, summary ...string) (ConfirmResponse, error) {
+func (a *MainAgent) AwaitConfirmWithRuleContext(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, needsApprovalRules []permission.Rule, alreadyAllowedRules []permission.Rule, summary ...string) (ConfirmResponse, error) {
 	return a.awaitConfirm(ctx, toolName, argsJSON, timeout, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules, false, summary...)
 }
 
-func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string, forceDenyReason bool, summary ...string) (ConfirmResponse, error) {
+func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, needsApprovalRules []permission.Rule, alreadyAllowedRules []permission.Rule, forceDenyReason bool, summary ...string) (ConfirmResponse, error) {
 	if err := a.interaction.beginConfirmFlow(ctx); err != nil {
 		return ConfirmResponse{}, err
 	}
@@ -79,8 +80,8 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 		"timeout_ms":            timeout.Milliseconds(),
 		"needs_approval":        append([]string(nil), needsApproval...),
 		"already_allowed":       append([]string(nil), alreadyAllowed...),
-		"needs_approval_rules":  append([]string(nil), needsApprovalRules...),
-		"already_allowed_rules": append([]string(nil), alreadyAllowedRules...),
+		"needs_approval_rules":  permission.RulePatterns(needsApprovalRules),
+		"already_allowed_rules": permission.RulePatterns(alreadyAllowedRules),
 	})
 
 	summaryVal := ""
@@ -103,8 +104,8 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 		Timeout:             timeout,
 		NeedsApproval:       append([]string(nil), needsApproval...),
 		AlreadyAllowed:      append([]string(nil), alreadyAllowed...),
-		NeedsApprovalRules:  append([]string(nil), needsApprovalRules...),
-		AlreadyAllowedRules: append([]string(nil), alreadyAllowedRules...),
+		NeedsApprovalRules:  append([]permission.Rule(nil), needsApprovalRules...),
+		AlreadyAllowedRules: append([]permission.Rule(nil), alreadyAllowedRules...),
 		DoneReport:          summaryVal,
 		ForceDenyReason:     forceDenyReason,
 		AgentID:             ownerID,

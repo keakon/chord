@@ -207,6 +207,7 @@ type headlessCommand struct {
 	EditSummary         string   `json:"edit_summary,omitempty"`
 	DenyReason          string   `json:"deny_reason,omitempty"`
 	RulePattern         string   `json:"rule_pattern,omitempty"`
+	RuleTool            string   `json:"rule_tool,omitempty"`  // defaults to the confirmed tool
 	RuleScope           string   `json:"rule_scope,omitempty"` // session | project | user_global
 	Answers             []string `json:"answers,omitempty"`
 	OperationID         string   `json:"operation_id,omitempty"`

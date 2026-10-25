@@ -281,8 +281,8 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 		if len(m.confirm.candidates) == 0 || len(m.confirm.scopes) == 0 {
 			return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
 		}
-		patterns := m.confirmSelectedRulePatterns()
-		if len(patterns) == 0 {
+		rules := m.confirmSelectedRules()
+		if len(rules) == 0 {
 			m.confirm.editError = "Pattern is required."
 			m.recalcViewportSize()
 			return nil
@@ -291,8 +291,8 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 		return m.resolveConfirm(ConfirmResult{
 			Action: ConfirmAllow,
 			RuleIntent: &ConfirmRuleIntent{
-				Patterns: patterns,
-				Scope:    scope,
+				Rules: rules,
+				Scope: scope,
 			},
 		})
 
@@ -318,7 +318,7 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) confirmSelectedRulePatterns() []string {
+func (m *Model) confirmSelectedRules() []ConfirmRule {
 	if len(m.confirm.candidates) == 0 {
 		return nil
 	}
@@ -326,23 +326,26 @@ func (m *Model) confirmSelectedRulePatterns() []string {
 	if len(selected) == 0 {
 		selected = map[int]struct{}{m.confirm.patternIdx: {}}
 	}
-	patterns := make([]string, 0, len(selected))
-	seen := make(map[string]struct{}, len(selected))
+	rules := make([]ConfirmRule, 0, len(selected))
+	seen := make(map[ConfirmRule]struct{}, len(selected))
 	for i := range m.confirm.candidates {
 		if _, ok := selected[i]; !ok {
 			continue
 		}
-		pattern := strings.TrimSpace(m.confirm.candidates[i].Pattern)
-		if pattern == "" {
+		rule := ConfirmRule{
+			Tool:    strings.TrimSpace(m.confirm.candidates[i].Tool),
+			Pattern: strings.TrimSpace(m.confirm.candidates[i].Pattern),
+		}
+		if rule.Pattern == "" {
 			continue
 		}
-		if _, ok := seen[pattern]; ok {
+		if _, ok := seen[rule]; ok {
 			continue
 		}
-		seen[pattern] = struct{}{}
-		patterns = append(patterns, pattern)
+		seen[rule] = struct{}{}
+		rules = append(rules, rule)
 	}
-	return patterns
+	return rules
 }
 
 func (m *Model) handleConfirmRulePatternEditKey(msg tea.KeyMsg) tea.Cmd {
@@ -500,8 +503,12 @@ func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 	if result.RuleIntent != nil && m.confirm.request != nil {
 		if m.confirm.requestID == "" {
 			// In-process: /rules reads from agent overlay; track locally as a fallback.
-			for _, pattern := range result.RuleIntent.Patterns {
-				m.addSessionRule(m.confirm.request.ToolName, pattern, result.RuleIntent.Scope)
+			for _, rule := range result.RuleIntent.Rules {
+				tool := strings.TrimSpace(rule.Tool)
+				if tool == "" {
+					tool = m.confirm.request.ToolName
+				}
+				m.addSessionRule(tool, rule.Pattern, result.RuleIntent.Scope)
 			}
 		} else {
 			// Request-ID path: never mutate local /rules state (paths/undo must come from backend).
@@ -517,8 +524,11 @@ func (m *Model) resolveConfirm(result ConfirmResult) tea.Cmd {
 		actionStr := confirmActionToStr(result.Action)
 		if result.RuleIntent != nil {
 			intent := &agent.ConfirmRuleIntent{
-				Patterns: append([]string(nil), result.RuleIntent.Patterns...),
-				Scope:    int(result.RuleIntent.Scope),
+				Rules: make([]agent.ConfirmRule, 0, len(result.RuleIntent.Rules)),
+				Scope: int(result.RuleIntent.Scope),
+			}
+			for _, rule := range result.RuleIntent.Rules {
+				intent.Rules = append(intent.Rules, agent.ConfirmRule{Tool: rule.Tool, Pattern: rule.Pattern})
 			}
 			if resolver, ok := m.agent.(confirmRuleIntentResolver); ok {
 				resolver.ResolveConfirmWithRuleIntent(actionStr, result.FinalArgsJSON, result.EditSummary, result.DenyReason, m.confirm.requestID, intent)

@@ -317,7 +317,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		state.mu.Unlock()
 
 	case "confirm":
-		ruleIntent, err := parseHeadlessRuleIntent(cmd.RulePattern, cmd.RuleScope)
+		ruleIntent, err := parseHeadlessRuleIntent(cmd.RulePattern, cmd.RuleTool, cmd.RuleScope)
 		if err != nil {
 			out.emit(headlessEnvelope{
 				Type: "error",
@@ -394,10 +394,11 @@ func defaultHandoffAgent(options []agent.HandoffAgentOption) string {
 	return ""
 }
 
-func parseHeadlessRuleIntent(pattern, scope string) (*agent.ConfirmRuleIntent, error) {
+func parseHeadlessRuleIntent(pattern, tool, scope string) (*agent.ConfirmRuleIntent, error) {
 	pattern = strings.TrimSpace(pattern)
+	tool = strings.TrimSpace(tool)
 	scope = strings.TrimSpace(scope)
-	if pattern == "" && scope == "" {
+	if pattern == "" && tool == "" && scope == "" {
 		return nil, nil
 	}
 	if pattern == "" {
@@ -418,7 +419,7 @@ func parseHeadlessRuleIntent(pattern, scope string) (*agent.ConfirmRuleIntent, e
 		return nil, fmt.Errorf("invalid rule_scope %q (expected session|project|user_global)", scope)
 	}
 	return &agent.ConfirmRuleIntent{
-		Patterns: []string{pattern},
-		Scope:    ruleScope,
+		Rules: []agent.ConfirmRule{{Tool: tool, Pattern: pattern}},
+		Scope: ruleScope,
 	}, nil
 }

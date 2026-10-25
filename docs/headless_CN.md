@@ -269,12 +269,13 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
   "final_args_json": "{\"path\":\"...\"}",
   "edit_summary": "",
   "deny_reason": "",
-  "rule_pattern": "shell:^git status$",
+  "rule_tool": "delete",
+  "rule_pattern": ".chord/notes/*",
   "rule_scope": "session"
 }
 ```
 
-`action` 要与模型/运行时提供的选项一致（如 `allow`、`deny`、`allow_once` 等）。可选的 `rule_pattern` + `rule_scope`（`session` / `project` / `user_global`）会在这次答复的同时安装一条权限规则；两者都省略时表示一次性决策。`session` 只在当前会话内生效；`project` 写入当前项目的 `.chord/agents/<role>.yaml`；`user_global` 写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。
+`action` 要与模型/运行时提供的选项一致（如 `allow`、`deny`、`allow_once` 等）。可选的 `rule_pattern` + `rule_scope`（`session` / `project` / `user_global`）会在这次答复的同时安装一条权限规则；可选的 `rule_tool` 指定规则所属的工具，缺省为本次确认的工具——拦截来自 write/delete 规则时（例如 apply_patch 移动源路径触发 delete ask）需要用它把规则装到对应工具下。`rule_pattern` 与 `rule_scope` 都省略时表示一次性决策。`session` 只在当前会话内生效；`project` 写入当前项目的 `.chord/agents/<role>.yaml`；`user_global` 写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。
 
 只要 headless 会话和事件流仍处于活动状态，每条送达客户端的 `confirm_request` 都会进入终态，并以 `confirm_resolved` 事件推送：`approved` / `denied` 是客户端作答的回执；`timeout` 表示到期后无人作答、已自动拒绝；`cancelled` 表示等待提前结束。收到该事件就收起提示，不要再回答——对已终结的请求发 `confirm`，运行时只会忽略。服务端关闭时可能在终态事件发送前停止事件投递；事件流或会话关闭后，客户端应清除本地未决确认。
 

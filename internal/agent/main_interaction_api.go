@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -31,10 +32,20 @@ type ConfirmResponse struct {
 	RuleIntent    *ConfirmRuleIntent // nil = no new rule
 }
 
-// ConfirmRuleIntent captures the user's intent to add a permission rule.
+// ConfirmRuleIntent captures the user's intent to add permission rules. Each
+// rule may name a tool other than the confirmed one: an apply_patch
+// confirmation, for example, is often blocked by a delete rule covering a
+// moved source path, and only a delete allow rule stops the repeat prompt.
 type ConfirmRuleIntent struct {
-	Patterns []string
-	Scope    int // 0=session, 1=project, 2=userGlobal (matches permission.RuleScope)
+	Rules []ConfirmRule
+	Scope int // 0=session, 1=project, 2=userGlobal (matches permission.RuleScope)
+}
+
+// ConfirmRule is one rule to install after a confirmed tool call. An empty
+// Tool means the confirmed tool.
+type ConfirmRule struct {
+	Tool    string
+	Pattern string
 }
 
 // ConfirmFunc is the callback the agent invokes when a tool call requires user
@@ -50,7 +61,7 @@ type ConfirmRuleIntent struct {
 //   - alreadyAllowedRules: rule patterns that matched allowed items in the same batch
 //   - ConfirmResponse: approved decision plus the final args JSON chosen by the user
 //   - err:          non-nil if the confirmation flow itself fails
-type ConfirmFunc func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error)
+type ConfirmFunc func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []permission.Rule, alreadyAllowedRules []permission.Rule) (ConfirmResponse, error)
 
 // ResolveConfirm sends the user's confirmation response back to the waiting
 // ConfirmFunc goroutine via the broker's requestID→channel map. The resolve
@@ -65,6 +76,7 @@ func (a *MainAgent) ResolveConfirmWithRuleIntent(action, finalArgsJSON, editSumm
 	var copiedRuleIntent *ConfirmRuleIntent
 	if ruleIntent != nil {
 		intentCopy := *ruleIntent
+		intentCopy.Rules = append([]ConfirmRule(nil), ruleIntent.Rules...)
 		copiedRuleIntent = &intentCopy
 	}
 	a.interaction.resolveConfirm(requestID, ConfirmResponse{

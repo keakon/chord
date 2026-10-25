@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -176,7 +177,7 @@ func TestRepeatedToolCallInLoopRequiresConfirmationAtIterationLimit(t *testing.T
 	a.loopState.MaxIterationsSet = true
 	a.loopState.Iteration = 1
 	a.newTurn("")
-	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error) {
+	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules, alreadyAllowedRules []permission.Rule) (ConfirmResponse, error) {
 		return a.AwaitConfirmWithRuleContext(ctx, toolName, args, 0, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 	}
 
@@ -264,7 +265,7 @@ func TestRepeatedToolCallInLoopRejectsApprovalAtIterationLimit(t *testing.T) {
 	a.loopState.MaxIterationsSet = true
 	a.loopState.Iteration = 1
 	a.newTurn("")
-	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error) {
+	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules, alreadyAllowedRules []permission.Rule) (ConfirmResponse, error) {
 		return a.AwaitConfirmWithRuleContext(ctx, toolName, args, 0, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 	}
 

@@ -953,7 +953,7 @@ func TestToolExecutionPipelineStripsUnknownArgsAddedByUserEdit(t *testing.T) {
 	pipeline := toolExecutionPipeline{
 		registry:       registry,
 		currentRuleset: func() permission.Ruleset { return ruleset },
-		confirm: func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
+		confirm: func(context.Context, string, string, []string, []string, []permission.Rule, []permission.Rule) (ConfirmResponse, error) {
 			return ConfirmResponse{Approved: true, FinalArgsJSON: `{"value":"edited","userExtra":1}`}, nil
 		},
 	}
@@ -1164,7 +1164,7 @@ func TestMainAndSubToolExecutionPipelineConsistentPermissionDecisions(t *testing
 		{
 			name:    "ask allow with modified args",
 			ruleset: permission.Ruleset{{Permission: "RequiredValue", Pattern: "*", Action: permission.ActionAsk}},
-			confirm: func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
+			confirm: func(context.Context, string, string, []string, []string, []permission.Rule, []permission.Rule) (ConfirmResponse, error) {
 				return ConfirmResponse{Approved: true, FinalArgsJSON: `{"value":"new"}`, EditSummary: "changed value"}, nil
 			},
 			wantResult: "value=new",
@@ -1173,7 +1173,7 @@ func TestMainAndSubToolExecutionPipelineConsistentPermissionDecisions(t *testing
 		{
 			name:    "ask rejected",
 			ruleset: permission.Ruleset{{Permission: "RequiredValue", Pattern: "*", Action: permission.ActionAsk}},
-			confirm: func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
+			confirm: func(context.Context, string, string, []string, []string, []permission.Rule, []permission.Rule) (ConfirmResponse, error) {
 				return ConfirmResponse{Approved: false, DenyReason: "nope"}, nil
 			},
 			wantErrText: "rejected by user: nope",

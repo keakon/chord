@@ -69,6 +69,39 @@ func (rs Ruleset) LastSpecificToolMatchPath(permission, pattern string, scope Pa
 	return MatchResult{}
 }
 
+// LastSpecificMatchPath returns the specific (non-wildcard-tool) rule that
+// EvaluatePath would select for a path call, mirroring its same-tool /
+// counterpart precedence. Found is false when the action comes from a
+// wildcard default or no rule matched, so callers can tell a named rule apart
+// from a blanket default.
+func (rs Ruleset) LastSpecificMatchPath(permission, pattern string, scope PathScope) MatchResult {
+	if scope.degenerate() {
+		return rs.LastSpecificToolMatch(permission, pattern)
+	}
+	normPerm := toolname.Normalize(permission)
+	if counterpart := getEditPatchCounterpart(normPerm); counterpart != "" {
+		if match, ok := rs.lastSpecificEditApplyPatchToolMatchPath(normPerm, counterpart, pattern, scope); ok {
+			return MatchResult{Rule: match, Found: true}
+		}
+	}
+	return rs.LastSpecificToolMatchPath(permission, pattern, scope)
+}
+
+// CoversPath reports whether the rule names toolName and matches path under
+// scope, using the same tool glob, path classification, and normalization as
+// path evaluation. It is a reporting helper for rule suggestions: counterpart
+// inheritance and wildcard defaults are intentionally not applied, so the
+// answer is "would this exact rule fire for this call".
+func (r Rule) CoversPath(toolName, path string, scope PathScope) bool {
+	if !globMatch(toolname.Normalize(toolName), toolname.Normalize(r.Permission)) {
+		return false
+	}
+	if scope.degenerate() {
+		return globMatch(path, r.Pattern)
+	}
+	return pathRuleMatches(r.Pattern, normalizePathInput(path, scope))
+}
+
 // LastNamedPathMatch returns the last rule that names permission (a "*" tool
 // pattern is skipped, as in LastSpecificToolMatchPath) and matches the path
 // with a pattern that names a path rather than every path. Path gates use it

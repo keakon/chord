@@ -13,6 +13,7 @@ import (
 
 // Candidate represents a suggested rule pattern for a tool invocation.
 type Candidate struct {
+	Tool    string // tool the rule names; empty means the confirmed tool
 	Pattern string // the rule pattern (e.g. "git log *")
 	Summary string // human-readable description (e.g. "same command, any flags")
 	Broad   bool   // true if pattern is very broad (e.g. "*", "git *")
@@ -29,11 +30,13 @@ const maxPatternCandidates = 6
 // needsApprovalRules: ask rules that already matched, offered as candidates
 // scope: path evaluation scope of the call being confirmed, used to spell
 // candidate paths the way the permission engine matches them
-func Suggest(toolName, argsJSON string, needsApproval []string, needsApprovalRules []string, scope permission.PathScope) []Candidate {
+func Suggest(toolName, argsJSON string, needsApproval []string, needsApprovalRules []permission.Rule, scope permission.PathScope) []Candidate {
 	switch toolname.Normalize(toolName) {
 	case toolname.Shell:
-		return suggestShellPatterns(argsJSON, needsApproval, needsApprovalRules)
-	case toolname.Edit, toolname.ApplyPatch, toolname.Write:
+		return suggestShellPatterns(argsJSON, needsApproval, permission.RulePatterns(needsApprovalRules))
+	case toolname.ApplyPatch:
+		return suggestApplyPatchPatterns(toolName, needsApproval, needsApprovalRules, scope)
+	case toolname.Edit, toolname.Write:
 		return suggestFilePatterns(toolName, argsJSON, scope)
 	case toolname.WebFetch:
 		return suggestWebFetchPatterns(argsJSON)
@@ -379,6 +382,183 @@ func allTargetsInRuleScope(paths []string, scope permission.PathScope) bool {
 	return found
 }
 
+// patchPathCandidatesPerTool caps each tool group so a patch blocked by
+// several tools still leaves every group's candidates visible.
+const patchPathCandidatesPerTool = 2
+
+// suggestApplyPatchPatterns builds candidates from the paths that asked and
+// the specific rules that raised the ask. A patch writes and removes files, so
+// the standalone write/delete rules apply alongside apply_patch's own rules
+// (an `edit` rule is inherited through the edit/patch counterpart). A
+// candidate must name whichever tool's rule it relaxes: an apply_patch allow
+// rule cannot lift a delete ask on a moved source path, which is why the
+// previous apply_patch-only suggestion kept asking on the next identical call.
+func suggestApplyPatchPatterns(toolName string, needsApproval []string, rules []permission.Rule, scope permission.PathScope) []Candidate {
+	askPaths := dedupePaths(needsApproval)
+	if len(askPaths) == 0 {
+		return normalizePatternCandidates([]Candidate{
+			{Pattern: "*", Summary: "any " + toolName + " call", Broad: true, Default: true},
+		})
+	}
+
+	var deletePaths, writePaths, patchPaths []string
+	for _, path := range askPaths {
+		deleteBlocked, writeBlocked, patchBlocked, named := false, false, false, false
+		for _, rule := range rules {
+			if rule.Action != permission.ActionAsk {
+				continue
+			}
+			if rule.CoversPath(toolname.Delete, path, scope) {
+				deleteBlocked, named = true, true
+			}
+			if rule.CoversPath(toolname.Write, path, scope) {
+				writeBlocked, named = true, true
+			}
+			if rule.CoversPath(toolname.ApplyPatch, path, scope) || rule.CoversPath(toolname.Edit, path, scope) {
+				patchBlocked, named = true, true
+			}
+		}
+		// No named rule matched: the ask comes from apply_patch's wildcard
+		// default, which an apply_patch path rule can override.
+		if !named {
+			patchBlocked = true
+		}
+		if deleteBlocked {
+			deletePaths = append(deletePaths, path)
+		}
+		if writeBlocked {
+			writePaths = append(writePaths, path)
+		}
+		if patchBlocked {
+			patchPaths = append(patchPaths, path)
+		}
+	}
+
+	candidates := make([]Candidate, 0, maxPatternCandidates)
+	candidates = append(candidates, tagCandidates(patchPathCandidates(deletePaths, scope), toolname.Delete)...)
+	candidates = append(candidates, tagCandidates(patchPathCandidates(writePaths, scope), toolname.Write)...)
+	candidates = append(candidates, tagCandidates(patchPathCandidates(patchPaths, scope), toolname.ApplyPatch)...)
+	if len(candidates) == 0 {
+		candidates = append(candidates, Candidate{Tool: toolname.Normalize(toolName), Pattern: "*", Summary: "any " + toolName + " call", Broad: true, Default: true})
+	}
+	return normalizePatternCandidates(candidates)
+}
+
+func tagCandidates(candidates []Candidate, tool string) []Candidate {
+	for i := range candidates {
+		candidates[i].Tool = tool
+	}
+	return candidates
+}
+
+// patchPathCandidates groups the given paths into the narrowest reusable
+// directory rules, ranked by coverage. Every candidate is default-selected:
+// a patch that touched several directories must cover all of them, or its
+// next identical call still asks for the directories left out. Paths at the
+// directory root fall back to exact-file rules.
+func patchPathCandidates(paths []string, scope permission.PathScope) []Candidate {
+	if len(paths) == 0 {
+		return nil
+	}
+	normalized := dedupePaths(normalizeRulePaths(paths, scope))
+	type directoryCandidate struct {
+		dir   string
+		count int
+	}
+	directories := make([]directoryCandidate, 0, len(normalized))
+	seen := make(map[string]struct{}, len(normalized))
+	for _, p := range normalized {
+		dir := pathpkg.Dir(p)
+		if dir == "." || dir == "" || dir == "/" {
+			continue
+		}
+		if _, ok := seen[dir]; ok {
+			continue
+		}
+		seen[dir] = struct{}{}
+		count := 0
+		prefix := dir + "/"
+		for _, candidate := range normalized {
+			if strings.HasPrefix(candidate, prefix) {
+				count++
+			}
+		}
+		directories = append(directories, directoryCandidate{dir: dir, count: count})
+	}
+	sort.Slice(directories, func(i, j int) bool {
+		if directories[i].count != directories[j].count {
+			return directories[i].count > directories[j].count
+		}
+		return directories[i].dir < directories[j].dir
+	})
+
+	candidates := make([]Candidate, 0, min(len(directories), patchPathCandidatesPerTool))
+	selected := make([]string, 0, cap(candidates))
+	for _, directory := range directories {
+		if len(candidates) >= patchPathCandidatesPerTool {
+			break
+		}
+		covered := false
+		for _, parent := range selected {
+			// The rule engine's "*" crosses separators, so a parent directory
+			// rule already covers every nested directory.
+			if strings.HasPrefix(directory.dir, parent+"/") {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		selected = append(selected, directory.dir)
+		candidates = append(candidates, Candidate{
+			Pattern: pathpkg.Join(directory.dir, "*"),
+			Summary: "any path under " + directory.dir + "/",
+			Default: true,
+		})
+	}
+	if len(candidates) == 0 {
+		for _, p := range normalized[:min(len(normalized), patchPathCandidatesPerTool)] {
+			candidates = append(candidates, Candidate{Pattern: p, Summary: "this exact file", Default: true})
+		}
+	}
+	return candidates
+}
+
+func normalizeRulePaths(paths []string, scope permission.PathScope) []string {
+	normalized := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		if normalizedPath := permission.NormalizeRulePath(p, scope); normalizedPath != "" && normalizedPath != "." {
+			normalized = append(normalized, normalizedPath)
+		}
+	}
+	return normalized
+}
+
+func dedupePaths(paths []string) []string {
+	if len(paths) < 2 {
+		return paths
+	}
+	seen := make(map[string]struct{}, len(paths))
+	result := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		result = append(result, p)
+	}
+	return result
+}
+
 // suggestWebFetchPatterns generates pattern candidates for WebFetch tool.
 func suggestWebFetchPatterns(argsJSON string) []Candidate {
 	rawURL := extractURL(argsJSON)
@@ -452,10 +632,11 @@ func normalizePatternCandidates(candidates []Candidate) []Candidate {
 		if c.Pattern == "" {
 			continue
 		}
-		if _, ok := seen[c.Pattern]; ok {
+		key := c.Tool + "\x00" + c.Pattern
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[c.Pattern] = struct{}{}
+		seen[key] = struct{}{}
 		if c.Default {
 			defaultSet = true
 		}

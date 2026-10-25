@@ -35,6 +35,20 @@ type Rule struct {
 // Ruleset is an ordered list of permission rules.
 type Ruleset []Rule
 
+// RulePatterns projects rules onto their argument patterns for protocol
+// surfaces (headless events, hooks) that expose matched rules as plain
+// strings.
+func RulePatterns(rules []Rule) []string {
+	if len(rules) == 0 {
+		return nil
+	}
+	patterns := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		patterns = append(patterns, rule.Pattern)
+	}
+	return patterns
+}
+
 // ParsePermission parses a YAML permission node preserving key order.
 // yaml.Node.Content for MappingNode is [key1, val1, key2, val2, ...] in document order.
 //

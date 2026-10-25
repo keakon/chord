@@ -162,8 +162,8 @@ func TestResolveConfirmWithRuleIntentPassesIntent(t *testing.T) {
 
 	ch := a.interaction.registerConfirm("req-1", testWalltimeTarget("main"))
 	intent := &ConfirmRuleIntent{
-		Patterns: []string{"git *"},
-		Scope:    int(permission.ScopeProject),
+		Rules: []ConfirmRule{{Pattern: "git *"}},
+		Scope: int(permission.ScopeProject),
 	}
 
 	a.ResolveConfirmWithRuleIntent("allow", `{"command":"git status"}`, "", "", "req-1", intent)
@@ -176,7 +176,7 @@ func TestResolveConfirmWithRuleIntentPassesIntent(t *testing.T) {
 		if resp.RuleIntent == nil {
 			t.Fatal("expected rule intent to be propagated")
 		}
-		if !reflect.DeepEqual(resp.RuleIntent.Patterns, []string{"git *"}) || resp.RuleIntent.Scope != int(permission.ScopeProject) {
+		if !reflect.DeepEqual(resp.RuleIntent.Rules, []ConfirmRule{{Pattern: "git *"}}) || resp.RuleIntent.Scope != int(permission.ScopeProject) {
 			t.Fatalf("rule intent = %+v, want pattern=git *, scope=%d", resp.RuleIntent, int(permission.ScopeProject))
 		}
 	default:

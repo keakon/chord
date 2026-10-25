@@ -8,13 +8,14 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
 // subYoloConfirmStub counts confirm invocations and always rejects, so tests
 // can tell whether an ask decision reached the shared confirmation flow.
 func subYoloConfirmStub(calls *atomic.Int32) ConfirmFunc {
-	return func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
+	return func(context.Context, string, string, []string, []string, []permission.Rule, []permission.Rule) (ConfirmResponse, error) {
 		calls.Add(1)
 		return ConfirmResponse{Approved: false, DenyReason: "test rejection"}, nil
 	}

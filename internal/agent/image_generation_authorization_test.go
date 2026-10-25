@@ -58,7 +58,7 @@ func TestImageArtifactPermissionPipeline(t *testing.T) {
 					rules := permissionRuleset(t, fmt.Sprintf("\"*\": allow\n%s:\n  %q: %s\n", pathTool, filepath.ToSlash(actual), action))
 					raw, _ := json.Marshal(args)
 					confirms := 0
-					pipe := toolExecutionPipeline{agentID: agentID, sessionDir: dir, toolBaseDir: cwd, currentRuleset: func() permission.Ruleset { return rules }, confirm: func(ctx context.Context, _, _ string, paths, _, _, _ []string) (ConfirmResponse, error) {
+					pipe := toolExecutionPipeline{agentID: agentID, sessionDir: dir, toolBaseDir: cwd, currentRuleset: func() permission.Ruleset { return rules }, confirm: func(ctx context.Context, _, _ string, paths, _ []string, _, _ []permission.Rule) (ConfirmResponse, error) {
 						confirms++
 						if tools.AgentIDFromContext(ctx) != agentID || len(paths) != 1 || paths[0] != actual {
 							t.Fatalf("confirmation has wrong binding: %v", paths)
@@ -130,7 +130,7 @@ func TestImageBackendRejectsUnapprovedArtifactAsk(t *testing.T) {
 		t.Fatal("unapproved ask accepted")
 	}
 	raw, _ := json.Marshal(request)
-	pipe := toolExecutionPipeline{sessionDir: dir, toolBaseDir: cwd, currentRuleset: a.effectiveRuleset, confirm: func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
+	pipe := toolExecutionPipeline{sessionDir: dir, toolBaseDir: cwd, currentRuleset: a.effectiveRuleset, confirm: func(context.Context, string, string, []string, []string, []permission.Rule, []permission.Rule) (ConfirmResponse, error) {
 		return ConfirmResponse{Approved: true}, nil
 	}}
 	call := message.ToolCall{Name: tools.NameGenerateImage, Args: raw}

@@ -411,7 +411,11 @@ func TestSuggestRulePatterns_BashComplexCommandPrefersMatchedAskRules(t *testing
 		"shell",
 		`{"command":"git reset HEAD^ && git add CHANGELOG.md && git commit -m fix"}`,
 		[]string{"git reset HEAD^", "git add CHANGELOG.md", "git commit -m fix"},
-		[]string{"git reset *", "git add *", "git commit *"},
+		[]permission.Rule{
+			{Permission: "shell", Pattern: "git reset *", Action: permission.ActionAsk},
+			{Permission: "shell", Pattern: "git add *", Action: permission.ActionAsk},
+			{Permission: "shell", Pattern: "git commit *", Action: permission.ActionAsk},
+		},
 		cwdScope(""),
 	)
 	if len(candidates) < 4 {
@@ -622,4 +626,54 @@ func TestSuggestRulePatterns_DeleteRepoWideTargetsOfferWildcard(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected a repository-wide '**' candidate: %+v", candidates)
+}
+
+func TestSuggestRulePatterns_ApplyPatchMoveBlockedByDeleteRule(t *testing.T) {
+	candidates := Suggest("apply_patch", `{"patch":"*** Begin Patch\n*** Update File: .chord/notes/a.md\n*** Move to: .chord/notes/archive/a.md\n*** End Patch"}`,
+		[]string{".chord/notes/a.md"},
+		[]permission.Rule{{Permission: "delete", Pattern: ".chord/*", Action: permission.ActionAsk}},
+		cwdScope("/home/user/project"))
+	if len(candidates) == 0 {
+		t.Fatal("expected candidates")
+	}
+	first := candidates[0]
+	if first.Tool != "delete" {
+		t.Fatalf("candidate tool = %q, want delete (only a delete rule lifts the ask): %#v", first.Tool, candidates)
+	}
+	if first.Pattern != ".chord/notes/*" || !first.Default {
+		t.Fatalf("candidate = %#v, want default .chord/notes/*", first)
+	}
+	for _, c := range candidates {
+		if c.Tool == "apply_patch" {
+			t.Fatalf("unexpected apply_patch candidate for a delete-only ask: %#v", candidates)
+		}
+	}
+}
+
+func TestSuggestRulePatterns_ApplyPatchWildcardDefaultAskOffersPatchRule(t *testing.T) {
+	candidates := Suggest("apply_patch", `{"patch":"*** Begin Patch\n*** Add File: internal/a.go\n+ok\n*** End Patch"}`,
+		[]string{"internal/a.go"}, nil, cwdScope("/home/user/project"))
+	if len(candidates) == 0 {
+		t.Fatal("expected candidates")
+	}
+	first := candidates[0]
+	if first.Tool != "apply_patch" || first.Pattern != "internal/*" || !first.Default {
+		t.Fatalf("candidate = %#v, want default apply_patch internal/*", first)
+	}
+}
+
+func TestSuggestRulePatterns_ApplyPatchOutOfScopePathOffersAbsoluteRule(t *testing.T) {
+	candidates := Suggest("apply_patch", `{"patch":"*** Begin Patch\n*** Delete File: /home/shared/a.md\n*** End Patch"}`,
+		[]string{"/home/shared/a.md"},
+		[]permission.Rule{{Permission: "delete", Pattern: "*", Action: permission.ActionAsk}},
+		cwdScope("/home/user/project"))
+	if len(candidates) == 0 {
+		t.Fatal("expected candidates")
+	}
+	first := candidates[0]
+	// A relative "**" rule cannot match out-of-scope absolute paths, so the
+	// candidate must be spelled absolute for the rule to fire.
+	if first.Tool != "delete" || first.Pattern != "/home/shared/*" {
+		t.Fatalf("candidate = %#v, want delete /home/shared/*", first)
+	}
 }

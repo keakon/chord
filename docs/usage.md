@@ -475,6 +475,8 @@ Each rule shows its scope (`session` / `project` / `global`) and on-disk file pa
 
 The confirmation popup also supports adding a remembered rule with `M`. In the rule picker, press `E` to edit the suggested pattern before saving. Delete confirmations suggest reusable parent-directory rules rather than exact-file rules, ranking directories that cover more paths still needing approval first. A global `*` catch-all is always available. When every requested path lies inside the repository, the picker also keeps a `**` option for follow-up deletes anywhere in the repository (or under the working directory when no repository resolves). The broad `**` and `*` options are never preselected.
 
+apply_patch confirmations suggest directory rules for the paths that asked, and each candidate names the tool whose rule raised the ask: a moved or deleted source path needs a `delete` rule, because an `apply_patch` allow cannot lift a `delete` ask on the same path. These concrete candidates come preselected; when no specific path asked, a global `apply_patch *` fallback is offered instead.
+
 ### `/loop`: continuous execution mode
 
 Continuous execution mode keeps the agent working after each round without you having to nudge it. Suitable for one-shot instructions like "implement feature X": you send one message and the agent iterates, verifies, and pushes through until the work is done, genuinely blocked, or you explicitly confirm exit.

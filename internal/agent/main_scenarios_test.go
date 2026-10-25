@@ -68,7 +68,7 @@ func TestScenarioToolChainAndPermissionBoundary(t *testing.T) {
 			a.tools.Register(tool)
 			a.ruleset = permission.Ruleset{{Permission: "sample_tool", Pattern: "*", Action: action}}
 			entered, release := make(chan struct{}), make(chan struct{})
-			a.confirmFn = func(ctx context.Context, _ string, _ string, _, _, _, _ []string) (ConfirmResponse, error) {
+			a.confirmFn = func(ctx context.Context, _ string, _ string, _, _ []string, _, _ []permission.Rule) (ConfirmResponse, error) {
 				close(entered)
 				select {
 				case <-release:

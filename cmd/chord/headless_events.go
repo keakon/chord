@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -285,7 +286,12 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		if strings.TrimSpace(e.DoneReport) != "" {
 			doneReport = strings.TrimSpace(e.DoneReport)
 		}
-		state.pendingConfirm = &headlessConfirmPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed, NeedsApprovalRules: e.NeedsApprovalRules, AlreadyAllowedRules: e.AlreadyAllowedRules, DoneReport: doneReport, DoneReason: doneReason, AgentID: e.AgentID}
+		// The headless protocol exposes matched rules as plain patterns; the
+		// per-rule tool stays internal and is reported through rule_tool when a
+		// client installs a rule.
+		needsApprovalRules := permission.RulePatterns(e.NeedsApprovalRules)
+		alreadyAllowedRules := permission.RulePatterns(e.AlreadyAllowedRules)
+		state.pendingConfirm = &headlessConfirmPayload{ToolName: e.ToolName, ArgsJSON: e.ArgsJSON, RequestID: e.RequestID, TimeoutMS: e.Timeout.Milliseconds(), NeedsApproval: e.NeedsApproval, AlreadyAllowed: e.AlreadyAllowed, NeedsApprovalRules: needsApprovalRules, AlreadyAllowedRules: alreadyAllowedRules, DoneReport: doneReport, DoneReason: doneReason, AgentID: e.AgentID}
 		if state.isSubscribed("confirm_request") {
 			out = append(out, &headlessEnvelope{Type: "confirm_request", Payload: map[string]any{
 				"tool_name":             e.ToolName,
@@ -294,8 +300,8 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"timeout_ms":            e.Timeout.Milliseconds(),
 				"needs_approval":        e.NeedsApproval,
 				"already_allowed":       e.AlreadyAllowed,
-				"needs_approval_rules":  e.NeedsApprovalRules,
-				"already_allowed_rules": e.AlreadyAllowedRules,
+				"needs_approval_rules":  needsApprovalRules,
+				"already_allowed_rules": alreadyAllowedRules,
 				"done_report":           doneReport,
 				"done_reason":           doneReason,
 				"agent_id":              e.AgentID,

@@ -366,11 +366,52 @@ func TestHeadlessConfirmSupportsRuleIntent(t *testing.T) {
 	if call.ruleIntent == nil {
 		t.Fatal("expected rule intent in confirm call")
 	}
-	if !reflect.DeepEqual(call.ruleIntent.Patterns, []string{"git *"}) {
-		t.Fatalf("rule patterns = %#v, want %#v", call.ruleIntent.Patterns, []string{"git *"})
+	if !reflect.DeepEqual(call.ruleIntent.Rules, []agent.ConfirmRule{{Pattern: "git *"}}) {
+		t.Fatalf("rule patterns = %#v, want %#v", call.ruleIntent.Rules, []agent.ConfirmRule{{Pattern: "git *"}})
 	}
 	if call.ruleIntent.Scope != int(permission.ScopeProject) {
 		t.Fatalf("rule scope = %d, want %d(project)", call.ruleIntent.Scope, int(permission.ScopeProject))
+	}
+}
+
+// rule_tool lets a headless client install the rule under the tool whose ask
+// actually blocked the call (a delete rule for an apply_patch Move), which the
+// confirmed tool alone cannot express.
+func TestHeadlessConfirmRuleIntentNamesTool(t *testing.T) {
+	state := &headlessState{
+		pendingConfirm: &headlessConfirmPayload{
+			ToolName:  "apply_patch",
+			RequestID: "req-1",
+		},
+	}
+	to := newTestOut(t)
+	backend := &mockBackend{}
+
+	cmd := headlessCommand{
+		Type:        "confirm",
+		Action:      "allow",
+		RequestID:   "req-1",
+		RuleTool:    "delete",
+		RulePattern: ".chord/notes/*",
+		RuleScope:   "session",
+	}
+	handleHeadlessCommand(cmd, backend, state, to.writer())
+
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if len(backend.confirmCalls) != 1 {
+		t.Fatalf("confirm calls = %d, want 1", len(backend.confirmCalls))
+	}
+	call := backend.confirmCalls[0]
+	if call.ruleIntent == nil {
+		t.Fatal("expected rule intent in confirm call")
+	}
+	want := []agent.ConfirmRule{{Tool: "delete", Pattern: ".chord/notes/*"}}
+	if !reflect.DeepEqual(call.ruleIntent.Rules, want) {
+		t.Fatalf("rule intent rules = %#v, want %#v", call.ruleIntent.Rules, want)
+	}
+	if call.ruleIntent.Scope != int(permission.ScopeSession) {
+		t.Fatalf("rule scope = %d, want %d(session)", call.ruleIntent.Scope, int(permission.ScopeSession))
 	}
 }
 
@@ -923,8 +964,8 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 		Timeout:             30 * time.Second,
 		NeedsApproval:       []string{"a.go", "b/c.txt"},
 		AlreadyAllowed:      []string{"d.go"},
-		NeedsApprovalRules:  []string{"ask Shell(rm*)"},
-		AlreadyAllowedRules: []string{"allow Shell(ls*)"},
+		NeedsApprovalRules:  []permission.Rule{{Permission: "Shell", Pattern: "ask Shell(rm*)", Action: permission.ActionAsk}},
+		AlreadyAllowedRules: []permission.Rule{{Permission: "Shell", Pattern: "allow Shell(ls*)", Action: permission.ActionAllow}},
 		AgentID:             "main-1",
 	}
 
@@ -960,11 +1001,11 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	if payload["timeout_ms"] != float64(30000) {
 		t.Errorf("timeout_ms = %v, want 30000", payload["timeout_ms"])
 	}
-	if got := stringSliceFromAny(t, payload["needs_approval_rules"]); !reflect.DeepEqual(got, ev.NeedsApprovalRules) {
-		t.Errorf("needs_approval_rules = %#v, want %#v", got, ev.NeedsApprovalRules)
+	if got := stringSliceFromAny(t, payload["needs_approval_rules"]); !reflect.DeepEqual(got, permission.RulePatterns(ev.NeedsApprovalRules)) {
+		t.Errorf("needs_approval_rules = %#v, want %#v", got, permission.RulePatterns(ev.NeedsApprovalRules))
 	}
-	if got := stringSliceFromAny(t, payload["already_allowed_rules"]); !reflect.DeepEqual(got, ev.AlreadyAllowedRules) {
-		t.Errorf("already_allowed_rules = %#v, want %#v", got, ev.AlreadyAllowedRules)
+	if got := stringSliceFromAny(t, payload["already_allowed_rules"]); !reflect.DeepEqual(got, permission.RulePatterns(ev.AlreadyAllowedRules)) {
+		t.Errorf("already_allowed_rules = %#v, want %#v", got, permission.RulePatterns(ev.AlreadyAllowedRules))
 	}
 
 	state.mu.Lock()
@@ -980,11 +1021,11 @@ func TestHeadlessConfirmRequestEventPayload(t *testing.T) {
 	if pc.AgentID != "main-1" {
 		t.Errorf("pendingConfirm.AgentID = %q, want main-1", pc.AgentID)
 	}
-	if !reflect.DeepEqual(pc.NeedsApprovalRules, ev.NeedsApprovalRules) {
-		t.Errorf("pendingConfirm.NeedsApprovalRules = %#v, want %#v", pc.NeedsApprovalRules, ev.NeedsApprovalRules)
+	if !reflect.DeepEqual(pc.NeedsApprovalRules, permission.RulePatterns(ev.NeedsApprovalRules)) {
+		t.Errorf("pendingConfirm.NeedsApprovalRules = %#v, want %#v", pc.NeedsApprovalRules, permission.RulePatterns(ev.NeedsApprovalRules))
 	}
-	if !reflect.DeepEqual(pc.AlreadyAllowedRules, ev.AlreadyAllowedRules) {
-		t.Errorf("pendingConfirm.AlreadyAllowedRules = %#v, want %#v", pc.AlreadyAllowedRules, ev.AlreadyAllowedRules)
+	if !reflect.DeepEqual(pc.AlreadyAllowedRules, permission.RulePatterns(ev.AlreadyAllowedRules)) {
+		t.Errorf("pendingConfirm.AlreadyAllowedRules = %#v, want %#v", pc.AlreadyAllowedRules, permission.RulePatterns(ev.AlreadyAllowedRules))
 	}
 }
 
