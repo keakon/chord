@@ -241,9 +241,11 @@ func TestSupervisorEscalatesToSIGKILL(t *testing.T) {
 // The lifecycle channel is the supervisor's own contract with Chord: the
 // managed process must not be able to read it, let alone forge a handshake.
 func TestManagedProcessCannotInheritLifecycleChannel(t *testing.T) {
+	// Probe in a subshell: dash ends the script on a redirection failure in a
+	// special builtin, so a top-level `: <&3` would swallow the rest of the run.
 	sup := startSupervised(t, `
-if : <&3 2>/dev/null; then printf 'inherited-3\n'; fi
-if : <&4 2>/dev/null; then printf 'inherited-4\n'; fi
+if ( : ) 2>/dev/null <&3; then printf 'inherited-3\n'; fi
+if ( : ) 2>/dev/null <&4; then printf 'inherited-4\n'; fi
 printf 'clean\n'
 `, "")
 	out, err := io.ReadAll(sup.Stdout())

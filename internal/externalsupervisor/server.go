@@ -90,17 +90,16 @@ func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStd
 		childStderr.Close()
 		return fail(out, request, fmt.Errorf("start %s: %w", request.Command, err), false, 0, 0, "", startedAt, Cleanup{Proven: true, Note: "launch failed before a process was started"})
 	}
-	// One reaper owns cmd.Wait for the rest of the run. The handshake-failure
-	// and supervision paths share it: a zombie leader is still a group member,
-	// so without reaping first the cleanup probe waits out both grace periods
-	// and reports an unproven receipt for a group that is already empty.
-	childDone := make(chan error, 1)
-	go func() { childDone <- cmd.Wait() }()
 	// The managed process owns its ends now. Holding any of them would hide
 	// EOF from Chord and make a dead process look alive.
 	closeAll(childStdin, childStdout, childStderr)
+	// Read the identity before reaping: cmd.Wait removes a process that exited
+	// during launch from the process table, and a fast failure must still be
+	// reported with the start token that proves its group.
+	childDone := make(chan error, 1)
 	pid, pgid, err := managedProcessGroupID(cmd)
 	if err != nil {
+		startChildReaper(cmd, childDone)
 		startToken, _ := processStartToken(pid)
 		if pgid <= 0 {
 			pgid = pid
@@ -116,6 +115,7 @@ func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStd
 	}
 	startToken, tokenErr := processStartToken(pid)
 	if tokenErr != nil {
+		startChildReaper(cmd, childDone)
 		cleanup, cleanupErr := cleanupUnboundProcess(cmd, pid, pgid, "", killGrace, childDone)
 		if cleanupErr != nil {
 			cleanup.Proven = false
@@ -125,6 +125,11 @@ func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStd
 		}
 		return fail(out, request, fmt.Errorf("read managed process identity: %w", tokenErr), true, pid, pgid, "", startedAt, cleanup)
 	}
+	// One reaper owns cmd.Wait for the rest of the run. The handshake-failure
+	// and supervision paths share it: a zombie leader is still a group member,
+	// so without reaping first the cleanup probe waits out both grace periods
+	// and reports an unproven receipt for a group that is already empty.
+	startChildReaper(cmd, childDone)
 
 	run := &supervisedRun{
 		request:    request,
@@ -157,6 +162,13 @@ func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStd
 }
 
 var managedProcessGroupID = processGroupID
+
+// startChildReaper waits for the managed process on its own goroutine. The
+// reaper must not start before the identity is read: cmd.Wait reaps the leader
+// and makes a fast exit invisible to the identity lookup.
+func startChildReaper(cmd *exec.Cmd, done chan<- error) {
+	go func() { done <- cmd.Wait() }()
+}
 
 // cleanupUnboundProcess tears down a launch that started but whose group could
 // not be read. A setsid child leads its own group, so the pid is the group id
