@@ -111,7 +111,7 @@ worker 能否修改文件、能否运行命令，只由它所属角色的权限�
 
 Chord 自己执行的工具，同一文件的并发写入会按调用串行执行，因此两个 Chord 内部 worker 不会交错写同一个文件。外部 coding-agent 后端在自己的进程内执行工具，其写入不受这条串行化保护。串行化保护的是文件完整性，而不是重叠修改之间的一致性；并行工作需要更大隔离时，改用独立检出或 Git worktree。
 
-任务身份由 `semantic_task_key` 承担。显式复用某个仍活跃任务的 key 会以 `already_exists` 拒绝，应改用 `notify` 继续那个任务。仅复用同一个 `plan_task_ref` 而没有相同显式 key 时只是提示：新任务照常启动，句柄带 `duplicate_detected` 和另一个任务的 ID，是否保留两者由你判断；任务描述不参与重复判定。
+任务身份由 `semantic_task_key` 承担。显式复用某个仍活跃任务的 key 会以 `already_exists` 拒绝，应改用 `notify` 继续那个任务。仅复用同一个 `plan_task_ref` 而没有相同显式 key 时只是提示：新任务照常启动，句柄带 `duplicate_detected` 和另一个任务的 ID，是否保留两者由你判断。两边均有显式 key 且值不同时，视为不同交付，即使 `plan_task_ref` 相同也不提示；任务描述不参与重复判定。
 
 可委派给哪些角色同样由权限决定：`delegate` 的规则匹配 `agent_type` 参数，因此一个角色可以被限制为只能委派给部分 SubAgent 定义，Delegate 工具也只列出这些可选目标。详见[权限与安全：特殊权限语义](./permissions-and-safety_CN.md#特殊权限语义)。
 

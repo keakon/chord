@@ -4,20 +4,23 @@
 
 > Selection date: October 9, 2026. Candidates are listed in suggested trial order, not as a Chord benchmark ranking. Confirm official model names, prices, and account availability before buying or reconfiguring.
 
-Start with the balanced tier for everyday development and the reliability-first tier for concurrency, permissions, or recovery. Use cheaper models for explicit mechanical work. A single main agent can finish a small task without starting a team. Add models with [`chord config add`](./cli.md#chord-config-add); the catalog supplies limits, modalities, and reasoning variants. Full layouts are in [Examples](./examples/index.md).
+Start with the balanced tier for everyday development and the reliability-first tier for concurrency, permissions, or recovery. Use cheaper models for explicit mechanical work. A single main agent can finish a small task without starting a team. Add models for Chord's native agents with [`chord config add`](./cli.md#chord-config-add); the catalog supplies limits, modalities, and reasoning variants. Full layouts are in [Examples](./examples/index.md).
 
 ## Will what you already pay for reach Chord?
 
-Chord accepts an API key, or Codex OAuth (`chord auth codex`). A subscription that only signs you into that vendor's own app does not.
+Chord's native main agent and subagents connect with API keys or Codex OAuth (`chord auth codex`). [Claude Code](./external-agents.md) can also run as an external subagent using its own CLI authentication. The main agent still needs an API or Codex connection.
 
 | You already have | In Chord? |
 | --- | --- |
 | A coding plan that supports third-party clients (for example ChatGPT Plus / Pro (Codex), Command Code GOAT, OpenCode Go) | Yes |
 | An API key for any provider Chord speaks (Chat Completions, Responses, Messages, Generate Content) | Yes |
-| Claude Pro / Max, SuperGrok, Muse Code, Google AI Pro / Ultra, or another vendor-only coding plan | No |
+| Claude Pro / Max | Through an external subagent if the account has Claude Code access; not as a direct model connection for Chord's main agent |
+| SuperGrok, Muse Code, Google AI Pro / Ultra, or another vendor-only coding plan | No |
 | GLM Coding Plan | No (only in the tools and products GLM officially supports) |
 
 If you already have a supported plan, start with models your account actually exposes. Whether a subscription saves money depends on its quotas, throttling, and your workload. API costs also include retries, review, and rework. With a limited strong-model budget, prioritize decisions that affect the whole task instead of allocating it by role name alone.
+
+Using a Claude subscription through Claude Code does not provide Anthropic API credits. Confirm the CLI's available models, quotas, and billing with your account; Chord does not combine those allowances with API or Codex usage.
 
 ## Choose a task tier
 
@@ -65,7 +68,7 @@ Keep the ordinary coder and explorer; reserve intensive models for the difficult
 
 ## Team roles and model pools
 
-Chord ships `builder` and `planner`. The roles below come from the optional [team example](./examples/examples-team.md); create only those you need. The same model can serve multiple independent sessions.
+Chord ships `builder` and `planner`. The roles below come from the optional [team example](./examples/examples-team.md); create only those you need. The same model can serve multiple independent sessions. The pools below apply to native agents; Claude Code subagents use their own backend configuration.
 
 | Role | Default pool | Responsibility |
 | --- | --- | --- |
@@ -91,6 +94,8 @@ Having an expert does not remove the coordinator's judgment work. The expert nee
 
 The [team example](./examples/examples-team.md) uses the complex-development recipe. With Codex alone, choose Sol from the account catalog for coordination, implementation, and review, and Luna for discovery and mechanical work; use Astra for intensive work when available. With only an Anthropic API key, Sonnet can cover everyday implementation and discovery while Opus handles difficult decisions. API keys do not require a subscription to the vendor's chat app.
 
+With both an API or Codex connection and Claude Code access, keep coordination on Chord's native main agent and delegate implementation or independent review to Claude Code. Select Sonnet or Opus according to the task tier and the models available to the CLI account. Configure the external subagent's model and effort with `--model` and `--effort` in `backend.launch_args`; these settings are outside Chord's model pools and fallback. Claude Code access alone cannot run Chord's main agent.
+
 Replace the discovery model with DeepSeek V4.1 Flash 1017 or Gemini 3.8 Flash when the task suits it. For other providers, apply the same role criteria and run representative project tasks before assigning coordination or final review.
 
 Multiple entries in a model pool provide fallback on request failures. They do not select by task difficulty or escalate because an answer is wrong. Choose the appropriate role or pool explicitly when changing tiers; a pool containing all three candidates is not a task router.
@@ -102,7 +107,8 @@ Multiple entries in a model pool provide fallback on request failures. They do n
 - Start with few workers. Parallel writes need independent deliverables and settled shared decisions; different files can still have semantic dependencies. Whether a worker may edit files or run commands is decided by its role's permission rules.
 - Review original requirements, actual changes, and verification evidence, not just the implementer's summary. Different models offer another perspective but do not guarantee independent errors.
 - Start with supported `medium` or `high` effort and adjust from results. Effort labels across vendors do not represent equal compute, and `max` does not guarantee better cost or quality.
-- Run `chord doctor models --pool <pool-name>` to check connectivity. It does not measure task success. Use Responses for GPT-6.1 Sol tool tasks; see [Model configuration](./model-configs.md).
+- Run `chord doctor models --pool <pool-name>` to check a native model pool's connectivity. It does not measure task success. Use Responses for GPT-6.1 Sol tool tasks; see [Model configuration](./model-configs.md).
+- For Claude Code subagents, confirm CLI authentication, available models, and quotas separately, then delegate a small, verifiable task to check the integration. `chord doctor models --pool` does not check this backend, and Chord's usage statistics do not include its model calls.
 
 ## Sources and limits
 

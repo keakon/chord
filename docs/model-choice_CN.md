@@ -4,20 +4,23 @@
 
 > 选型日期：2026 年 10 月 9 日。下面的候选顺序是建议的试用顺序，不是 Chord 实测排名。购买或改配置前，请确认官方型号、价格和账号可用性。
 
-日常开发从均衡档开始，涉及并发、权限或恢复时用可靠性优先档。明确的机械任务可以降档；小任务由单个主代理直接完成，不必启动整套团队。接入模型用 [`chord config add`](./cli_CN.md#chord-config-add)，限额、模态和 reasoning 档位由目录补齐；完整布局见[配置示例](./examples/index_CN.md)。
+日常开发从均衡档开始，涉及并发、权限或恢复时用可靠性优先档。明确的机械任务可以降档；小任务由单个主代理直接完成，不必启动整套团队。Chord 原生 Agent 接入模型用 [`chord config add`](./cli_CN.md#chord-config-add)，限额、模态和 reasoning 档位由目录补齐；完整布局见[配置示例](./examples/index_CN.md)。
 
 ## 你已经在付的，Chord 用得上吗？
 
-Chord 只接受 API key，或 Codex OAuth（`chord auth codex`）。订阅如果只能登录那家自己的应用，这里用不了。
+Chord 原生主／子 Agent 通过 API key 或 Codex OAuth（`chord auth codex`）接入模型。[Claude Code](./external-agents_CN.md) 也可以作为外部子 Agent，沿用 CLI 自己的认证。主 Agent 仍需 API 或 Codex 接入。
 
 | 你已经有 | 能给 Chord 用吗？ |
 | --- | --- |
 | 支持第三方客户端使用的编程套餐（例如 ChatGPT Plus / Pro（Codex）、Command Code GOAT、OpenCode Go） | 能 |
 | 任何 Chord 支持协议（Chat Completions、Responses、Messages、Generate Content）的模型 API key | 能 |
-| Claude Pro / Max、SuperGrok、Muse Code、Google AI Pro / Ultra，或其他只能登录自家客户端的编程套餐 | 不能 |
+| Claude Pro / Max | 账号具有 Claude Code 使用资格时，可通过外部子 Agent 使用；不能直接作为 Chord 主 Agent 的模型接入 |
+| SuperGrok、Muse Code、Google AI Pro / Ultra，或其他只能登录自家客户端的编程套餐 | 不能 |
 | GLM Coding Plan | 不能（仅限官方支持的指定工具与产品环境中使用） |
 
 已有可用套餐时，先从账号实际提供的模型中选择。包月是否划算取决于额度、限流和任务量；按量 API 还要计算重试、审查及返工成本。只有一份强模型预算时，优先覆盖会影响整个任务的判断，不固定按角色名称分配。
+
+通过 Claude Code 使用 Claude 订阅不代表获得 Anthropic API 额度。请按账户确认 CLI 可用模型、限额与计费；Chord 不会将这些额度与 API 或 Codex 用量合并。
 
 ## 按任务选档位
 
@@ -65,7 +68,7 @@ coder 可以决定局部实现细节；行为、公共接口或安全边界仍�
 
 ## 团队角色与模型池
 
-Chord 自带 `builder` 和 `planner`。下面的角色来自可选的[团队方案](./examples/examples-team_CN.md)，需要时再创建；同一模型可以用于多个独立会话。
+Chord 自带 `builder` 和 `planner`。下面的角色来自可选的[团队方案](./examples/examples-team_CN.md)，需要时再创建；同一模型可以用于多个独立会话。下面的模型池适用于原生 Agent，Claude Code 子 Agent 使用独立的后端配置。
 
 | 角色 | 默认池 | 职责 |
 | --- | --- | --- |
@@ -91,6 +94,8 @@ Chord 自带 `builder` 和 `planner`。下面的角色来自可选的[团队方�
 
 [团队示例](./examples/examples-team_CN.md)采用复杂开发配方。只有 Codex 时，从账号目录中选择 Sol 承担协调、实现和审查，Luna 承担探索及机械任务；Astra 在可用时用于攻坚。只有 Anthropic API 时，可以让 Sonnet 承担日常实现和探索，Opus 承担复杂判断。API key 不要求订阅该厂商的聊天应用。
 
+同时有 API／Codex 接入和 Claude Code 使用资格时，让 Chord 原生主 Agent 负责协调，将实现或独立审查委派给 Claude Code。Sonnet 或 Opus 按任务档位选择，以 CLI 账号实际可用的模型为准。外部子 Agent 的模型和推理强度在 `backend.launch_args` 中用 `--model`、`--effort` 设置，不经过 Chord 模型池或回退机制。只有 Claude Code 使用资格，仍不能运行 Chord 主 Agent。
+
 按任务将探索模型替换为 DeepSeek V4.1 Flash 1017 或 Gemini 3.8 Flash。只使用其他渠道时，也按同样职责筛选，先让候选模型完成本项目的代表性任务，再决定是否承担协调或终审。
 
 模型池中的多个条目提供请求失败时的回退，不会按难度自动选模，也不会因为答案错误而自动升级。需要换档时，明确选择对应角色或模型池。不要把三个候选全部放入一个池，就把它当作任务路由器。
@@ -102,7 +107,8 @@ Chord 自带 `builder` 和 `planner`。下面的角色来自可选的[团队方�
 - 从少量 worker 开始。并行写入需要独立交付与明确的共享决策；文件不同仍可能存在语义依赖。worker 能否修改文件或运行命令，由所属角色的权限规则决定。
 - 审查要看原始需求、实际改动和验证证据，不能只读实现者摘要。不同模型可以提供另一种视角，但不保证错误相互独立。
 - 先使用模型支持的 `medium` 或 `high` 档位，按结果调整。不同厂商的 effort 名称不代表相同计算量；`max` 不保证更好的成本或质量。
-- 用 `chord doctor models --pool <池名>` 检查接入。它不验证上述任务成功率。GPT-6.1 Sol 的工具任务应使用 Responses 接入；配置方式见[模型配置](./model-configs_CN.md)。
+- 用 `chord doctor models --pool <池名>` 检查原生模型池接入。它不验证上述任务成功率。GPT-6.1 Sol 的工具任务应使用 Responses 接入；配置方式见[模型配置](./model-configs_CN.md)。
+- Claude Code 子 Agent 要单独确认 CLI 认证、可用模型与额度，再委派一个容易验证的小任务检查接入。`chord doctor models --pool` 不检查这个后端，Chord 用量统计也不包含它的模型调用。
 
 ## 资料与适用范围
 
