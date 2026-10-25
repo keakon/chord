@@ -60,8 +60,13 @@ func TestInputDeliveryDurableSubmitAndEdit(t *testing.T) {
 		t.Fatalf("edit: %+v", edited)
 	}
 	snapshot := a.InputQueueSnapshot()
-	if snapshot.State.Inputs[0].Content != "replacement" || snapshot.State.Gate.Mode != recovery.FollowupGatePaused || len(snapshot.State.EditHolds) != 0 {
+	if snapshot.State.Inputs[0].Content != "replacement" || snapshot.State.Gate.Mode != recovery.FollowupGateRunning || len(snapshot.State.EditHolds) != 0 {
 		t.Fatalf("edited snapshot: %+v", snapshot)
+	}
+	// Releasing the hold restores the interrupted gate, but the follow-up still
+	// waits for the work it was queued behind.
+	if ids := selectDeliveryInputs(snapshot.State, true); len(ids) != 0 {
+		t.Fatalf("edited follow-up ran before its predecessor settled: %v", ids)
 	}
 	snapshot.State.Inputs[0].Content = "mutated copy"
 	if a.InputQueueSnapshot().State.Inputs[0].Content != "replacement" {

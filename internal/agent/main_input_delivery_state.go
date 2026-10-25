@@ -66,6 +66,12 @@ func selectDeliveryInputs(state *recovery.InputDeliveryState, allowFollowup bool
 // follow-up wait for a resume that releases nothing. Explicit user pauses and
 // session-level pauses record intent outside the queue and are left alone.
 //
+// An edit hold derives its pause from the gate it interrupted, so releasing
+// the hold restores that gate even while follow-ups are queued: the item the
+// user just re-sent must run after the work it was waiting for. A predecessor
+// that failed, was cancelled, or has an unknown outcome is still recorded, so
+// those follow-ups keep waiting for an explicit resume.
+//
 // A working-directory pause is left alone for the opposite reason: it reports
 // a mismatch that only /queue resume with the original directory active can
 // acknowledge, and the waiter test below cannot see it — the input it holds
@@ -76,7 +82,27 @@ func normalizeFollowupGate(state *recovery.InputDeliveryState) {
 		return
 	}
 	switch state.Gate.Reason {
-	case recovery.FollowupPredecessorFailed, recovery.FollowupPredecessorCancelled, recovery.FollowupOutcomeUnknown, recovery.FollowupEditHold:
+	case recovery.FollowupPredecessorFailed, recovery.FollowupPredecessorCancelled, recovery.FollowupOutcomeUnknown:
+	case recovery.FollowupEditHold:
+		if len(state.EditHolds) > 0 {
+			return
+		}
+		switch deliveryWorkOutcome(state, state.Gate.WaitingWorkID) {
+		case recovery.DeliveryWorkFailed:
+			state.Gate.Reason = recovery.FollowupPredecessorFailed
+		case recovery.DeliveryWorkCancelled:
+			state.Gate.Reason = recovery.FollowupPredecessorCancelled
+		case recovery.DeliveryWorkUnknown:
+			state.Gate.Reason = recovery.FollowupOutcomeUnknown
+		case recovery.DeliveryWorkActive:
+			// The interrupted gate resumes, but the waiter still holds the
+			// queued follow-up back until that work settles.
+			state.Gate.Mode, state.Gate.Reason = recovery.FollowupGateRunning, ""
+			return
+		default:
+			state.Gate = recovery.FollowupGate{Mode: recovery.FollowupGateRunning}
+			return
+		}
 	default:
 		return
 	}
@@ -89,6 +115,18 @@ func normalizeFollowupGate(state *recovery.InputDeliveryState) {
 		}
 	}
 	state.Gate = recovery.FollowupGate{Mode: recovery.FollowupGateRunning}
+}
+
+func deliveryWorkOutcome(state *recovery.InputDeliveryState, workID string) string {
+	if state == nil || workID == "" {
+		return ""
+	}
+	for _, work := range state.Works {
+		if work.WorkID == workID {
+			return work.Outcome
+		}
+	}
+	return ""
 }
 
 func deliveryInputForEdit(state *recovery.InputDeliveryState, id string, revision uint64) (*recovery.PendingInput, error) {
