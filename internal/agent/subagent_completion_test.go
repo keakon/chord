@@ -920,6 +920,68 @@ func TestCompletedMailboxTextExpressesContentOnce(t *testing.T) {
 	}
 }
 
+// TestMailboxTextRendersEachArtifactRefOnce pins the artifact dedupe:
+// normalization merges completion artifacts into ArtifactRefs, so the renderer
+// must not print the same reference again in the completion section.
+func TestMailboxTextRendersEachArtifactRefOnce(t *testing.T) {
+	t.Parallel()
+	refA := tools.ArtifactRef{ID: "artifact-a", RelPath: "artifacts/a.md", Type: "report"}
+	refB := tools.ArtifactRef{ID: "artifact-b", RelPath: "artifacts/b.md", Type: "report"}
+	refIDOnly := tools.ArtifactRef{ID: "artifact-id-only"}
+
+	tests := []struct {
+		name            string
+		refs            []tools.ArtifactRef
+		completion      []tools.ArtifactRef
+		wantOnce        []string
+		wantRefSections int
+	}{
+		{
+			name:            "normalized completion artifacts already listed",
+			refs:            []tools.ArtifactRef{refA, refB},
+			completion:      []tools.ArtifactRef{refA, refB},
+			wantOnce:        []string{"artifacts/a.md", "artifacts/b.md"},
+			wantRefSections: 1,
+		},
+		{
+			name:            "completion-only artifact stays visible",
+			refs:            []tools.ArtifactRef{refA},
+			completion:      []tools.ArtifactRef{refA, refB},
+			wantOnce:        []string{"artifacts/a.md", "artifacts/b.md"},
+			wantRefSections: 2,
+		},
+		{
+			name:            "id-only duplicate renders once",
+			refs:            []tools.ArtifactRef{refIDOnly},
+			completion:      []tools.ArtifactRef{refIDOnly},
+			wantOnce:        []string{"artifact-id-only"},
+			wantRefSections: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &SubAgentMailboxMessage{
+				MessageID: "msg-artifacts", AgentID: "worker-1", TaskID: "task-1",
+				Kind: SubAgentMailboxKindCompleted, Summary: "done",
+				ArtifactRefs: tt.refs,
+				Completion:   &CompletionEnvelope{Artifacts: tt.completion},
+			}
+			text := formatSubAgentMailboxInjectionText(msg)
+			for _, want := range tt.wantOnce {
+				if n := strings.Count(text, want); n != 1 {
+					t.Fatalf("%q appears %d times, want once:\n%s", want, n, text)
+				}
+			}
+			if n := strings.Count(text, "\n- artifact_refs"); n != tt.wantRefSections {
+				t.Fatalf("artifact_refs sections = %d, want %d:\n%s", n, tt.wantRefSections, text)
+			}
+			if strings.Contains(text, "\n  - \n") || strings.HasSuffix(text, "\n  - ") {
+				t.Fatalf("mailbox text contains an empty artifact bullet:\n%s", text)
+			}
+		})
+	}
+}
+
 // TestMailboxTextKeepsDistinctPayload guards the other half of the dedupe
 // contract: a payload that genuinely differs from the summary is still
 // rendered, so distinct message bodies are not lost by the equal-text elision.

@@ -141,8 +141,10 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 	if len(msg.ArtifactRefs) > 0 {
 		b.WriteString("\n- artifact_refs:")
 		for _, ref := range msg.ArtifactRefs {
-			b.WriteString("\n  - ")
-			b.WriteString(ref.RelPath)
+			if label := artifactRefLabel(ref); label != "" {
+				b.WriteString("\n  - ")
+				b.WriteString(label)
+			}
 		}
 	}
 	if msg.Completion != nil {
@@ -181,14 +183,26 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 			b.WriteString(strings.Join(msg.Completion.FollowUpRecommended, ", "))
 		}
 		if len(msg.Completion.Artifacts) > 0 {
+			// Normalization merges completion artifacts into ArtifactRefs, which
+			// the section above already rendered. Keep only refs this mailbox has
+			// not shown yet so the owner reads each artifact once.
+			listed := make(map[string]struct{}, len(msg.ArtifactRefs))
+			for _, ref := range msg.ArtifactRefs {
+				if label := artifactRefLabel(ref); label != "" {
+					listed[label] = struct{}{}
+				}
+			}
 			refs := make([]string, 0, len(msg.Completion.Artifacts))
 			for _, ref := range msg.Completion.Artifacts {
-				ref = tools.NormalizeArtifactRef(ref)
-				if ref.RelPath != "" {
-					refs = append(refs, ref.RelPath)
-				} else if ref.ID != "" {
-					refs = append(refs, ref.ID)
+				label := artifactRefLabel(ref)
+				if label == "" {
+					continue
 				}
+				if _, ok := listed[label]; ok {
+					continue
+				}
+				listed[label] = struct{}{}
+				refs = append(refs, label)
 			}
 			if len(refs) > 0 {
 				b.WriteString("\n- artifact_refs: ")
@@ -233,6 +247,14 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 		b.WriteString("\n- requires_ack: true")
 	}
 	return b.String()
+}
+
+func artifactRefLabel(ref tools.ArtifactRef) string {
+	ref = tools.NormalizeArtifactRef(ref)
+	if ref.RelPath != "" {
+		return ref.RelPath
+	}
+	return ref.ID
 }
 
 func mailboxMetadata(msg *SubAgentMailboxMessage) *message.MailboxMetadata {
