@@ -154,9 +154,13 @@ type externalWorker struct {
 	permissionMu        sync.Mutex
 	permissionWG        sync.WaitGroup
 	permissionRequests  map[string]externalPermissionRequest
-	permissionOutcomes  map[string]*externalPermissionOutcome
-	historyMu           sync.Mutex
-	ctxMgr              *ctxmgr.Manager
+	// permissionWrites counts answers being written back to the process. A
+	// request leaves permissionRequests before its write, so the write must be
+	// counted apart to tell "no permission work left" from "no request left".
+	permissionWrites   int
+	permissionOutcomes map[string]*externalPermissionOutcome
+	historyMu          sync.Mutex
+	ctxMgr             *ctxmgr.Manager
 
 	lastAssistantMu sync.Mutex
 	lastAssistant   string

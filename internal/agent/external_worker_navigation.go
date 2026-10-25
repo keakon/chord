@@ -1,6 +1,9 @@
 package agent
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // liveExternalWorkers returns every external worker still registered as a live
 // runtime: starting, running, or waiting for its terminal settlement. A worker
@@ -51,9 +54,48 @@ func (a *MainAgent) suspendExternalWorkersForSwitch(retry, superseded func()) (b
 		for _, worker := range started {
 			<-worker.done
 		}
+		a.awaitStoppedWorkerSettlement(started)
 		a.sendEvent(Event{Type: eventExternalNavigationReady, Payload: externalNavigationReady{epoch: epoch, resume: retry, superseded: superseded}})
 	}()
 	return true, nil
+}
+
+// externalSwitchSettleWait bounds how long a deferred switch waits for the
+// stopped workers' settlements to land after their processes exited. A close
+// event whose termination could not be proven keeps retrying on its own
+// schedule; past the bound the retry runs anyway and its busy gate reports the
+// residue honestly instead of stalling navigation forever.
+const externalSwitchSettleWait = 10 * time.Second
+
+// awaitStoppedWorkerSettlement waits until every stopped worker left the
+// runtime registry, which is the point its close event settled the task. A
+// settlement rides a loop event queued after the worker's done channel closed
+// — closeExternalWorker's deferred close in particular has no ordering against
+// this goroutine — so queueing the navigation retry first would let the retry's
+// busy gate reject the switch over the settlement event of the very workers it
+// just stopped.
+func (a *MainAgent) awaitStoppedWorkerSettlement(workers []*externalWorker) {
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(externalSwitchSettleWait)
+	defer deadline.Stop()
+	for {
+		settled := true
+		for _, worker := range workers {
+			if a.subs.runtime(worker.instanceID) != nil {
+				settled = false
+				break
+			}
+		}
+		if settled {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			return
+		}
+	}
 }
 
 // pauseAdmissionAndSnapshotExternalWorkers pauses admission and returns the

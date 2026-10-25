@@ -34,7 +34,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"e
 	}
 	record := driveExternalTask(t, a, handle.TaskID)
 	if record.State != string(SubAgentStateCompleted) {
-		t.Fatalf("task state = %q, want completed", record.State)
+		t.Fatalf("task state = %q, want completed (closed_reason=%q summary=%q settlement=%+v)", record.State, record.ClosedReason, record.LastSummary, record.LatestSettlement)
 	}
 
 	var phases []ActivityType

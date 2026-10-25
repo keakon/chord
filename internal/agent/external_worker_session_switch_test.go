@@ -274,8 +274,14 @@ func TestAbandonedStartedExternalWorkerStillSettles(t *testing.T) {
 
 	a.abandonSubAgentsForSessionSwitch()
 
+	// The slot and registry conditions can both hold before the settlement's
+	// close event is dispatched: abandon releases a slot for a worker whose
+	// process already exited, while the settlement still rides the loop. Wait
+	// for the terminal record, which is what the assertion below reads.
 	dispatchEventsUntil(t, a, func() bool {
-		return !worker.slotHeld() && a.subs.runtime(worker.instanceID) == nil
+		record := a.taskRecordByTaskID(worker.taskID)
+		return record != nil && isTerminalSubAgentState(SubAgentState(record.State)) &&
+			!worker.slotHeld() && a.subs.runtime(worker.instanceID) == nil
 	})
 	assertExternalTaskSettledAsCancelled(t, a, sourceDir, worker)
 }

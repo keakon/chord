@@ -254,7 +254,13 @@ printf 'clean\n'
 		t.Fatalf("managed process inherited the lifecycle channel: %q", out)
 	}
 	if !strings.Contains(string(out), "clean") {
-		t.Fatalf("managed stdout = %q", out)
+		// The report says how the child ended: a signal exit means the group was
+		// torn down before the fixture finished, while a clean exit without
+		// output means the fixture never produced its last line.
+		stopErr := sup.Stop(2 * time.Second)
+		report := sup.Report()
+		stderr, _ := io.ReadAll(sup.Stderr())
+		t.Fatalf("managed stdout = %q (stop=%v report=%+v stderr=%q)", out, stopErr, report, stderr)
 	}
 	if err := sup.Stop(2 * time.Second); err != nil {
 		t.Fatalf("stop: %v", err)

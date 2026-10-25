@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/recovery"
@@ -75,8 +76,8 @@ func (a *MainAgent) handleTakeoverTarget(req sessionTakeoverTarget) {
 		return
 	}
 	defer finish()
-	if a.currentTurn() != nil || len(a.pendingUserMessages) > 0 || len(a.pause.parkedInputs) > 0 || a.hasPauseBlockingInteraction() || a.compactionState.running || a.mainLLMRequestInFlight.Load() || a.hasQueuedAutomaticWork() || a.loopKeepsMainBusy() || a.takeoverTargetHasActiveWork() {
-		reply(pauseError("target_not_ready", "target session has active work or queued input"))
+	if reasons := a.takeoverTargetBusyReasons(); len(reasons) > 0 {
+		reply(pauseError("target_not_ready", "target session has active work or queued input: "+strings.Join(reasons, ", ")))
 		return
 	}
 	if filepath.Base(req.sessionID) != req.sessionID || req.identity.SessionID != req.sessionID {
@@ -158,6 +159,42 @@ func (a *MainAgent) handleTakeoverTarget(req sessionTakeoverTarget) {
 	a.publishRestoredQuestions()
 	a.setIdleForComposerEdit()
 	reply(nil)
+}
+
+// takeoverTargetBusyReasons names every busy-state predicate that blocks a
+// takeover, so a rejection can say what the session is still doing instead of
+// leaving the caller to guess which half of "active work or queued input" it
+// hit.
+func (a *MainAgent) takeoverTargetBusyReasons() []string {
+	var reasons []string
+	if a.currentTurn() != nil {
+		reasons = append(reasons, "current turn")
+	}
+	if len(a.pendingUserMessages) > 0 {
+		reasons = append(reasons, "pending user messages")
+	}
+	if len(a.pause.parkedInputs) > 0 {
+		reasons = append(reasons, "parked inputs")
+	}
+	if a.hasPauseBlockingInteraction() {
+		reasons = append(reasons, "blocking interaction")
+	}
+	if a.compactionState.running {
+		reasons = append(reasons, "compaction")
+	}
+	if a.mainLLMRequestInFlight.Load() {
+		reasons = append(reasons, "main LLM request")
+	}
+	if a.hasQueuedAutomaticWork() {
+		reasons = append(reasons, "queued automatic work")
+	}
+	if a.loopKeepsMainBusy() {
+		reasons = append(reasons, "loop")
+	}
+	if a.takeoverTargetHasActiveWork() {
+		reasons = append(reasons, "subagent or background job")
+	}
+	return reasons
 }
 
 func (a *MainAgent) releaseTakeoverInputAdmission(req sessionTakeoverTarget) {

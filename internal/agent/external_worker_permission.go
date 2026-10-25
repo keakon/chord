@@ -157,9 +157,17 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 		if !active || ctx.Err() != nil {
 			frame = externalclaude.DenyPermission(event.RequestID, "external permission request cancelled")
 		}
+		// The request must read as settled before its answer reaches the
+		// process: the external agent acts on the frame the moment the write
+		// lands and can overtake this goroutine with its result, and a result
+		// that arrives while the request still reads pending fails the run as
+		// unsettled. The write can block on stdin backpressure, so it must not
+		// hold the lock that result handling needs to inspect pending
+		// permissions; cancellation stays observable through ctx, which
+		// cancelExternalPermissions cancels for every pending request.
+		delete(w.permissionRequests, event.RequestID)
+		w.permissionWrites++
 		w.permissionMu.Unlock()
-		// The write can block on stdin backpressure, so it must not hold the lock
-		// that result handling needs to inspect pending permissions.
 		writeFailed := false
 		if active && ctx.Err() == nil {
 			writeCtx, writeCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -169,15 +177,14 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 			writeCancel()
 		}
 		w.permissionMu.Lock()
-		_, active = w.permissionRequests[event.RequestID]
-		if !active || ctx.Err() != nil {
+		if ctx.Err() != nil {
 			frame = externalclaude.DenyPermission(event.RequestID, "external permission request cancelled")
 		}
-		delete(w.permissionRequests, event.RequestID)
+		w.permissionWrites--
 		outcome.frame, outcome.done = frame, true
 		pruneExternalPermissionOutcomesLocked(w.permissionOutcomes)
 		resumed := false
-		if len(w.permissionRequests) == 0 && w.State() == SubAgentStateWaitingMain {
+		if len(w.permissionRequests) == 0 && w.permissionWrites == 0 && w.State() == SubAgentStateWaitingMain {
 			resumed = w.setState(SubAgentStateRunning, "external agent running")
 		}
 		w.permissionMu.Unlock()
