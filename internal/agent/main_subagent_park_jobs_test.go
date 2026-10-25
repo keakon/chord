@@ -14,8 +14,11 @@ import (
 // transcript, so the orchestrator still sees the result. Only session
 // switches, shutdown, and terminal settles tear jobs down.
 func TestParkSubAgentLeavesDetachedJobsRunning(t *testing.T) {
-	restore := tools.ResetJobRegistryForTest()
-	defer restore()
+	t.Cleanup(tools.ResetJobRegistryForTest())
+	// StopJobByUser only requests the stop; join the job here so its run
+	// goroutine cannot write logs after this test releases the package-wide
+	// default logger to the next test.
+	t.Cleanup(func() { tools.StopAllJobsForShutdown() })
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-park-jobs")
 	sub.setState(SubAgentStateIdle, "idle after starting a background job")

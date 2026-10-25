@@ -779,19 +779,20 @@ func (r *JobRegistry) finish(j *job, status jobStatus, detail string, exitErr er
 	// model as a user stop nor lose its completion toast.
 	userStopped := j.stopOrigin == jobStopOriginUser && status == jobStatusKilled
 	j.mu.Unlock()
+	sender := j.eventSender
+	if notify && sender == nil {
+		// A detached job that finished without a sender would silently lose its
+		// result, and the model would wait forever on a notification that can
+		// never arrive. Log it so the missing wiring is diagnosable. Emit it
+		// before closing done: a caller that joins on done must be guaranteed
+		// the run goroutine has no more log writes to make.
+		log.Warnf("job finished with no event sender id=%v agent_id=%v status=%v", j.ID, j.AgentID, status)
+	}
 	close(j.done)
 	if j.logWriter != nil {
 		_ = j.logWriter.Close()
 	}
-	if !notify {
-		return
-	}
-	sender := j.eventSender
-	if sender == nil {
-		// A detached job that finished without a sender would silently lose its
-		// result, and the model would wait forever on a notification that can
-		// never arrive. Log it so the missing wiring is diagnosable.
-		log.Warnf("job finished with no event sender id=%v agent_id=%v status=%v", j.ID, j.AgentID, status)
+	if !notify || sender == nil {
 		return
 	}
 	statusText := j.statusText()
