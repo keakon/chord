@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -72,33 +71,13 @@ var (
 	errExternalToolDuplicateRequest = errors.New("external permission was already requested for this tool call")
 )
 
-// canonicalExternalToolInput rewrites a tool input into one stable JSON text so
-// semantically identical inputs hash identically. Claude Code may re-serialize
-// the same tool_use input when it sends the can_use_tool request, which can
-// reorder object members and change whitespace; JSON object order is not part
-// of the value. Number literals are kept as written, so 1 and 1.0 stay distinct
-// and fingerprint equality never merges arguments the tool could tell apart.
-func canonicalExternalToolInput(input json.RawMessage) (json.RawMessage, error) {
-	if !json.Valid(input) {
-		return nil, errExternalToolInputInvalid
-	}
-	decoder := json.NewDecoder(bytes.NewReader(input))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, errExternalToolInputInvalid
-	}
-	canonical, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("external tool input is not valid JSON: %w", err)
-	}
-	return canonical, nil
-}
-
+// Claude Code may re-serialize the same input between tool_use and
+// can_use_tool. Object order and whitespace must not change its fingerprint,
+// while number literals such as 1 and 1.0 must remain distinct.
 func externalToolFingerprint(name string, input json.RawMessage) ([32]byte, error) {
-	canonical, err := canonicalExternalToolInput(input)
+	canonical, err := canonicalToolCallArgs(input)
 	if err != nil {
-		return [32]byte{}, err
+		return [32]byte{}, fmt.Errorf("%w: %w", errExternalToolInputInvalid, err)
 	}
 	data, err := json.Marshal(struct {
 		Name  string
@@ -110,11 +89,7 @@ func externalToolFingerprint(name string, input json.RawMessage) ([32]byte, erro
 	return sha256.Sum256(data), nil
 }
 
-func (w *externalWorker) bindExternalTool(id, name string, input json.RawMessage, request bool) error {
-	fingerprint, err := externalToolFingerprint(name, input)
-	if err != nil {
-		return err
-	}
+func (w *externalWorker) bindExternalTool(id, name string, fingerprint [32]byte, request bool) error {
 	if binding := w.toolBindings[id]; binding != nil {
 		if binding.fingerprint != fingerprint {
 			log.Debugf("external tool binding mismatch task=%v instance=%v tool_use_id=%v tool=%v bound=%x received=%x",
@@ -176,7 +151,7 @@ func (w *externalWorker) beginExternalPermission(event externalclaude.Event) {
 	w.permissionMu.Unlock()
 	go func() {
 		defer w.permissionWG.Done()
-		frame := w.evaluateExternalPermission(ctx, event)
+		frame := w.evaluateExternalPermission(ctx, event, fingerprint)
 		w.permissionMu.Lock()
 		_, active := w.permissionRequests[event.RequestID]
 		if !active || ctx.Err() != nil {
@@ -245,7 +220,7 @@ func (w *externalWorker) cancelExternalPermissions(requestID string) {
 	w.permissionMu.Unlock()
 }
 
-func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event externalclaude.Event) externalclaude.Frame {
+func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event externalclaude.Event, fingerprint [32]byte) externalclaude.Frame {
 	request := event.Request
 	registered := false
 	deny := func(reason string) externalclaude.Frame {
@@ -256,15 +231,15 @@ func (w *externalWorker) evaluateExternalPermission(ctx context.Context, event e
 		}
 		return externalclaude.DenyPermission(event.RequestID, reason)
 	}
-	if request == nil || request.ToolName == "" || request.ToolUseID == "" || !json.Valid(request.Input) {
+	if request == nil || request.ToolName == "" || request.ToolUseID == "" {
 		return deny("invalid external permission request")
 	}
 	w.externalToolStateMu.Lock()
-	if err := w.bindExternalTool(request.ToolUseID, request.ToolName, request.Input, true); err != nil {
+	if err := w.bindExternalTool(request.ToolUseID, request.ToolName, fingerprint, true); err != nil {
 		w.externalToolStateMu.Unlock()
 		return deny(err.Error())
 	}
-	w.handleExternalToolUse(externalclaude.ContentBlock{ID: request.ToolUseID, Name: request.ToolName, Input: request.Input})
+	w.recordExternalToolUse(externalclaude.ContentBlock{ID: request.ToolUseID, Name: request.ToolName, Input: request.Input})
 	registered = true
 	w.externalToolStateMu.Unlock()
 	if !externalclaude.ManagedTool(request.ToolName) {

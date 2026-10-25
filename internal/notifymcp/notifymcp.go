@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	ServerName = "chord"
-	ToolName   = "notify"
+	ServerName   = "chord"
+	ToolName     = "notify"
+	KindNotice   = "notice"
+	KindDecision = "decision"
 
 	protocolVersion = "2024-11-05"
 	// MaxMessageBytes bounds one notify message and its structured payload.
@@ -125,8 +127,8 @@ func toolsListResult() json.RawMessage {
 				},
 				"kind": map[string]any{
 					"type":        "string",
-					"enum":        []string{"notice", "decision"},
-					"default":     "notice",
+					"enum":        []string{KindNotice, KindDecision},
+					"default":     KindNotice,
 					"description": "notice for a non-blocking update; decision when the owner must act.",
 				},
 				"payload": map[string]any{
@@ -170,9 +172,9 @@ func callTool(ctx context.Context, params json.RawMessage, deliver DeliverFunc) 
 	}
 	kind := strings.TrimSpace(arguments.Kind)
 	if kind == "" {
-		kind = "notice"
+		kind = KindNotice
 	}
-	if kind != "notice" && kind != "decision" {
+	if kind != KindNotice && kind != KindDecision {
 		return toolError("kind must be notice or decision"), nil
 	}
 	payload := bytes.TrimSpace(arguments.Payload)

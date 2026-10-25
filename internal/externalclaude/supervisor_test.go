@@ -155,6 +155,9 @@ exit 0
 // instead of waiting for that process or turning the teardown into a failure.
 func assertEscapedDescendantRunEnds(t *testing.T, session *Session) {
 	t.Helper()
+	t.Cleanup(func() {
+		session.Stop(time.Second)
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if _, err := session.Initialize(ctx, ""); err != nil {
@@ -163,8 +166,13 @@ func assertEscapedDescendantRunEnds(t *testing.T, session *Session) {
 	if err := session.WriteUserMessage(ctx, "go"); err != nil {
 		t.Fatalf("send prompt: %v", err)
 	}
-	if event := <-session.Events(); event.Type != TypeResult {
-		t.Fatalf("event = %+v", event)
+	select {
+	case event, ok := <-session.Events():
+		if !ok || event.Type != TypeResult {
+			t.Fatalf("event = %+v, stream open = %t", event, ok)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the external result")
 	}
 	session.Finish(5 * time.Second)
 	waited := make(chan error, 1)

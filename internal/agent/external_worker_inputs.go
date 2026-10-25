@@ -26,9 +26,18 @@ func (w *externalWorker) cloneExternalTaskRecordLocked() (*recoveryOwnership, *D
 }
 
 func (w *externalWorker) persistExternalSessionLocked() error {
-	owner, record, err := w.cloneExternalTaskRecordLocked()
-	if err != nil {
-		return err
+	a := w.parent
+	a.taskRegistryPersistMu.Lock()
+	defer a.taskRegistryPersistMu.Unlock()
+	owner := a.currentRecoveryOwnership()
+	if owner == nil || owner.epoch != w.sessionEpoch {
+		return fmt.Errorf("external task storage belongs to a replaced session")
+	}
+	a.subs.mu.Lock()
+	record := cloneDurableTaskRecord(a.subs.taskRecords[w.taskID])
+	if record == nil || record.LatestInstanceID != w.instanceID {
+		a.subs.mu.Unlock()
+		return fmt.Errorf("external task instance is no longer current")
 	}
 	record.State = string(w.State())
 	record.ResumePolicy = durableTaskResumePolicy(w.State())
@@ -47,13 +56,19 @@ func (w *externalWorker) persistExternalSessionLocked() error {
 		record.ExternalSession.Baseline = nil
 	}
 	record.UpdatedAt = time.Now()
-	if err := w.parent.persistTaskRegistryRecord(owner.dir, w.taskID, record); err != nil {
+	// Publish before the snapshot, as other registry updates do. A mailbox
+	// arriving during the write can then extend this record without a later
+	// stale publication replacing its fields.
+	a.subs.taskRecords[w.taskID] = record
+	records := cloneDurableTaskRecordMap(a.subs.taskRecords)
+	a.subs.mu.Unlock()
+	if hook := a.taskRegistryPersistHook; hook != nil {
+		hook()
+	}
+	if err := persistDurableTaskRecords(owner.dir, records); err != nil {
 		w.persistence.markDegraded(err)
 		return fmt.Errorf("persist external input state: %w", err)
 	}
-	w.parent.subs.mu.Lock()
-	w.parent.subs.taskRecords[w.taskID] = record
-	w.parent.subs.mu.Unlock()
 	return nil
 }
 
@@ -77,9 +92,7 @@ func (w *externalWorker) sendExternalInput(input externalTaskInput) error {
 	return w.currentSession().WriteUserMessage(w.ctx, input.Content)
 }
 
-func (w *externalWorker) finishExternalInput() error {
-	w.promptMu.Lock()
-	defer w.promptMu.Unlock()
+func (w *externalWorker) finishExternalInputLocked() error {
 	for i := range w.inputs {
 		if w.inputs[i].State == message.ToolRecoveryStateOutcomeUnknown {
 			w.inputs = slices.Delete(w.inputs, i, i+1)

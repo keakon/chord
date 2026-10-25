@@ -42,15 +42,6 @@ func (w *externalWorker) externalResultContractPromptBlock() string {
 	}, "\n")
 }
 
-// hasQueuedExternalInput reports whether another queued input will run after
-// the current result, in which case this result is not the task's deliverable
-// and the contract does not apply to it yet.
-func (w *externalWorker) hasQueuedExternalInput() bool {
-	w.promptMu.Lock()
-	defer w.promptMu.Unlock()
-	return len(w.promptQueue) > 0
-}
-
 // validateExternalResultContract checks the external process's final answer
 // against the declared contract. There is no machine-readable delivery channel
 // here, so the final text is the payload: text that is not valid JSON is a

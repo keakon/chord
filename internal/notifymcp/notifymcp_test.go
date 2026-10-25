@@ -117,6 +117,26 @@ func TestHandleForwardsNotify(t *testing.T) {
 	}
 }
 
+func TestHandleNormalizesNotifyBeforeDelivery(t *testing.T) {
+	for _, arguments := range []string{
+		`{"message":"  Sample notice  ","payload":null}`,
+		`{"message":"  Sample notice  ","kind":" notice ","payload":null}`,
+	} {
+		delivered := false
+		response(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"notify","arguments":`+arguments+`}}`,
+			func(_ context.Context, request Request) error {
+				delivered = true
+				if request.Message != "Sample notice" || request.Kind != KindNotice || request.Payload != nil {
+					t.Fatalf("notification not normalized: %+v", request)
+				}
+				return nil
+			})
+		if !delivered {
+			t.Fatal("normalized notification not delivered")
+		}
+	}
+}
+
 func TestHandleReportsDeliveryFailureAsToolError(t *testing.T) {
 	deliver := func(context.Context, Request) error {
 		return context.DeadlineExceeded
@@ -144,11 +164,16 @@ func TestHandleRejectsInvalidNotifyArguments(t *testing.T) {
 		{name: "bad kind", arguments: `{"message":"x","kind":"urgent"}`, want: "kind must be notice or decision"},
 		{name: "array payload", arguments: `{"message":"x","payload":[1]}`, want: "payload must be a JSON object"},
 		{name: "string payload", arguments: `{"message":"x","payload":"text"}`, want: "payload must be a JSON object"},
+		{name: "oversized message", arguments: `{"message":"` + strings.Repeat("x", MaxMessageBytes+1) + `"}`, want: "message exceeds"},
+		{name: "oversized payload", arguments: `{"message":"x","payload":{"text":"` + strings.Repeat("x", MaxMessageBytes) + `"}}`, want: "payload must be a JSON object"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			message := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"notify","arguments":` + tc.arguments + `}}`
-			decoded := response(t, message, func(context.Context, Request) error { return nil })
+			decoded := response(t, message, func(context.Context, Request) error {
+				t.Fatal("invalid notification reached delivery")
+				return nil
+			})
 			var callResult struct {
 				Content []struct {
 					Text string `json:"text"`

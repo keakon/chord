@@ -538,8 +538,7 @@ func (w *externalWorker) lastAssistantText() string {
 // emitProgressStatus refreshes the TUI status line only. The owner is not told
 // about routine tool or assistant progress: like a native SubAgent, whose
 // summary only advances on an explicit Notify, an external worker reaches the
-// main agent only through Notify, a terminal report, or a stall alert. The
-// external CLI has no Notify tool, so it notifies solely by stopping.
+// main agent only through MCP Notify, a terminal report, or a stall alert.
 func (w *externalWorker) emitProgressStatus(summary string) {
 	summary = strings.TrimSpace(summary)
 	if summary == "" {

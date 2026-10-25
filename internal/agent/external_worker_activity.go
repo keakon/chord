@@ -25,8 +25,11 @@ func (w *externalWorker) emitExternalActivity(activity ActivityType, detail stri
 // runningExternalToolsLocked counts authorized tools whose result has not
 // arrived. Callers hold externalToolStateMu.
 func (w *externalWorker) runningExternalToolsLocked() int {
+	w.toolMu.Lock()
+	defer w.toolMu.Unlock()
 	running := 0
-	for _, binding := range w.toolBindings {
+	for id := range w.toolNames {
+		binding := w.toolBindings[id]
 		if binding.started && !binding.settled {
 			running++
 		}

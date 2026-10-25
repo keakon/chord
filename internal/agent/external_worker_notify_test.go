@@ -23,13 +23,11 @@ func testExternalNotifyWorker() *externalWorker {
 
 func TestExternalNotifyMailboxIsReportOnlyNotice(t *testing.T) {
 	worker := testExternalNotifyWorker()
-	mailbox, err := worker.externalNotifyMailbox(notifymcp.Request{
-		Message: "  Found the failing test  ",
+	mailbox := worker.externalNotifyMailbox(notifymcp.Request{
+		Message: "Found the failing test",
+		Kind:    notifymcp.KindNotice,
 		Payload: json.RawMessage(`{"test":"sample"}`),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if mailbox.Kind != SubAgentMailboxKindNotice || mailbox.MessageType != AgentMessageTypeNotice {
 		t.Fatalf("mailbox kind/type = %q/%q", mailbox.Kind, mailbox.MessageType)
 	}
@@ -52,13 +50,10 @@ func TestExternalNotifyMailboxIsReportOnlyNotice(t *testing.T) {
 }
 
 func TestExternalNotifyMailboxDecisionInterrupts(t *testing.T) {
-	mailbox, err := testExternalNotifyWorker().externalNotifyMailbox(notifymcp.Request{
+	mailbox := testExternalNotifyWorker().externalNotifyMailbox(notifymcp.Request{
 		Message: "Choose a migration path",
-		Kind:    "decision",
+		Kind:    notifymcp.KindDecision,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if mailbox.Priority != SubAgentMailboxPriorityInterrupt || mailbox.Subtype != agentMessageSubtypeDecision {
 		t.Fatalf("mailbox priority/subtype = %q/%q", mailbox.Priority, mailbox.Subtype)
 	}
@@ -67,22 +62,23 @@ func TestExternalNotifyMailboxDecisionInterrupts(t *testing.T) {
 	}
 }
 
-func TestExternalNotifyMailboxRejectsInvalidInput(t *testing.T) {
+func TestExternalNotifyMCPRejectsInvalidInput(t *testing.T) {
 	cases := []struct {
-		name    string
-		request notifymcp.Request
-		want    string
+		name      string
+		arguments string
+		want      string
 	}{
-		{name: "empty message", request: notifymcp.Request{Message: " "}, want: "message must not be empty"},
-		{name: "bad kind", request: notifymcp.Request{Message: "x", Kind: "urgent"}, want: "kind must be notice or decision"},
-		{name: "array payload", request: notifymcp.Request{Message: "x", Payload: json.RawMessage(`[1]`)}, want: "payload must be a JSON object"},
-		{name: "broken payload", request: notifymcp.Request{Message: "x", Payload: json.RawMessage(`{"a":}`)}, want: "payload must be a JSON object"},
+		{name: "empty message", arguments: `{"message":" "}`, want: "message must not be empty"},
+		{name: "bad kind", arguments: `{"message":"x","kind":"urgent"}`, want: "kind must be notice or decision"},
+		{name: "array payload", arguments: `{"message":"x","payload":[1]}`, want: "payload must be a JSON object"},
+		{name: "broken payload", arguments: `{"message":"x","payload":{"a":}}`, want: "parse error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := testExternalNotifyWorker().externalNotifyMailbox(tc.request)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error = %v, want %q", err, tc.want)
+			call := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"notify","arguments":` + tc.arguments + `}}`)
+			reply := testExternalNotifyWorker().handleExternalMCP(context.Background(), notifymcp.ServerName, call)
+			if !strings.Contains(string(reply), tc.want) {
+				t.Fatalf("reply = %s, want %q", reply, tc.want)
 			}
 		})
 	}

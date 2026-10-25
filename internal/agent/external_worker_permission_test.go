@@ -17,6 +17,12 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func evaluateExternalTestPermission(t *testing.T, w *externalWorker, ctx context.Context, event externalclaude.Event) externalclaude.Frame {
+	t.Helper()
+	fingerprint := mustExternalToolFingerprint(t, event.Request.ToolName, string(event.Request.Input))
+	return w.evaluateExternalPermission(ctx, event, fingerprint)
+}
+
 func TestExternalPermissionBindsToolIdentity(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	configureExternalTestRuntime(t, a, "claude", `"*": allow`)
@@ -30,7 +36,7 @@ func TestExternalPermissionBindsToolIdentity(t *testing.T) {
 	first := externalclaude.Event{RequestID: "request-1", Request: &externalclaude.ControlRequest{
 		ToolName: "Read", ToolUseID: "tool-1", Input: json.RawMessage(`{"file_path":"sample.txt"}`),
 	}}
-	frame := w.evaluateExternalPermission(context.Background(), first)
+	frame := evaluateExternalTestPermission(t, w, context.Background(), first)
 	if string(frame.Response.Response) == "" {
 		t.Fatal("missing permission decision")
 	}
@@ -40,7 +46,7 @@ func TestExternalPermissionBindsToolIdentity(t *testing.T) {
 		request := *first.Request
 		request.Input = json.RawMessage(input)
 		next.Request = &request
-		decision := w.evaluateExternalPermission(context.Background(), next)
+		decision := evaluateExternalTestPermission(t, w, context.Background(), next)
 		var response externalclaude.PermissionDecision
 		if err := json.Unmarshal(decision.Response.Response, &response); err != nil {
 			t.Fatal(err)
@@ -69,7 +75,7 @@ func TestExternalDeniedToolAlwaysHasTerminalHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.evaluateExternalPermission(context.Background(), externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
+	evaluateExternalTestPermission(t, w, context.Background(), externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
 		ToolName: "Write", ToolUseID: "call", Input: json.RawMessage(`{"file_path":"sample.txt","content":"Text."}`),
 	}})
 	history := w.messageSnapshot()
@@ -158,7 +164,7 @@ func TestExternalTaskAliasUsesAgentRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame := w.evaluateExternalPermission(context.Background(), externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
+	frame := evaluateExternalTestPermission(t, w, context.Background(), externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
 		ToolName: "Task", ToolUseID: "agent-call",
 		Input: json.RawMessage(`{"description":"inspect","prompt":"Inspect the fixture.","subagent_type":"Explore"}`),
 	}})
@@ -184,7 +190,7 @@ func TestExternalNotebookEditUsesPathRules(t *testing.T) {
 	}
 	evaluate := func(id, path string) externalclaude.PermissionDecision {
 		t.Helper()
-		frame := w.evaluateExternalPermission(context.Background(), externalclaude.Event{RequestID: id, Request: &externalclaude.ControlRequest{
+		frame := evaluateExternalTestPermission(t, w, context.Background(), externalclaude.Event{RequestID: id, Request: &externalclaude.ControlRequest{
 			ToolName: "NotebookEdit", ToolUseID: id,
 			Input: json.RawMessage(`{"notebook_path":` + strconv.Quote(path) + `,"cell_id":"cell-1","new_source":"print(1)"}`),
 		}})
@@ -217,7 +223,7 @@ func TestExternalQuestionAuthorizationRecordsEffectiveInput(t *testing.T) {
 	input := json.RawMessage(`{"questions":[{"header":"Choice","question":"Choose an option","options":[{"label":"Alpha","description":"First option"},{"label":"Beta","description":"Second option"}]}]}`)
 	done := make(chan externalclaude.Frame, 1)
 	go func() {
-		done <- w.evaluateExternalPermission(ctx, externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
+		done <- evaluateExternalTestPermission(t, w, ctx, externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
 			ToolName: "AskUserQuestion", ToolUseID: "call", Input: input,
 		}})
 	}()
@@ -286,7 +292,7 @@ func TestExternalQuestionMultipleAndCustomAnswers(t *testing.T) {
 	]}`)
 	done := make(chan externalclaude.Frame, 1)
 	go func() {
-		done <- w.evaluateExternalPermission(ctx, externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
+		done <- evaluateExternalTestPermission(t, w, ctx, externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
 			ToolName: "AskUserQuestion", ToolUseID: "call", Input: input,
 		}})
 	}()
@@ -373,7 +379,7 @@ func TestExternalQuestionCancellationDoesNotAuthorize(t *testing.T) {
 	}
 	done := make(chan externalclaude.Frame, 1)
 	go func() {
-		done <- w.evaluateExternalPermission(requestCtx, externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
+		done <- evaluateExternalTestPermission(t, w, requestCtx, externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
 			ToolName: "AskUserQuestion", ToolUseID: "call",
 			Input: json.RawMessage(`{"questions":[{"header":"Choice","question":"Choose an option","options":[{"label":"Alpha","description":"First"}]}]}`),
 		}})
@@ -454,7 +460,7 @@ func TestExternalPermissionPersistenceFailuresFailClosed(t *testing.T) {
 				w.toolBindings["call"].started = true
 				w.handleExternalToolResult(externalclaude.ContentBlock{ToolUseID: "call", Content: json.RawMessage(`"Contents."`)})
 			} else {
-				frame := w.evaluateExternalPermission(ctx, externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
+				frame := evaluateExternalTestPermission(t, w, ctx, externalclaude.Event{RequestID: "req", Request: &externalclaude.ControlRequest{
 					ToolName: "Read", ToolUseID: "call", Input: input,
 				}})
 				var decision externalclaude.PermissionDecision
@@ -506,7 +512,7 @@ func TestExternalConcurrentPermissionCancellation(t *testing.T) {
 	evaluate := func(ctx context.Context, id string) <-chan externalclaude.Frame {
 		done := make(chan externalclaude.Frame, 1)
 		go func() {
-			done <- w.evaluateExternalPermission(ctx, externalclaude.Event{RequestID: id, Request: &externalclaude.ControlRequest{
+			done <- evaluateExternalTestPermission(t, w, ctx, externalclaude.Event{RequestID: id, Request: &externalclaude.ControlRequest{
 				ToolName: "Read", ToolUseID: id, Input: json.RawMessage(`{"file_path":"sample.txt"}`),
 			}})
 		}()

@@ -47,7 +47,7 @@ func newTestExternalRuntime(t *testing.T, a *MainAgent, taskID string) *external
 	return w
 }
 
-// TestExternalRuntimeSharesStallWatchdog pins M2: the Running-worker stall scan
+// TestExternalRuntimeSharesStallWatchdog pins the Running-worker stall scan:
 // covers any live runtime, not just *SubAgent, so a silent external coding-agent
 // worker raises the same owner alert (once per episode) as a SubAgent.
 func TestExternalRuntimeSharesStallWatchdog(t *testing.T) {
@@ -103,7 +103,7 @@ func TestRunningRuntimeStallReasonExternalProbe(t *testing.T) {
 	}
 }
 
-// TestUserCancelStopsExternalWorker pins H1's second half: the user cancel must
+// TestUserCancelStopsExternalWorker pins that the user cancel must
 // reach an external worker (whose ctx is not the turn's) and settle it
 // cancelled by the user through the shared close handler.
 func TestUserCancelStopsExternalWorker(t *testing.T) {
@@ -174,8 +174,8 @@ func TestExternalWorkerProgressThrottle(t *testing.T) {
 // TestExternalWorkerProgressStaysOutOfOwnerMailbox pins the notification
 // boundary: routine tool and assistant progress refresh only the TUI status and
 // the activity heartbeat. A native SubAgent's summary advances only on an
-// explicit Notify; an external worker has no Notify tool, so it reaches the
-// owner solely by stopping, through its terminal mailbox or a stall alert.
+// explicit Notify; an external worker reaches the owner only through explicit
+// MCP Notify, its terminal mailbox or a stall alert.
 func TestExternalWorkerProgressStaysOutOfOwnerMailbox(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	taskID := "task-external-progress"
@@ -243,7 +243,7 @@ func TestCoordinationSnapshotListsOnlyActionableTasks(t *testing.T) {
 	}
 }
 
-// TestExternalToolDiffUsesAgentdiffLineNumbers pins L1: the external Edit card
+// TestExternalToolDiffUsesAgentdiffLineNumbers pins that the external Edit card
 // diff comes from the shared agentdiff helpers, so it carries the real unified
 // hunk header and counts instead of a synthetic, line-number-off summary.
 func TestExternalToolDiffUsesAgentdiffLineNumbers(t *testing.T) {

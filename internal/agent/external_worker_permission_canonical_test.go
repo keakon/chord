@@ -85,6 +85,10 @@ func TestExternalToolFingerprintDistinguishesArguments(t *testing.T) {
 	if small == large {
 		t.Fatal("adjacent integers beyond float64 precision produced the same fingerprint")
 	}
+	integer := mustExternalToolFingerprint(t, "Read", `{"offset":1}`)
+	if decimal := mustExternalToolFingerprint(t, "Read", `{"offset":1.0}`); integer == decimal {
+		t.Fatal("distinct number literals produced the same fingerprint")
+	}
 	if got := mustExternalToolFingerprint(t, "Write", base); got == want {
 		t.Fatal("distinct tool names produced the same fingerprint")
 	}
@@ -101,8 +105,8 @@ func TestExternalToolFingerprintRejectsInvalidInput(t *testing.T) {
 func TestExternalToolBindingCanonicalizesInput(t *testing.T) {
 	w := &externalWorker{taskID: "task-1", instanceID: "external-1", toolBindings: map[string]*externalToolBinding{}}
 	const id = "tool-1"
-	toolUseInput := json.RawMessage(`{"command":"sleep 2","description":"Wait briefly.","timeout":120000}`)
-	requestInput := json.RawMessage(`{"command":"sleep 2","timeout":120000,"description":"Wait briefly."}`)
+	toolUseInput := mustExternalToolFingerprint(t, "Bash", `{"command":"sleep 2","description":"Wait briefly.","timeout":120000}`)
+	requestInput := mustExternalToolFingerprint(t, "Bash", `{"command":"sleep 2","timeout":120000,"description":"Wait briefly."}`)
 
 	if err := w.bindExternalTool(id, "Bash", toolUseInput, false); err != nil {
 		t.Fatalf("bind tool_use: %v", err)
@@ -116,7 +120,7 @@ func TestExternalToolBindingCanonicalizesInput(t *testing.T) {
 	if err := w.bindExternalTool(id, "Bash", requestInput, true); !errors.Is(err, errExternalToolDuplicateRequest) {
 		t.Fatalf("second permission request error = %v, want a duplicate rejection", err)
 	}
-	if err := w.bindExternalTool(id, "Bash", json.RawMessage(`{"command":"sleep 3","timeout":120000,"description":"Wait briefly."}`), true); !errors.Is(err, errExternalToolIdentityMismatch) {
+	if err := w.bindExternalTool(id, "Bash", mustExternalToolFingerprint(t, "Bash", `{"command":"sleep 3","timeout":120000,"description":"Wait briefly."}`), true); !errors.Is(err, errExternalToolIdentityMismatch) {
 		t.Fatalf("changed arguments error = %v, want an identity mismatch", err)
 	}
 }
@@ -135,7 +139,7 @@ func TestExternalPermissionAcceptsReserializedInput(t *testing.T) {
 		ID: "tool-bash", Name: "Bash",
 		Input: json.RawMessage(`{"command":"sleep 2","description":"Wait briefly.","timeout":120000}`),
 	})
-	frame := w.evaluateExternalPermission(context.Background(), externalclaude.Event{RequestID: "perm-bash", Request: &externalclaude.ControlRequest{
+	frame := evaluateExternalTestPermission(t, w, context.Background(), externalclaude.Event{RequestID: "perm-bash", Request: &externalclaude.ControlRequest{
 		ToolName: "Bash", ToolUseID: "tool-bash",
 		Input: json.RawMessage(`{"command":"sleep 2","timeout":120000,"description":"Wait briefly."}`),
 	}})
@@ -162,7 +166,7 @@ func TestExternalPermissionBindsTaskAgentAliases(t *testing.T) {
 		ID: "tool-task", Name: "Task",
 		Input: json.RawMessage(`{"description":"inspect","prompt":"Inspect the fixture.","subagent_type":"Explore"}`),
 	})
-	frame := w.evaluateExternalPermission(context.Background(), externalclaude.Event{RequestID: "perm-task", Request: &externalclaude.ControlRequest{
+	frame := evaluateExternalTestPermission(t, w, context.Background(), externalclaude.Event{RequestID: "perm-task", Request: &externalclaude.ControlRequest{
 		ToolName: "Agent", ToolUseID: "tool-task",
 		Input: json.RawMessage(`{"subagent_type":"Explore","prompt":"Inspect the fixture.","description":"inspect"}`),
 	}})

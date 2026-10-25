@@ -227,10 +227,6 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 	}
 	session = started
 	w.setSession(session)
-	w.promptMu.Lock()
-	w.processEnded = false
-	err = w.persistExternalSessionLocked()
-	w.promptMu.Unlock()
 	initialized := false
 	defer func() {
 		if !initialized {
@@ -241,6 +237,14 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 			processEnded = started.ProcessEnded()
 		}
 	}()
+	// The run id and processEnded=false were committed before spawn. Check
+	// ownership again without rewriting that identical durable state.
+	w.promptMu.Lock()
+	_, _, err = w.cloneExternalTaskRecordLocked()
+	if err == nil && w.PersistenceHealth().State != PersistenceHealthy {
+		err = fmt.Errorf("external worker persistence requires recovery")
+	}
+	w.promptMu.Unlock()
 	if err != nil {
 		return nil, false, err
 	}
@@ -564,7 +568,14 @@ func (w *externalWorker) finishExternalStream() {
 	})
 }
 
-func (w *externalWorker) handleExternalResult(event externalclaude.Event) (bool, externalTaskInput) {
+func (w *externalWorker) handleExternalResult(event externalclaude.Event) (stop bool, next externalTaskInput) {
+	w.promptMu.Lock()
+	defer func() {
+		if next.ID == "" {
+			w.inputClosed = true
+		}
+		w.promptMu.Unlock()
+	}()
 	if w.resultSeen {
 		w.setResultError(fmt.Errorf("external agent sent a duplicate result"))
 		return true, externalTaskInput{}
@@ -599,15 +610,10 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (bool,
 		// An error result is a definitive outcome for this input: the failure is
 		// carried by the task state, not by an unknown input that would block a
 		// targeted follow-up.
-		if err := w.finishExternalInput(); err != nil {
+		if err := w.finishExternalInputLocked(); err != nil {
 			w.setResultError(err)
 			return true, externalTaskInput{}
 		}
-		// A failed result still ends this input: a message that arrives while
-		// the process exits belongs to the next attempt, not to this stdin.
-		w.promptMu.Lock()
-		w.inputClosed = true
-		w.promptMu.Unlock()
 		w.setResultError(fmt.Errorf("external agent failed: %s", reason))
 		return true, externalTaskInput{}
 	}
@@ -637,9 +643,9 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (bool,
 	// enforced on it before the input completes. A violation is a definitive
 	// outcome for this input (the task fails), so it does not become unknown and
 	// block a targeted follow-up.
-	if !w.hasQueuedExternalInput() {
+	if len(w.promptQueue) == 0 {
 		if err := w.validateExternalResultContract(w.resultText); err != nil {
-			if inputErr := w.finishExternalInput(); inputErr != nil {
+			if inputErr := w.finishExternalInputLocked(); inputErr != nil {
 				w.setResultError(inputErr)
 				return true, externalTaskInput{}
 			}
@@ -647,19 +653,15 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (bool,
 			return true, externalTaskInput{}
 		}
 	}
-	if err := w.finishExternalInput(); err != nil {
+	if err := w.finishExternalInputLocked(); err != nil {
 		w.setResultError(err)
 		return true, externalTaskInput{}
 	}
-	w.promptMu.Lock()
 	if len(w.promptQueue) > 0 {
 		next := w.promptQueue[0]
 		w.promptQueue = w.promptQueue[1:]
-		w.promptMu.Unlock()
 		return true, next
 	}
-	w.inputClosed = true
-	w.promptMu.Unlock()
 	return true, externalTaskInput{}
 }
 
@@ -667,11 +669,19 @@ func (w *externalWorker) handleExternalToolUse(use externalclaude.ContentBlock) 
 	if strings.TrimSpace(use.ID) == "" {
 		return
 	}
-	if err := w.bindExternalTool(use.ID, use.Name, use.Input, false); err != nil {
+	fingerprint, err := externalToolFingerprint(use.Name, use.Input)
+	if err == nil {
+		err = w.bindExternalTool(use.ID, use.Name, fingerprint, false)
+	}
+	if err != nil {
 		w.setResultError(err)
 		w.teardown()
 		return
 	}
+	w.recordExternalToolUse(use)
+}
+
+func (w *externalWorker) recordExternalToolUse(use externalclaude.ContentBlock) {
 	if w.toolSeen[use.ID] {
 		return
 	}

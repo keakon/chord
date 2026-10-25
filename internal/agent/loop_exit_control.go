@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -27,17 +26,7 @@ func canonicalRepeatedToolCallArgs(raw json.RawMessage) string {
 	if trimmed == "" {
 		return "{}"
 	}
-	var decoded any
-	dec := json.NewDecoder(strings.NewReader(trimmed))
-	dec.UseNumber()
-	if err := dec.Decode(&decoded); err != nil {
-		return trimmed
-	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		return trimmed
-	}
-	encoded, err := json.Marshal(decoded)
+	encoded, err := canonicalToolCallArgs(raw)
 	if err != nil {
 		return trimmed
 	}

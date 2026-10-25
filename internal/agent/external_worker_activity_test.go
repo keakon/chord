@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -61,4 +62,36 @@ func containsActivitySubsequence(phases, want []ActivityType) bool {
 		}
 	}
 	return next == len(want)
+}
+
+func TestRunningExternalToolsCountsOnlyStartedUnsettledCalls(t *testing.T) {
+	w := &externalWorker{
+		toolNames: map[string]string{
+			"pending": toolname.Read, "first": toolname.Read, "second": toolname.Read,
+		},
+		toolBindings: map[string]*externalToolBinding{
+			"pending": {}, "first": {started: true}, "second": {started: true},
+			"settled": {started: true, settled: true}, "denied": {settled: true},
+		},
+	}
+	check := func(want int) {
+		t.Helper()
+		w.externalToolStateMu.Lock()
+		defer w.externalToolStateMu.Unlock()
+		if got := w.runningExternalToolsLocked(); got != want {
+			t.Fatalf("running count = %d, want %d", got, want)
+		}
+	}
+	check(2)
+	w.toolBindings["first"].settled = true
+	w.forgetToolName("first")
+	check(1)
+	w.toolBindings["pending"].started = true
+	check(2)
+	w.toolBindings["second"].settled = true
+	w.forgetToolName("second")
+	check(1)
+	w.toolBindings["pending"].settled = true
+	w.forgetToolName("pending")
+	check(0)
 }
