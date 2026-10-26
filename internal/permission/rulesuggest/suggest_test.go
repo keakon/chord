@@ -487,11 +487,34 @@ func TestSuggestRulePatterns_WriteRelativePathDefaultsToDirScope(t *testing.T) {
 	}
 }
 
-func TestSuggestRulePatterns_WriteParentPathDoesNotDefaultToDirScope(t *testing.T) {
+// TestSuggestRulePatterns_OutsideCWDPathDefaultsToDirRule guards that an
+// out-of-cwd path pre-selects the absolute parent directory rule, which the
+// engine matches, instead of the one-off exact file.
+func TestSuggestRulePatterns_OutsideCWDPathDefaultsToDirRule(t *testing.T) {
 	candidates := Suggest("write", `{"path":"../secret/plan.md","content":"..."}`, nil, nil, cwdScope("/home/user/project"))
+	if len(candidates) < 2 {
+		t.Fatalf("expected a literal and a directory candidate: %+v", candidates)
+	}
+	if candidates[0].Pattern != "/home/user/secret/plan.md" || candidates[0].Default {
+		t.Fatalf("literal candidate = %#v, want an unselected exact file", candidates[0])
+	}
+	if got := candidates[1]; got.Pattern != "/home/user/secret/*" || !got.Default {
+		t.Fatalf("candidate[1] = %#v, want default /home/user/secret/*", got)
+	}
+	rs := permission.Ruleset{{Permission: toolname.Write, Pattern: candidates[1].Pattern, Action: permission.ActionAllow}}
+	if got := rs.EvaluatePath(toolname.Write, "../secret/plan.md", cwdScope("/home/user/project")); got != permission.ActionAllow {
+		t.Fatalf("suggested rule %q does not match the confirmed call (got %q)", candidates[1].Pattern, got)
+	}
+}
+
+// TestSuggestRulePatterns_FileCandidatesOmitRecursiveDirRule guards that the
+// edit/write ladder does not offer "dir/**" on top of "dir/*": the engine's
+// "*" already crosses separators, so the recursive spelling repeats it.
+func TestSuggestRulePatterns_FileCandidatesOmitRecursiveDirRule(t *testing.T) {
+	candidates := Suggest("write", `{"path":"internal/tui/app.go","content":"..."}`, nil, nil, cwdScope("/home/user/project"))
 	for _, c := range candidates {
-		if c.Pattern == "../secret/*" && c.Default {
-			t.Fatalf("unexpected default dir candidate for parent path: %+v", c)
+		if c.Pattern == "internal/tui/**" {
+			t.Fatalf("unexpected recursive directory candidate: %+v", candidates)
 		}
 	}
 }
@@ -532,6 +555,25 @@ func TestSuggestRulePatterns_DeleteRanksByRecursiveCoverage(t *testing.T) {
 			if candidate.Broad {
 				t.Fatalf("scoped directory candidate %q must not be marked broad: %+v", candidate.Pattern, candidates)
 			}
+		}
+	}
+}
+
+// TestSuggestRulePatterns_DeleteFoldsNestedDirectoriesIntoAncestor guards that
+// a subdirectory whose ancestor rule is already selected does not take another
+// slot: "artifacts/*" already covers "artifacts/2024/*" at any depth.
+func TestSuggestRulePatterns_DeleteFoldsNestedDirectoriesIntoAncestor(t *testing.T) {
+	paths := []string{"artifacts/2024/q1.log", "artifacts/2024/q2.log", "artifacts/root.log"}
+	candidates := Suggest("delete", `{"paths":[]}`, paths, nil, cwdScope("/home/user/project"))
+	for _, candidate := range candidates {
+		if candidate.Pattern == "artifacts/*" {
+			if !candidate.Default {
+				t.Fatalf("ancestor directory rule should be the default: %+v", candidates)
+			}
+			continue
+		}
+		if candidate.Pattern == "artifacts/2024/*" {
+			t.Fatalf("nested directory rule duplicates its ancestor: %+v", candidates)
 		}
 	}
 }
@@ -660,20 +702,94 @@ func TestSuggestRulePatterns_ApplyPatchWildcardDefaultAskOffersPatchRule(t *test
 	if first.Tool != "apply_patch" || first.Pattern != "internal/*" || !first.Default {
 		t.Fatalf("candidate = %#v, want default apply_patch internal/*", first)
 	}
+	foundWildcard := false
+	for _, c := range candidates {
+		if c.Tool == toolname.ApplyPatch && c.Pattern == "*" && c.Broad && !c.Default {
+			foundWildcard = true
+		}
+	}
+	if !foundWildcard {
+		t.Fatalf("apply_patch candidates must keep a wildcard fallback: %+v", candidates)
+	}
 }
 
 func TestSuggestRulePatterns_ApplyPatchCoversEveryTouchedDirectory(t *testing.T) {
 	paths := []string{"alpha/a.go", "bravo/b.go", "charlie/c.go"}
 	candidates := Suggest("apply_patch", `{}`, paths, nil, cwdScope("/home/user/project"))
-	want := []string{"alpha/*", "bravo/*", "charlie/*"}
-	if len(candidates) != len(want) {
-		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), len(want), candidates)
+	if len(candidates) != 5 {
+		t.Fatalf("candidate count = %d, want 5: %+v", len(candidates), candidates)
 	}
-	for i, pattern := range want {
+	for i, pattern := range []string{"alpha/*", "bravo/*", "charlie/*"} {
 		candidate := candidates[i]
 		if candidate.Tool != toolname.ApplyPatch || candidate.Pattern != pattern || !candidate.Default {
 			t.Fatalf("candidate[%d] = %#v, want default apply_patch %q", i, candidate, pattern)
 		}
+	}
+	// The broad ladder rounds out every group: the repository-wide rule first,
+	// then the tool-wide catch-all. Both stay unselected.
+	if got := candidates[3]; got.Tool != toolname.ApplyPatch || got.Pattern != "**" || got.Default || !got.Broad {
+		t.Fatalf("candidate[3] = %#v, want an unselected broad apply_patch '**'", got)
+	}
+	if got := candidates[4]; got.Tool != toolname.ApplyPatch || got.Pattern != "*" || got.Default || !got.Broad {
+		t.Fatalf("candidate[4] = %#v, want an unselected broad apply_patch '*'", got)
+	}
+}
+
+// TestSuggestRulePatterns_ApplyPatchSiblingDirectoriesEndWithBroadLadder pins
+// the full ladder for files scattered across top-level directories: one narrow
+// rule per directory, then the repository-wide "**", then the tool-wide "*".
+func TestSuggestRulePatterns_ApplyPatchSiblingDirectoriesEndWithBroadLadder(t *testing.T) {
+	paths := []string{"a/x.go", "b/y.go", "c/z.go"}
+	candidates := Suggest("apply_patch", `{}`, paths, nil, cwdScope("/repo"))
+	want := []string{"a/*", "b/*", "c/*", "**", "*"}
+	if len(candidates) != len(want) {
+		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), len(want), candidates)
+	}
+	for i, pattern := range want {
+		if candidates[i].Pattern != pattern {
+			t.Fatalf("candidate[%d] = %q, want %q: %+v", i, candidates[i].Pattern, pattern, candidates)
+		}
+	}
+	for i := range 3 {
+		if !candidates[i].Default {
+			t.Fatalf("narrow candidate[%d] should be the default: %+v", i, candidates)
+		}
+	}
+	if candidates[3].Summary != "any path under the working directory" {
+		t.Fatalf("** summary = %q, want the scope-wide wording", candidates[3].Summary)
+	}
+	for i := 3; i < len(candidates); i++ {
+		if candidates[i].Default || !candidates[i].Broad {
+			t.Fatalf("broad candidate[%d] = %#v, want an unselected broad rule", i, candidates[i])
+		}
+	}
+}
+
+// TestSuggestRulePatterns_ApplyPatchReservesWildcardSlot guards that a group's
+// broad rules survive the candidate cap even when narrow rules fill the rest of
+// the budget: the cap is spent per group, not by truncating a list the
+// fallbacks were appended to.
+func TestSuggestRulePatterns_ApplyPatchReservesWildcardSlot(t *testing.T) {
+	paths := make([]string, 0, 5)
+	for _, dir := range []string{"a", "b", "c", "d", "e"} {
+		paths = append(paths, dir+"/file.go")
+	}
+	candidates := Suggest("apply_patch", `{}`, paths, nil, cwdScope("/home/user/project"))
+	if len(candidates) > maxPatternCandidates {
+		t.Fatalf("candidate count = %d, want at most %d: %+v", len(candidates), maxPatternCandidates, candidates)
+	}
+	last := candidates[len(candidates)-1]
+	if got := last; got.Tool != toolname.ApplyPatch || got.Pattern != "*" || got.Default || !got.Broad {
+		t.Fatalf("last candidate = %#v, want the broad apply_patch '*'", got)
+	}
+	foundRepoWide := false
+	for _, candidate := range candidates {
+		if candidate.Pattern == "**" {
+			foundRepoWide = candidate.Default && candidate.Broad
+		}
+	}
+	if !foundRepoWide {
+		t.Fatalf("expected the default '**' fallback covering the truncated directory: %+v", candidates)
 	}
 }
 
@@ -708,23 +824,33 @@ func TestSuggestRulePatterns_ApplyPatchKeepsEveryBlockedToolGroup(t *testing.T) 
 	if len(candidates) != maxPatternCandidates {
 		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), maxPatternCandidates, candidates)
 	}
-	counts := make(map[string]int, 3)
-	coverage := make(map[string]bool, 3)
+	type group struct {
+		narrow int
+		wild   bool
+	}
+	groups := make(map[string]group, 3)
 	for _, candidate := range candidates {
-		if !candidate.Default {
-			t.Fatalf("candidate should be default-selected: %#v", candidate)
+		state := groups[candidate.Tool]
+		if candidate.Pattern == "*" {
+			if candidate.Default || !candidate.Broad {
+				t.Fatalf("tool-wide catch-all should be available but unselected: %#v", candidate)
+			}
+			state.wild = true
+		} else {
+			if !candidate.Default {
+				t.Fatalf("narrow candidate should be default-selected: %#v", candidate)
+			}
+			state.narrow++
+			if candidate.Pattern != "src/*" {
+				t.Fatalf("group %q narrow candidate = %q, want the ancestor covering every path", candidate.Tool, candidate.Pattern)
+			}
 		}
-		counts[candidate.Tool]++
-		if candidate.Pattern == "src/*" {
-			coverage[candidate.Tool] = true
-		}
+		groups[candidate.Tool] = state
 	}
 	for _, tool := range []string{toolname.Delete, toolname.Write, toolname.ApplyPatch} {
-		if counts[tool] != 2 {
-			t.Fatalf("%s candidate count = %d, want 2: %+v", tool, counts[tool], candidates)
-		}
-		if !coverage[tool] {
-			t.Fatalf("%s group lacks a fallback covering all paths: %+v", tool, candidates)
+		state, ok := groups[tool]
+		if !ok || state.narrow == 0 || !state.wild {
+			t.Fatalf("%s group = %#v, want both a narrow rule and its '*' fallback: %+v", tool, state, candidates)
 		}
 	}
 }
