@@ -2,6 +2,8 @@ package promptcache
 
 import (
 	"crypto/sha256"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,26 +96,31 @@ func TestClassifyCacheOutcome(t *testing.T) {
 		expected         int
 		sinceLastRequest time.Duration
 		usage            *message.TokenUsage
+		cacheObserved    bool
 		wantOutcome      string
 		wantReason       string
 	}{
 		{"local rewrite wins over usage", "prefix_rewrite", 50_000, warm,
-			&message.TokenUsage{CacheReadTokens: 50_000}, cacheOutcomeLocalRewrite, "prefix_rewrite"},
+			&message.TokenUsage{CacheReadTokens: 50_000}, true, cacheOutcomeLocalRewrite, "prefix_rewrite"},
 		{"missing usage is unknown", "", 50_000, warm,
-			nil, cacheOutcomeUnknown, "no_cache_usage"},
-		{"all-zero cache fields are unknown", "", 50_000, warm,
-			&message.TokenUsage{InputTokens: 60_000}, cacheOutcomeUnknown, "no_cache_usage"},
+			nil, true, cacheOutcomeUnknown, "no_cache_usage"},
+		{"all-zero cache fields without history are unknown", "", 50_000, warm,
+			&message.TokenUsage{InputTokens: 60_000}, false, cacheOutcomeUnknown, "no_cache_usage"},
+		{"all-zero cache fields after prior reads are a miss", "", 50_000, warm,
+			&message.TokenUsage{InputTokens: 60_000}, true, cacheOutcomeSuspectedProviderMiss, "low_cache_read"},
+		{"all-zero cache fields after prior reads outside the window are unknown", "", 50_000, cacheWarmWindow + time.Second,
+			&message.TokenUsage{InputTokens: 60_000}, true, cacheOutcomeUnknown, "warm_window_elapsed"},
 		{"tiny expectation stays append", "", minAttributableCacheTokens - 1, warm,
-			&message.TokenUsage{CacheWriteTokens: 500}, cacheOutcomeAppend, ""},
+			&message.TokenUsage{CacheWriteTokens: 500}, false, cacheOutcomeAppend, ""},
 		{"consistent cache read is append", "", 50_000, warm,
-			&message.TokenUsage{CacheReadTokens: 30_000}, cacheOutcomeAppend, ""},
+			&message.TokenUsage{CacheReadTokens: 30_000}, true, cacheOutcomeAppend, ""},
 		{"low read inside warm window is suspected", "", 50_000, warm,
-			&message.TokenUsage{CacheReadTokens: 100, CacheWriteTokens: 49_000}, cacheOutcomeSuspectedProviderMiss, "low_cache_read"},
+			&message.TokenUsage{CacheReadTokens: 100, CacheWriteTokens: 49_000}, false, cacheOutcomeSuspectedProviderMiss, "low_cache_read"},
 		{"low read after warm window is unknown", "", 50_000, cacheWarmWindow + time.Second,
-			&message.TokenUsage{CacheReadTokens: 100, CacheWriteTokens: 49_000}, cacheOutcomeUnknown, "warm_window_elapsed"},
+			&message.TokenUsage{CacheReadTokens: 100, CacheWriteTokens: 49_000}, false, cacheOutcomeUnknown, "warm_window_elapsed"},
 	}
 	for _, tc := range cases {
-		outcome, reason := classifyCacheOutcome(tc.localRewrite, tc.expected, tc.sinceLastRequest, tc.usage)
+		outcome, reason := classifyCacheOutcome(tc.localRewrite, tc.expected, tc.sinceLastRequest, tc.usage, tc.cacheObserved)
 		if outcome != tc.wantOutcome || reason != tc.wantReason {
 			t.Errorf("%s: outcome=%q reason=%q, want %q %q", tc.name, outcome, reason, tc.wantOutcome, tc.wantReason)
 		}
@@ -166,6 +173,51 @@ func TestNoteCacheExpectationAttributesDivergence(t *testing.T) {
 	diag = note("q/m", mutated, hash, time.Now(), nil)
 	if diag["cache_first_request"] != "true" {
 		t.Fatalf("other-ref diag = %v", diag)
+	}
+}
+
+// The estimator attributes bytes to payload the provider prices differently
+// (encrypted reasoning is the large case), so the expectation is bounded by the
+// prompt size the provider itself reported.
+func TestNoteCacheExpectationCapsByProviderPromptSize(t *testing.T) {
+	state := &Expectations{}
+	hash := sha256.Sum256([]byte("tools"))
+	prompt := func() [sha256.Size]byte { return sha256.Sum256([]byte("system")) }
+	note := func(messages []message.Message, sentAt time.Time, usage *message.TokenUsage) map[string]string {
+		return state.Note(Request{ModelRef: "p/m", Messages: messages, ToolDefHash: hash, SentAt: sentAt, Usage: usage, PromptHash: prompt})
+	}
+	base := []message.Message{{Role: message.RoleUser, Content: strings.Repeat("payload ", 2000)}}
+	estimated := ctxmgr.EstimateMessageTokens(base[0])
+	providerTokens := estimated / 3
+	if providerTokens < minAttributableCacheTokens {
+		t.Fatalf("sample too small: estimate=%d", estimated)
+	}
+	note(base, time.Unix(1000, 0), &message.TokenUsage{InputTokens: providerTokens, InputSemanticsKnown: true, InputIncludesCacheRead: true})
+	grown := append(append([]message.Message(nil), base...), message.Message{Role: message.RoleUser, Content: "next"})
+	diag := note(grown, time.Unix(1010, 0), &message.TokenUsage{InputTokens: providerTokens + 5, CacheReadTokens: providerTokens - 100, InputSemanticsKnown: true, InputIncludesCacheRead: true})
+	if got := diag["cache_expected_tokens"]; got != strconv.Itoa(providerTokens) {
+		t.Fatalf("expected tokens = %s, want provider-bounded %d (local estimate %d)", got, providerTokens, estimated)
+	}
+	if diag["cache_outcome"] != cacheOutcomeAppend {
+		t.Fatalf("provider-bounded expectation still misread as a miss: %v", diag)
+	}
+}
+
+// A zero cache read is a lost cache, not a provider without caching, once this
+// ref has reported a cache read before.
+func TestNoteCacheExpectationReportsLostCacheAfterObservedReads(t *testing.T) {
+	state := &Expectations{}
+	hash := sha256.Sum256([]byte("tools"))
+	prompt := func() [sha256.Size]byte { return sha256.Sum256([]byte("system")) }
+	note := func(messages []message.Message, sentAt time.Time, usage *message.TokenUsage) map[string]string {
+		return state.Note(Request{ModelRef: "p/m", Messages: messages, ToolDefHash: hash, SentAt: sentAt, Usage: usage, PromptHash: prompt})
+	}
+	base := []message.Message{{Role: message.RoleUser, Content: strings.Repeat("payload ", 2000)}}
+	note(base, time.Unix(1000, 0), &message.TokenUsage{InputTokens: 4_000, CacheReadTokens: 3_000, InputSemanticsKnown: true, InputIncludesCacheRead: true})
+	grown := append(append([]message.Message(nil), base...), message.Message{Role: message.RoleUser, Content: "next"})
+	diag := note(grown, time.Unix(1010, 0), &message.TokenUsage{InputTokens: 4_100, InputSemanticsKnown: true, InputIncludesCacheRead: true})
+	if diag["cache_outcome"] != cacheOutcomeSuspectedProviderMiss || diag["cache_outcome_reason"] != "low_cache_read" {
+		t.Fatalf("lost cache after observed reads misclassified: %v", diag)
 	}
 }
 

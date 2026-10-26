@@ -31,6 +31,16 @@ type expectationRecord struct {
 	// cache age by the whole streaming duration for both the warm-window
 	// outcome classification and warm-cache routing.
 	SentAt time.Time
+	// ProviderInputTokens is the prompt size the provider reported for this
+	// request, or 0 when its input-token semantics are unknown. The local
+	// estimator attributes bytes to payload the provider prices differently
+	// (encrypted reasoning blobs are the large case), so this number — not the
+	// estimate — bounds what the next request could possibly find cached.
+	ProviderInputTokens int
+	// ObservedCacheRead records that this ref has ever reported a cache read.
+	// An all-zero cache report then means a lost cache, not a provider that
+	// never caches.
+	ObservedCacheRead bool
 }
 
 // incrementalCacheExpectationShapes computes the shape and token-estimate
@@ -82,13 +92,18 @@ const minAttributableCacheTokens = 1024
 // cache reads, a stable local prefix whose provider cache reads fell far short
 // (suspected provider or routing miss), or unknown when the evidence cannot
 // separate those cases.
-func classifyCacheOutcome(localRewriteReason string, expectedTokens int, sinceLastRequest time.Duration, usage *message.TokenUsage) (outcome, reason string) {
+func classifyCacheOutcome(localRewriteReason string, expectedTokens int, sinceLastRequest time.Duration, usage *message.TokenUsage, cacheObserved bool) (outcome, reason string) {
 	if localRewriteReason != "" {
 		return cacheOutcomeLocalRewrite, localRewriteReason
 	}
-	if usage == nil || (usage.CacheReadTokens <= 0 && usage.CacheWriteTokens <= 0 && usage.CacheWrite1hTokens <= 0) {
+	if usage == nil {
+		return cacheOutcomeUnknown, "no_cache_usage"
+	}
+	if usage.CacheReadTokens <= 0 && usage.CacheWriteTokens <= 0 && usage.CacheWrite1hTokens <= 0 && !cacheObserved {
 		// All-zero cache fields cannot distinguish a provider without prompt
-		// caching from a complete miss.
+		// caching from a complete miss. Once this ref has reported a cache
+		// read, though, a zero report is a lost cache rather than a provider
+		// that never caches.
 		return cacheOutcomeUnknown, "no_cache_usage"
 	}
 	if expectedTokens < minAttributableCacheTokens {
@@ -105,6 +120,25 @@ func classifyCacheOutcome(localRewriteReason string, expectedTokens int, sinceLa
 		return cacheOutcomeUnknown, "warm_window_elapsed"
 	}
 	return cacheOutcomeSuspectedProviderMiss, "low_cache_read"
+}
+
+// providerPromptTokens returns the provider-reported prompt size, or 0 when the
+// provider does not state that input tokens already include cache reads: a
+// provider reporting only the uncached remainder would otherwise cap the
+// expectation far below the real prompt.
+func providerPromptTokens(usage *message.TokenUsage) int {
+	if usage == nil || usage.InputTokens <= 0 || !usage.InputSemanticsKnown || !usage.InputIncludesCacheRead {
+		return 0
+	}
+	return usage.InputTokens
+}
+
+// observedCacheRead reports whether this ref has ever returned a cache read.
+func observedCacheRead(previous *expectationRecord, usage *message.TokenUsage) bool {
+	if previous != nil && previous.ObservedCacheRead {
+		return true
+	}
+	return usage != nil && usage.CacheReadTokens > 0
 }
 
 // Request is the projected input evidence for a completed provider attempt.
@@ -148,12 +182,14 @@ func (s *Expectations) Note(request Request) map[string]string {
 		totalTokens += t
 	}
 	record := &expectationRecord{
-		Source:      source,
-		Shapes:      shapes,
-		Tokens:      tokens,
-		ToolDefHash: toolDefHash,
-		PromptHash:  request.PromptHash(),
-		SentAt:      sentAt,
+		Source:              source,
+		Shapes:              shapes,
+		Tokens:              tokens,
+		ToolDefHash:         toolDefHash,
+		PromptHash:          request.PromptHash(),
+		SentAt:              sentAt,
+		ProviderInputTokens: providerPromptTokens(usage),
+		ObservedCacheRead:   observedCacheRead(previous, usage),
 	}
 
 	s.mu.Lock()
@@ -184,6 +220,11 @@ func (s *Expectations) Note(request Request) map[string]string {
 	expected := 0
 	for i := 0; i < divergence; i++ {
 		expected += previous.Tokens[i]
+	}
+	// The provider cannot hold more of this ref than the prompt it actually
+	// received last time, so that reported size caps the local estimate.
+	if previous.ProviderInputTokens > 0 {
+		expected = min(expected, previous.ProviderInputTokens)
 	}
 	toolDefChanged := previous.ToolDefHash != toolDefHash
 	promptChanged := previous.PromptHash != record.PromptHash
@@ -220,7 +261,7 @@ func (s *Expectations) Note(request Request) map[string]string {
 	case prefixRewrite:
 		localRewriteReason = "prefix_rewrite"
 	}
-	outcome, reason := classifyCacheOutcome(localRewriteReason, expected, sentAt.Sub(previous.SentAt), usage)
+	outcome, reason := classifyCacheOutcome(localRewriteReason, expected, sentAt.Sub(previous.SentAt), usage, record.ObservedCacheRead)
 	diag["cache_outcome"] = outcome
 	if reason != "" {
 		diag["cache_outcome_reason"] = reason
