@@ -15,13 +15,13 @@ GOPLS ?= gopls
 MODERNIZE_VERSION ?= v0.50.0
 MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
-.PHONY: ci preflight fmt fmt-check deps-check test test-fast test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check bench-tui clean
+.PHONY: ci preflight fmt fmt-check deps-check test test-fast test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check bench-tui clean
 
-ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check
+ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check
 
 # Same Go gates as .githooks/pre-push; docs checks stay in the hook because
 # they depend on the changed paths.
-preflight: fmt-check deps-check vet staticcheck modernize-check test-fast
+preflight: fmt-check deps-check vet staticcheck modernize-check test-fast resource-scripts-check
 
 # fmt / fmt-check cover every Go file Git tracks or would add. Ignored private
 # trees (for example .chord/) must never block the gate or get rewritten by it.
@@ -81,6 +81,10 @@ docs-check:
 
 docs-examples-check:
 	./scripts/check_docs_examples.sh
+
+resource-scripts-check:
+	bash -n scripts/test_tmpdir.sh scripts/test_tmpdir_ownership.sh
+	bash scripts/test_tmpdir_ownership.sh
 
 bench-tui:
 	./scripts/bench_tui_regression.sh

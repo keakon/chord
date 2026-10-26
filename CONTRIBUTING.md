@@ -125,14 +125,17 @@ it or recreate the RAM disk with `scripts/test_tmpdir.sh --destroy`.
 To create one yourself:
 
 - **Linux**: `/dev/shm` is already a tmpfs, so `TMPDIR=/dev/shm` works — provided it allows executing files (Go runs the test binary from there) and has room; containers mount it `noexec` and only 64 MiB, so check with `findmnt /dev/shm` first. A dedicated tmpfs (`sudo mount -t tmpfs -o size=2g,exec tmpfs /mnt/ram`) is equivalent.
-- **macOS**: `scripts/test_tmpdir.sh` creates an APFS RAM disk for you; to do it by hand:
+- **macOS**: `scripts/test_tmpdir.sh` reuses `/Volumes/ChordTestRam` whenever it is writable and allows exec, and creates a new APFS RAM disk only when no usable mount is present. Both the Chord and chord-gateway helpers use the same owner record under `~/Library/Caches/chord-test-tmpdir`; the record stores the mounted device, volume UUID, parent disk, and attached physical store. `--destroy` ejects that physical store only when the mount still matches the first three fields and the store still backs the parent. A mount without a record is reused but left in place by `--destroy`. To create a disk by hand:
 
   ```bash
   dev=$(hdiutil attach -nomount ram://8388608 | awk '{print $1}')
   diskutil erasevolume APFS ChordTestRam "$dev"   # APFS, not HFS+
   ```
 
-  Use APFS: HFS+ timestamps have one-second granularity, which breaks tests that detect an external edit by mtime. Detach it later with `scripts/test_tmpdir.sh --destroy`.
+  Use APFS: HFS+ timestamps have one-second granularity, which breaks tests that detect an external edit by mtime. A manually created disk has no owner record, so keep `$dev` and eject it with `diskutil eject "$dev"`; `scripts/test_tmpdir.sh --destroy` refuses to eject unverified mounts.
+
+Run `scripts/test_tmpdir_ownership.sh` after changing the helper's ownership behavior.
+
 - **Windows**: there is no built-in memory filesystem, and Go reads `TMP`/`TEMP`, not `TMPDIR`. Either install a RAM-disk tool and point `TMP`/`TEMP` at it, or point them at a fast SSD. `make test-fast` exports `TMPDIR`, `TMP`, and `TEMP` together, so the same path works under Git Bash.
 
 Any other test entry point can reuse the directory by prefixing the variable, for example:
