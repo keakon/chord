@@ -130,24 +130,41 @@ func (r *compactionFileReplay) replay(messages []message.Message, checkpoint int
 		}
 		total += v.bytes
 	}
-	changed := len(r.versions) == 0 || !reflect.DeepEqual(r.versions[len(r.versions)-1].message.Parts, current.Parts)
-	// Bound both retained content and per-version metadata. At the bound a
-	// fresh snapshot takes precedence over cache reuse; no stale copy survives.
-	if total > budget || changed && (total+bytes > budget || len(r.versions) >= 8) {
-		reset = true
-	}
 	if reset {
 		r.clear()
 		r.checkpoint, r.root, r.paths = signature, root, paths
 	}
-	if len(r.versions) == 0 || changed {
-		before := len(messages)
-		if len(r.versions) == 0 {
-			before = checkpoint + 1
+	changed := len(r.versions) == 0 || !reflect.DeepEqual(r.versions[len(r.versions)-1].message.Parts, current.Parts)
+	if changed {
+		switch {
+		case len(r.versions) == 0:
+			// Nothing after a fresh checkpoint is cached yet, so the bundle can
+			// sit directly behind it without replacing a published item.
+			r.versions = append(r.versions, compactionFileVersion{
+				before: checkpoint + 1, anchor: compactionFileAnchor(messages[checkpoint]), message: current, bytes: bytes,
+			})
+		case total+bytes <= budget && len(r.versions) < compactionInjectedFilesMaxVersions:
+			// Appending at the tail leaves every earlier byte in place, so the
+			// prefix the provider already cached keeps matching.
+			r.versions = append(r.versions, compactionFileVersion{
+				before: len(messages), anchor: compactionFileAnchor(messages[len(messages)-1]), message: current, bytes: bytes,
+			})
+		default:
+			// The bundle is at its byte or version bound. Refresh the newest
+			// published position in place instead of restarting the bundle
+			// behind the checkpoint: rewriting that early item invalidates
+			// every message after it, while the newest position only costs the
+			// messages appended since it was published. Older versions stay
+			// byte-identical, so they keep hitting the provider cache, and only
+			// trailing versions are dropped as far as the refreshed bundle
+			// needs room.
+			for len(r.versions) > 1 && total-r.versions[len(r.versions)-1].bytes+bytes > budget {
+				total -= r.versions[len(r.versions)-1].bytes
+				r.versions = r.versions[:len(r.versions)-1]
+			}
+			last := &r.versions[len(r.versions)-1]
+			last.message, last.bytes = current, bytes
 		}
-		r.versions = append(r.versions, compactionFileVersion{
-			before: before, anchor: compactionFileAnchor(messages[before-1]), message: current, bytes: bytes,
-		})
 	}
 	out := make([]message.Message, 0, len(messages)+len(r.versions))
 	start := 0

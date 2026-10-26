@@ -23,6 +23,12 @@ const (
 	compactionInjectedFilesMaxBytes = 48 * 1024
 	compactionInjectedFilesMinBytes = 8 * 1024
 
+	// compactionInjectedFilesMaxVersions bounds the snapshot history a single
+	// request carries. Each retained version is a published position the
+	// provider may already have cached, so the cap trades request bytes for
+	// prefix stability instead of collapsing the history.
+	compactionInjectedFilesMaxVersions = 8
+
 	// Post-compaction re-injection budget policy.
 	//
 	// The must-restore layer travels inside the checkpoint message itself

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -146,8 +147,20 @@ func TestCompactionFileReplayBoundsAndCheckpointReset(t *testing.T) {
 		t.Fatal("expected two versions")
 	}
 	out := r.replay(raw, 0, "checkpoint", "/root", snapshot("latest"), 10, 25)
-	if len(r.versions) != 1 || !strings.Contains(out[1].Parts[1].Text, "latest") {
-		t.Fatal("budget did not replace history with current snapshot")
+	if len(r.versions) != 2 || !strings.Contains(out[1].Parts[1].Text, "old") {
+		t.Fatal("budget pressure rewrote a version the provider may already cache")
+	}
+	if !strings.Contains(out[len(out)-1].Parts[1].Text, "latest") {
+		t.Fatal("budget pressure lost the refreshed snapshot")
+	}
+	for i := range 5 {
+		out = r.replay(raw, 0, "checkpoint", "/root", snapshot(fmt.Sprintf("refresh-%d", i)), 10, 25)
+		if len(r.versions) != 2 {
+			t.Fatalf("over-budget refresh grew the version list to %d", len(r.versions))
+		}
+	}
+	if !strings.Contains(out[len(out)-1].Parts[1].Text, "refresh-4") {
+		t.Fatal("repeated budget refresh kept a stale snapshot")
 	}
 	r.replay(raw, 0, "next checkpoint", "/root", snapshot("latest"), 10, 25)
 	if len(r.versions) != 1 || r.checkpoint != "next checkpoint" {
@@ -158,10 +171,16 @@ func TestCompactionFileReplayBoundsAndCheckpointReset(t *testing.T) {
 		t.Fatal("workspace change retained prior replay state")
 	}
 	for i := range 20 {
-		r.replay(raw, 0, "next checkpoint", "/other-root", snapshot(strings.Repeat("x", i+1)), 1, 10000)
-		if len(r.versions) > 8 {
+		out = r.replay(raw, 0, "next checkpoint", "/other-root", snapshot(strings.Repeat("x", i+1)), 1, 10000)
+		if len(r.versions) > compactionInjectedFilesMaxVersions {
 			t.Fatal("unbounded snapshot versions")
 		}
+	}
+	if !strings.Contains(out[len(out)-1].Parts[1].Text, strings.Repeat("x", 20)) {
+		t.Fatal("version-count bound kept a stale snapshot")
+	}
+	if !strings.Contains(out[1].Parts[1].Text, "other workspace") {
+		t.Fatal("version-count bound moved the first published bundle")
 	}
 }
 
