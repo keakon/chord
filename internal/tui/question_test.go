@@ -24,6 +24,9 @@ type questionResolverAgent struct {
 	// response that loses its race with the deadline comes back as no_response.
 	terminal string
 	calls    []questionResolveCall
+	// interactCalls counts accepted QuestionOpInteract operations, which the
+	// calls slice deliberately skips.
+	interactCalls int
 }
 
 type questionResolveCall struct {
@@ -39,7 +42,11 @@ func (a *questionResolverAgent) ApplyQuestionOperation(_ context.Context, op age
 	if op.Operation == agent.QuestionOpWithdraw {
 		reason = tools.QuestionOutcomeCancelled
 	}
-	if op.Operation == agent.QuestionOpInteract || op.Operation == agent.QuestionOpPresented {
+	if op.Operation == agent.QuestionOpInteract {
+		a.interactCalls++
+		return agent.QuestionReceipt{Accepted: true}, nil
+	}
+	if op.Operation == agent.QuestionOpPresented {
 		return agent.QuestionReceipt{Accepted: true}, nil
 	}
 	a.calls = append(a.calls, questionResolveCall{answers: op.Answers, reason: reason, requestID: op.QuestionID, op: op.Operation, userText: op.UserText})
@@ -77,10 +84,10 @@ func TestQuestionTextOnlySupportsMultilineSubmit(t *testing.T) {
 	}
 	m.question.input.Focus()
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}), m.question.request.Item)
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}), m.question.request.Item)
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "b", Code: 'b'}), m.question.request.Item)
-	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item))
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}))
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}))
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "b", Code: 'b'}))
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})))
 
 	if len(backend.calls) != 1 {
 		t.Fatalf("resolve calls = %d, want 1", len(backend.calls))
@@ -107,7 +114,7 @@ func TestQuestionSubmitPreservesLeadingWhitespace(t *testing.T) {
 	m.question.input.Focus()
 	m.question.input.SetValue("  foo\n bar")
 
-	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item))
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})))
 
 	if len(backend.calls) != 1 || len(backend.calls[0].answers) != 1 {
 		t.Fatalf("resolve calls = %+v, want one answer", backend.calls)
@@ -134,11 +141,10 @@ func TestQuestionCustomSupportsCtrlJNewline(t *testing.T) {
 	}
 	m.question.input.Focus()
 
-	q := m.question.request.Item
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "x", Code: 'x'}), q)
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModCtrl}), q)
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}), q)
-	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), q))
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "x", Code: 'x'}))
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModCtrl}))
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})))
 
 	if len(backend.calls) != 1 || len(backend.calls[0].answers) != 1 {
 		t.Fatalf("resolve calls = %+v, want one answer", backend.calls)
@@ -164,7 +170,7 @@ func TestQuestionSubmitSurfacesRefusedResponse(t *testing.T) {
 	m.question.input.Focus()
 	m.question.input.SetValue("late")
 
-	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item))
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})))
 
 	if len(backend.calls) != 1 {
 		t.Fatalf("resolve calls = %d, want 1", len(backend.calls))
@@ -193,7 +199,7 @@ func TestQuestionSubmitReportsTheWinningTerminalReason(t *testing.T) {
 	m.question.input.Focus()
 	m.question.input.SetValue("late")
 
-	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item))
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})))
 
 	if m.activeToast == nil {
 		t.Fatal("a response that lost its race with the deadline must surface a toast")
@@ -204,18 +210,16 @@ func TestQuestionSubmitReportsTheWinningTerminalReason(t *testing.T) {
 }
 
 // A question can only be answered or cancelled — there is no "declined" state.
-// Esc cancels: it withdraws the question's requirement and closes the dialog,
-// so a required question is never left parked with no way to resolve it. The
-// withdrawal carries an explicit user-facing sentence naming the question, so
-// the transcript reads like any other cancelled tool call.
+// Esc on the option list cancels: it withdraws the question's requirement and
+// closes the dialog, so a required question is never left parked with no way to
+// resolve it. The withdrawal carries an explicit user-facing sentence naming the
+// question, so the transcript reads like any other cancelled tool call.
 func TestQuestionEscCancels(t *testing.T) {
 	backend := &questionResolverAgent{accepted: true}
 	m := NewModelWithSize(backend, 80, 24)
 	snap := questionEventForTest("q-1", "Choice", "Choose", []string{"one"}, nil, false, time.Time{}, "main").Question
 	m.mode = ModeInsert
 	m.handleQuestionState(snap)
-	m.question.custom = true
-	m.question.input.SetValue("draft")
 	runQuestionCmd(&m, m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})))
 	if len(backend.calls) != 1 || backend.calls[0].op != agent.QuestionOpWithdraw {
 		t.Fatalf("Esc must cancel (withdraw), calls = %+v", backend.calls)
@@ -227,6 +231,61 @@ func TestQuestionEscCancels(t *testing.T) {
 		t.Fatalf("withdrawal text = %q, want no raw question ID", backend.calls[0].userText)
 	}
 	if m.mode != ModeInsert || m.question.request != nil {
+		t.Fatal("cancelling must close the dialog")
+	}
+}
+
+// Esc in the custom text input goes back to the option list instead of
+// cancelling: the dialog stays open and the draft is kept for the next custom
+// edit, mirroring the Tab binding. Cancelling is an option-list action, so a
+// second Esc from the option list withdraws the question.
+func TestQuestionEscInCustomInputReturnsToOptions(t *testing.T) {
+	backend := &questionResolverAgent{accepted: true}
+	m := NewModelWithSize(backend, 80, 24)
+	snap := questionEventForTest("q-esc", "Choice", "Choose", []string{"one"}, nil, false, time.Time{}, "main").Question
+	m.mode = ModeInsert
+	m.handleQuestionState(snap)
+	m.question.custom = true
+	m.question.input.SetValue("draft")
+	runQuestionCmd(&m, m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})))
+	if len(backend.calls) != 0 {
+		t.Fatalf("Esc in the custom input must not resolve the question, calls = %+v", backend.calls)
+	}
+	if backend.interactCalls != 1 {
+		t.Fatalf("Esc back to the option list must count as user interaction, interactCalls = %d", backend.interactCalls)
+	}
+	if m.question.request == nil {
+		t.Fatal("Esc in the custom input must leave the dialog open")
+	}
+	if m.question.custom {
+		t.Fatal("Esc in the custom input must return to the option list")
+	}
+	if got := m.question.input.Value(); got != "draft" {
+		t.Fatalf("draft = %q, want it kept for the next custom edit", got)
+	}
+	runQuestionCmd(&m, m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})))
+	if len(backend.calls) != 1 || backend.calls[0].op != agent.QuestionOpWithdraw {
+		t.Fatalf("Esc on the option list must cancel (withdraw), calls = %+v", backend.calls)
+	}
+	if m.question.request != nil {
+		t.Fatal("cancelling must close the dialog")
+	}
+}
+
+// Text-only questions have no option list to return to, so Esc keeps its cancel
+// binding while the text input is focused.
+func TestQuestionEscCancelsTextOnly(t *testing.T) {
+	backend := &questionResolverAgent{accepted: true}
+	m := NewModelWithSize(backend, 80, 24)
+	snap := questionEventForTest("q-log", "Log", "paste log", nil, nil, false, time.Time{}, "main").Question
+	m.mode = ModeInsert
+	m.handleQuestionState(snap)
+	m.question.input.SetValue("partial draft")
+	runQuestionCmd(&m, m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})))
+	if len(backend.calls) != 1 || backend.calls[0].op != agent.QuestionOpWithdraw {
+		t.Fatalf("Esc must cancel a text-only question, calls = %+v", backend.calls)
+	}
+	if m.question.request != nil {
 		t.Fatal("cancelling must close the dialog")
 	}
 }
@@ -340,21 +399,20 @@ func TestQuestionTextInputSupportsUpDownNavigation(t *testing.T) {
 		input:   newQuestionTextarea(m.width),
 	}
 	m.question.input.Focus()
-	q := m.question.request.Item
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}), q)
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}), q)
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "b", Code: 'b'}), q)
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}))
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}))
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "b", Code: 'b'}))
 	if got := m.question.input.Line(); got != 1 {
 		t.Fatalf("line before navigation = %d, want 1", got)
 	}
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}), q)
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
 	if got := m.question.input.Line(); got != 0 {
 		t.Fatalf("line after up = %d, want 0", got)
 	}
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}), q)
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 	if got := m.question.input.Line(); got != 1 {
 		t.Fatalf("line after down = %d, want 1", got)
 	}

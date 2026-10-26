@@ -13,23 +13,27 @@ import (
 func (m *Model) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
 	cmd := m.handleQuestionKeyInput(msg)
 	var interact tea.Cmd
-	// Selection keys can submit directly. Only send an interaction operation
-	// when this key leaves the dialog open, avoiding concurrent state commits.
-	if msg.String() != "esc" && !m.question.submitting {
+	// Selection keys can submit directly. Every key that closes the dialog
+	// sets submitting before it gets here, so the keys that find submitting
+	// unset are exactly the ones that leave the dialog open — only those send
+	// an interaction operation, avoiding concurrent state commits.
+	if !m.question.submitting {
 		interact = m.beginQuestionInteraction()
 	}
 	return tea.Batch(interact, cmd)
 }
 
 func (m *Model) handleQuestionKeyInput(msg tea.KeyMsg) tea.Cmd {
-	if m.question.request == nil {
+	if m.question.request == nil || m.question.submitting {
 		return nil
 	}
 	if msg.String() == "esc" {
+		// In the custom text input Esc returns to the option list; only the
+		// option list (and text-only questions) bind Esc to cancel.
+		if m.question.custom && m.leaveQuestionCustomInput() {
+			return nil
+		}
 		return m.cancelQuestion()
-	}
-	if m.question.submitting {
-		return nil
 	}
 	if msg.String() == "pgup" || msg.String() == "pgdown" {
 		delta := max(m.question.visibleBodyHeight, 1)
@@ -50,7 +54,7 @@ func (m *Model) handleQuestionKeyInput(msg tea.KeyMsg) tea.Cmd {
 
 	// If custom text input is focused, route most keys to the textarea.
 	if m.question.custom || len(q.Options) == 0 {
-		return m.handleQuestionTextKey(msg, q)
+		return m.handleQuestionTextKey(msg)
 	}
 
 	return m.handleQuestionOptionKey(msg, q)
@@ -140,17 +144,13 @@ func (m *Model) handleQuestionOptionKey(msg tea.KeyMsg, q tools.QuestionItem) te
 		m.question.input.Focus()
 		m.recalcViewportSize()
 		return textareaBlinkCmd()
-
-	// Cancel
-	case msg.Key().Code == tea.KeyEscape:
-		return m.cancelQuestion()
 	}
 
 	return nil
 }
 
 // handleQuestionTextKey handles keys while the custom text input is focused.
-func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.Cmd {
+func (m *Model) handleQuestionTextKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case isPlainKey(msg, tea.KeyEnter):
 		text := m.question.input.Value()
@@ -159,18 +159,9 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 		}
 		return m.resolveQuestion([]string{text})
 
-	case msg.Key().Code == tea.KeyEscape:
-		return m.cancelQuestion()
-
 	case msg.Key().Code == tea.KeyTab:
-		if len(q.Options) > 0 {
-			// Tab goes back to option selection.
-			m.question.custom = false
-			m.question.followCursor = true
-			m.question.input.Blur()
-			m.recalcViewportSize()
-			return nil
-		}
+		// Tab goes back to option selection.
+		m.leaveQuestionCustomInput()
 		return nil
 
 	default:
@@ -178,6 +169,20 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 		m.question.input, cmd = m.question.input.Update(msg)
 		return cmd
 	}
+}
+
+// leaveQuestionCustomInput returns from the custom text input to the option
+// list and keeps the draft. It reports whether there was an option list to
+// return to; text-only questions have none.
+func (m *Model) leaveQuestionCustomInput() bool {
+	if m.question.request == nil || len(m.question.request.Item.Options) == 0 {
+		return false
+	}
+	m.question.custom = false
+	m.question.followCursor = true
+	m.question.input.Blur()
+	m.recalcViewportSize()
+	return true
 }
 
 // submitCurrentQuestion submits selected options in their display order.
@@ -208,8 +213,9 @@ func (m *Model) submitQuestionOperation(op agent.QuestionOperation) tea.Cmd {
 
 // cancelQuestion withdraws the question's requirement. A question can only be
 // answered or cancelled — there is no "declined" state that keeps the
-// requirement pending while hiding the dialog — so Esc cancels it outright, and
-// it is the only binding that does. The withdrawal carries an explicit
+// requirement pending while hiding the dialog — so Esc cancels it from the
+// option list, and it is the only binding that does; in the custom text input
+// Esc first returns to the option list. The withdrawal carries an explicit
 // user-facing sentence naming the question, so the transcript reads like any
 // other cancelled tool call instead of a raw question ID. Every other key,
 // Ctrl+W included, stays an ordinary editing key: a terminal that intercepts it

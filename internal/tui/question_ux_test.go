@@ -121,6 +121,19 @@ func TestQuestionDeadlineAndEditorFitSixRows(t *testing.T) {
 	}
 }
 
+func TestQuestionCustomEditorCompactHintReturnsToOptions(t *testing.T) {
+	m := NewModelWithSize(nil, 40, 5)
+	m.question = questionState{
+		request: &QuestionRequest{Item: tools.QuestionItem{Header: "Details", Question: "Add details", Options: []tools.QuestionOption{{ID: "first", Label: "First"}}}},
+		input:   newQuestionTextarea(40), custom: true,
+	}
+	m.question.input.SetValue("My answer")
+	rendered := terminaltext.StripANSI(m.renderQuestionDialog())
+	if !strings.Contains(rendered, "send") || !strings.Contains(rendered, "options") || strings.Contains(rendered, "cancel") {
+		t.Fatalf("custom editor compact hint must return Esc to options:\n%s", rendered)
+	}
+}
+
 func TestQuestionUnicodeAndDeadlineFitShortTerminal(t *testing.T) {
 	m := NewModelWithSize(nil, 32, 12)
 	m.question = questionState{

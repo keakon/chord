@@ -13,7 +13,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Breaking Changes
 
-- Questions can only be answered or cancelled: the `declined` outcome and the `decline` operation are removed, and `question_resolved` no longer reports `declined`. `Esc` in the question dialog now cancels (withdraws) the question instead of declining it, so a required question is never left parked with no way to resolve it, and cancelling one question of a batch releases the requirements of the ones you never saw. `Esc` is the only in-dialog cancel binding: `Ctrl+W` no longer withdraws a question and stays an ordinary text-editing key. Headless clients that sent `decline` must send `answer` or `withdraw_requirement` instead.
+- Questions can only be answered or cancelled: the `declined` outcome and the `decline` operation are removed, and `question_resolved` no longer reports `declined`. `Esc` on the option list now cancels (withdraws) the question instead of declining it, so a required question is never left parked with no way to resolve it; in the custom answer editor `Esc` returns to the option list and keeps the draft. Cancelling one question of a batch releases the requirements of the ones you never saw. `Esc` cancels only from the option list — a question without options also cancels from its text editor — and `Ctrl+W` no longer withdraws a question, staying an ordinary text-editing key. Headless clients that sent `decline` must send `answer` or `withdraw_requirement` instead.
 
 - Restored sessions no longer interpret unstructured read-output range footers. Read affected files again to restore structured range metadata for request trimming; saved conversation text remains intact.
 

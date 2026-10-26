@@ -158,8 +158,12 @@ func (m *Model) renderQuestionDialog() string {
 	} else if q.Multiple {
 		secondary = hintLine(hint("Space", "toggle"), hint("Tab", "custom"))
 	}
+	escAction := "cancel"
+	if m.question.custom && len(q.Options) > 0 {
+		escAction = "options"
+	}
 	cfg.CompactHint = hintLine(
-		primaryHint("Enter", action), hint("Esc", "cancel"),
+		primaryHint("Enter", action), hint("Esc", escAction),
 	) + "\n" + secondary
 	if !m.question.deadline.IsZero() {
 		secs := int(ceilDuration(max(time.Until(m.question.deadline), 0), time.Second) / time.Second)
@@ -257,8 +261,7 @@ func questionHint(q tools.QuestionItem, customMode bool) string {
 		return hintLine(
 			primaryHint("Enter", "submit"),
 			hint("Shift+Enter/Ctrl+J", "new line"),
-			hint("Tab", "options"),
-			hint("Esc", "cancel"),
+			hint("Tab/Esc", "options"),
 		)
 	}
 
