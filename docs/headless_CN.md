@@ -10,9 +10,9 @@ MainAgent 的 `send` 支持 `delivery_policy: "next_request"`（默认）和 `"a
 {"type":"send","request_id":"request-1","content":"Check the documentation","delivery_policy":"after_completion"}
 ```
 
-`ready`、`ready_paused`、`session_switched` 和 `status_response` 可包含 `input_queue`。缺失或 null 表示尚未取得投影；空 `inputs` 数组表示确认空队列。订阅 `input_queue_changed` 获取变化。投影包含 runtime/session 身份、`view_version`、`queue_revision`、暂停状态、工作结果，以及最多 128 项输入摘要；每项预览最多 160 个 Unicode 字符，附件只返回数量，不包含二进制或附件路径。先校验 runtime/session，再比较 `view_version`；`queue_revision` 用于持久 CAS，存储错误变化时可能保持不变。
+`ready`、`ready_paused`、`session_switched` 和 `status_response` 可包含 `input_queue`。缺失或 null 表示尚未取得投影；空 `inputs` 数组表示确认空队列。订阅 `input_queue_changed` 获取变化。投影包含 runtime/session 身份、`view_version`、`view_version_cas`、`queue_revision`、暂停状态、工作结果，以及最多 128 项输入摘要；每项预览最多 160 个 Unicode 字符，附件只返回数量，不包含二进制或附件路径。先校验 runtime/session，再比较 `view_version`；`queue_revision` 用于持久 CAS，存储错误变化时可能保持不变。`view_version_cas: true` 表示服务端会按该版本检查视图相关操作。
 
-`input_queue` 操作须提供唯一 `operation_id`、要求绑定时的当前 `binding_id`，以及从投影取得的完整 `target`：`runtime_id`、`session_id`、`session_epoch`、`owner_task_id`、`work_dir_generation`。owner 必须为 `main`。回执 `input_queue_result` 不受事件订阅过滤，返回 `committed`、`rejected`、`conflict` 或 `unknown`，并携带当前版本。
+`input_queue` 操作须提供唯一 `operation_id`、要求绑定时的当前 `binding_id`，以及从投影取得的完整 `target`：`runtime_id`、`session_id`、`session_epoch`、`owner_task_id`、`work_dir_generation`。owner 必须为 `main`。需要确保操作只应用到当前展示的投影时，应携带非零 `expected_view_version`；视图版本过期时返回 `conflict`，操作不会执行。Chord 在 headless 收到命令时和 MainAgent 处理操作时都会检查版本；持久改动还会在保存前比较输入或队列修订号。`input_queue_result` 不受事件订阅过滤，返回 `committed`、`rejected`、`conflict` 或 `unknown`，并携带当前版本。
 
 | 操作 | 额外必需字段 |
 | --- | --- |
@@ -275,7 +275,9 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 }
 ```
 
-`action` 要与模型/运行时提供的选项一致（如 `allow`、`deny`、`allow_once` 等）。可选的 `rule_pattern` + `rule_scope`（`session` / `project` / `user_global`）会在这次答复的同时安装一条权限规则；可选的 `rule_tool` 指定规则所属的工具，缺省为本次确认的工具——拦截来自 write/delete 规则时（例如 apply_patch 移动源路径触发 delete ask）需要用它把规则装到对应工具下。`confirm_request` 会在 `needs_approval_rule_items` 和 `already_allowed_rule_items` 里带上匹配到的 `{tool, pattern}`，客户端把对应项的 tool 传给 `rule_tool` 即可。想一次安装多条建议时，改用 `rule_items` 替代单条 `rule_pattern`/`rule_tool`；每项可带 `tool`（缺省为本次确认的工具），`pattern` 必填。所有规则字段都省略时表示一次性决策。`session` 只在当前会话内生效；`project` 写入当前项目的 `.chord/agents/<role>.yaml`；`user_global` 写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。
+`action` 要与模型/运行时提供的选项一致（如 `allow`、`deny`、`allow_once` 等）。可选的 `rule_pattern` + `rule_scope`（`session` / `project` / `user_global`）会在这次答复的同时安装一条权限规则；可选的 `rule_tool` 指定规则所属的工具，缺省为本次确认的工具。拦截来自 write/delete 规则时（例如 apply_patch 移动源路径触发 delete ask），需要用 `rule_tool` 指定实际被拦截的工具。`confirm_request` 会在 `needs_approval_rule_items` 和 `already_allowed_rule_items` 里带上匹配到的 `{tool, pattern}`，客户端把对应项的 tool 传给 `rule_tool` 即可。想一次安装多条建议时，改用 `rule_items` 替代单条 `rule_pattern`/`rule_tool`；每项可带 `tool`（缺省为本次确认的工具），`pattern` 必填。所有规则字段都省略时表示一次性决策。`session` 只在当前会话内生效；`project` 写入当前项目的 `.chord/agents/<role>.yaml`；`user_global` 写入用户配置目录的 `agents/<role>.yaml`（默认 `~/.config/chord/agents/<role>.yaml`）。
+
+Chord 收到带 request ID 的规则意图后，会在尝试写入规则后发送 `confirm_rule_intent_result`。该 envelope 始终发送，不受订阅过滤，内容包含 `request_id` 和 `results`；每条结果包含 `tool`、`pattern`，保存失败时还带 `error`。此回执单独报告规则保存结果，不改变确认决定；规则写入失败不会撤销已批准的调用。
 
 只要 headless 会话和事件流仍处于活动状态，每条送达客户端的 `confirm_request` 都会进入终态，并以 `confirm_resolved` 事件推送：`approved` / `denied` 是客户端作答的回执；`timeout` 表示到期后无人作答、已自动拒绝；`cancelled` 表示等待提前结束。收到该事件就收起提示，不要再回答——对已终结的请求发 `confirm`，运行时只会忽略。服务端关闭时可能在终态事件发送前停止事件投递；事件流或会话关闭后，客户端应清除本地未决确认。
 
@@ -350,7 +352,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 {"type":"image_artifact","request_id":"download-1","content":"artifact:images/sha256-<digest>.png"}
 ```
 
-响应使用相同分块格式，并回传 `request_id`。只接受当前会话中的生成图片引用，拒绝任意磁盘路径和其他会话的文件。该命令不会调用生图服务。Gateway 订阅图片结果后，需要拼接数据并通过对应聊天平台的文件或图片 API 转发。
+响应使用相同分块格式，并回传 `request_id`。只接受当前会话中的生成图片引用，拒绝任意磁盘路径和其他会话的文件。若会话 artifact 不可用或原图无法读取，`error` payload 也会回传 `request_id`，供客户端结束对应请求。该命令不会调用生图服务。Gateway 订阅图片结果后，需要拼接数据并通过对应聊天平台的文件或图片 API 转发。
 
 ## 事件
 
@@ -363,11 +365,12 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 | `ready`              | 服务启动完成，可以接受命令                   | `session_id`，以及可选 worktree 信息：`name`、`branch`、`path`、`repo_root` |
 | `question_receipt` | 问题操作的可靠接纳回执 | `operation_id`、`request_id`、`accepted`、`status`、`version`、`error` |
 | `input_result` | 带 `request_id` 的 `send` 的消费回执 | `request_id`、`status`、可选 `turn_id` / `message` |
+| `confirm_rule_intent_result` | 确认附带规则的保存结果 | `request_id`、`results[]`（含 `tool`、`pattern` 和可选 `error`） |
 | `subscribe_response` | 响应 `subscribe`                             | `events` |
 | `status_response`    | 响应 `status`                                | 见 [`status`](#status) |
 | `models_response`    | 响应 `models`                                | `ok`、`message`、`status` |
 | `role_response`      | 响应 `role`                                  | `ok`、`message`、`role`、`roles[]`（元素含 `name`、`current`） |
-| `error`              | 命令解析或执行错误                           | `message`，可选 `code`（例如 `stdin_line_too_long`） |
+| `error`              | 命令解析或执行错误                           | `message`，可选 `code`（例如 `stdin_line_too_long`）；`image_artifact` 失败时还可包含 `request_id` |
 
 ### 可订阅推送事件
 

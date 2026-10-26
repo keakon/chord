@@ -36,34 +36,38 @@ type InputTarget struct {
 }
 
 type SubmitInput struct {
-	OperationID    string
-	RequestID      string
-	DraftID        string
-	Target         InputTarget
-	DeliveryPolicy recovery.InputDeliveryPolicy
-	Content        string
-	Parts          []message.ContentPart
+	ExpectedViewVersion uint64
+	OperationID         string
+	RequestID           string
+	DraftID             string
+	Target              InputTarget
+	DeliveryPolicy      recovery.InputDeliveryPolicy
+	Content             string
+	Parts               []message.ContentPart
 }
 
 type UpdateInput struct {
-	OperationID      string
-	Target           InputTarget
-	InputID          string
-	ExpectedRevision uint64
-	DeliveryPolicy   recovery.InputDeliveryPolicy
+	ExpectedViewVersion uint64
+	OperationID         string
+	Target              InputTarget
+	InputID             string
+	ExpectedRevision    uint64
+	DeliveryPolicy      recovery.InputDeliveryPolicy
 	// Nil preserves the current content and attachments (policy-only update).
 	Content *string
 	Parts   []message.ContentPart
 }
 
 type DeleteInput struct {
-	OperationID      string
-	Target           InputTarget
-	InputID          string
-	ExpectedRevision uint64
+	ExpectedViewVersion uint64
+	OperationID         string
+	Target              InputTarget
+	InputID             string
+	ExpectedRevision    uint64
 }
 
 type QueueControl struct {
+	ExpectedViewVersion   uint64
 	OperationID           string
 	Target                InputTarget
 	Action                string

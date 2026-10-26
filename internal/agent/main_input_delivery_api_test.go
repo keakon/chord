@@ -88,6 +88,73 @@ func TestInputDeliveryRejectsStaleTarget(t *testing.T) {
 	}
 }
 
+func TestInputDeliveryRejectsStaleViewBeforeImmediateSubmit(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.delivery.viewVersion = 3
+	target := a.InputDeliveryTarget()
+	result := runDeliveryOperation(t, a, &deliveryOperation{submit: &SubmitInput{
+		ExpectedViewVersion: 2,
+		OperationID:         "stale-immediate",
+		Target:              target,
+		DeliveryPolicy:      recovery.InputDeliveryNextRequest,
+		Content:             "sample",
+	}})
+	if result.Result != InputQueueConflict {
+		t.Fatalf("stale submit: %+v", result)
+	}
+	if len(a.ctxMgr.Snapshot()) != 0 {
+		t.Fatal("stale submit was applied as an immediate user message")
+	}
+}
+
+func TestInputDeliveryRejectsStaleViewForAllOperationKinds(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
+	target := a.InputDeliveryTarget()
+	queued := runDeliveryOperation(t, a, &deliveryOperation{submit: &SubmitInput{
+		OperationID:    "seed",
+		Target:         target,
+		DeliveryPolicy: recovery.InputDeliveryAfterCompletion,
+		Content:        "queued",
+	}})
+	if queued.Result != InputQueueCommitted {
+		t.Fatalf("seed submit: %+v", queued)
+	}
+	a.publishInputDelivery()
+	staleView := a.delivery.viewVersion - 1
+	revision := uint64(1)
+	queueRevision := a.delivery.committed.Revision
+	content := "replacement"
+	operations := []struct {
+		name string
+		op   *deliveryOperation
+	}{
+		{"after-completion submit", &deliveryOperation{submit: &SubmitInput{ExpectedViewVersion: staleView, OperationID: "stale-after", Target: target, DeliveryPolicy: recovery.InputDeliveryAfterCompletion, Content: "later"}}},
+		{"immediate submit", &deliveryOperation{submit: &SubmitInput{ExpectedViewVersion: staleView, OperationID: "stale-immediate", Target: target, DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: "now"}}},
+		{"update", &deliveryOperation{update: &UpdateInput{ExpectedViewVersion: staleView, OperationID: "stale-update", Target: target, InputID: queued.InputID, ExpectedRevision: revision, Content: &content}}},
+		{"delete", &deliveryOperation{delete: &DeleteInput{ExpectedViewVersion: staleView, OperationID: "stale-delete", Target: target, InputID: queued.InputID, ExpectedRevision: revision}}},
+		{"pause", &deliveryOperation{control: &QueueControl{ExpectedViewVersion: staleView, OperationID: "stale-pause", Target: target, Action: InputQueuePause, ExpectedQueueRevision: queueRevision}}},
+		{"hold edit", &deliveryOperation{control: &QueueControl{ExpectedViewVersion: staleView, OperationID: "stale-hold", Target: target, Action: InputQueueHoldEdit, InputID: queued.InputID, ExpectedRevision: revision}}},
+	}
+	for _, tc := range operations {
+		t.Run(tc.name, func(t *testing.T) {
+			result := runDeliveryOperation(t, a, tc.op)
+			if result.Result != InputQueueConflict {
+				t.Fatalf("stale operation result = %+v", result)
+			}
+			if len(a.ctxMgr.Snapshot()) != 0 {
+				t.Fatal("stale immediate submit reached the transcript")
+			}
+		})
+	}
+	state := a.InputQueueSnapshot().State
+	if state.Revision != queueRevision || len(state.Inputs) != 1 || state.Inputs[0].Content != "queued" || state.Gate.Mode != recovery.FollowupGateRunning || len(state.EditHolds) != 0 {
+		t.Fatalf("stale operation mutated queue: %+v", state)
+	}
+}
+
 func TestInputDeliveryFinalResponse(t *testing.T) {
 	for _, reason := range []string{"stop", "end_turn", "stop_sequence", "STOP"} {
 		if !isDeliveryFinalResponse(&LLMResponsePayload{Content: "sample result", StopReason: reason}) {

@@ -68,8 +68,109 @@ func TestHeadlessInputDeliveryDoesNotDismissCurrentInteraction(t *testing.T) {
 	backend := &queueTestBackend{snapshot: &agent.InputQueueSnapshot{Target: agent.InputTarget{RuntimeID: "runtime", SessionID: "session", OwnerTaskID: "main"}}}
 	state := &headlessState{pendingConfirm: &headlessConfirmPayload{RequestID: "confirm", ToolName: "sample"}}
 	out := newTestOut(t)
-	handleHeadlessCommand(headlessCommand{Type: "send", RequestID: "request", Content: "sample", DeliveryPolicy: recovery.InputDeliveryAfterCompletion}, backend, state, out.writer())
+	handleHeadlessCommand(headlessCommand{Type: "send", OperationID: "operation", InputTarget: new(backend.snapshot.Target), RequestID: "request", Content: "sample", DeliveryPolicy: recovery.InputDeliveryAfterCompletion}, backend, state, out.writer())
 	if len(backend.submitted) != 1 || state.pendingConfirm == nil || len(backend.confirmCalls) != 0 {
 		t.Fatal("after-completion input disturbed current confirmation")
+	}
+}
+
+func TestHeadlessAfterCompletionRejectsChangedTarget(t *testing.T) {
+	target := agent.InputTarget{RuntimeID: "runtime", SessionID: "session", SessionEpoch: 1, OwnerTaskID: "main", WorkDirGeneration: 1}
+	for _, changed := range []*agent.InputTarget{
+		nil,
+		new(agent.InputTarget{RuntimeID: "other", SessionID: "session", SessionEpoch: 1, OwnerTaskID: "main", WorkDirGeneration: 1}),
+		new(agent.InputTarget{RuntimeID: "runtime", SessionID: "other", SessionEpoch: 1, OwnerTaskID: "main", WorkDirGeneration: 1}),
+		new(agent.InputTarget{RuntimeID: "runtime", SessionID: "session", SessionEpoch: 2, OwnerTaskID: "main", WorkDirGeneration: 1}),
+		new(agent.InputTarget{RuntimeID: "runtime", SessionID: "session", SessionEpoch: 1, OwnerTaskID: "main", WorkDirGeneration: 2}),
+	} {
+		backend := &queueTestBackend{snapshot: &agent.InputQueueSnapshot{Target: target}}
+		out := newTestOut(t)
+		handleHeadlessCommand(headlessCommand{Type: "send", OperationID: "operation", RequestID: "request", InputTarget: changed, Content: "sample", DeliveryPolicy: recovery.InputDeliveryAfterCompletion}, backend, &headlessState{}, out.writer())
+		if len(backend.submitted) != 0 {
+			t.Fatalf("changed target admitted: %+v", changed)
+		}
+		replies := out.drain()
+		if len(replies) != 1 || replies[0].Type != "input_queue_result" {
+			t.Fatalf("missing correlated rejection: %+v", replies)
+		}
+		payload, err := json.Marshal(replies[0].Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result agent.InputQueueOperationResultEvent
+		if err := json.Unmarshal(payload, &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.OperationID != "operation" || result.Result != agent.InputQueueRejected {
+			t.Fatalf("rejection=%+v", result)
+		}
+	}
+}
+
+func TestHeadlessInputQueueRejectsStaleViewBeforeAdmission(t *testing.T) {
+	target := agent.InputTarget{RuntimeID: "runtime", SessionID: "session", SessionEpoch: 1, OwnerTaskID: "main"}
+	snapshot := &agent.InputQueueSnapshot{Target: target, ViewVersion: 7, State: &recovery.InputDeliveryState{
+		Revision: 3,
+		Inputs:   []recovery.PendingInput{{InputID: "input", Revision: 2, Sequence: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryAfterCompletion}},
+	}}
+	backend := &queueTestBackend{snapshot: snapshot}
+	out := newTestOut(t)
+	expected := uint64(6)
+	revision := uint64(2)
+	handleHeadlessInputQueue(headlessCommand{
+		OperationID:         "stale",
+		InputTarget:         &target,
+		Action:              "delete",
+		InputID:             "input",
+		ExpectedRevision:    &revision,
+		ExpectedViewVersion: &expected,
+	}, backend, out.writer())
+	if len(backend.updates) != 0 || len(backend.submitted) != 0 {
+		t.Fatal("stale queue view was admitted")
+	}
+	replies := out.drain()
+	if len(replies) != 1 || replies[0].Type != "input_queue_result" {
+		t.Fatalf("replies = %+v", replies)
+	}
+	payload, err := json.Marshal(replies[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result agent.InputQueueOperationResultEvent
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.OperationID != "stale" || result.Result != agent.InputQueueConflict {
+		t.Fatalf("stale reply = %+v", result)
+	}
+}
+
+func TestHeadlessAfterCompletionRejectsStaleView(t *testing.T) {
+	target := agent.InputTarget{RuntimeID: "runtime", SessionID: "session", SessionEpoch: 1, OwnerTaskID: "main"}
+	backend := &queueTestBackend{snapshot: &agent.InputQueueSnapshot{Target: target, ViewVersion: 7}}
+	out := newTestOut(t)
+	expected := uint64(6)
+	handleHeadlessCommand(headlessCommand{
+		Type: "send", OperationID: "stale-after", RequestID: "request",
+		InputTarget: &target, Content: "sample", DeliveryPolicy: recovery.InputDeliveryAfterCompletion,
+		ExpectedViewVersion: &expected,
+	}, backend, &headlessState{}, out.writer())
+	if len(backend.submitted) != 0 {
+		t.Fatal("stale after-completion submit was admitted")
+	}
+	replies := out.drain()
+	if len(replies) != 1 || replies[0].Type != "input_queue_result" {
+		t.Fatalf("replies = %+v", replies)
+	}
+	payload, err := json.Marshal(replies[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result agent.InputQueueOperationResultEvent
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.OperationID != "stale-after" || result.Result != agent.InputQueueConflict {
+		t.Fatalf("stale reply = %+v", result)
 	}
 }

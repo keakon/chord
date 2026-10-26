@@ -34,19 +34,20 @@ type headlessInputQueueItem struct {
 type headlessInputQueue struct {
 	RestoredNextInputsBlocked bool `json:"restored_next_inputs_blocked,omitempty"`
 	agent.InputTarget
-	ViewVersion   uint64                   `json:"view_version"`
-	QueueRevision uint64                   `json:"queue_revision"`
-	Gate          recovery.FollowupGate    `json:"gate"`
-	Works         []recovery.DeliveryWork  `json:"works"`
-	Inputs        []headlessInputQueueItem `json:"inputs"`
-	Blocked       string                   `json:"blocked,omitempty"`
+	ViewVersion    uint64                   `json:"view_version"`
+	ViewVersionCAS bool                     `json:"view_version_cas"`
+	QueueRevision  uint64                   `json:"queue_revision"`
+	Gate           recovery.FollowupGate    `json:"gate"`
+	Works          []recovery.DeliveryWork  `json:"works"`
+	Inputs         []headlessInputQueueItem `json:"inputs"`
+	Blocked        string                   `json:"blocked,omitempty"`
 }
 
 func inputQueueProjection(snapshot *agent.InputQueueSnapshot) *headlessInputQueue {
 	if snapshot == nil {
 		return nil
 	}
-	out := &headlessInputQueue{RestoredNextInputsBlocked: snapshot.RestoredNextInputsBlocked, InputTarget: snapshot.Target, ViewVersion: snapshot.ViewVersion, Blocked: snapshot.Blocked, Inputs: []headlessInputQueueItem{}}
+	out := &headlessInputQueue{RestoredNextInputsBlocked: snapshot.RestoredNextInputsBlocked, InputTarget: snapshot.Target, ViewVersion: snapshot.ViewVersion, ViewVersionCAS: true, Blocked: snapshot.Blocked, Inputs: []headlessInputQueueItem{}}
 	if snapshot.State == nil {
 		out.Gate.Mode = recovery.FollowupGateRunning
 		return out
@@ -128,6 +129,14 @@ func handleHeadlessInputQueue(cmd headlessCommand, backend headlessBackend, out 
 		return
 	}
 	snapshot := queue.InputQueueSnapshot()
+	var expectedView uint64
+	if cmd.ExpectedViewVersion != nil {
+		expectedView = *cmd.ExpectedViewVersion
+		if snapshot == nil || expectedView == 0 || expectedView != snapshot.ViewVersion {
+			out.emit(headlessEnvelope{Type: "input_queue_result", Payload: agent.InputQueueOperationResultEvent{OperationID: cmd.OperationID, Target: target, Result: agent.InputQueueConflict, Reason: "Input queue view changed; refresh its state"}})
+			return
+		}
+	}
 	var input *recovery.PendingInput
 	if snapshot != nil && snapshot.State != nil {
 		for i := range snapshot.State.Inputs {
@@ -171,25 +180,25 @@ func handleHeadlessInputQueue(cmd headlessCommand, backend headlessBackend, out 
 			}
 			content = new(cmd.Content)
 		}
-		admitted = queue.UpdateQueuedInput(agent.UpdateInput{OperationID: cmd.OperationID, Target: target, InputID: cmd.InputID, ExpectedRevision: *cmd.ExpectedRevision, DeliveryPolicy: cmd.DeliveryPolicy, Content: content})
+		admitted = queue.UpdateQueuedInput(agent.UpdateInput{ExpectedViewVersion: expectedView, OperationID: cmd.OperationID, Target: target, InputID: cmd.InputID, ExpectedRevision: *cmd.ExpectedRevision, DeliveryPolicy: cmd.DeliveryPolicy, Content: content})
 	case "delete":
 		if cmd.ExpectedRevision == nil {
 			reject("expected_revision is required")
 			return
 		}
-		admitted = queue.DeleteQueuedInput(agent.DeleteInput{OperationID: cmd.OperationID, Target: target, InputID: cmd.InputID, ExpectedRevision: *cmd.ExpectedRevision})
+		admitted = queue.DeleteQueuedInput(agent.DeleteInput{ExpectedViewVersion: expectedView, OperationID: cmd.OperationID, Target: target, InputID: cmd.InputID, ExpectedRevision: *cmd.ExpectedRevision})
 	case agent.InputQueuePause, agent.InputQueueResume, agent.InputQueueClear:
 		if cmd.ExpectedQueueRevision == nil {
 			reject("expected_queue_revision is required")
 			return
 		}
-		admitted = queue.ControlInputQueue(agent.QueueControl{OperationID: cmd.OperationID, Target: target, Action: cmd.Action, ExpectedQueueRevision: *cmd.ExpectedQueueRevision})
+		admitted = queue.ControlInputQueue(agent.QueueControl{ExpectedViewVersion: expectedView, OperationID: cmd.OperationID, Target: target, Action: cmd.Action, ExpectedQueueRevision: *cmd.ExpectedQueueRevision})
 	case agent.InputQueueHoldEdit, agent.InputQueueReleaseEdit:
 		if cmd.ExpectedRevision == nil {
 			reject("expected_revision is required")
 			return
 		}
-		admitted = queue.ControlInputQueue(agent.QueueControl{OperationID: cmd.OperationID, Target: target, Action: cmd.Action, InputID: cmd.InputID, ExpectedRevision: *cmd.ExpectedRevision})
+		admitted = queue.ControlInputQueue(agent.QueueControl{ExpectedViewVersion: expectedView, OperationID: cmd.OperationID, Target: target, Action: cmd.Action, InputID: cmd.InputID, ExpectedRevision: *cmd.ExpectedRevision})
 	default:
 		reject("Unknown input_queue action")
 		return
@@ -199,33 +208,54 @@ func handleHeadlessInputQueue(cmd headlessCommand, backend headlessBackend, out 
 	}
 }
 
-func headlessSendWithPolicy(cmd headlessCommand, backend headlessBackend, state *headlessState, out *stdoutWriter) bool {
+func headlessSendWithPolicy(cmd headlessCommand, backend headlessBackend, out *stdoutWriter) bool {
 	if cmd.DeliveryPolicy == "" || cmd.DeliveryPolicy == recovery.InputDeliveryNextRequest {
 		return false
 	}
+	queue, ok := backend.(headlessInputQueueBackend)
+	reject := func(reason string) {
+		result := agent.InputQueueOperationResultEvent{OperationID: cmd.OperationID, Result: agent.InputQueueRejected, Reason: reason}
+		if ok {
+			result.Target = queue.InputDeliveryTarget()
+		}
+		out.emit(headlessEnvelope{Type: "input_queue_result", Payload: result})
+	}
 	if cmd.DeliveryPolicy != recovery.InputDeliveryAfterCompletion {
-		emitHeadlessInputRejected(cmd.RequestID, "Invalid delivery_policy", state, out)
+		reject("Invalid delivery_policy")
 		return true
 	}
 	if cmd.Agent != "" && cmd.Agent != "main" {
-		emitHeadlessInputRejected(cmd.RequestID, "after_completion is only supported by MainAgent", state, out)
+		reject("after_completion is only supported by MainAgent")
 		return true
 	}
-	queue, ok := backend.(headlessInputQueueBackend)
 	if !ok {
-		emitHeadlessInputRejected(cmd.RequestID, "After-completion delivery is unavailable", state, out)
+		reject("After-completion delivery is unavailable")
 		return true
 	}
+	if cmd.OperationID == "" || cmd.InputTarget == nil {
+		reject("operation_id and target are required for after_completion")
+		return true
+	}
+	target := queue.InputDeliveryTarget()
+	if *cmd.InputTarget != target || flagGatewayInstance != "" && cmd.BindingID != flagGatewayInstance {
+		reject("Input queue binding changed; refresh its state")
+		return true
+	}
+	snapshot := queue.InputQueueSnapshot()
 	if strings.TrimSpace(cmd.Content) == "" {
-		emitHeadlessInputRejected(cmd.RequestID, "Empty input", state, out)
+		reject("Empty input")
 		return true
 	}
-	if cmd.RequestID == "" && cmd.OperationID == "" {
-		emitHeadlessInputRejected(cmd.RequestID, "request_id is required for after_completion", state, out)
-		return true
+	var expectedView uint64
+	if cmd.ExpectedViewVersion != nil {
+		expectedView = *cmd.ExpectedViewVersion
+		if snapshot == nil || expectedView == 0 || expectedView != snapshot.ViewVersion {
+			out.emit(headlessEnvelope{Type: "input_queue_result", Payload: agent.InputQueueOperationResultEvent{OperationID: cmd.OperationID, Target: target, Result: agent.InputQueueConflict, Reason: "Input queue view changed; refresh its state"}})
+			return true
+		}
 	}
-	if !queue.SubmitUserInput(agent.SubmitInput{OperationID: cmd.OperationID, RequestID: cmd.RequestID, Target: queue.InputDeliveryTarget(), DeliveryPolicy: cmd.DeliveryPolicy, Content: cmd.Content}) {
-		emitHeadlessInputRejected(cmd.RequestID, "Agent is shutting down", state, out)
+	if !queue.SubmitUserInput(agent.SubmitInput{ExpectedViewVersion: expectedView, OperationID: cmd.OperationID, RequestID: cmd.RequestID, Target: target, DeliveryPolicy: cmd.DeliveryPolicy, Content: cmd.Content}) {
+		reject("Agent is shutting down")
 	}
 	return true
 }

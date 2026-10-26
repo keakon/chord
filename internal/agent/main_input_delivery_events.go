@@ -24,6 +24,10 @@ func (a *MainAgent) handleDeliveryOperation(op *deliveryOperation) {
 		a.rejectDeliveryOperation(op, InputQueueRejected, fmt.Errorf("input target changed; refresh the input queue"))
 		return
 	}
+	if expectedView := deliveryOperationExpectedView(op); expectedView != 0 && expectedView != a.delivery.viewVersion {
+		a.rejectDeliveryOperation(op, InputQueueConflict, fmt.Errorf("input queue view changed: %w", recovery.ErrInputDeliveryConflict))
+		return
+	}
 	if a.sessionExecutionPaused() && a.pause.restored && op.submit != nil && (op.submit.DeliveryPolicy == "" || op.submit.DeliveryPolicy == recovery.InputDeliveryNextRequest) {
 		reservedBytes := deliveryIntentTextBytes(op)
 		duplicate := false
@@ -197,6 +201,10 @@ func (a *MainAgent) applyDeliveryOperation(op *deliveryOperation, state *recover
 	if target != a.InputDeliveryTarget() {
 		return fmt.Errorf("input target changed; refresh the input queue")
 	}
+	expectedView := deliveryOperationExpectedView(op)
+	if expectedView != 0 && expectedView != a.delivery.viewVersion {
+		return fmt.Errorf("input queue view changed: %w", recovery.ErrInputDeliveryConflict)
+	}
 	switch {
 	case op.submit != nil:
 		input := op.submit
@@ -249,6 +257,21 @@ func (a *MainAgent) applyDeliveryOperation(op *deliveryOperation, state *recover
 		return a.applyDeliveryControl(op.control, state)
 	}
 	return nil
+}
+
+func deliveryOperationExpectedView(op *deliveryOperation) uint64 {
+	switch {
+	case op.submit != nil:
+		return op.submit.ExpectedViewVersion
+	case op.update != nil:
+		return op.update.ExpectedViewVersion
+	case op.delete != nil:
+		return op.delete.ExpectedViewVersion
+	case op.control != nil:
+		return op.control.ExpectedViewVersion
+	default:
+		return 0
+	}
 }
 
 func (a *MainAgent) applyDeliveryControl(control *QueueControl, state *recovery.InputDeliveryState) error {
