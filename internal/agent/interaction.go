@@ -71,7 +71,7 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 	agentName := a.agentNameForInteraction(ownerID)
 	turnID := a.turnIDForInteraction(ctx)
 	requestID := makeRequestID()
-	ch := a.interaction.registerConfirm(requestID, a.walltime.captureAt(ownerID, agentName, turnID))
+	ch := a.interaction.registerConfirm(requestID, a.walltime.captureAt(ownerID, agentName, turnID), confirmIdentity{ToolName: toolName, AgentID: ownerID}, ctx)
 	defer a.interaction.unregisterConfirm(requestID)
 
 	a.fireHookBackground(ctx, hook.OnWaitConfirm, turnID, map[string]any{
@@ -99,27 +99,39 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 		scope = a.effectivePathScope()
 	}
 
-	if err := a.emitInteractiveToTUI(ctx, ConfirmRequestEvent{
-		ToolName:            toolName,
-		ArgsJSON:            argsJSON,
-		RequestID:           requestID,
-		Timeout:             timeout,
-		NeedsApproval:       append([]string(nil), needsApproval...),
-		AlreadyAllowed:      append([]string(nil), alreadyAllowed...),
-		NeedsApprovalRules:  append([]permission.Rule(nil), needsApprovalRules...),
-		AlreadyAllowedRules: append([]permission.Rule(nil), alreadyAllowedRules...),
-		DoneReport:          summaryVal,
-		ForceDenyReason:     forceDenyReason,
-		AgentID:             ownerID,
-		PathScope:           scope,
+	// Delivery and its delivered mark share the broker's settlement lock, so a
+	// turn cancellation either observes this request and reports its resolution
+	// before the idle close-out, or the delivery aborts on the cancelled context
+	// without a dialog to resolve.
+	if err := a.interaction.deliverConfirm(ctx, requestID, func() error {
+		return a.emitInteractiveToTUI(ctx, ConfirmRequestEvent{
+			ToolName:            toolName,
+			ArgsJSON:            argsJSON,
+			RequestID:           requestID,
+			Timeout:             timeout,
+			NeedsApproval:       append([]string(nil), needsApproval...),
+			AlreadyAllowed:      append([]string(nil), alreadyAllowed...),
+			NeedsApprovalRules:  append([]permission.Rule(nil), needsApprovalRules...),
+			AlreadyAllowedRules: append([]permission.Rule(nil), alreadyAllowedRules...),
+			DoneReport:          summaryVal,
+			ForceDenyReason:     forceDenyReason,
+			AgentID:             ownerID,
+			PathScope:           scope,
+		})
 	}); err != nil {
 		return ConfirmResponse{}, err
 	}
 	a.emitToTUI(NotificationEvent{Reason: NotificationReasonUserInputRequired, Message: "Chord: Permission confirmation required"})
-	resp, outcome, err := a.interaction.awaitConfirm(ctx, ch, timeout, toolName)
+	resp, outcome, err := a.interaction.awaitConfirm(ctx, requestID, ch, timeout, toolName)
 	// The request was delivered, so every consumer must learn it is no longer
 	// actionable — an unanswered timeout or cancellation leaves a client with
 	// no local countdown holding a stale request whose answer would be a no-op.
-	a.emitToTUI(ConfirmResolvedEvent{RequestID: requestID, ToolName: toolName, AgentID: ownerID, Outcome: outcome})
+	// The exactly-once claim keeps this emission and a turn cancellation's
+	// settlement from reporting the same resolution twice; the broker also
+	// holds the claim/emission lock until the event is queued, so a cancellation
+	// cannot close the turn out ahead of an emission this waiter already claimed.
+	a.interaction.emitConfirmResolvedOnce(requestID, func() {
+		a.emitToTUI(ConfirmResolvedEvent{RequestID: requestID, ToolName: toolName, AgentID: ownerID, Outcome: outcome})
+	})
 	return resp, err
 }

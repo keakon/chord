@@ -11,6 +11,35 @@ import (
 	"github.com/keakon/chord/internal/recovery"
 )
 
+// settleCancelledConfirms reports the terminal resolution for the confirms the
+// aborted turn still had parked. A confirm answered just before the
+// cancellation keeps its approved/denied outcome; an unanswered one is
+// reported as cancelled or, when its context deadline already expired,
+// timeout. Only confirms whose waiter context is already cancelled and whose
+// request was delivered are settled: this turn's own confirms qualify because
+// the turn context was cancelled first, while confirms parked by subagents or
+// external workers — whose contexts do not derive from the aborted turn — stay
+// pending and keep waiting for a real answer.
+//
+// The event loop calls this while closing the turn out, before it emits idle.
+// Settling from the synchronous cancel caller would make a TUI key handler
+// wait for output-channel capacity that only a later Update can drain, locking
+// the interface against itself. The waiter wakes through the turn's cancelled
+// context and would otherwise emit the same resolution from its own goroutine,
+// racing the idle close-out. The broker serializes the exactly-once claim with
+// the emission, so the loser reports nothing and the resolution is always
+// queued ahead of the idle that follows the turn.
+func (a *MainAgent) settleCancelledConfirms() {
+	a.interaction.emitCancelledConfirmResolutions(func(requestID string, identity confirmIdentity, outcome string) {
+		a.emitToTUI(ConfirmResolvedEvent{
+			RequestID: requestID,
+			ToolName:  identity.ToolName,
+			AgentID:   identity.AgentID,
+			Outcome:   outcome,
+		})
+	})
+}
+
 // handleTurnCancelled closes any still-pending tool cards in the UI and marks
 // the agent idle. It intentionally does not append tool messages to ctxMgr: a
 // cancelled tool has no conversation-visible result and should not be sent back
@@ -111,6 +140,7 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 		a.commitPendingUserMessagesWithoutTurn()
 	}
 	a.applyPendingModelPoolSwitchesAtRequestBoundary()
+	a.settleCancelledConfirms()
 	a.emitActivity(identity.MainAgentID, ActivityIdle, "")
 	a.markActiveSubAgentMailboxAck(false)
 	a.setIdleAndDrainPending()

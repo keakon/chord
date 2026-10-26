@@ -44,7 +44,7 @@
 - MainAgent 支持 Alt+Enter 保存完成后执行的输入，提供 `/queue` 编辑与显式暂停/继续，并支持 headless 队列快照和版本校验操作。
 
 - macOS 和 Linux 支持 TUI 与本机网关之间接管运行中的会话。Chord 会等待已开始的工作结束——状态栏会显示已等待的时长；若等待预算在源释放前结束，状态栏会继续确认交接并自行完成恢复。排队输入会被保存，恢复后保持暂停，直到你明确继续。
-- headless 客户端在送达的 `confirm_request` 进入终态时会收到 `confirm_resolved` 推送：`approved` / `denied` 是客户端作答回执，`timeout` 表示到期无人作答、已自动拒绝，`cancelled` 表示等待提前结束。没有本地倒计时的集成方不必再让一条无人应答的确认一直可操作到下一次 idle；收到该事件即收起提示——对已终结请求发送 `confirm` 只会被运行时忽略。
+- headless 客户端在送达的 `confirm_request` 进入终态时会收到 `confirm_resolved` 推送：`approved` / `denied` 是客户端作答回执，`timeout` 表示到期无人作答、已自动拒绝，`cancelled` 表示等待提前结束。turn 被取消时，它停留中的确认的回执会先于 turn 结束后的 idle 推送，提示可以在交互状态清空之前收起。没有本地倒计时的集成方不必再让一条无人应答的确认一直可操作到下一次 idle；收到该事件即收起提示——对已终结请求发送 `confirm` 只会被运行时忽略。
 
 ### 改进
 
@@ -79,6 +79,7 @@
 - Headless `models_response` 回显 `models` 命令携带的可选 `request_id`，集成方可以区分迟到回执与后续请求的结果；命令未携带 ID 时响应不含该字段。
 
 ### 修复
+
 
 - 权限确认时记住的规则现在会给出真正能止住重复询问的建议。apply_patch 确认会上报拦截本次调用的 write/delete 规则（例如 Move 源路径触发的 delete ask），规则选择器改为默认勾选标注了对应工具的目录规则，而不是一条压不住 ask 的宽泛 apply_patch 规则。headless 客户端可以在 `confirm` 里传 `rule_tool`，把规则装到拦截工具名下。
 

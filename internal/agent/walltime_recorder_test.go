@@ -31,9 +31,9 @@ func TestWalltimeUserWaitSettlesOnConfirmResolution(t *testing.T) {
 
 	const agentID = "worker-1"
 	requestID := "req-user-wait"
-	ch := b.registerConfirm(requestID, rec.captureAt(agentID, "", 0))
+	ch := b.registerConfirm(requestID, rec.captureAt(agentID, "", 0), confirmIdentity{ToolName: "read", AgentID: agentID}, nil)
 	go b.resolveConfirm(requestID, ConfirmResponse{Approved: true})
-	resp, _, err := b.awaitConfirm(context.Background(), ch, 0, "read")
+	resp, _, err := b.awaitConfirm(context.Background(), requestID, ch, 0, "read")
 	if err != nil || !resp.Approved {
 		t.Fatalf("awaitConfirm = (%#v, %v), want approved response", resp, err)
 	}
@@ -64,8 +64,8 @@ func TestWalltimeUserWaitSettlesOnConfirmTimeout(t *testing.T) {
 	})
 
 	const agentID = "worker-2"
-	ch := b.registerConfirm("req-timeout", rec.captureAt(agentID, "", 0))
-	resp, _, err := b.awaitConfirm(context.Background(), ch, 2*time.Millisecond, "read")
+	ch := b.registerConfirm("req-timeout", rec.captureAt(agentID, "", 0), confirmIdentity{ToolName: "read", AgentID: agentID}, nil)
+	resp, _, err := b.awaitConfirm(context.Background(), "req-timeout", ch, 2*time.Millisecond, "read")
 	if err != nil || resp.Approved {
 		t.Fatalf("awaitConfirm = (%#v, %v), want auto-denied timeout", resp, err)
 	}
@@ -113,9 +113,9 @@ func TestWalltimeUserWaitAttribution(t *testing.T) {
 		a.walltime.recordTarget(target, analytics.WalltimePurposeUserWait, d)
 	})
 	toolCtx := tools.WithAgentID(context.Background(), a.instanceID)
-	ch := b.registerConfirm("req-main", a.walltime.captureAt(a.agentIDForInteraction(toolCtx), a.currentAgentName(), a.currentTurnID()))
+	ch := b.registerConfirm("req-main", a.walltime.captureAt(a.agentIDForInteraction(toolCtx), a.currentAgentName(), a.currentTurnID()), confirmIdentity{ToolName: "read", AgentID: a.agentIDForInteraction(toolCtx)}, nil)
 	go b.resolveConfirm("req-main", ConfirmResponse{Approved: true})
-	if _, _, err := b.awaitConfirm(context.Background(), ch, 0, "read"); err != nil {
+	if _, _, err := b.awaitConfirm(context.Background(), "req-main", ch, 0, "read"); err != nil {
 		t.Fatalf("awaitConfirm: %v", err)
 	}
 	b.unregisterConfirm("req-main")

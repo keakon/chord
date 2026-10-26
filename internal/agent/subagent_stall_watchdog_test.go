@@ -287,7 +287,7 @@ func TestStallSweepHoldsQuietWorkersWhileUserInteractionPending(t *testing.T) {
 			name: "confirm",
 			open: func(a *MainAgent) (close func()) {
 				req := "adhoc-user-confirm"
-				a.interaction.registerConfirm(req, testWalltimeTarget("main"))
+				a.interaction.registerConfirm(req, testWalltimeTarget("main"), confirmIdentity{ToolName: "read", AgentID: "main"}, nil)
 				return func() { a.interaction.unregisterConfirm(req) }
 			},
 		},

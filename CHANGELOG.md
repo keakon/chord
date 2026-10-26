@@ -44,7 +44,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - MainAgent supports persistent after-completion inputs with Alt+Enter, a `/queue` editor and explicit pause/resume, plus headless queue snapshots and revision-checked controls.
 
 - Take over a live local session between TUI and a gateway on macOS and Linux. Chord waits for already-started work with the status bar reporting how long the wait has run; when a wait budget ends before the source releases, the status bar keeps confirming the hand-off and completes the restore on its own. Queued inputs are saved, and the session is restored paused until you explicitly continue.
-- Headless clients receive a `confirm_resolved` push when a delivered `confirm_request` reaches a terminal outcome: `approved` and `denied` echo the client's answer, `timeout` means the deadline auto-denied with no answer, and `cancelled` means the wait ended early. Integrations without a local countdown no longer hold an unanswered confirmation actionable until the next idle; retire the prompt when the event arrives — a late `confirm` for a resolved request is ignored by the runtime.
+- Headless clients receive a `confirm_resolved` push when a delivered `confirm_request` reaches a terminal outcome: `approved` and `denied` echo the client's answer, `timeout` means the deadline auto-denied with no answer, and `cancelled` means the wait ended early. When a turn is cancelled, the resolution for a confirmation it had parked is pushed before the turn's idle close-out, so the prompt can be retired before the interaction state clears. Integrations without a local countdown no longer hold an unanswered confirmation actionable until the next idle; retire the prompt when the event arrives — a late `confirm` for a resolved request is ignored by the runtime.
 
 ### Improvements
 
@@ -79,6 +79,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Headless `models_response` payloads echo the optional `request_id` a `models` command carries, so integrators can tell a late reply from the result of a later request; commands without an ID omit the field.
 
 ### Fixes
+
 
 - Remembering a rule from a permission confirmation now suggests rules that actually stop the repeat prompt. apply_patch confirmations report the write/delete rules that blocked the call — for example a delete ask on a moved source path — and the picker offers preselected directory rules named for that tool instead of a broad apply_patch rule that could not lift the ask. Headless clients can pass `rule_tool` with `confirm` to install the rule under the blocking tool.
 

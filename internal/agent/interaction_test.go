@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +16,15 @@ import (
 // full MainAgent.
 func testWalltimeTarget(agentID string) *walltimeTarget {
 	return newWalltimeRecorder(nil, nil, nil).captureAt(agentID, "", 0)
+}
+
+// deliverTestConfirm marks a registered confirm as delivered through the real
+// delivery path, with a no-op event emission.
+func deliverTestConfirm(t *testing.T, b *interactionBroker, requestID string) {
+	t.Helper()
+	if err := b.deliverConfirm(context.Background(), requestID, func() error { return nil }); err != nil {
+		t.Fatalf("deliver confirm %q: %v", requestID, err)
+	}
 }
 
 // collectConfirmEvents drains the agent output until both a confirm request
@@ -143,7 +154,7 @@ func TestAwaitConfirmAnswerEmitsResolvedEvent(t *testing.T) {
 func TestResolveConfirmUnknownActionDenies(t *testing.T) {
 	a := &MainAgent{interaction: newInteractionBroker(nil)}
 
-	ch := a.interaction.registerConfirm("req-1", testWalltimeTarget("main"))
+	ch := a.interaction.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "read", AgentID: "main"}, nil)
 
 	a.ResolveConfirm("bogus", `{"path":"x"}`, "", "", "req-1")
 
@@ -160,7 +171,7 @@ func TestResolveConfirmUnknownActionDenies(t *testing.T) {
 func TestResolveConfirmWithRuleIntentPassesIntent(t *testing.T) {
 	a := &MainAgent{interaction: newInteractionBroker(nil)}
 
-	ch := a.interaction.registerConfirm("req-1", testWalltimeTarget("main"))
+	ch := a.interaction.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "read", AgentID: "main"}, nil)
 	intent := &ConfirmRuleIntent{
 		Rules: []ConfirmRule{{Pattern: "git *"}},
 		Scope: int(permission.ScopeProject),
@@ -196,12 +207,12 @@ func TestInteractionBrokerResolveUnknownIsNoop(t *testing.T) {
 // round trip without standing up a full MainAgent.
 func TestInteractionBrokerAwaitConfirmResolves(t *testing.T) {
 	b := newInteractionBroker(nil)
-	ch := b.registerConfirm("req-1", testWalltimeTarget("main"))
+	ch := b.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "read", AgentID: "main"}, nil)
 	defer b.unregisterConfirm("req-1")
 
 	go b.resolveConfirm("req-1", ConfirmResponse{Approved: true})
 
-	resp, outcome, err := b.awaitConfirm(context.Background(), ch, time.Second, "Read")
+	resp, outcome, err := b.awaitConfirm(context.Background(), "req-1", ch, time.Second, "Read")
 	if err != nil {
 		t.Fatalf("awaitConfirm: %v", err)
 	}
@@ -217,10 +228,10 @@ func TestInteractionBrokerAwaitConfirmResolves(t *testing.T) {
 // auto-denies (no error) when the timeout fires.
 func TestInteractionBrokerAwaitConfirmTimeoutDenies(t *testing.T) {
 	b := newInteractionBroker(nil)
-	ch := b.registerConfirm("req-1", testWalltimeTarget("main"))
+	ch := b.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "read", AgentID: "main"}, nil)
 	defer b.unregisterConfirm("req-1")
 
-	resp, outcome, err := b.awaitConfirm(context.Background(), ch, time.Millisecond, "Read")
+	resp, outcome, err := b.awaitConfirm(context.Background(), "req-1", ch, time.Millisecond, "Read")
 	if err != nil {
 		t.Fatalf("awaitConfirm: %v", err)
 	}
@@ -238,12 +249,12 @@ func TestInteractionBrokerAwaitConfirmTimeoutDenies(t *testing.T) {
 // deterministic terminal state.
 func TestInteractionBrokerAwaitConfirmDeadlineIsTimeout(t *testing.T) {
 	b := newInteractionBroker(nil)
-	ch := b.registerConfirm("req-1", testWalltimeTarget("main"))
+	ch := b.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "read", AgentID: "main"}, nil)
 	defer b.unregisterConfirm("req-1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()
-	resp, outcome, err := b.awaitConfirm(ctx, ch, time.Minute, "Read")
+	resp, outcome, err := b.awaitConfirm(ctx, "req-1", ch, time.Minute, "Read")
 	if err != nil {
 		t.Fatalf("awaitConfirm: %v", err)
 	}
@@ -255,18 +266,260 @@ func TestInteractionBrokerAwaitConfirmDeadlineIsTimeout(t *testing.T) {
 	}
 }
 
+// TestCancellationSettlementKeepsBufferedAnswer pins the outcome consistency a
+// turn cancellation owes a confirm the user answered before the abort: the
+// settlement and the waiter both report the answer's outcome instead of the
+// cancellation, and an answer that arrives after the decision is ignored.
+func TestCancellationSettlementKeepsBufferedAnswer(t *testing.T) {
+	b := newInteractionBroker(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := b.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "delete", AgentID: "main"}, ctx)
+	defer b.unregisterConfirm("req-1")
+	deliverTestConfirm(t, b, "req-1")
+
+	b.resolveConfirm("req-1", ConfirmResponse{Approved: true})
+	cancel()
+
+	var outcomes []string
+	b.emitCancelledConfirmResolutions(func(requestID string, _ confirmIdentity, outcome string) {
+		if requestID != "req-1" {
+			t.Fatalf("settled unexpected request %q", requestID)
+		}
+		outcomes = append(outcomes, outcome)
+	})
+	if !reflect.DeepEqual(outcomes, []string{ConfirmOutcomeApproved}) {
+		t.Fatalf("settled outcomes = %v, want [%s]", outcomes, ConfirmOutcomeApproved)
+	}
+
+	resp, outcome, err := b.awaitConfirm(ctx, "req-1", ch, 0, "delete")
+	if err != nil {
+		t.Fatalf("awaitConfirm: %v", err)
+	}
+	if !resp.Approved || outcome != ConfirmOutcomeApproved {
+		t.Fatalf("awaitConfirm = (%+v, %q), want approved", resp, outcome)
+	}
+
+	// A late answer must not replace the decision the settlement already
+	// reported.
+	b.resolveConfirm("req-1", ConfirmResponse{Approved: false})
+	b.confirmMapMu.Lock()
+	decision := b.confirmDecisions["req-1"]
+	b.confirmMapMu.Unlock()
+	if decision.outcome != ConfirmOutcomeApproved || !decision.resp.Approved {
+		t.Fatalf("decision after late answer = %+v, want approved", decision)
+	}
+	select {
+	case resp := <-ch:
+		t.Fatalf("late answer delivered to the waiter: %+v", resp)
+	default:
+	}
+}
+
 // TestInteractionBrokerAwaitStops verifies an in-flight await unblocks with
 // ErrAgentShutdown when stoppingCh closes.
 func TestInteractionBrokerAwaitStops(t *testing.T) {
 	stopCh := make(chan struct{})
 	b := newInteractionBroker(stopCh)
-	ch := b.registerConfirm("req-1", testWalltimeTarget("main"))
+	ch := b.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "read", AgentID: "main"}, nil)
 	defer b.unregisterConfirm("req-1")
 
 	close(stopCh)
 
-	if _, _, err := b.awaitConfirm(context.Background(), ch, 0, "Read"); err != ErrAgentShutdown {
+	if _, _, err := b.awaitConfirm(context.Background(), "req-1", ch, 0, "Read"); err != ErrAgentShutdown {
 		t.Fatalf("err = %v, want ErrAgentShutdown", err)
+	}
+}
+
+// TestInteractionBrokerSettlementWaitsForClaimedWaiterEmission pins the
+// cancellation ordering barrier: once a waiter has claimed the terminal
+// resolution, the cancellation settlement must not finish (and let the turn
+// queue its idle) until that resolution has actually been emitted.
+func TestInteractionBrokerSettlementWaitsForClaimedWaiterEmission(t *testing.T) {
+	b := newInteractionBroker(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	b.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "delete", AgentID: "main"}, ctx)
+	deliverTestConfirm(t, b, "req-1")
+	defer b.unregisterConfirm("req-1")
+
+	emitStarted := make(chan struct{})
+	release := make(chan struct{})
+	waiterDone := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	go func() {
+		b.emitConfirmResolvedOnce("req-1", func() {
+			close(emitStarted)
+			<-release
+		})
+		close(waiterDone)
+	}()
+	select {
+	case <-emitStarted:
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not start its claimed emission")
+	}
+
+	settleDone := make(chan struct{})
+	var settled []string
+	go func() {
+		b.emitCancelledConfirmResolutions(func(requestID string, _ confirmIdentity, _ string) {
+			settled = append(settled, requestID)
+		})
+		close(settleDone)
+	}()
+	select {
+	case <-settleDone:
+		t.Fatal("cancellation settlement finished before the waiter's claimed emission")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-waiterDone:
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not finish its claimed emission")
+	}
+	select {
+	case <-settleDone:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation settlement did not finish after the claimed emission")
+	}
+	if len(settled) != 0 {
+		t.Fatalf("cancellation emitted %+v after the waiter held the claim, want none", settled)
+	}
+}
+
+// TestDeliverConfirmCancelledContextSkipsRequest pins the delivery rule a
+// cancellation relies on: a request whose context is already cancelled never
+// reaches a consumer and is not marked delivered, so the settlement reports no
+// resolution for a dialog that never opened.
+func TestCancellationSettlementKeepsExpiredDeadlineAsTimeout(t *testing.T) {
+	b := newInteractionBroker(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	ch := b.registerConfirm("deadline-req", testWalltimeTarget("main"), confirmIdentity{ToolName: "delete", AgentID: "main"}, ctx)
+	defer b.unregisterConfirm("deadline-req")
+	if err := b.deliverConfirm(ctx, "deadline-req", func() error { return nil }); err != nil {
+		t.Fatalf("deliverConfirm: %v", err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("deadline did not expire")
+	}
+
+	var emitted string
+	b.emitCancelledConfirmResolutions(func(_ string, _ confirmIdentity, outcome string) {
+		emitted = outcome
+	})
+	resp, outcome, err := b.awaitConfirm(ctx, "deadline-req", ch, time.Minute, "delete")
+	if emitted != ConfirmOutcomeTimeout || outcome != ConfirmOutcomeTimeout || err != nil {
+		t.Fatalf("deadline settlement emitted=%q waiter=%q err=%v; want timeout without error", emitted, outcome, err)
+	}
+	if resp.Approved {
+		t.Fatal("expired deadline must auto-deny the confirm")
+	}
+}
+
+func TestDeliverConfirmCancelledContextSkipsRequest(t *testing.T) {
+	b := newInteractionBroker(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	b.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "delete", AgentID: "main"}, ctx)
+	defer b.unregisterConfirm("req-1")
+
+	emitted := false
+	err := b.deliverConfirm(ctx, "req-1", func() error {
+		emitted = true
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("deliverConfirm error = %v, want context.Canceled", err)
+	}
+	if emitted {
+		t.Fatal("deliverConfirm emitted a request for a cancelled context")
+	}
+	b.emitCancelledConfirmResolutions(func(requestID string, _ confirmIdentity, _ string) {
+		t.Fatalf("cancellation settled undelivered confirm %v", requestID)
+	})
+}
+
+// TestCancellationSettlementWaitsForInFlightDelivery pins the ordering barrier
+// between delivery and cancellation: the settlement shares confirmResolveMu
+// with the delivery mark, so it cannot report a resolution while the request is
+// still being queued. Without the shared lock, the request and its resolution
+// could reach a consumer out of order.
+func TestCancellationSettlementWaitsForInFlightDelivery(t *testing.T) {
+	b := newInteractionBroker(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "delete", AgentID: "main"}, ctx)
+	defer b.unregisterConfirm("req-1")
+
+	var orderMu sync.Mutex
+	var order []string
+	record := func(step string) {
+		orderMu.Lock()
+		order = append(order, step)
+		orderMu.Unlock()
+	}
+
+	emitting := make(chan struct{})
+	release := make(chan struct{})
+	delivered := make(chan error, 1)
+	go func() {
+		delivered <- b.deliverConfirm(ctx, "req-1", func() error {
+			close(emitting)
+			<-release
+			record("request")
+			return nil
+		})
+	}()
+	select {
+	case <-emitting:
+	case <-time.After(time.Second):
+		t.Fatal("confirm delivery did not start")
+	}
+	cancel()
+
+	settled := make(chan struct{})
+	go func() {
+		b.emitCancelledConfirmResolutions(func(string, confirmIdentity, string) {
+			record("resolved")
+		})
+		close(settled)
+	}()
+	select {
+	case <-settled:
+		t.Fatal("cancellation settlement finished while the request delivery was still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case err := <-delivered:
+		if err != nil {
+			t.Fatalf("deliverConfirm error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("delivery did not finish")
+	}
+	select {
+	case <-settled:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation settlement did not finish after the delivery")
+	}
+
+	orderMu.Lock()
+	defer orderMu.Unlock()
+	if !reflect.DeepEqual(order, []string{"request", "resolved"}) {
+		t.Fatalf("event order = %v, want request before resolved", order)
 	}
 }
 
@@ -274,7 +527,7 @@ func TestInteractionBrokerAwaitStops(t *testing.T) {
 // resolve is a no-op.
 func TestInteractionBrokerClearPending(t *testing.T) {
 	b := newInteractionBroker(nil)
-	ch := b.registerConfirm("req-1", testWalltimeTarget("main"))
+	ch := b.registerConfirm("req-1", testWalltimeTarget("main"), confirmIdentity{ToolName: "read", AgentID: "main"}, nil)
 
 	b.clearPending()
 	b.resolveConfirm("req-1", ConfirmResponse{Approved: true})

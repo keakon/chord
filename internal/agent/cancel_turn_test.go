@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
@@ -67,6 +69,42 @@ func TestCancelCurrentTurnWithoutPendingToolsEmitsIdle(t *testing.T) {
 	if _, ok := evt.(IdleEvent); !ok {
 		t.Fatalf("second event type = %T, want IdleEvent", evt)
 	}
+}
+
+func TestCancelCurrentTurnDoesNotWaitForFullOutput(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn("")
+	drainAgentEvents(a.Events())
+
+	requestID := "cancel-output-req"
+	ch := a.interaction.registerConfirm(requestID, testWalltimeTarget("main"), confirmIdentity{ToolName: "delete", AgentID: "main"}, a.turn.Ctx)
+	defer a.interaction.unregisterConfirm(requestID)
+	_ = ch
+	if err := a.interaction.deliverConfirm(a.turn.Ctx, requestID, func() error { return nil }); err != nil {
+		t.Fatalf("deliverConfirm: %v", err)
+	}
+	for len(a.outputCh) < cap(a.outputCh) {
+		a.outputCh <- InfoEvent{}
+	}
+
+	done := make(chan bool, 1)
+	go func() { done <- a.CancelCurrentTurn() }()
+	select {
+	case cancelled := <-done:
+		if !cancelled {
+			t.Fatal("CancelCurrentTurn() = false, want true")
+		}
+	case <-time.After(time.Second):
+		drainAgentEvents(a.Events())
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("cancel did not unblock after draining output")
+		}
+		t.Fatal("CancelCurrentTurn blocked on a full output channel; a synchronous TUI caller cannot drain it")
+	}
+	drainAgentEvents(a.Events())
 }
 
 func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing.T) {
@@ -590,4 +628,170 @@ func TestCancelTurnParksMailboxDeliveryUntilUserAction(t *testing.T) {
 			countSubAgentMailboxMessages(a.ctxMgr.Snapshot(), mailbox.MessageID) == 1
 	})
 	drainAgentEvents(a.outputCh)
+}
+
+// TestCancelCurrentTurnSettlesPendingConfirmBeforeIdle pins the cancel-path
+// event order integrators depend on: the terminal ConfirmResolvedEvent for a
+// confirmation the cancelled turn had parked must reach consumers before the
+// turn's idle close-out. An idle that overtakes the resolution reads as "no
+// pending interaction", so a confirm_resolved arriving after it describes a
+// request the client already dropped and can no longer retire. The resolution
+// is settled by the event loop's cancellation closeout, not by the synchronous
+// CancelCurrentTurn caller, so the caller can return without waiting for output
+// capacity.
+func TestCancelCurrentTurnSettlesPendingConfirmBeforeIdle(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+
+	a.newTurn("")
+	if a.turn == nil {
+		t.Fatal("expected active turn")
+	}
+	turnID := a.turn.ID
+
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := a.AwaitConfirm(a.turn.Ctx, "delete", `{"paths":["target.txt"]}`, 0, nil, nil)
+		waiterDone <- err
+	}()
+
+	// The request event is emitted after the confirm is registered, so seeing
+	// it guarantees the cancellation path has a pending confirm to settle.
+	var request ConfirmRequestEvent
+	for {
+		evt := nextAgentEvent(t, a.Events())
+		if req, ok := evt.(ConfirmRequestEvent); ok {
+			request = req
+			break
+		}
+	}
+	if request.ToolName != "delete" || request.AgentID != "main" {
+		t.Fatalf("ConfirmRequestEvent = %+v, want tool delete owned by main", request)
+	}
+
+	if cancelled := a.CancelCurrentTurn(); !cancelled {
+		t.Fatal("CancelCurrentTurn() = false, want true")
+	}
+	a.handleTurnCancelled(Event{
+		Type:   EventTurnCancelled,
+		TurnID: turnID,
+		Payload: &TurnCancelledPayload{
+			TurnID: turnID,
+		},
+	})
+
+	var resolved ConfirmResolvedEvent
+	resolvedCount := 0
+	resolvedAt, idleAt := -1, -1
+	for i, evt := range drainAgentEvents(a.Events()) {
+		switch evt := evt.(type) {
+		case ConfirmResolvedEvent:
+			resolved = evt
+			resolvedCount++
+			resolvedAt = i
+		case IdleEvent:
+			idleAt = i
+		}
+	}
+	if resolvedCount == 0 {
+		t.Fatal("ConfirmResolvedEvent must be queued by the cancellation closeout")
+	}
+	if resolvedCount > 1 {
+		t.Fatalf("%d ConfirmResolvedEvents queued, want exactly one", resolvedCount)
+	}
+	if idleAt >= 0 && resolvedAt > idleAt {
+		t.Fatalf("ConfirmResolvedEvent at %d arrived after idle at %d", resolvedAt, idleAt)
+	}
+	if resolved.Outcome != ConfirmOutcomeCancelled || resolved.RequestID != request.RequestID ||
+		resolved.ToolName != "delete" || resolved.AgentID != "main" {
+		t.Fatalf("ConfirmResolvedEvent = %+v, want cancelled resolution for request %q", resolved, request.RequestID)
+	}
+
+	select {
+	case <-waiterDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("parked awaitConfirm did not return after the turn was cancelled")
+	}
+}
+
+// TestConfirmResolutionEmittedExactlyOnceAcrossCancelAndWaiter pins the claim
+// contract the cancel-path ordering relies on: whichever of the cancellation
+// settlement and the unblocking waiter claims the terminal resolution first,
+// the other side must not emit a second ConfirmResolvedEvent. The settlement
+// only takes confirms whose waiter context is already cancelled and whose
+// request was delivered — a confirm parked by a live subagent or external
+// worker context, or a request that never reached a consumer, stays with the
+// waiter.
+func TestConfirmResolutionEmittedExactlyOnceAcrossCancelAndWaiter(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	liveCtx := context.Background()
+	identity := confirmIdentity{ToolName: "delete", AgentID: "main"}
+
+	// A delivered confirm whose waiter context is cancelled settles exactly
+	// once, and the waiter loses its claim.
+	requestID := "claim-once-req"
+	a.interaction.registerConfirm(requestID, testWalltimeTarget("main"), identity, cancelCtx)
+	deliverTestConfirm(t, a.interaction, requestID)
+
+	var cancelEmits []string
+	a.interaction.emitCancelledConfirmResolutions(func(requestID string, _ confirmIdentity, _ string) {
+		cancelEmits = append(cancelEmits, requestID)
+	})
+	if len(cancelEmits) != 1 || cancelEmits[0] != requestID {
+		t.Fatalf("cancellation emitted %v, want the pending delete confirm", cancelEmits)
+	}
+	waiterEmits := 0
+	a.interaction.emitConfirmResolvedOnce(requestID, func() { waiterEmits++ })
+	if waiterEmits != 0 {
+		t.Fatal("a resolution already claimed by the cancellation settlement must not be emitted by the waiter")
+	}
+	a.interaction.unregisterConfirm(requestID)
+
+	a.interaction.registerConfirm(requestID, testWalltimeTarget("main"), identity, cancelCtx)
+	deliverTestConfirm(t, a.interaction, requestID)
+	a.interaction.emitConfirmResolvedOnce(requestID, func() { waiterEmits++ })
+	if waiterEmits != 1 {
+		t.Fatalf("waiter emitted %d resolutions, want 1", waiterEmits)
+	}
+	cancelEmits = nil
+	a.interaction.emitCancelledConfirmResolutions(func(requestID string, _ confirmIdentity, _ string) {
+		cancelEmits = append(cancelEmits, requestID)
+	})
+	if len(cancelEmits) != 0 {
+		t.Fatalf("cancellation emitted %v after the waiter held the claim, want none", cancelEmits)
+	}
+	a.interaction.unregisterConfirm(requestID)
+
+	// A confirm whose waiter context is still live outlives the abort: the
+	// settlement skips it and the waiter keeps its claim available.
+	parkedID := "parked-req"
+	a.interaction.registerConfirm(parkedID, testWalltimeTarget("main"), identity, liveCtx)
+	deliverTestConfirm(t, a.interaction, parkedID)
+	a.interaction.emitCancelledConfirmResolutions(func(requestID string, _ confirmIdentity, _ string) {
+		t.Fatalf("cancellation settled live-context confirm %v", requestID)
+	})
+	parkedEmits := 0
+	a.interaction.emitConfirmResolvedOnce(parkedID, func() { parkedEmits++ })
+	if parkedEmits != 1 {
+		t.Fatalf("the surviving confirm's waiter emitted %d resolutions, want 1", parkedEmits)
+	}
+	a.interaction.unregisterConfirm(parkedID)
+
+	// A cancelled confirm whose request was never delivered resolves nothing:
+	// no consumer saw the dialog, so there is no resolution to report.
+	undeliveredID := "undelivered-req"
+	a.interaction.registerConfirm(undeliveredID, testWalltimeTarget("main"), identity, cancelCtx)
+	a.interaction.emitCancelledConfirmResolutions(func(requestID string, _ confirmIdentity, _ string) {
+		t.Fatalf("cancellation settled undelivered confirm %v", requestID)
+	})
+	undeliveredEmits := 0
+	a.interaction.emitConfirmResolvedOnce(undeliveredID, func() { undeliveredEmits++ })
+	if undeliveredEmits != 1 {
+		t.Fatalf("the undelivered confirm's waiter emitted %d resolutions, want 1", undeliveredEmits)
+	}
+	a.interaction.unregisterConfirm(undeliveredID)
 }
