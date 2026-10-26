@@ -48,6 +48,92 @@ var (
 	}
 )
 
+// afterWriteClientWaitTimeout bounds how long one write waits for its
+// language server client to appear after Start. Batch callers run these waits
+// concurrently, so the budget applies per file rather than per batch.
+const afterWriteClientWaitTimeout = 3 * time.Second
+
+// afterWritePrepared carries one write through the two phases of the
+// after-write pipeline: preparation (client wait, waiter registration, content
+// sync) and the diagnostics wait that follows.
+type afterWritePrepared struct {
+	path        string
+	base        string
+	sync        afterWriteSync
+	waiter      chan diagnosticsEvent
+	waitTimeout time.Duration
+	// wait reports whether the diagnostics wait should run: false when the
+	// write has no server coverage, its server start failed, or every owning
+	// server missed the content sync.
+	wait bool
+}
+
+// beginAfterFileWrite runs the first step of the after-write pipeline: drop
+// exited clients so Start relaunches them, record whether this write needs a
+// cold start, and launch the owning servers. Batch callers run it for every
+// file before any client wait, so all servers start (in parallel) and every
+// cold file is recognized before a sibling's wait makes the server look warm.
+func (m *Manager) beginAfterFileWrite(ctx context.Context, absPath, base string) (coldStart bool, baseOut string, exited []string) {
+	baseOut, exited = m.appendExitedServerNotes(ctx, absPath, base)
+	coldStart = !afterWriteHasReadyClient(m, absPath)
+	afterWriteStart(m, ctx, absPath)
+	return coldStart, baseOut, exited
+}
+
+// prepareAfterFileWrite runs the pre-wait half of the single-file after-write
+// pipeline: client wait, waiter registration, content sync, and sync-failure
+// handling. coldStart and exited come from beginAfterFileWrite, which the
+// caller runs first.
+func (m *Manager) prepareAfterFileWrite(ctx context.Context, absPath, content, base string, changeType WatchedFileChangeType, coldStart bool, exited []string) afterWritePrepared {
+	// Start is asynchronous, so wait briefly for the matching client to appear
+	// before treating the first post-write sync as a startup failure.
+	if _, ok := afterWriteWaitForClient(m, ctx, absPath, afterWriteClientWaitTimeout); !ok {
+		return afterWritePrepared{path: absPath, base: m.appendStartFailureNotes(ctx, absPath, base, exited)}
+	}
+	return m.prepareReadyAfterFileWrite(ctx, absPath, content, base, changeType, coldStart)
+}
+
+// prepareReadyAfterFileWrite runs the pre-wait half after the caller has
+// confirmed a client is available. It registers the waiter BEFORE sending
+// didChange so a fast server's publish is never missed; batch callers run the
+// client waits concurrently and call this serially so all content syncs reach
+// the server as one analysis unit.
+func (m *Manager) prepareReadyAfterFileWrite(ctx context.Context, absPath, content, base string, changeType WatchedFileChangeType, coldStart bool) afterWritePrepared {
+	prepared := afterWritePrepared{path: absPath, base: base}
+	prepared.waiter = m.PrepareWaiter(absPath)
+	prepared.sync = m.syncAfterWrite(ctx, absPath, content, changeType, true)
+	prepared.base, prepared.wait = m.settleAfterWriteSyncFailure(ctx, absPath, prepared.waiter, prepared.sync, prepared.base)
+	prepared.waitTimeout = diagnosticsWaitTimeout
+	if coldStart {
+		prepared.waitTimeout = coldStartDiagnosticsWaitTimeout
+	}
+	return prepared
+}
+
+// awaitPreparedAfterFileWrite runs the wait half of the after-write pipeline
+// for a prepared write: fresh diagnostics, sync confirmation, timeout notes,
+// and the review snapshot. It returns the tool-result string with this file's
+// diagnostics appended after base.
+func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *afterWritePrepared, includeOtherFiles bool, displayBaseDir string) string {
+	if !prepared.wait {
+		return prepared.base
+	}
+
+	_, notified := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.after}, prepared.waitTimeout)
+	if notified {
+		m.confirmDiagnosticsSync(prepared.sync.token)
+	}
+	if !notified && ctx.Err() == nil {
+		// A timeout is logged every time; the model hears about the first one
+		// per session so an empty result is never mistaken for a clean one.
+		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", prepared.path, prepared.waitTimeout)
+		prepared.base = m.appendTimeoutNote(prepared.path, prepared.base, prepared.waitTimeout)
+	}
+
+	m.recordReviewSnapshot(prepared.path)
+	return m.AppendLSPDiagnosticsToToolOutput(prepared.base, prepared.path, includeOtherFiles, displayBaseDir)
+}
+
 // AfterFileWriteToolResult runs the LSP pipeline after Write/Edit succeeds: Start, DidChange,
 // WaitDiagnosticsNotify, logs startup/sync failures, then appends LSP error diagnostics
 // (if any). includeOtherFiles is true for Write. If no LSP is configured for this file
@@ -69,43 +155,9 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 		return base
 	}
 
-	base, exited := m.appendExitedServerNotes(ctx, absPath, base)
-	coldStart := !afterWriteHasReadyClient(m, absPath)
-	afterWriteStart(m, ctx, absPath)
-
-	// Start is asynchronous, so wait briefly for the matching client to appear
-	// before treating the first post-write sync as a startup failure.
-	_, ok := afterWriteWaitForClient(m, ctx, absPath, 3*time.Second)
-	if !ok {
-		return m.appendStartFailureNotes(ctx, absPath, base, exited)
-	}
-
-	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
-	waiterCh := m.PrepareWaiter(absPath)
-	sync := m.syncAfterWrite(ctx, absPath, content, changeType, true)
-	base, wait := m.settleAfterWriteSyncFailure(ctx, absPath, waiterCh, sync, base)
-	if !wait {
-		return base
-	}
-
-	waitTimeout := diagnosticsWaitTimeout
-	if coldStart {
-		waitTimeout = coldStartDiagnosticsWaitTimeout
-	}
-
-	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: sync.serverVersions, after: sync.after}, waitTimeout)
-	if notified {
-		m.confirmDiagnosticsSync(sync.token)
-	}
-	if !notified && ctx.Err() == nil {
-		// A timeout is logged every time; the model hears about the first one
-		// per session so an empty result is never mistaken for a clean one.
-		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", absPath, waitTimeout)
-		base = m.appendTimeoutNote(absPath, base, waitTimeout)
-	}
-
-	m.recordReviewSnapshot(absPath)
-	return m.AppendLSPDiagnosticsToToolOutput(base, absPath, includeOtherFiles, displayBaseDir)
+	coldStart, base, exited := m.beginAfterFileWrite(ctx, absPath, base)
+	prepared := m.prepareAfterFileWrite(ctx, absPath, content, base, changeType, coldStart, exited)
+	return m.awaitPreparedAfterFileWrite(ctx, &prepared, includeOtherFiles, displayBaseDir)
 }
 
 func (m *Manager) logLSPServiceNote(path, msg string) {

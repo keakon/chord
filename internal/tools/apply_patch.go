@@ -736,7 +736,6 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 		change  lsp.WatchedFileChangeType
 	}
 	finalWrites := make(map[string]finalWrite)
-	var reviewedPaths []string
 	for _, mutation := range plan.Mutations {
 		switch mutation.Kind {
 		case MutationAdd:
@@ -768,11 +767,21 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 	}
 	slices.Sort(paths)
 	var notes []string
+	writes := make([]lsp.FileWrite, 0, len(paths))
 	for _, path := range paths {
 		write := finalWrites[path]
 		t.LSP.MarkTouched(write.path)
 		outputs[path] = t.LSP.DiagnosticOutputConfigForPath(path)
-		result := t.LSP.AfterFileWriteToolResult(ctx, write.path, write.content, "", false, write.change, t.BaseDir)
+		writes = append(writes, lsp.FileWrite{Path: write.path, Content: write.content, ChangeType: write.change})
+	}
+	// The batched pipeline sends every file's content sync before waiting, so
+	// the language server re-analyzes the whole patch as one unit and the
+	// per-file waits overlap instead of queuing behind each other.
+	results := t.LSP.AfterFileWritesToolResult(ctx, writes, t.BaseDir)
+	var reviewedPaths []string
+	for _, path := range paths {
+		write := finalWrites[path]
+		result := results[write.path]
 		if parsed := lsp.ParseToolOutputDiagnostics(result); len(parsed) > 0 {
 			extras[path] = parsed
 		}
