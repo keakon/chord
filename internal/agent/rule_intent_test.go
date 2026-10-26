@@ -106,3 +106,32 @@ delete:
 		t.Fatalf("action after delete rule = %q, want %q", got.Action, permission.ActionAllow)
 	}
 }
+
+func TestRuleIntentReturnsPerRulePersistenceResults(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.activeConfig = &config.AgentConfig{Name: "builder"}
+	intent := &ConfirmRuleIntent{
+		RequestID: "confirm-1",
+		Rules: []ConfirmRule{
+			{Tool: tools.NameShell, Pattern: "git status"},
+			{Tool: tools.NameDelete, Pattern: "sample.txt"},
+		},
+		Scope: int(permission.ScopeSession),
+	}
+	results := a.processRuleIntentWithResult(tools.NameShell, intent, "builder")
+	if len(results) != 2 {
+		t.Fatalf("results = %#v, want one result per rule", results)
+	}
+	for i, result := range results {
+		if result.Tool != intent.Rules[i].Tool || result.Pattern != intent.Rules[i].Pattern || result.Error != "" {
+			t.Fatalf("result[%d] = %+v", i, result)
+		}
+	}
+
+	intent.Scope = 99
+	results = a.processRuleIntentWithResult(tools.NameShell, intent, "builder")
+	if len(results) != 2 || results[0].Error == "" || results[1].Error == "" {
+		t.Fatalf("failed persistence results = %#v", results)
+	}
+}

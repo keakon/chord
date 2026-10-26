@@ -150,9 +150,9 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		machineStateRoot:      a.ContentRoot(),
 		toolBaseDirGeneration: a.workDirState.load().Generation,
 		pathScope:             a.effectivePathScope(),
-		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
-			a.processRuleIntent(toolName, intent, a.currentAgentName())
-			return a.effectiveRuleset()
+		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) (permission.Ruleset, []ConfirmRuleIntentResult) {
+			results := a.processRuleIntentWithResult(toolName, intent, a.currentAgentName())
+			return a.effectiveRuleset(), results
 		},
 		isInternalTool:        isInternalControlTool,
 		confirm:               a.confirmFn,

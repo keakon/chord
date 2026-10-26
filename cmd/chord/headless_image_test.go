@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/png"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,5 +112,43 @@ func TestHeadlessImageChunksStopOnBackpressureCancellation(t *testing.T) {
 	calls := 0
 	if emitHeadlessImageChunks(imagegen.Image{Data: make([]byte, 3*headlessImageChunkBytes)}, "", "", "", "", func(*headlessEnvelope) bool { calls++; return false }) || calls != 1 {
 		t.Fatal("delivery continued after output closed")
+	}
+}
+
+type headlessImageSessionFixture struct{ dir string }
+
+func (b headlessImageSessionFixture) SendUserMessageWithReceipt(string, string) bool { return false }
+func (headlessImageSessionFixture) CancelCurrentTurn() bool                          { return false }
+func (headlessImageSessionFixture) ResolveConfirm(string, string, string, string, string) {
+}
+func (b headlessImageSessionFixture) SessionDir() string { return b.dir }
+
+func TestHeadlessImageArtifactErrorsCarryRequestID(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		backend headlessBackend
+		content string
+	}{
+		{name: "session unavailable", content: "artifact:images/missing.png"},
+		{name: "artifact unavailable", backend: headlessImageSessionFixture{dir: t.TempDir()}, content: "artifact:images/missing.png"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var output strings.Builder
+			out := newStdoutWriter(t.Context(), &output)
+			go out.run()
+
+			handleHeadlessImageArtifact(headlessCommand{RequestID: "refetch-1", Content: tc.content}, tc.backend, out)
+			if !out.closeUntil(nil) {
+				t.Fatal("stdout writer did not close")
+			}
+			var env headlessEnvelope
+			if err := json.Unmarshal([]byte(strings.TrimSpace(output.String())), &env); err != nil {
+				t.Fatalf("decode error envelope: %v", err)
+			}
+			payload, ok := env.Payload.(map[string]any)
+			if env.Type != "error" || !ok || payload["request_id"] != "refetch-1" {
+				t.Fatalf("error envelope = %#v, want request_id refetch-1", env)
+			}
+		})
 	}
 }

@@ -63,12 +63,13 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 			return s.permissionApprovalMatches(s.currentTurn(), callID, name, string(args), cwd, pctx)
 		},
 		currentRuleset: s.currentRuleset,
-		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset {
+		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) (permission.Ruleset, []ConfirmRuleIntentResult) {
+			var results []ConfirmRuleIntentResult
 			if s.parent != nil {
-				s.parent.processRuleIntent(toolName, intent, s.agentDefName)
+				results = s.parent.processRuleIntentWithResult(toolName, intent, s.agentDefName)
 				s.setRuleset(s.parent.buildSubAgentRuleset(s.parent.agentConfigs[s.agentDefName]))
 			}
-			return s.currentRuleset()
+			return s.currentRuleset(), results
 		},
 		isInternalTool: isSubAgentInternalTool,
 		confirm:        confirm,

@@ -60,12 +60,12 @@ func emitHeadlessImageOriginals(ctx context.Context, e agent.ToolResultEvent, em
 func handleHeadlessImageArtifact(cmd headlessCommand, backend headlessBackend, out *stdoutWriter) {
 	sb, ok := backend.(headlessSessionBackend)
 	if !ok {
-		out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "Session artifacts are unavailable"}})
+		out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": "Session artifacts are unavailable", "request_id": cmd.RequestID}})
 		return
 	}
 	img, err := tools.ReadGeneratedOriginal(out.sendContext(), sb.SessionDir(), cmd.Content)
 	if err != nil {
-		out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": fmt.Sprintf("Image artifact: %v", err)}})
+		out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": fmt.Sprintf("Image artifact: %v", err), "request_id": cmd.RequestID}})
 		return
 	}
 	emitHeadlessImageChunks(img, cmd.Content, "", cmd.RequestID, "", func(env *headlessEnvelope) bool { return out.emit(env) })

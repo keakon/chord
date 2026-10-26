@@ -1140,6 +1140,19 @@ type ConfirmResolvedEvent struct {
 
 func (ConfirmResolvedEvent) agentEvent() {}
 
+type ConfirmRuleIntentResultEvent struct {
+	RequestID string                    `json:"request_id"`
+	Results   []ConfirmRuleIntentResult `json:"results"`
+}
+
+type ConfirmRuleIntentResult struct {
+	Tool    string `json:"tool"`
+	Pattern string `json:"pattern"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (ConfirmRuleIntentResultEvent) agentEvent() {}
+
 // Question close reasons that are not model-visible question outcomes. They
 // mean the request was closed by the system rather than answered or timed out.
 const (

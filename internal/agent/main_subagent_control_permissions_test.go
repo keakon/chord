@@ -163,7 +163,7 @@ func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
 	sub.setRuleset(a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName]))
 
 	pipeline := sub.toolExecutionPipeline()
-	refreshed := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
+	refreshed, _ := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
 		Rules: []ConfirmRule{{Pattern: "*"}},
 		Scope: int(permission.ScopeSession),
 	})
@@ -239,7 +239,7 @@ func TestSubAgentRuleIntentSessionRuleSurvivesMainRoleSwitch(t *testing.T) {
 	sub.setRuleset(a.buildSubAgentRuleset(a.agentConfigs[sub.agentDefName]))
 
 	pipeline := sub.toolExecutionPipeline()
-	refreshed := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
+	refreshed, _ := pipeline.refreshRulesetAfterRuleIntent(tools.NameShell, &ConfirmRuleIntent{
 		Rules: []ConfirmRule{{Pattern: "*"}},
 		Scope: int(permission.ScopeSession),
 	})

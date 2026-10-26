@@ -75,6 +75,8 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 
 	case agent.InputQueueOperationResultEvent:
 		out = append(out, &headlessEnvelope{Type: "input_queue_result", Payload: e})
+	case agent.ConfirmRuleIntentResultEvent:
+		out = append(out, &headlessEnvelope{Type: "confirm_rule_intent_result", Payload: e})
 	case agent.InputQueueChangedEvent:
 		projection := inputQueueProjection(e.Snapshot)
 		if projection == nil {

@@ -16,9 +16,23 @@ import (
 // role when the MainAgent triggered the confirm, or the SubAgent's own agent
 // definition name when a SubAgent did.
 func (a *MainAgent) processRuleIntent(toolName string, intent *ConfirmRuleIntent, ownerRole string) {
-	for _, rule := range ruleIntentPermissions(toolName, intent) {
-		a.addPermissionRule(rule, permission.RuleScope(intent.Scope), ownerRole)
+	a.processRuleIntentWithResult(toolName, intent, ownerRole)
+}
+
+func (a *MainAgent) processRuleIntentWithResult(toolName string, intent *ConfirmRuleIntent, ownerRole string) []ConfirmRuleIntentResult {
+	if intent == nil {
+		return nil
 	}
+	results := make([]ConfirmRuleIntentResult, 0, len(intent.Rules))
+	for _, rule := range ruleIntentPermissions(toolName, intent) {
+		err := a.addPermissionRule(rule, permission.RuleScope(intent.Scope), ownerRole)
+		result := ConfirmRuleIntentResult{Tool: rule.Permission, Pattern: rule.Pattern}
+		if err != nil {
+			result.Error = err.Error()
+		}
+		results = append(results, result)
+	}
+	return results
 }
 
 // ruleIntentPermissions resolves the rules an intent installs. A rule without

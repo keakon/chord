@@ -59,6 +59,37 @@ func TestHeadlessSilentErrorEventDropped(t *testing.T) {
 	}
 }
 
+func TestHeadlessConfirmRuleIntentResultEnvelope(t *testing.T) {
+	state := &headlessState{}
+	result := agent.ConfirmRuleIntentResultEvent{
+		RequestID: "confirm-1",
+		Results: []agent.ConfirmRuleIntentResult{
+			{Tool: "Shell", Pattern: "git status"},
+			{Tool: "Delete", Pattern: "sample.txt", Error: "permission file is read-only"},
+		},
+	}
+	envs := filterHeadlessEvent(result, state)
+	if len(envs) != 1 || envs[0].Type != "confirm_rule_intent_result" {
+		t.Fatalf("envelopes = %#v, want one correlated confirmation receipt", envs)
+	}
+	payload := headlessPayloadMap(t, envs[0].Payload)
+	if payload["request_id"] != "confirm-1" {
+		t.Fatalf("request_id = %v, want confirm-1", payload["request_id"])
+	}
+	results, ok := payload["results"].([]any)
+	if !ok || len(results) != 2 {
+		t.Fatalf("results = %#v, want two per-rule persistence results", payload["results"])
+	}
+	first, ok := results[0].(map[string]any)
+	if !ok || first["tool"] != "Shell" || first["pattern"] != "git status" {
+		t.Fatalf("first result = %#v", results[0])
+	}
+	second, ok := results[1].(map[string]any)
+	if !ok || second["tool"] != "Delete" || second["error"] != "permission file is read-only" {
+		t.Fatalf("second result = %#v", results[1])
+	}
+}
+
 // A turn that hits a silent retry and then recovers must still report
 // last_outcome=completed at global idle: the recovered retry must not stick as
 // the gateway-visible terminal outcome.

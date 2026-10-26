@@ -151,7 +151,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 	case "input_queue":
 		handleHeadlessInputQueue(cmd, backend, out)
 	case "send":
-		if headlessSendWithPolicy(cmd, backend, state, out) {
+		if headlessSendWithPolicy(cmd, backend, out) {
 			return
 		}
 		if isHeadlessMCPCommand(cmd.Content) {
@@ -328,6 +328,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			return
 		}
 		if ruleIntent != nil {
+			ruleIntent.RequestID = cmd.RequestID
 			if withRuleIntent, ok := backend.(headlessBackendWithRuleIntent); ok {
 				withRuleIntent.ResolveConfirmWithRuleIntent(cmd.Action, cmd.FinalArgsJSON, cmd.EditSummary, cmd.DenyReason, cmd.RequestID, ruleIntent)
 			} else {

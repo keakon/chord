@@ -37,8 +37,9 @@ type ConfirmResponse struct {
 // confirmation, for example, is often blocked by a delete rule covering a
 // moved source path, and only a delete allow rule stops the repeat prompt.
 type ConfirmRuleIntent struct {
-	Rules []ConfirmRule
-	Scope int // 0=session, 1=project, 2=userGlobal (matches permission.RuleScope)
+	Rules     []ConfirmRule
+	Scope     int // 0=session, 1=project, 2=userGlobal (matches permission.RuleScope)
+	RequestID string
 }
 
 // ConfirmRule is one rule to install after a confirmed tool call. An empty
@@ -77,6 +78,7 @@ func (a *MainAgent) ResolveConfirmWithRuleIntent(action, finalArgsJSON, editSumm
 	if ruleIntent != nil {
 		intentCopy := *ruleIntent
 		intentCopy.Rules = append([]ConfirmRule(nil), ruleIntent.Rules...)
+		intentCopy.RequestID = requestID
 		copiedRuleIntent = &intentCopy
 	}
 	a.interaction.resolveConfirm(requestID, ConfirmResponse{

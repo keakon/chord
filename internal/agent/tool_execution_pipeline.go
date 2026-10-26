@@ -68,7 +68,7 @@ type toolExecutionPipeline struct {
 	applyPatchRetry       *applyPatchRetryGuard
 
 	currentRuleset                func() permission.Ruleset
-	refreshRulesetAfterRuleIntent func(toolName string, intent *ConfirmRuleIntent) permission.Ruleset
+	refreshRulesetAfterRuleIntent func(toolName string, intent *ConfirmRuleIntent) (permission.Ruleset, []ConfirmRuleIntentResult)
 	isInternalTool                func(string) bool
 	confirm                       ConfirmFunc
 	currentTurnID                 func() uint64
@@ -1232,7 +1232,10 @@ func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message
 			return wrapToolRejectedByUser(tc.Name, denyReason)
 		}
 		if resp.RuleIntent != nil && p.refreshRulesetAfterRuleIntent != nil {
-			ruleset = p.refreshRulesetAfterRuleIntent(tc.Name, resp.RuleIntent)
+			ruleset, ruleResults := p.refreshRulesetAfterRuleIntent(tc.Name, resp.RuleIntent)
+			if resp.RuleIntent.RequestID != "" && p.emit != nil {
+				p.emit(ConfirmRuleIntentResultEvent{RequestID: resp.RuleIntent.RequestID, Results: ruleResults})
+			}
 			approvedRules = ruleset
 		}
 		originalArgs := append(json.RawMessage(nil), tc.Args...)
