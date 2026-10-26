@@ -4,8 +4,11 @@ import (
 	"strings"
 )
 
-func emitHeadlessModelsResponse(out *stdoutWriter, ok bool, message string, status string) {
+func emitHeadlessModelsResponse(out *stdoutWriter, requestID string, ok bool, message string, status string) {
 	payload := map[string]any{"ok": ok}
+	if requestID != "" {
+		payload["request_id"] = requestID
+	}
 	if message != "" {
 		payload["message"] = message
 	}
@@ -18,19 +21,19 @@ func emitHeadlessModelsResponse(out *stdoutWriter, ok bool, message string, stat
 func handleHeadlessModelsCommand(cmd headlessCommand, backend headlessModelsBackend, out *stdoutWriter) {
 	switch strings.TrimSpace(cmd.Action) {
 	case "", "status":
-		emitHeadlessModelsResponse(out, true, "", backend.ModelsStatusText())
+		emitHeadlessModelsResponse(out, cmd.RequestID, true, "", backend.ModelsStatusText())
 	case "set_current_model_pool":
 		pool := strings.TrimSpace(cmd.Pool)
 		if pool == "" {
-			emitHeadlessModelsResponse(out, false, "models set_current_model_pool requires pool", "")
+			emitHeadlessModelsResponse(out, cmd.RequestID, false, "models set_current_model_pool requires pool", "")
 			return
 		}
 		if err := backend.SetCurrentModelPool(pool); err != nil {
-			emitHeadlessModelsResponse(out, false, err.Error(), "")
+			emitHeadlessModelsResponse(out, cmd.RequestID, false, err.Error(), "")
 			return
 		}
-		emitHeadlessModelsResponse(out, true, "model pool set", backend.ModelsStatusText())
+		emitHeadlessModelsResponse(out, cmd.RequestID, true, "model pool set", backend.ModelsStatusText())
 	default:
-		emitHeadlessModelsResponse(out, false, "unsupported models action: "+cmd.Action, "")
+		emitHeadlessModelsResponse(out, cmd.RequestID, false, "unsupported models action: "+cmd.Action, "")
 	}
 }

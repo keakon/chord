@@ -208,11 +208,11 @@ Each input has one consumption reply. It does not promise model success, task co
 Inspect or change model pools.
 
 ```json
-{"type": "models", "action": "status"}
+{"type": "models", "request_id": "models-1", "action": "status"}
 ```
 
 ```json
-{"type": "models", "action": "set_current_model_pool", "pool": "thinking"}
+{"type": "models", "request_id": "models-2", "action": "set_current_model_pool", "pool": "thinking"}
 ```
 
 Response:
@@ -221,13 +221,16 @@ Response:
 {
   "type": "models_response",
   "payload": {
+    "request_id": "models-2",
     "ok": true,
     "status": "Model pool: thinking\n..."
   }
 }
 ```
 
-`status` is a plain-text snapshot that mirrors `/models status`.
+`request_id` is optional and is echoed in the response when provided. Clients
+should use a unique ID for each request so late responses cannot be mistaken
+for a later request. `status` is a plain-text snapshot that mirrors `/models status`.
 
 ### `role`
 
@@ -370,7 +373,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `confirm_rule_intent_result` | Result of persisting rules attached to a confirmation | `request_id`, `results[]` with `tool`, `pattern`, optional `error` |
 | `subscribe_response`  | Reply to a `subscribe` command                                                             | `events`                                                          |
 | `status_response`     | Reply to a `status` command                                                                | see [`status`](#status)                                           |
-| `models_response`     | Reply to a `models` command                                                                | `ok`, `message`, `status`                                         |
+| `models_response`     | Reply to a `models` command                                                                | `ok`, `message`, `status`, optional `request_id`                  |
 | `role_response`       | Reply to a `role` command                                                                  | `ok`, `message`, `role`, `roles[]` with `{name, current}`         |
 | `error`               | Command parse / execution error                                                            | `message`, optional `code` (for example `stdin_line_too_long`), optional `request_id` for `image_artifact` failures |
 

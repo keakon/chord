@@ -74,6 +74,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - The status bar compaction pill now freezes its timer and shows a `ready` marker once the summary is produced, instead of counting the wait for the agent's next request boundary as compaction time. The `✓`/`✗` outcome then reports the compaction work duration rather than the total wait.
 
+- Headless `models_response` payloads echo the optional `request_id` a `models` command carries, so integrators can tell a late reply from the result of a later request; commands without an ID omit the field.
+
 ### Fixes
 
 - Remembering a rule from a permission confirmation now suggests rules that actually stop the repeat prompt. apply_patch confirmations report the write/delete rules that blocked the call — for example a delete ask on a moved source path — and the picker offers preselected directory rules named for that tool instead of a broad apply_patch rule that could not lift the ask. Headless clients can pass `rule_tool` with `confirm` to install the rule under the blocking tool.

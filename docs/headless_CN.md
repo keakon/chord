@@ -206,11 +206,11 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 查看或切换模型池。
 
 ```json
-{"type": "models", "action": "status"}
+{"type": "models", "request_id": "models-1", "action": "status"}
 ```
 
 ```json
-{"type": "models", "action": "set_current_model_pool", "pool": "thinking"}
+{"type": "models", "request_id": "models-2", "action": "set_current_model_pool", "pool": "thinking"}
 ```
 
 响应：
@@ -219,13 +219,14 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 {
   "type": "models_response",
   "payload": {
+    "request_id": "models-2",
     "ok": true,
     "status": "Model pool: thinking\n..."
   }
 }
 ```
 
-`status` 是与 `/models status` 一致的纯文本快照。
+`request_id` 可选，提供后 Chord 会在回执中回显。每条命令应使用唯一 ID，避免迟到回执被误认为后续请求的结果。`status` 是与 `/models status` 一致的纯文本快照。
 
 ### `role`
 
@@ -368,7 +369,7 @@ Chord 收到带 request ID 的规则意图后，会在尝试写入规则后发�
 | `confirm_rule_intent_result` | 确认附带规则的保存结果 | `request_id`、`results[]`（含 `tool`、`pattern` 和可选 `error`） |
 | `subscribe_response` | 响应 `subscribe`                             | `events` |
 | `status_response`    | 响应 `status`                                | 见 [`status`](#status) |
-| `models_response`    | 响应 `models`                                | `ok`、`message`、`status` |
+| `models_response`    | 响应 `models`                                | `ok`、`message`、`status`、可选 `request_id` |
 | `role_response`      | 响应 `role`                                  | `ok`、`message`、`role`、`roles[]`（元素含 `name`、`current`） |
 | `error`              | 命令解析或执行错误                           | `message`，可选 `code`（例如 `stdin_line_too_long`）；`image_artifact` 失败时还可包含 `request_id` |
 

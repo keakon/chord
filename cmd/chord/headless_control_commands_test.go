@@ -43,7 +43,7 @@ func TestHeadlessModelsCommandStatus(t *testing.T) {
 	to := newTestOut(t)
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "models", Action: "status"}, backend, state, to.writer())
+	handleHeadlessCommand(headlessCommand{Type: "models", Action: "status", RequestID: "models-status-1"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "models_response")
 	if env == nil {
@@ -56,6 +56,26 @@ func TestHeadlessModelsCommandStatus(t *testing.T) {
 	if payload["status"] != "Model pool: thinking\n" {
 		t.Fatalf("status = %q", payload["status"])
 	}
+	if payload["request_id"] != "models-status-1" {
+		t.Fatalf("request_id = %v, want models-status-1", payload["request_id"])
+	}
+}
+
+func TestHeadlessModelsCommandFailureEchoesRequestID(t *testing.T) {
+	state := &headlessState{}
+	to := newTestOut(t)
+	backend := &mockBackend{}
+
+	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_model_pool", RequestID: "models-failed-1"}, backend, state, to.writer())
+
+	env := findHeadlessEnvelopeValue(to.drain(), "models_response")
+	if env == nil {
+		t.Fatal("models_response missing")
+	}
+	payload := env.Payload.(map[string]any)
+	if payload["ok"] != false || payload["request_id"] != "models-failed-1" {
+		t.Fatalf("models_response payload = %v, want failed response correlated to models-failed-1", payload)
+	}
 }
 
 func TestHeadlessModelsCommandSetCurrentModelPool(t *testing.T) {
@@ -63,7 +83,7 @@ func TestHeadlessModelsCommandSetCurrentModelPool(t *testing.T) {
 	to := newTestOut(t)
 	backend := &mockBackend{}
 
-	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_model_pool", Pool: "fast"}, backend, state, to.writer())
+	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_model_pool", Pool: "fast", RequestID: "models-set-1"}, backend, state, to.writer())
 
 	backend.mu.Lock()
 	msgs := append([]string(nil), backend.sentMessages...)
@@ -85,6 +105,9 @@ func TestHeadlessModelsCommandSetCurrentModelPool(t *testing.T) {
 			payload := env.Payload.(map[string]any)
 			if payload["ok"] != true {
 				t.Fatalf("models_response ok = %v, want true", payload["ok"])
+			}
+			if payload["request_id"] != "models-set-1" {
+				t.Fatalf("models_response request_id = %v, want models-set-1", payload["request_id"])
 			}
 		}
 	}
