@@ -232,16 +232,20 @@ func TestApplyCompactionDraftInvalidatesLLMRouting(t *testing.T) {
 	}
 }
 
-func TestApplyCompactionDraftOnlyRequestsPortableReplayForNativePayload(t *testing.T) {
+// Compaction only rewrites durable history. A one-request portable replay here
+// would re-render the whole prefix once and then fall back to native wire shape
+// on the following request, re-inserting reasoning items mid-prefix and losing
+// the cache for every message after them. The replay level is a per-request
+// decision derived from the target's provenance, so compaction must not queue
+// an override.
+func TestApplyCompactionDraftLeavesReplayLevelToRequestNormalization(t *testing.T) {
 	t.Parallel()
-	portableReplay := modelcompat.ReplayCompatSynthesized
 	for _, tc := range []struct {
-		name             string
-		newMessages      []message.Message
-		wantReplayCompat *int
+		name        string
+		newMessages []message.Message
 	}{
 		{
-			name: "plain text stays native",
+			name: "plain text",
 			newMessages: []message.Message{{
 				Role:                message.RoleUser,
 				Content:             "[Context Summary]",
@@ -249,7 +253,7 @@ func TestApplyCompactionDraftOnlyRequestsPortableReplayForNativePayload(t *testi
 			}},
 		},
 		{
-			name: "native reasoning becomes portable",
+			name: "foreign-wire native reasoning",
 			newMessages: []message.Message{
 				{Role: message.RoleUser, Content: "[Context Summary]", IsCompactionSummary: true},
 				{
@@ -259,7 +263,6 @@ func TestApplyCompactionDraftOnlyRequestsPortableReplayForNativePayload(t *testi
 					Provenance:       &message.MessageProvenance{ProviderID: "test", ModelID: "model", WireFamily: modelcompat.WireFamilyAnthropic},
 				},
 			},
-			wantReplayCompat: &portableReplay,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -295,15 +298,8 @@ func TestApplyCompactionDraftOnlyRequestsPortableReplayForNativePayload(t *testi
 			if len(provider.tunings) != 1 {
 				t.Fatalf("tunings = %+v, want one request", provider.tunings)
 			}
-			got := provider.tunings[0].ReplayCompat
-			if tc.wantReplayCompat == nil {
-				if got != nil {
-					t.Fatalf("ReplayCompat = %v, want native/unset", *got)
-				}
-				return
-			}
-			if got == nil || *got != *tc.wantReplayCompat {
-				t.Fatalf("ReplayCompat = %v, want %d", got, *tc.wantReplayCompat)
+			if got := provider.tunings[0].ReplayCompat; got != nil {
+				t.Fatalf("ReplayCompat = %v, want unset", *got)
 			}
 		})
 	}

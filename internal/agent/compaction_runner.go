@@ -18,7 +18,6 @@ import (
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -760,10 +759,6 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.clearPreparedReductionCache()
 	if a.llmClient != nil {
 		a.llmClient.ResetReplayCompatibility()
-		if modelcompat.HasNativeReplayPayload(compactedMessages) {
-			portableReplay := modelcompat.ReplayCompatSynthesized
-			a.llmClient.MergeNextRequestTuningOverride(llm.RequestTuning{ReplayCompat: &portableReplay})
-		}
 		a.llmClient.InvalidateRouting("context_compacted")
 	}
 	a.ctxMgr.ClearLastTokenUsage()
