@@ -29,13 +29,19 @@ func TestDirectoryInstructionProjectionNoopOwnership(t *testing.T) {
 	}
 }
 
-func TestDirectoryInstructionProjectionNoFactsPreservesBlockers(t *testing.T) {
+// A scope whose rules could not be loaded is simply absent; it must never turn
+// into a request message, because the model cannot act on the reason and would
+// only be told about a condition the harness has to resolve.
+func TestDirectoryInstructionProjectionOmitsBlockers(t *testing.T) {
 	r := &directoryInstructionRuntime{}
-	r.view.Store(&directoryInstructionView{Blocked: []message.DirectoryInstructionFact{{Scope: "sample", Reason: message.DirectoryInstructionReasonPermission}}})
+	r.view.Store(&directoryInstructionView{Blocked: []message.DirectoryInstructionFact{{Scope: "sample", Reason: message.DirectoryInstructionReasonIO, Detail: "cannot read rule file"}}})
 	history := []message.Message{{Role: message.RoleUser, Content: "sample"}}
 	got, err := projectDirectoryInstructionHistory(history, r)
-	if err != nil || len(got) != 2 || got[1].Kind != message.KindDirectoryInstructionProjection {
-		t.Fatalf("blocker projection: %+v %v", got, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Content != "sample" {
+		t.Fatalf("blocker reached the request: %+v", got)
 	}
 }
 

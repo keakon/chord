@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -56,7 +55,9 @@ func TestDirectoryInstructionsReadThenWriteStillExecutes(t *testing.T) {
 	}
 }
 
-func TestDirectoryInstructionsPatchAppliesWithoutPreflight(t *testing.T) {
+// Rules reach the model only when a file inside a directory is read. A patch
+// that creates files in two directories applies unchanged and discovers nothing.
+func TestDirectoryInstructionsPatchAppliesWithoutDiscovery(t *testing.T) {
 	p, root := directoryPipelineFixture(t)
 	writeResolverRule(t, filepath.Join(root, "deep"), "Review changes here.")
 	patch := "*** Begin Patch\n*** Add File: first.txt\n+first\n*** Add File: deep/last.txt\n+last\n*** End Patch"
@@ -70,8 +71,8 @@ func TestDirectoryInstructionsPatchAppliesWithoutPreflight(t *testing.T) {
 			t.Fatalf("target %s=%q err=%v", path, got, err)
 		}
 	}
-	if result.DirectoryDiscovery == nil {
-		t.Fatal("apply_patch did not discover directory rules")
+	if result.DirectoryDiscovery != nil {
+		t.Fatalf("non-read tool discovered directory rules: %+v", result.DirectoryDiscovery)
 	}
 }
 
@@ -87,22 +88,14 @@ func TestDirectoryInstructionsUnstableReadIdentitySkipsDiscovery(t *testing.T) {
 	}
 }
 
-// A rule file the current ruleset forbids reading is recorded as blocked, but
-// it neither injects the cached body nor stops the write.
+// A rule file that cannot be loaded never stops a write: the write neither
+// reads nor discovers rules, so it cannot be affected by one.
 func TestDirectoryInstructionsUnreadableRuleDoesNotBlockWrite(t *testing.T) {
 	p, root := directoryPipelineFixture(t)
 	dir := filepath.Join(root, "module")
-	writeResolverRule(t, dir, "module rule")
-	d := discoverResolverDirectory(t, p.directoryRuntime, dir)
-	visible := map[directoryInstructionVersion]struct{}{}
-	for scope, o := range d.Observations {
-		if o.Status == "present" {
-			visible[directoryInstructionFactFromObservation(p.directoryRuntime.binding, scope, o).Ref()] = struct{}{}
-		}
-	}
-	p.directoryRuntime.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: p.directoryRuntime.binding, RequestSeq: 2, Visible: visible}})
-	p.currentRuleset = func() permission.Ruleset {
-		return permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}, {Permission: tools.NameRead, Pattern: "*AGENTS.md", Action: permission.ActionDeny}}
+	// A directory named AGENTS.md cannot be opened as a regular file.
+	if err := os.MkdirAll(filepath.Join(dir, "AGENTS.md"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 	target := filepath.Join(dir, "new.txt")
 	result, err := p.execute(context.Background(), directoryCall("write", tools.NameWrite, map[string]string{"path": target, "content": "sample"}), false)
@@ -112,11 +105,8 @@ func TestDirectoryInstructionsUnreadableRuleDoesNotBlockWrite(t *testing.T) {
 	if got, err := os.ReadFile(target); err != nil || string(got) != "sample" {
 		t.Fatalf("file=%q err=%v", got, err)
 	}
-	if result.DirectoryDiscovery == nil {
-		t.Fatal("write did not discover directory rules")
-	}
-	if o := result.DirectoryDiscovery.Observations["module"]; o.Status != "blocked" || o.Reason != message.DirectoryInstructionReasonPermission {
-		t.Fatalf("unreadable rule not recorded as blocked: %+v", result.DirectoryDiscovery.Observations)
+	if result.DirectoryDiscovery != nil {
+		t.Fatalf("write discovered directory rules: %+v", result.DirectoryDiscovery)
 	}
 }
 

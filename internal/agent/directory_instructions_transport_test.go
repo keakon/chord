@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -239,35 +238,5 @@ func TestDirectoryInstructionTransportPreservesRulesAndAttemptEvidence(t *testin
 				t.Fatalf("submissions=%d", submissions.Load())
 			}
 		})
-	}
-}
-
-func TestDirectoryInstructionTransportBudgetSkipsSmallModelWithoutEvidence(t *testing.T) {
-	r, messages, _ := directoryTransportFixture(t)
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		var body struct {
-			Model string `json:"model"`
-		}
-		_ = json.NewDecoder(req.Body).Decode(&body)
-		calls.Add(1)
-		if body.Model != "large-model" {
-			t.Errorf("budget-skipped model submitted: %s", body.Model)
-		}
-		if attempt := r.attempt.Load(); attempt == nil || attempt.request.AttemptSeq != 1 {
-			t.Errorf("skipped target produced evidence: %+v", attempt)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, directoryTransportResponse(config.ProviderTypeChatCompletions))
-	}))
-	defer server.Close()
-	cfg := llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions, APIURL: server.URL, Models: map[string]config.ModelConfig{"small-model": {Limit: config.ModelLimit{Context: 128, Output: 64}}, "large-model": {Limit: config.ModelLimit{Context: 32000, Output: 512}}}}, []string{"key"})
-	impl := newDirectoryTransportProvider(t, cfg, config.ProviderTypeChatCompletions)
-	client := llm.NewClient(cfg, impl, "small-model", 64, "")
-	defer client.Close()
-	client.SetFallbackModels([]llm.FallbackModel{{ProviderConfig: cfg, ProviderImpl: impl, ModelID: "large-model", ContextLimit: 32000, MaxTokens: 512}})
-	_, err := client.CompleteStreamWithOptions(context.Background(), messages, nil, func(message.StreamDelta) {}, llm.CompleteStreamOptions{PrepareAttempt: prepareDirectoryInstructionAttempt(r, 9)})
-	if err != nil || calls.Load() != 1 {
-		t.Fatalf("calls=%d err=%v", calls.Load(), err)
 	}
 }

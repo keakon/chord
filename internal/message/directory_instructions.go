@@ -17,7 +17,6 @@ const (
 	DirectoryInstructionRemove            = "remove"
 	DirectoryInstructionBlocked           = "blocked"
 	DirectoryInstructionReasonIO          = "io"
-	DirectoryInstructionReasonPermission  = "permission"
 	DirectoryInstructionReasonCapacity    = "capacity"
 	DirectoryInstructionReasonEncoding    = "encoding"
 	DirectoryInstructionReasonSize        = "size"
@@ -135,6 +134,9 @@ func RenderDirectoryInstructionFacts(facts []DirectoryInstructionFact) string {
 
 // DirectoryInstructionAccountingMessages projects durable facts for token
 // accounting without retaining stale versions or charging blocked bodies.
+// Blocked scopes are absent by construction: a scope whose rules could not be
+// loaded contributes no request message, so accounting must not price a notice
+// no request contains.
 func DirectoryInstructionAccountingMessages(messages []Message) []Message {
 	type key struct{ root, scope string }
 	type entry struct {
@@ -159,16 +161,12 @@ func DirectoryInstructionAccountingMessages(messages []Message) []Message {
 		return messages
 	}
 	byIndex := make(map[int][]DirectoryInstructionFact)
-	var blocked []DirectoryInstructionFact
 	for _, e := range latest {
-		switch e.fact.Operation {
-		case DirectoryInstructionUpsert:
+		if e.fact.Operation == DirectoryInstructionUpsert {
 			byIndex[e.index] = append(byIndex[e.index], e.fact)
-		case DirectoryInstructionBlocked:
-			blocked = append(blocked, e.fact)
 		}
 	}
-	out := make([]Message, 0, len(messages)+1)
+	out := make([]Message, 0, len(messages))
 	for i, m := range messages {
 		if m.Kind != KindDirectoryInstructions {
 			out = append(out, m)
@@ -178,24 +176,6 @@ func DirectoryInstructionAccountingMessages(messages []Message) []Message {
 			SortDirectoryInstructionFacts(fs)
 			out = append(out, Message{Role: RoleUser, Kind: KindDirectoryInstructionProjection, Content: RenderDirectoryInstructionFacts(fs)})
 		}
-	}
-	if len(blocked) > 0 {
-		SortDirectoryInstructionFacts(blocked)
-		var b strings.Builder
-		b.WriteString("Directory rules could not be loaded for these scopes; treat them as having no extra rules in context.\n")
-		count := 0
-		for _, f := range blocked {
-			line := fmt.Sprintf("%s: %s\n", f.Scope, f.Reason)
-			if count >= 8 || b.Len()+len(line) > 1900 {
-				break
-			}
-			b.WriteString(line)
-			count++
-		}
-		if count < len(blocked) {
-			fmt.Fprintf(&b, "%d additional unavailable scopes.\n", len(blocked)-count)
-		}
-		out = append(out, Message{Role: RoleUser, Kind: KindDirectoryInstructionProjection, Content: b.String()})
 	}
 	return out
 }

@@ -2,14 +2,11 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"maps"
 	"path/filepath"
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -23,7 +20,6 @@ type directoryInstructionPreparation struct {
 	historyFingerprint string
 	activationKey      string
 	binding            directoryInstructionBinding
-	permissionIdentity string
 	turnID             uint64
 	sourceID           string
 }
@@ -35,7 +31,7 @@ type directoryInstructionsPrepared struct {
 	committed   bool
 }
 
-func prepareDirectoryInstructions(ctx context.Context, binding directoryInstructionBinding, history []message.Message, check func(context.Context, string) error, identity string) (*directoryInstructionRuntime, []message.DirectoryInstructionFact, error) {
+func prepareDirectoryInstructions(ctx context.Context, binding directoryInstructionBinding, history []message.Message) (*directoryInstructionRuntime, []message.DirectoryInstructionFact, error) {
 	inputBinding := binding
 	binding, err := prepareDirectoryInstructionBinding(ctx, binding)
 	if err != nil {
@@ -43,8 +39,6 @@ func prepareDirectoryInstructions(ctx context.Context, binding directoryInstruct
 	}
 	r := newDirectoryInstructionRuntime(context.WithoutCancel(ctx), binding)
 	r.inputBinding = inputBinding
-	r.permissionCheck = check
-	r.permissionIdentity = identity
 	fail := func(err error) (*directoryInstructionRuntime, []message.DirectoryInstructionFact, error) {
 		r.cancel()
 		return nil, nil, err
@@ -104,13 +98,10 @@ func prepareDirectoryInstructions(ctx context.Context, binding directoryInstruct
 		facts = append(facts, f)
 	}
 	message.SortDirectoryInstructionFacts(facts)
-	// Hard failures in the initial chain cannot be downgraded to a request that
-	// silently lacks mandatory workspace instructions.
-	for _, o := range r.initial.Observations {
-		if o.Status == "blocked" && (o.Reason == "size" || o.Reason == "too_large" || o.Reason == "capacity" || o.Reason == "encoding" || o.Reason == "invalid_utf8") {
-			return fail(fmt.Errorf("directory rules cannot be prepared: %s: %s", o.SourcePath, o.Reason))
-		}
-	}
+	// A rule file that cannot be loaded is simply absent: directory rules are
+	// prompt material, and the harness neither judges nor enforces their content.
+	// A scope without them behaves exactly like a scope with no AGENTS.md, which
+	// is also why the condition never reaches the model.
 	merged := append([]message.Message(nil), history...)
 	if len(facts) > 0 {
 		merged = append(merged, directoryInstructionFactMessage(facts))
@@ -126,68 +117,11 @@ func directoryInstructionFactMessage(facts []message.DirectoryInstructionFact) m
 	return message.Message{Role: message.RoleUser, Kind: message.KindDirectoryInstructions, DirectoryInstructions: &message.DirectoryInstructions{Facts: append([]message.DirectoryInstructionFact(nil), facts...)}}
 }
 
-// directoryInstructionPermissionMode preserves the caller's read semantics:
-// main-agent YOLO bypasses ordinary rules; workers only downgrade ask.
-type directoryInstructionPermissionMode struct {
-	Bypass       bool
-	DowngradeAsk bool
-}
-
-func directoryInstructionPermission(rules permission.Ruleset, scope permission.PathScope, mode directoryInstructionPermissionMode) (func(context.Context, string) error, string) {
-	// Ordinary main-agent reads bypass rules under YOLO. Normalize the identity
-	// too, so preparation and dispatch agree even when configured rules differ.
-	if mode.Bypass {
-		rules = nil
-		mode.DowngradeAsk = false
-	}
-	data, _ := json.Marshal(struct {
-		Rules permission.Ruleset
-		Scope permission.PathScope
-	}{rules, scope})
-	identity := message.DirectoryInstructionBodyHash(fmt.Sprintf("%s:%v", data, mode))
-	return func(ctx context.Context, path string) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if len(rules) == 0 {
-			return nil
-		}
-		args, _ := json.Marshal(map[string]string{"path": path})
-		decision := evaluateToolPermissionInDirWithContext(rules, tools.NameRead, args, scope, toolPermissionContext{})
-		if decision.Action == permission.ActionAsk && mode.DowngradeAsk {
-			return nil
-		}
-		if decision.Action != permission.ActionAllow {
-			return fmt.Errorf("read permission %s for %s", decision.Action, path)
-		}
-		return nil
-	}, identity
-}
-func (a *MainAgent) directoryInstructionReadPermission() (func(context.Context, string) error, string) {
-	return directoryInstructionPermission(a.snapshotRuleset(), a.effectivePathScope(), directoryInstructionPermissionMode{Bypass: a.YoloEnabled()})
-}
-
-func (s *SubAgent) directoryInstructionReadPermission() (func(context.Context, string) error, string) {
-	return directoryInstructionPermission(s.currentRuleset(), s.effectivePathScope(), directoryInstructionPermissionMode{DowngradeAsk: s.parent != nil && s.parent.YoloEnabled()})
-}
-
-func (p toolExecutionPipeline) directoryInstructionReadPermission() (func(context.Context, string) error, string) {
-	var rules permission.Ruleset
-	if p.currentRuleset != nil {
-		rules = p.currentRuleset()
-	}
-	return directoryInstructionPermission(rules, p.effectivePathScope(), directoryInstructionPermissionMode{
-		Bypass:       p.bypassPermission != nil && p.bypassPermission(tools.NameRead),
-		DowngradeAsk: p.yoloDowngradeAsk != nil && p.yoloDowngradeAsk(tools.NameRead),
-	})
-}
-
-func directoryInstructionBindingMatches(r *directoryInstructionRuntime, b directoryInstructionBinding, identity string) bool {
-	return r != nil && r.binding.SessionEpoch == b.SessionEpoch && r.binding.AgentID == b.AgentID && r.binding.Generation == b.Generation && r.inputBinding.WorkDir == b.WorkDir && r.inputBinding.ContentRoot == b.ContentRoot && r.permissionIdentity == identity
+func directoryInstructionBindingMatches(r *directoryInstructionRuntime, b directoryInstructionBinding) bool {
+	return r != nil && r.binding.SessionEpoch == b.SessionEpoch && r.binding.AgentID == b.AgentID && r.binding.Generation == b.Generation && r.inputBinding.WorkDir == b.WorkDir && r.inputBinding.ContentRoot == b.ContentRoot
 }
 func (a *MainAgent) ensureDirectoryInstructionsBeforeRequest(ctx context.Context, turnID uint64, sourceID string) bool {
 	binding := directoryInstructionBinding{SessionEpoch: a.sessionEpoch, AgentID: "main", Generation: a.workDirState.load().Generation, ContentRoot: a.ContentRoot(), WorkDir: a.effectiveToolBaseDir()}
-	check, identity := a.directoryInstructionReadPermission()
 	if p := a.directoryPreparation; p != nil {
 		if !p.failed {
 			return false
@@ -198,21 +132,21 @@ func (a *MainAgent) ensureDirectoryInstructionsBeforeRequest(ctx context.Context
 		}
 		a.directoryPreparation = nil
 	}
-	if r := a.directoryInstructions.Load(); directoryInstructionBindingMatches(r, binding, identity) {
+	if r := a.directoryInstructions.Load(); directoryInstructionBindingMatches(r, binding) {
 		return a.ensureDirectoryInstructionCandidates(ctx, turnID, sourceID, r)
 	}
 
 	if old := a.directoryInstructions.Swap(nil); old != nil {
 		old.cancel()
 	}
-	prep := &directoryInstructionPreparation{binding: binding, permissionIdentity: identity, turnID: turnID, sourceID: sourceID}
+	prep := &directoryInstructionPreparation{binding: binding, turnID: turnID, sourceID: sourceID}
 	a.directoryPreparation = prep
 	history := a.ctxMgr.Snapshot()
 	prep.historyFingerprint = compactionTranscriptFingerprint(history)
 	prep.activationKey = a.directoryInstructionActivationKey(history)
 	inputs := a.directoryCandidateInputs(history)
 	go func() {
-		r, facts, err := prepareDirectoryInstructions(ctx, binding, history, check, identity)
+		r, facts, err := prepareDirectoryInstructions(ctx, binding, history)
 		if err == nil {
 			facts, err = budgetRestoredDirectoryInstructions(r, facts, history, inputs)
 		}
@@ -312,7 +246,6 @@ func (s *SubAgent) ensureDirectoryInstructionsBeforeRequest(turn *Turn) bool {
 		root = s.parent.ContentRoot()
 	}
 	binding := directoryInstructionBinding{SessionEpoch: s.sessionEpoch, AgentID: s.taskID, Generation: s.workDirState.load().Generation, ContentRoot: root, WorkDir: s.effectiveToolBaseDir()}
-	check, identity := s.directoryInstructionReadPermission()
 	if p := s.directoryPreparation; p != nil {
 		if !p.failed {
 			return false
@@ -324,7 +257,7 @@ func (s *SubAgent) ensureDirectoryInstructionsBeforeRequest(turn *Turn) bool {
 		}
 		s.directoryPreparation = nil
 	}
-	if r := s.directoryInstructions.Load(); directoryInstructionBindingMatches(r, binding, identity) {
+	if r := s.directoryInstructions.Load(); directoryInstructionBindingMatches(r, binding) {
 		return s.ensureDirectoryInstructionCandidates(turn, r)
 	}
 
@@ -334,7 +267,7 @@ func (s *SubAgent) ensureDirectoryInstructionsBeforeRequest(turn *Turn) bool {
 	if s.directoryPreparedCh == nil {
 		s.directoryPreparedCh = make(chan directoryInstructionsPrepared, 1)
 	}
-	prep := &directoryInstructionPreparation{binding: binding, permissionIdentity: identity, turnID: turn.ID}
+	prep := &directoryInstructionPreparation{binding: binding, turnID: turn.ID}
 	s.directoryPreparation = prep
 	history := s.ctxMgr.Snapshot()
 	prep.historyFingerprint = compactionTranscriptFingerprint(history)
@@ -342,7 +275,7 @@ func (s *SubAgent) ensureDirectoryInstructionsBeforeRequest(turn *Turn) bool {
 	inputs := s.directoryCandidateInputs(history)
 	s.llmRequestInFlight.Store(true)
 	s.llmWG.Go(func() {
-		r, facts, err := prepareDirectoryInstructions(turn.Ctx, binding, history, check, identity)
+		r, facts, err := prepareDirectoryInstructions(turn.Ctx, binding, history)
 		if err == nil {
 			facts, err = budgetRestoredDirectoryInstructions(r, facts, history, inputs)
 		}

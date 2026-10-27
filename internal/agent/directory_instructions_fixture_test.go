@@ -11,8 +11,7 @@ import (
 func prepareMainRequestDirectoryFixture(t *testing.T, a *MainAgent) {
 	t.Helper()
 	binding := directoryInstructionBinding{SessionEpoch: a.sessionEpoch, AgentID: "main", Generation: a.workDirState.load().Generation, ContentRoot: a.ContentRoot(), WorkDir: a.effectiveToolBaseDir()}
-	check, identity := a.directoryInstructionReadPermission()
-	r, facts, err := prepareDirectoryInstructions(context.Background(), binding, a.ctxMgr.Snapshot(), check, identity)
+	r, facts, err := prepareDirectoryInstructions(context.Background(), binding, a.ctxMgr.Snapshot())
 	if err != nil {
 		t.Fatalf("prepare directory fixture: %v", err)
 	}
@@ -40,8 +39,7 @@ func prepareSubRequestDirectoryFixture(t *testing.T, s *SubAgent) {
 		root = s.parent.ContentRoot()
 	}
 	binding := directoryInstructionBinding{SessionEpoch: s.sessionEpoch, AgentID: s.taskID, Generation: s.workDirState.load().Generation, ContentRoot: root, WorkDir: s.effectiveToolBaseDir()}
-	check, identity := s.directoryInstructionReadPermission()
-	r, facts, err := prepareDirectoryInstructions(context.Background(), binding, s.ctxMgr.Snapshot(), check, identity)
+	r, facts, err := prepareDirectoryInstructions(context.Background(), binding, s.ctxMgr.Snapshot())
 	if err != nil {
 		t.Fatalf("prepare worker directory fixture: %v", err)
 	}

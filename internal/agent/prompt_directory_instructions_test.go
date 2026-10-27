@@ -281,7 +281,7 @@ func renderDirectoryInstructionsForTest(contentRoot, workDir string) string {
 	if err != nil {
 		return ""
 	}
-	r, _, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: work}, nil, nil, "")
+	r, _, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: work}, nil)
 	if err != nil {
 		return ""
 	}

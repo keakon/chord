@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -22,7 +21,7 @@ func TestDirectoryInstructionTurnCancelRetainsBindingSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	turn, cancel := context.WithCancel(context.Background())
-	r, _, err := prepareDirectoryInstructions(turn, directoryInstructionBinding{ContentRoot: root, WorkDir: root}, nil, nil, "")
+	r, _, err := prepareDirectoryInstructions(turn, directoryInstructionBinding{ContentRoot: root, WorkDir: root}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,18 +35,33 @@ func TestDirectoryInstructionTurnCancelRetainsBindingSnapshot(t *testing.T) {
 		t.Fatalf("cancel changed frozen rules: %+v %v", d, err)
 	}
 }
-func TestDirectoryInstructionPermissionYoloDoesNotBypassDeny(t *testing.T) {
-	for _, action := range []permission.Action{permission.ActionAllow, permission.ActionAsk, permission.ActionDeny} {
-		for _, yolo := range []bool{false, true} {
-			check, _ := directoryInstructionPermission(permission.Ruleset{{Permission: tools.NameRead, Pattern: "*", Action: action}}, permission.PathScope{Cwd: "/repo"}, directoryInstructionPermissionMode{DowngradeAsk: yolo})
-			err := check(context.Background(), "/repo/AGENTS.md")
-			wantAllowed := action == permission.ActionAllow || (action == permission.ActionAsk && yolo)
-			if (err == nil) != wantAllowed {
-				t.Fatalf("%s yolo=%v err=%v", action, yolo, err)
-			}
-		}
+
+// A rule file that cannot be loaded is ignored, exactly like a missing one.
+// The harness never judges or enforces rule content, so a failure may not fail
+// the session, gate a tool, or reach the model.
+func TestDirectoryInstructionUnreadableRulesAreIgnored(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory named AGENTS.md cannot be opened as a regular file, which is
+	// the only kind of failure left: no rule content, no ruleset, no gate.
+	if err = os.Mkdir(filepath.Join(root, "AGENTS.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, facts, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, nil)
+	if err != nil {
+		t.Fatalf("unreadable rules failed preparation: %v", err)
+	}
+	defer r.cancel()
+	if len(facts) != 0 {
+		t.Fatalf("unreadable rules produced facts: %+v", facts)
+	}
+	if v := buildDirectoryInstructionView(r.initial, nil, r.binding); len(v.Initial) != 0 || len(v.Dynamic) != 0 {
+		t.Fatalf("unreadable rules reached the view: %+v", v)
 	}
 }
+
 func TestDirectoryInstructionActivationRetryNeedsRealImprovement(t *testing.T) {
 	history := []message.Message{{Role: message.RoleUser, Content: "task"}}
 	key := directoryInstructionActivationKey(history, "provider/model", 8192)
@@ -67,7 +81,7 @@ func TestDirectoryInstructionActivationRetryNeedsRealImprovement(t *testing.T) {
 }
 func TestDirectoryInstructionMalformedRestoreFailsPreparation(t *testing.T) {
 	root := t.TempDir()
-	_, _, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, []message.Message{{Role: message.RoleUser, Kind: message.KindDirectoryInstructions}}, nil, "")
+	_, _, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, []message.Message{{Role: message.RoleUser, Kind: message.KindDirectoryInstructions}})
 	if err == nil {
 		t.Fatal("malformed durable fact allowed preparation")
 	}
@@ -89,8 +103,7 @@ func prepareSubDirectoryInstructionsForTest(t *testing.T, s *SubAgent) {
 	if s.parent != nil {
 		root = s.parent.ContentRoot()
 	}
-	check, identity := s.directoryInstructionReadPermission()
-	r, _, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{ContentRoot: root, WorkDir: s.effectiveToolBaseDir(), AgentID: s.taskID}, s.ctxMgr.Snapshot(), check, identity)
+	r, _, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{ContentRoot: root, WorkDir: s.effectiveToolBaseDir(), AgentID: s.taskID}, s.ctxMgr.Snapshot())
 	if err != nil {
 		t.Fatal(err)
 	}

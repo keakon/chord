@@ -17,7 +17,7 @@ type directoryInstructionBinding struct {
 	WorkDir         string
 	FallbackAllowed bool
 }
-type directoryInstructionObservation struct{ Status, SourcePath, Body, BodyHash, Reason, Detail, PermissionIdentity string }
+type directoryInstructionObservation struct{ Status, SourcePath, Body, BodyHash, Reason, Detail string }
 type directoryInstructionSnapshot struct {
 	Observations map[string]directoryInstructionObservation
 }
@@ -56,26 +56,23 @@ type directoryInstructionRequest struct {
 	Visible                map[directoryInstructionVersion]struct{}
 }
 type directoryInstructionRuntime struct {
-	inputBinding              directoryInstructionBinding
-	pending                   map[string]directoryInstructionObservation
-	blockedRevision           map[string]string
-	initial                   directoryInstructionSnapshot
-	attempt                   atomic.Pointer[directoryInstructionAttempt]
-	binding                   directoryInstructionBinding
-	ctx                       context.Context
-	cancel                    context.CancelFunc
-	discoveryToken            chan struct{}
-	observed                  map[string]directoryInstructionObservation
-	observedBytes             int
-	frozen                    atomic.Pointer[directoryInstructionFrozenView]
-	view                      atomic.Pointer[directoryInstructionView]
-	permissionCheck           func(context.Context, string) error
-	permissionIdentity        string
-	boundaries                map[string]bool
-	resolvedTargets           map[tools.InstructionTarget]string
-	failureRequest            uint64
-	failurePermissionIdentity string
-	failures                  map[string]directoryInstructionObservation
+	inputBinding    directoryInstructionBinding
+	pending         map[string]directoryInstructionObservation
+	blockedRevision map[string]string
+	initial         directoryInstructionSnapshot
+	attempt         atomic.Pointer[directoryInstructionAttempt]
+	binding         directoryInstructionBinding
+	ctx             context.Context
+	cancel          context.CancelFunc
+	discoveryToken  chan struct{}
+	observed        map[string]directoryInstructionObservation
+	observedBytes   int
+	frozen          atomic.Pointer[directoryInstructionFrozenView]
+	view            atomic.Pointer[directoryInstructionView]
+	boundaries      map[string]bool
+	resolvedTargets map[tools.InstructionTarget]string
+	failureRequest  uint64
+	failures        map[string]directoryInstructionObservation
 }
 
 func newDirectoryInstructionRuntime(ctx context.Context, binding directoryInstructionBinding) *directoryInstructionRuntime {

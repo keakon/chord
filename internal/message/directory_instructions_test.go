@@ -2,7 +2,6 @@ package message
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -43,7 +42,7 @@ func TestDirectoryInstructionFactsAreTypedAndIsolated(t *testing.T) {
 		}
 	}
 }
-func TestDirectoryInstructionAccountingSuppressesStaleAndBlockedBodies(t *testing.T) {
+func TestDirectoryInstructionAccountingDropsStaleAndBlockedBodies(t *testing.T) {
 	f := DirectoryInstructionFact{CheckoutRoot: "/repo", Scope: ".", SourcePath: "/repo/AGENTS.md", Operation: DirectoryInstructionUpsert, Body: "old body"}
 	f.BodyHash = DirectoryInstructionBodyHash(f.Body)
 	fact := func(f DirectoryInstructionFact) Message {
@@ -55,7 +54,9 @@ func TestDirectoryInstructionAccountingSuppressesStaleAndBlockedBodies(t *testin
 	f.Body = "new candidate"
 	f.BodyHash = DirectoryInstructionBodyHash(f.Body)
 	out := DirectoryInstructionAccountingMessages([]Message{old, fact(f)})
-	if len(out) != 1 || strings.Contains(out[0].Content, "old body") || strings.Contains(out[0].Content, "new candidate") {
+	// The blocked fact supersedes the earlier body, and a blocked scope never
+	// becomes a request message, so accounting charges neither.
+	if len(out) != 0 {
 		t.Fatalf("stale or blocked body counted: %#v", out)
 	}
 }

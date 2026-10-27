@@ -3,11 +3,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -57,15 +57,16 @@ func TestDirectoryInstructionClearTurnDiscoveryRetainsFrozenRules(t *testing.T) 
 	}
 }
 
-func TestDirectoryInstructionEmptyPermissionsFollowToolDefault(t *testing.T) {
-	check, _ := directoryInstructionPermission(nil, permission.PathScope{Cwd: "/repo"}, directoryInstructionPermissionMode{})
-	if err := check(t.Context(), "/repo/AGENTS.md"); err != nil {
-		t.Fatal(err)
-	}
+// A cancelled discovery reads no rule file at all: cancellation is the only
+// thing that can stop a load now, and it leaves the scope without content.
+func TestDirectoryInstructionCancelledDiscoveryReadsNothing(t *testing.T) {
+	r, root := newResolverFixture(t)
+	writeResolverRule(t, root, "rules")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if check(ctx, "/repo/AGENTS.md") == nil {
-		t.Fatal("cancelled discovery allowed")
+	got := r.readInstructionFile(ctx, filepath.Join(root, "AGENTS.md"))
+	if got.Status != "blocked" || got.Reason != "cancelled" || got.Body != "" {
+		t.Fatalf("cancelled read produced content: %+v", got)
 	}
 }
 

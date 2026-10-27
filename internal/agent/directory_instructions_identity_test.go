@@ -9,8 +9,10 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// Reading is the only trigger, so the retargeted-parent check runs for reads;
+// write and apply_patch keep their own path resolution without discovering.
 func TestDirectoryInstructionsDiscoveryReResolvesRetargetedParent(t *testing.T) {
-	for _, name := range []string{tools.NameWrite, tools.NameApplyPatch, tools.NameRead} {
+	for _, name := range []string{tools.NameRead} {
 		t.Run(name, func(t *testing.T) {
 			p, root := directoryPipelineFixture(t)
 			a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
@@ -94,7 +96,7 @@ func TestDirectoryInstructionRestoreRetiresChangedScopeIdentity(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			r, facts, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{CheckoutRoot: root, ContentRoot: root, WorkDir: root}, history, nil, "")
+			r, facts, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{CheckoutRoot: root, ContentRoot: root, WorkDir: root}, history)
 			if err != nil {
 				t.Fatal(err)
 			}

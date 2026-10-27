@@ -30,7 +30,7 @@ func (a *MainAgent) ensureDirectoryInstructionCandidates(ctx context.Context, tu
 		r.pending = nil
 		return true
 	}
-	prep := &directoryInstructionPreparation{binding: r.binding, permissionIdentity: r.permissionIdentity, turnID: turnID, sourceID: sourceID, dynamic: true, activationKey: key, historyFingerprint: compactionTranscriptFingerprint(history)}
+	prep := &directoryInstructionPreparation{binding: r.binding, turnID: turnID, sourceID: sourceID, dynamic: true, activationKey: key, historyFingerprint: compactionTranscriptFingerprint(history)}
 	inputs := a.directoryCandidateInputs(history)
 	a.directoryPreparation = prep
 	go func() {
@@ -64,7 +64,7 @@ func (s *SubAgent) ensureDirectoryInstructionCandidates(turn *Turn, r *directory
 		r.pending = nil
 		return true
 	}
-	prep := &directoryInstructionPreparation{binding: r.binding, permissionIdentity: r.permissionIdentity, turnID: turn.ID, dynamic: true, activationKey: key, historyFingerprint: compactionTranscriptFingerprint(history)}
+	prep := &directoryInstructionPreparation{binding: r.binding, turnID: turn.ID, dynamic: true, activationKey: key, historyFingerprint: compactionTranscriptFingerprint(history)}
 	inputs := s.directoryCandidateInputs(history)
 	s.directoryPreparation = prep
 	s.llmRequestInFlight.Store(true)
@@ -192,7 +192,7 @@ func recordDirectoryInstructionActivation(r *directoryInstructionRuntime, p *dir
 			} else if f.Operation == message.DirectoryInstructionRemove {
 				status = "absent"
 			}
-			r.initial.Observations[f.Scope] = directoryInstructionObservation{Status: status, SourcePath: f.SourcePath, Body: f.Body, BodyHash: f.BodyHash, Reason: f.Reason, Detail: f.Detail, PermissionIdentity: r.permissionIdentity}
+			r.initial.Observations[f.Scope] = directoryInstructionObservation{Status: status, SourcePath: f.SourcePath, Body: f.Body, BodyHash: f.BodyHash, Reason: f.Reason, Detail: f.Detail}
 		}
 		if f.Operation == message.DirectoryInstructionBlocked && f.Reason == message.DirectoryInstructionReasonInputBudget {
 			r.blockedRevision[f.Scope] = p.activationKey

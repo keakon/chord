@@ -58,7 +58,7 @@ func TestDirectoryInstructionResolverFreezesPositiveAndNegative(t *testing.T) {
 		t.Fatalf("snapshot changed: %+v", d)
 	}
 }
-func TestDirectoryInstructionResolverPermissionAndHardLimits(t *testing.T) {
+func TestDirectoryInstructionResolverHardLimits(t *testing.T) {
 	for _, test := range []struct{ name, body, reason string }{{"size", strings.Repeat("x", maxDirectoryInstructionBytes+1), "size"}, {"encoding", string([]byte{255}), "encoding"}, {"limit", strings.Repeat("x", maxDirectoryInstructionBytes), ""}} {
 		t.Run(test.name, func(t *testing.T) {
 			r, root := newResolverFixture(t)
@@ -68,23 +68,6 @@ func TestDirectoryInstructionResolverPermissionAndHardLimits(t *testing.T) {
 				t.Fatalf("unexpected: %+v", d)
 			}
 		})
-	}
-	r, root := newResolverFixture(t)
-	writeResolverRule(t, root, "valid")
-	r.permissionCheck = func(context.Context, string) error { return fmt.Errorf("read denied") }
-	d := discoverResolverDirectory(t, r, root)
-	if d.Complete || d.Observations["."].Reason != "permission" || len(r.observed) != 0 {
-		t.Fatalf("permission failure frozen: %+v", d)
-	}
-	r.permissionCheck = nil
-	d = discoverResolverDirectory(t, r, root)
-	if !d.Complete || d.Observations["."].Body != "valid" {
-		t.Fatal(d)
-	}
-	r.permissionCheck = func(context.Context, string) error { return fmt.Errorf("read denied") }
-	d = discoverResolverDirectory(t, r, root)
-	if d.Complete {
-		t.Fatal("cached body bypassed deny")
 	}
 }
 func TestDirectoryInstructionResolverEntryAndContentSymlinks(t *testing.T) {
@@ -145,7 +128,7 @@ func TestDirectoryInstructionResolverNegativeObservationsNotEvicted(t *testing.T
 	}
 }
 
-func TestDirectoryInstructionResolverFallbackAndSourcePermissions(t *testing.T) {
+func TestDirectoryInstructionResolverFallback(t *testing.T) {
 	r, root := newResolverFixture(t)
 	content, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -158,18 +141,6 @@ func TestDirectoryInstructionResolverFallbackAndSourcePermissions(t *testing.T) 
 	if d.Observations["."].Body != "fallback" || d.Observations["."].SourcePath != filepath.Join(content, "AGENTS.md") {
 		t.Fatal(d)
 	}
-	r2 := newDirectoryInstructionRuntime(context.Background(), r.binding)
-	t.Cleanup(r2.cancel)
-	r2.permissionCheck = func(_ context.Context, path string) error {
-		if path == filepath.Join(root, "AGENTS.md") {
-			return fmt.Errorf("denied")
-		}
-		return nil
-	}
-	d = discoverResolverDirectory(t, r2, root)
-	if d.Complete || d.Observations["."].Body != "" {
-		t.Fatal("fallback bypassed deny")
-	}
 	r3 := newDirectoryInstructionRuntime(context.Background(), r.binding)
 	t.Cleanup(r3.cancel)
 	writeResolverRule(t, root, string([]byte{255}))
@@ -181,7 +152,8 @@ func TestDirectoryInstructionResolverFallbackAndSourcePermissions(t *testing.T) 
 
 // A rule file symlinked to a shared source outside the checkout is the author's
 // own choice, so the rules load and are attributed to the scope holding the
-// link. The ruleset's read permission still governs the target.
+// link. Nothing consults the ruleset: a read rule governs the read tool the
+// model calls, not the prompt the harness assembles.
 func TestDirectoryInstructionResolverFollowsExternalRuleSymlink(t *testing.T) {
 	r, root := newResolverFixture(t)
 	external, err := filepath.EvalSymlinks(t.TempDir())
@@ -197,18 +169,6 @@ func TestDirectoryInstructionResolverFollowsExternalRuleSymlink(t *testing.T) {
 	got := d.Observations["."]
 	if !d.Complete || got.Status != "present" || got.Body != "external" || got.SourcePath != target {
 		t.Fatalf("external rule symlink not followed: %+v complete=%v", got, d.Complete)
-	}
-	r2 := newDirectoryInstructionRuntime(context.Background(), r.binding)
-	t.Cleanup(r2.cancel)
-	r2.permissionCheck = func(_ context.Context, path string) error {
-		if path == target {
-			return fmt.Errorf("denied")
-		}
-		return nil
-	}
-	d = discoverResolverDirectory(t, r2, root)
-	if d.Complete || d.Observations["."].Reason != "permission" {
-		t.Fatalf("external target bypassed read permission: %+v", d.Observations["."])
 	}
 }
 func TestDirectoryInstructionResolverCapacityPreservesEarlierSnapshots(t *testing.T) {
@@ -239,26 +199,35 @@ func TestDirectoryInstructionBindingUnrelatedWorkspaceDisablesFallback(t *testin
 	}
 }
 
+// A failed load is replayed for the rest of the request instead of retried on
+// every discovery; only a new request looks at the filesystem again.
 func TestDirectoryInstructionResolverRetriesFailuresOnlyOnNextRequest(t *testing.T) {
 	r, root := newResolverFixture(t)
-	calls := 0
-	r.permissionCheck = func(context.Context, string) error { calls++; return fmt.Errorf("denied") }
+	// A directory named AGENTS.md cannot be opened as a regular file.
+	if err := os.Mkdir(filepath.Join(root, "AGENTS.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	targets := []tools.InstructionTarget{{Path: root, Mode: tools.InstructionTargetDirectory}}
-	for range 2 {
-		_, err := r.Discover(withDirectoryInstructionDiscoveryRequest(context.Background(), 1), r.binding, targets)
+	discover := func(seq uint64) directoryInstructionDiscovery {
+		t.Helper()
+		d, err := r.Discover(withDirectoryInstructionDiscoveryRequest(context.Background(), seq), r.binding, targets)
 		if err != nil {
 			t.Fatal(err)
 		}
+		return d
 	}
-	if calls != 1 {
-		t.Fatalf("same request retried %d times", calls)
+	if d := discover(1); d.Complete || d.Observations["."].Reason != "io" {
+		t.Fatalf("unreadable rule not reported: %+v", d.Observations["."])
 	}
-	_, err := r.Discover(withDirectoryInstructionDiscoveryRequest(context.Background(), 2), r.binding, targets)
-	if err != nil {
+	if err := os.Remove(filepath.Join(root, "AGENTS.md")); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Fatalf("new request did not retry: %d", calls)
+	writeResolverRule(t, root, "rules")
+	if d := discover(1); d.Complete || d.Observations["."].Body != "" {
+		t.Fatalf("same request re-read the rule file: %+v", d.Observations["."])
+	}
+	if d := discover(2); !d.Complete || d.Observations["."].Body != "rules" {
+		t.Fatalf("new request did not retry: %+v", d.Observations["."])
 	}
 }
 

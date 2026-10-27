@@ -82,23 +82,6 @@ func projectDirectoryInstructions(history []message.Message, v directoryInstruct
 		}
 		out = append(out, m)
 	}
-	if len(v.Blocked) > 0 {
-		var b strings.Builder
-		b.WriteString("Directory rules could not be loaded for these scopes; treat them as having no extra rules in context.\n")
-		count := 0
-		for _, f := range v.Blocked {
-			line := fmt.Sprintf("%s: %s\n", f.Scope, f.Reason)
-			if count >= 8 || b.Len()+len(line) > 1900 {
-				break
-			}
-			b.WriteString(line)
-			count++
-		}
-		if count < len(v.Blocked) {
-			fmt.Fprintf(&b, "%d additional unavailable scopes.\n", len(v.Blocked)-count)
-		}
-		out = append(out, message.Message{Role: message.RoleUser, Kind: message.KindDirectoryInstructionProjection, Content: b.String()})
-	}
 	return out, nil
 }
 func validateDirectoryInstructionRequest(messages []message.Message, v directoryInstructionView) (map[directoryInstructionVersion]struct{}, error) {

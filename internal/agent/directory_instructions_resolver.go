@@ -124,26 +124,7 @@ func directoryBlocked(path, reason string, err error) directoryInstructionObserv
 	return directoryInstructionObservation{Status: "blocked", SourcePath: path, Reason: reason, Detail: detail}
 }
 
-type directoryInstructionPermissionContextKey struct{}
-type directoryInstructionPermissionOverride struct {
-	check    func(context.Context, string) error
-	identity string
-}
-
-func (r *directoryInstructionRuntime) checkInstructionPermission(ctx context.Context, path string) error {
-	if override, ok := ctx.Value(directoryInstructionPermissionContextKey{}).(directoryInstructionPermissionOverride); ok {
-		return override.check(ctx, path)
-	}
-	if r.permissionCheck == nil {
-		return nil
-	}
-	return r.permissionCheck(ctx, path)
-}
-
 func (r *directoryInstructionRuntime) readInstructionFile(ctx context.Context, path string) directoryInstructionObservation {
-	if err := r.checkInstructionPermission(ctx, path); err != nil {
-		return directoryBlocked(path, message.DirectoryInstructionReasonPermission, err)
-	}
 	if err := ctx.Err(); err != nil {
 		return directoryBlocked(path, "cancelled", err)
 	}
@@ -154,39 +135,15 @@ func (r *directoryInstructionRuntime) readInstructionFile(ctx context.Context, p
 	if err != nil {
 		return directoryBlocked(path, message.DirectoryInstructionReasonIO, err)
 	}
-	if real != path {
-		if err := r.checkInstructionPermission(ctx, real); err != nil {
-			return directoryBlocked(real, message.DirectoryInstructionReasonPermission, err)
-		}
-	}
-	// A rule file may be a symlink to a shared source outside the checkout, such
-	// as a rules repository beside it: the author who created that link chose the
-	// content, so following it is the same trust decision as writing the rules in
-	// place. The target still has to pass the ruleset's read permission, be a
-	// regular file, and fit the size and encoding limits below. A link into a
-	// nested checkout stays off limits even when it is inside this one: those
-	// rules belong to another project.
-	for _, root := range []string{r.binding.CheckoutRoot, r.binding.ContentRoot} {
-		if root == r.binding.ContentRoot && !r.binding.FallbackAllowed && root != r.binding.CheckoutRoot {
-			continue
-		}
-		if _, ok := relativePathWithin(root, real); !ok {
-			continue
-		}
-		if real != path {
-			scopes, _ := instructionScopeChain(root, filepath.Dir(real))
-			for _, scope := range scopes[1:] {
-				_, err := os.Lstat(filepath.Join(root, filepath.FromSlash(scope), ".git"))
-				if err == nil {
-					return directoryBlocked(real, message.DirectoryInstructionReasonPermission, fmt.Errorf("rule source crosses a nested checkout: %s", real))
-				}
-				if !os.IsNotExist(err) {
-					return directoryBlocked(real, message.DirectoryInstructionReasonIO, err)
-				}
-			}
-		}
-		break
-	}
+	// Following a rule-file symlink is the repository author's decision: the link
+	// lives where the rules belong, and its target is whatever that author chose,
+	// inside the checkout or beside it. The harness reads the file it points at
+	// and does not adjudicate where it lives; only a regular file within the size
+	// and encoding limits below reaches the prompt.
+	//
+	// The ruleset plays no part here. A read rule governs the read tool the model
+	// calls; assembling the prompt is the harness's own work, and letting a rule
+	// hide a project's rules would be a gate on the harness, not on a tool.
 	f, err := pathutil.OpenCanonicalRegular(real)
 	if err != nil {
 		return directoryBlocked(real, message.DirectoryInstructionReasonIO, err)
@@ -217,11 +174,7 @@ func (r *directoryInstructionRuntime) readInstructionFile(ctx context.Context, p
 		return directoryInstructionObservation{Status: "absent", SourcePath: real}
 	}
 	hash := sha256.Sum256([]byte(body))
-	permissionIdentity := r.permissionIdentity
-	if override, ok := ctx.Value(directoryInstructionPermissionContextKey{}).(directoryInstructionPermissionOverride); ok {
-		permissionIdentity = override.identity
-	}
-	return directoryInstructionObservation{Status: "present", SourcePath: real, Body: body, BodyHash: hex.EncodeToString(hash[:]), PermissionIdentity: permissionIdentity}
+	return directoryInstructionObservation{Status: "present", SourcePath: real, Body: body, BodyHash: hex.EncodeToString(hash[:])}
 }
 
 func (r *directoryInstructionRuntime) readInstructionLevel(ctx context.Context, scope string) directoryInstructionObservation {
@@ -269,12 +222,7 @@ func (r *directoryInstructionRuntime) Discover(ctx context.Context, binding dire
 	stop := context.AfterFunc(r.ctx, cancel)
 	defer stop()
 	requestSeq, _ := ctx.Value(directoryInstructionDiscoveryRequestKey{}).(uint64)
-	permissionIdentity := r.permissionIdentity
-	if override, ok := ctx.Value(directoryInstructionPermissionContextKey{}).(directoryInstructionPermissionOverride); ok {
-		permissionIdentity = override.identity
-	}
-	if requestSeq != r.failureRequest || permissionIdentity != r.failurePermissionIdentity {
-		r.failurePermissionIdentity = permissionIdentity
+	if requestSeq != r.failureRequest {
 		r.failureRequest = requestSeq
 		r.failures = make(map[string]directoryInstructionObservation)
 	}
@@ -369,31 +317,25 @@ func (r *directoryInstructionRuntime) Discover(ctx context.Context, binding dire
 				}
 			}
 			observation, cached := r.observed[scope]
-			if cached {
-				if err := r.checkInstructionPermission(ctx, filepath.Join(binding.CheckoutRoot, filepath.FromSlash(scope), "AGENTS.md")); err != nil {
-					observation = directoryBlocked(observation.SourcePath, message.DirectoryInstructionReasonPermission, err)
-				} else if observation.SourcePath != "" {
-					if err := r.checkInstructionPermission(ctx, observation.SourcePath); err != nil {
-						observation = directoryBlocked(observation.SourcePath, message.DirectoryInstructionReasonPermission, err)
+			if !cached {
+				if len(r.observed) >= maxDirectoryInstructionObservedLevels {
+					observation = directoryBlocked(target.Path, message.DirectoryInstructionReasonCapacity, fmt.Errorf("directory observation limit reached; start a new session with a narrower access scope"))
+				} else {
+					observation = r.readInstructionLevel(ctx, scope)
+					if err := ctx.Err(); err != nil {
+						return d, err
+					}
+					if r.observedBytes+len(observation.Body) > maxDirectoryInstructionSnapshotBytes {
+						observation = directoryBlocked(observation.SourcePath, message.DirectoryInstructionReasonCapacity, fmt.Errorf("directory instruction snapshot exceeds 256 KiB; start a new session"))
+					}
+					if observation.Status != "blocked" || observation.Reason == message.DirectoryInstructionReasonCapacity || observation.Reason == message.DirectoryInstructionReasonSize || observation.Reason == message.DirectoryInstructionReasonEncoding {
+						r.observed[scope] = observation
+						r.observedBytes += len(observation.Body)
+						changed = true
 					}
 				}
-			} else if len(r.observed) >= maxDirectoryInstructionObservedLevels {
-				observation = directoryBlocked(target.Path, message.DirectoryInstructionReasonCapacity, fmt.Errorf("directory observation limit reached; start a new session with a narrower access scope"))
-			} else {
-				observation = r.readInstructionLevel(ctx, scope)
-				if err := ctx.Err(); err != nil {
-					return d, err
-				}
-				if r.observedBytes+len(observation.Body) > maxDirectoryInstructionSnapshotBytes {
-					observation = directoryBlocked(observation.SourcePath, message.DirectoryInstructionReasonCapacity, fmt.Errorf("directory instruction snapshot exceeds 256 KiB; start a new session"))
-				}
-				if observation.Status != "blocked" || observation.Reason == message.DirectoryInstructionReasonCapacity || observation.Reason == message.DirectoryInstructionReasonSize || observation.Reason == message.DirectoryInstructionReasonEncoding {
-					r.observed[scope] = observation
-					r.observedBytes += len(observation.Body)
-					changed = true
-				}
 			}
-			if requestSeq != 0 && observation.Status == "blocked" && (observation.Reason == message.DirectoryInstructionReasonIO || observation.Reason == message.DirectoryInstructionReasonPermission) {
+			if requestSeq != 0 && observation.Status == "blocked" && observation.Reason == message.DirectoryInstructionReasonIO {
 				r.failures[scope] = observation
 			}
 			d.Observations[scope] = observation

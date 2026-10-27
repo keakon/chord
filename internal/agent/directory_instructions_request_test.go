@@ -79,7 +79,7 @@ func TestDirectoryInstructionPreparationRechecksRestoredAncestorChain(t *testing
 		t.Fatal(err)
 	}
 	old := message.DirectoryInstructionFact{CheckoutRoot: root, Scope: "middle/leaf", SourcePath: filepath.Join(dir, "AGENTS.md"), Operation: message.DirectoryInstructionUpsert, Body: "deleted leaf rules", BodyHash: message.DirectoryInstructionBodyHash("deleted leaf rules")}
-	r, facts, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, []message.Message{directoryInstructionFactMessage([]message.DirectoryInstructionFact{old})}, nil, "")
+	r, facts, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, []message.Message{directoryInstructionFactMessage([]message.DirectoryInstructionFact{old})})
 	if err != nil {
 		t.Fatal(err)
 	}
