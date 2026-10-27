@@ -32,6 +32,12 @@ const (
 
 var errCodexWSInvalidEventJSON = errors.New("codex ws invalid event json")
 
+// errCodexWSNoConnection reports a read attempt without an active WebSocket.
+// The connection field is cleared by codexWSCloseConnUnlocked (cancel, idle
+// timeout, reset from another goroutine), so a reader must never assume it is
+// still set when it starts.
+var errCodexWSNoConnection = errors.New("codex ws: no active connection")
+
 // parseCodexWebSocketErrorJSON extracts an APIError (and optional Codex rate-limit headers) from a
 // WebSocket text frame with type "error", matching ChatGPT/Codex Responses WebSocket payloads.
 // Returns nil, nil when the body is not a structured API error.
@@ -610,13 +616,22 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 }
 
 func (r *ResponsesProvider) codexWSReadMessageWithIdleTimeoutLocked(streamCtx context.Context) ([]byte, error) {
+	// Capture the connection before spawning the reader: the field is cleared by
+	// codexWSCloseConnUnlocked as soon as this call returns (cancel, idle
+	// timeout) or by a reset from another goroutine, and the goroutine may not be
+	// scheduled until after that. Reading r.codexWSConn inside the goroutine
+	// would then dereference a nil *websocket.Conn (SIGSEGV in NextReader).
+	conn := r.codexWSConn
+	if conn == nil {
+		return nil, errCodexWSNoConnection
+	}
 	type readResult struct {
 		msg []byte
 		err error
 	}
 	resultCh := make(chan readResult, 1)
 	go func() {
-		_, msg, err := r.codexWSConn.ReadMessage()
+		_, msg, err := conn.ReadMessage()
 		resultCh <- readResult{msg: msg, err: err}
 	}()
 
@@ -631,10 +646,10 @@ func (r *ResponsesProvider) codexWSReadMessageWithIdleTimeoutLocked(streamCtx co
 
 	select {
 	case <-streamCtx.Done():
-		_ = r.codexWSConn.SetReadDeadline(time.Now())
+		_ = conn.SetReadDeadline(time.Now())
 		return nil, websocketStreamContextError(streamCtx)
 	case <-timer.C:
-		_ = r.codexWSConn.SetReadDeadline(time.Now())
+		_ = conn.SetReadDeadline(time.Now())
 		return nil, fmt.Errorf("idle timeout waiting for websocket message: no data from model for %s", idleTimeout)
 	case result := <-resultCh:
 		return result.msg, result.err

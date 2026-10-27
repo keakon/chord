@@ -84,6 +84,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Cancelling or timing out a Codex WebSocket request no longer risks crashing Chord while its reader is still starting.
+
 - Editing a file no longer deletes text when `new_string` is omitted or set to `null`. Both used to decode as an empty replacement and remove `old_string`; only an explicit empty string now deletes text, and any other missing value is rejected before the file is touched.
 
 - `complete` now rejects a completion that supplies both `result` and `result_ref`. The tool description already required exactly one; previously the same payload passed both checks, and the inline result could be persisted before a mismatch was reported.

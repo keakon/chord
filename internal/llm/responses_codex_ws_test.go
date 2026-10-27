@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -112,6 +114,8 @@ func TestNewResponsesWebsocketDialerUsesConfiguredHandshakeTimeout(t *testing.T)
 }
 
 func TestCodexWSExecuteRequestUsesProviderTotalTimeout(t *testing.T) {
+	t.Parallel()
+
 	upgrader := websocket.Upgrader{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +168,8 @@ func TestCodexWSExecuteRequestUsesProviderTotalTimeout(t *testing.T) {
 }
 
 func TestCodexWSReadMessageUsesProviderIdleTimeout(t *testing.T) {
+	t.Parallel()
+
 	upgrader := websocket.Upgrader{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +178,8 @@ func TestCodexWSReadMessageUsesProviderIdleTimeout(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		time.Sleep(2 * time.Second)
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, _, _ = conn.ReadMessage()
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -194,6 +201,84 @@ func TestCodexWSReadMessageUsesProviderIdleTimeout(t *testing.T) {
 	_, err = r.codexWSReadMessageWithIdleTimeoutLocked(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "no data from model for 100ms") {
 		t.Fatalf("codexWSReadMessageWithIdleTimeoutLocked err = %v, want 100ms idle timeout", err)
+	}
+}
+
+func TestCodexWSReadMessageWithoutConnectionReturnsError(t *testing.T) {
+	// A reader must fail closed instead of dereferencing a cleared connection
+	// field: codexWSCloseConnUnlocked nils it on cancel, idle timeout and reset.
+	r := &ResponsesProvider{}
+	_, err := r.codexWSReadMessageWithIdleTimeoutLocked(context.Background())
+	if !errors.Is(err, errCodexWSNoConnection) {
+		t.Fatalf("codexWSReadMessageWithIdleTimeoutLocked err = %v, want %v", err, errCodexWSNoConnection)
+	}
+}
+
+type codexWSReadCompletionConn struct {
+	net.Conn
+	readDone chan struct{}
+}
+
+func (c *codexWSReadCompletionConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if c.readDone != nil {
+		close(c.readDone)
+	}
+	return n, err
+}
+
+func TestCodexWSReadMessageKeepsCapturedConnection(t *testing.T) {
+	// Keep this test serial because GOMAXPROCS changes process-wide scheduling.
+	// A cancelled context and one P favor returning before the reader starts.
+	upgrader := websocket.Upgrader{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, _, _ = conn.ReadMessage()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	var readConn *codexWSReadCompletionConn
+	dialer := *websocket.DefaultDialer
+	dialer.NetDialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		readConn = &codexWSReadCompletionConn{Conn: conn}
+		return readConn, nil
+	}
+	wsConn, _, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer wsConn.Close()
+	readConn.readDone = make(chan struct{})
+
+	r := &ResponsesProvider{codexWSConn: wsConn}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	_, err = r.codexWSReadMessageWithIdleTimeoutLocked(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("codexWSReadMessageWithIdleTimeoutLocked err = %v, want context.Canceled", err)
+	}
+
+	// Simulate the connection field being cleared before the reader goroutine
+	// gets scheduled; the captured connection keeps the read panic-free.
+	r.codexWSConn = nil
+	select {
+	case <-readConn.readDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("websocket reader did not finish after cancellation")
 	}
 }
 
