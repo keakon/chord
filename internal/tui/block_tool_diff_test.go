@@ -224,6 +224,117 @@ func TestApplyPatchToolCardSummarizesDeleteAndKeepsMoveUpdateDiff(t *testing.T) 
 	}
 }
 
+// A codex-style patch spells the target absolutely while the tool writes
+// base-dir-relative diff headers. Both name the same file, so the card has to
+// relativize the header path, recognise the delete section (the writer spells
+// the same path on both sides instead of using /dev/null) and keep the removed
+// contents out of the body — the same thing the delete tool's card does.
+func TestApplyPatchDeleteCardRelativizesAbsoluteTarget(t *testing.T) {
+	const workingDir = "/Users/example/project"
+	args := `{"patch":"*** Begin Patch\n*** Delete File: ` + workingDir + `/.chord/notes/demo.sh\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		displayWorkingDir: workingDir,
+		ResultDone:        true, ResultStatus: message.ToolStatusSuccess,
+		ResultContent: "Applied patch:\nD .chord/notes/demo.sh",
+		Diff:          "--- .chord/notes/demo.sh\n+++ .chord/notes/demo.sh\n@@ -1,2 +1,0 @@\n-obsolete\n-secret\n",
+	}
+
+	plain := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
+	if !strings.Contains(plain, "✓ apply_patch D .chord/notes/demo.sh · 1 file · -2 lines") {
+		t.Fatalf("expected a relative delete header with its line count, got:\n%s", plain)
+	}
+	for _, unwanted := range []string{"obsolete", "secret", workingDir, "↳ M", "↳ D"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected %q to be absent from a single-file delete card, got:\n%s", unwanted, plain)
+		}
+	}
+}
+
+// The same-file-both-sides diff must not turn a delete into "M", and a
+// multi-file patch must spell every row the way the header does.
+func TestApplyPatchMultiFileRowsRelativizeAbsoluteTargets(t *testing.T) {
+	const workingDir = "/Users/example/project"
+	args := `{"patch":"*** Begin Patch\n*** Delete File: ` + workingDir + `/.chord/notes/old.sh\n*** Update File: ` + workingDir + `/.chord/notes/keep.sh\n@@\n-old\n+new\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		displayWorkingDir: workingDir,
+		ResultDone:        true, ResultStatus: message.ToolStatusSuccess,
+		ResultContent: "Applied patch:\nD .chord/notes/old.sh\nM .chord/notes/keep.sh",
+		Diff: "--- .chord/notes/old.sh\n+++ .chord/notes/old.sh\n@@ -1,2 +1,0 @@\n-obsolete\n-secret\n" +
+			"--- .chord/notes/keep.sh\n+++ .chord/notes/keep.sh\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+
+	plain := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
+	if !strings.Contains(plain, "· 2 files · +1 -3 lines") {
+		t.Fatalf("expected the header to count the hidden delete section, got:\n%s", plain)
+	}
+	for _, want := range []string{"↳ D .chord/notes/old.sh", "↳ M .chord/notes/keep.sh", "+new"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected %q, got:\n%s", want, plain)
+		}
+	}
+	for _, unwanted := range []string{workingDir, "obsolete", "secret"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected %q to be absent, got:\n%s", unwanted, plain)
+		}
+	}
+}
+
+// A move with content changes keeps its diff section, and the section header
+// must still match the target when the two sides spell the paths differently.
+func TestApplyPatchMoveUpdateSectionMatchesAbsoluteTarget(t *testing.T) {
+	const workingDir = "/Users/example/project"
+	args := `{"patch":"*** Begin Patch\n*** Update File: ` + workingDir + `/src/old.go\n*** Move to: ` + workingDir + `/src/new.go\n@@\n-const moved = 1\n+const moved = 2\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		displayWorkingDir: workingDir,
+		ResultDone:        true, ResultStatus: message.ToolStatusSuccess,
+		ResultContent: "Applied patch:\nR src/old.go -> src/new.go",
+		Diff:          "--- src/old.go\n+++ src/new.go\n@@ -1,1 +1,1 @@\n-const moved = 1\n+const moved = 2\n",
+	}
+
+	plain := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
+	for _, want := range []string{"apply_patch src/old.go → src/new.go", "+const moved = 2"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected %q, got:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, workingDir) {
+		t.Fatalf("expected no absolute path in the card, got:\n%s", plain)
+	}
+}
+
+// An errored patch keeps the section of a delete that already landed: that
+// section header is the only place the committed group is marked ✓.
+func TestApplyPatchErrorCardMarksCommittedDelete(t *testing.T) {
+	args := `{"patch":"*** Begin Patch\n*** Delete File: .chord/notes/old.sh\n*** Update File: .chord/notes/failed.sh\n@@\n-missing\n+replacement\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: message.ToolStatusError,
+		ResultContent: strings.Join([]string{
+			"apply_patch partially applied: 1 change committed; 1 file group not applied.",
+			"Applied patch:",
+			"D .chord/notes/old.sh",
+			"",
+			"Not applied:",
+			"- .chord/notes/failed.sh: hunk not found (1/1)",
+		}, "\n"),
+		Diff: "--- .chord/notes/old.sh\n+++ .chord/notes/old.sh\n@@ -1,1 +1,0 @@\n-obsolete\n",
+	}
+
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{"↳ ✓ D .chord/notes/old.sh", "✗ .chord/notes/failed.sh"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected errored card to contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
 func TestApplyPatchToolCardHidesSingleDeleteDiff(t *testing.T) {
 	args := `{"patch":"*** Begin Patch\n*** Delete File: tmp/old.txt\n*** End Patch"}`
 	block := &Block{
@@ -1248,12 +1359,16 @@ func TestRenderHighlightedSnippetLineOmitsSummaryWhenTooNarrow(t *testing.T) {
 }
 
 // TestEditDiffHeaderPathIsCwdRelative guards against regressing to an absolute
-// edit path in the diff header. ExtractEditPathFromArgs resolves to an absolute
-// path; diffToolFilePath must shorten it to a cwd-relative form so a long
-// absolute prefix (deep tree, long $HOME, git worktree) cannot push the file
-// name out of the width-clipped header.
+// edit path in the diff header. Before the session publishes its working dir
+// the card falls back to the process one, so a long absolute prefix (deep tree,
+// long $HOME, git worktree) cannot push the file name out of the width-clipped
+// header.
 func TestEditDiffHeaderPathIsCwdRelative(t *testing.T) {
-	args, _ := json.Marshal(map[string]string{"path": "src/demo.go", "patch": "@@\n-old\n+new\n"})
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	args, _ := json.Marshal(map[string]string{"path": filepath.Join(wd, "src", "demo.go"), "patch": "@@\n-old\n+new\n"})
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
@@ -1280,22 +1395,39 @@ func TestEditDiffHeaderPathIsCwdRelative(t *testing.T) {
 	}
 }
 
-// TestRelToProcessWorkingDir covers the helper directly: absolute paths under
-// cwd become relative; paths outside it or already relative are left for the
-// caller to handle.
-func TestRelToProcessWorkingDir(t *testing.T) {
+// The session may work in a checkout other than the process one (a worktree).
+// The edit header has to name files relative to the session working dir, and a
+// file from the process checkout must keep its absolute path instead of reading
+// as if it lived in the session's.
+func TestEditDiffHeaderPathIsSessionRelative(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
-	if got := relToProcessWorkingDir(filepath.Join(wd, "a", "b.go")); got != filepath.Join("a", "b.go") {
-		t.Fatalf("under-cwd abs path = %q, want %q", got, filepath.Join("a", "b.go"))
-	}
-	if got := relToProcessWorkingDir("a/b.go"); got != "a/b.go" {
-		t.Fatalf("relative path = %q, want unchanged", got)
-	}
-	if got := relToProcessWorkingDir(filepath.Dir(wd)); got != "" {
-		t.Fatalf("parent of cwd = %q, want \"\" (escapes upward)", got)
+	sessionDir := t.TempDir()
+	for _, tc := range []struct {
+		name, path, want string
+	}{
+		{"inside the session dir", filepath.Join(sessionDir, "src", "app.go"), filepath.Join("src", "app.go")},
+		{"inside the process dir only", filepath.Join(wd, "src", "app.go"), filepath.Join(wd, "src", "app.go")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args, _ := json.Marshal(map[string]string{"path": tc.path, "old_string": "a", "new_string": "b"})
+			block := &Block{
+				ID: 1, Type: BlockToolCall, ToolName: tools.NameEdit,
+				Content: string(args), RawArgs: string(args), displayWorkingDir: sessionDir,
+				ResultDone: true, ResultStatus: message.ToolStatusSuccess,
+				ResultContent: "Replaced 1 occurrence",
+				Diff:          "--- src/app.go\n+++ src/app.go\n@@ -1,1 +1,1 @@\n-a\n+b\n",
+			}
+			if got := block.diffToolFilePath(); got != tc.want {
+				t.Fatalf("diffToolFilePath = %q, want %q", got, tc.want)
+			}
+			plain := terminaltext.StripANSI(strings.Join(block.Render(400, ""), "\n"))
+			if !strings.Contains(plain, "edit "+tc.want+" ·") {
+				t.Fatalf("expected header to name %q, got:\n%s", tc.want, plain)
+			}
+		})
 	}
 }
 

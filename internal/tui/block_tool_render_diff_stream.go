@@ -106,9 +106,6 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 	// The header path may be a display summary; keep the undecorated target for
 	// the preview's syntax highlighting (see diffToolPathsWithTargets).
 	filePath, syntaxPath := b.diffToolPathsWithTargets(targets)
-	if filePath != "" {
-		filePath = b.displayToolPath(filePath)
-	}
 	prefix := b.renderToolPrefix(spinnerFrame)
 	headerLine := appendSearchHeaderSummary(
 		renderToolHeaderLine(prefix, toolName),
@@ -122,7 +119,7 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 	bodyLines := []string{
 		headerLine,
 	}
-	bodyLines = appendApplyPatchTargetLines(bodyLines, targets, cardWidth-4)
+	bodyLines = b.appendApplyPatchTargetLines(bodyLines, targets, cardWidth-4)
 	patch, lineStarts := b.streamingApplyPatchPreviewData()
 	// Mirror the cold render (renderFileDiffCall): a patch whose targets only
 	// delete or move/rename files has no line change to preview, so the

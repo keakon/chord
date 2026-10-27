@@ -161,6 +161,16 @@ func (b *Block) fileDiffSummaryLine(applyPatchTargets []tools.ApplyPatchDisplayT
 	parts := make([]string, 0, 3)
 	if tools.NormalizeName(b.ToolName) == tools.NameApplyPatch {
 		files := meta.Files
+		if len(applyPatchTargets) > files {
+			// The card hides deleted and purely moved files from the body (a
+			// "D path" row replaces their section), so counting the rendered
+			// diff alone drops those files and their removed lines. The applied
+			// diff still covers every file.
+			if full := parseDiffResultMeta(b.Diff); full.Files > files {
+				meta = full
+				files = meta.Files
+			}
+		}
 		if files == 0 {
 			files = len(applyPatchTargets)
 		}

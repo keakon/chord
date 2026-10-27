@@ -84,6 +84,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- The `apply_patch` card spells every file the way the tool reports it and no longer replays deleted contents. A patch that named its target absolutely — what Codex-style models send — printed that absolute path in the header, and a deleted file's diff section was labelled `M` because the card only recognised the conventional `+++ /dev/null` spelling. Deleted files now show as a `D path` row with their removed lines still counted in the header, matching the `delete` tool's card.
+
+- The `edit` card names its file relative to the session working directory. When the session worked in a different checkout than the directory Chord was started in, a file from the starting directory could be shown as a relative path, as if it belonged to the session's checkout.
+
 - Cancelling or timing out a Codex WebSocket request no longer risks crashing Chord while its reader is still starting.
 
 - Editing a file no longer deletes text when `new_string` is omitted or set to `null`. Both used to decode as an empty replacement and remove `old_string`; only an explicit empty string now deletes text, and any other missing value is rejected before the file is touched.

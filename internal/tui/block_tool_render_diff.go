@@ -136,9 +136,6 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	// which is not a path; syntax highlighting needs the undecorated target so
 	// lexerForFilePath can resolve the real lexer.
 	filePath, syntaxPath := b.diffToolPathsWithTargets(applyPatchTargets)
-	if filePath != "" {
-		filePath = b.displayToolPath(filePath)
-	}
 	prefix := b.renderToolPrefix(spinnerFrame)
 	// The card surface spans the full viewport, but wrapped plain-text error /
 	// diagnostic sections keep a readable column: they wrap at the prose cap
@@ -195,9 +192,9 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		// carry the whole status picture instead.
 		if !applyPatchError {
 			if hasOperationSummaries {
-				result = appendApplyPatchOperationSummaries(result, applyPatchTargets, cardWidth-4)
+				result = b.appendApplyPatchOperationSummaries(result, applyPatchTargets, cardWidth-4)
 			} else if !groupedApplyPatchDiff {
-				result = appendApplyPatchTargetLines(result, applyPatchTargets, cardWidth-4)
+				result = b.appendApplyPatchTargetLines(result, applyPatchTargets, cardWidth-4)
 			}
 		}
 		if strings.TrimSpace(displayDiff) == "" && !applyPatchNoChanges && !b.toolResultIsError() && !b.toolResultIsCancelled() &&
@@ -565,57 +562,75 @@ func (b *Block) applyPatchDisplayDiff(targets []tools.ApplyPatchDisplayTarget) s
 	return strings.TrimSpace(strings.Join(filtered, "\n"))
 }
 
-func (b *Block) applyPatchDiffSectionIsSummaryOnly(targets []tools.ApplyPatchDisplayTarget, oldHeader, newHeader string) bool {
-	oldPath := strings.TrimSpace(strings.TrimPrefix(oldHeader, "--- "))
-	newPath := strings.TrimSpace(strings.TrimPrefix(newHeader, "+++ "))
+// diffSectionDevNull is the conventional unified-diff marker for a side that
+// has no file. Chord's own diff writer always spells the filename on both
+// sides, so a section may name the same path twice instead.
+const diffSectionDevNull = "/dev/null"
+
+func diffSectionPath(header, prefix string) string {
+	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
+}
+
+// applyPatchDiffSectionTarget finds the operation a diff section belongs to.
+// The two sides spell the file differently — the tool writes base-dir-relative
+// diff headers while the target carries the model's spelling, which may be
+// absolute — so the comparison runs on resolved paths instead of raw strings.
+func (b *Block) applyPatchDiffSectionTarget(targets []tools.ApplyPatchDisplayTarget, oldHeader, newHeader string) (tools.ApplyPatchDisplayTarget, bool) {
+	oldPath := diffSectionPath(oldHeader, "--- ")
+	newPath := diffSectionPath(newHeader, "+++ ")
 	for _, target := range targets {
-		switch {
-		case target.Kind == tools.MutationDelete && target.TargetPath == "":
-			if oldPath == target.SourcePath && newPath == "/dev/null" {
-				return true
-			}
-		case target.TargetPath != "" && target.Added == 0 && target.Removed == 0:
-			if oldPath == target.SourcePath && newPath == target.TargetPath {
-				return true
-			}
+		// An added file only exists on the +++ side; every other operation
+		// names the file it touches on the --- side.
+		sectionPath := oldPath
+		if target.Kind == tools.MutationAdd {
+			sectionPath = newPath
 		}
+		if sectionPath == "" || sectionPath == diffSectionDevNull {
+			continue
+		}
+		if b.applyPatchPathKey(sectionPath) != b.applyPatchPathKey(target.SourcePath) {
+			continue
+		}
+		if target.TargetPath != "" && b.applyPatchPathKey(newPath) != b.applyPatchPathKey(target.TargetPath) {
+			continue
+		}
+		return target, true
 	}
-	return newPath == "/dev/null"
+	return tools.ApplyPatchDisplayTarget{}, false
+}
+
+func (b *Block) applyPatchDiffSectionIsSummaryOnly(targets []tools.ApplyPatchDisplayTarget, oldHeader, newHeader string) bool {
+	target, ok := b.applyPatchDiffSectionTarget(targets, oldHeader, newHeader)
+	if !ok {
+		// Without a parsed operation the section header is all we have; only a
+		// deletion spelled the conventional way can be recognised.
+		return diffSectionPath(newHeader, "+++ ") == diffSectionDevNull
+	}
+	// A deleted file has nothing left to show, so the card names it with a
+	// "D path" row instead of replaying the removed lines — the same thing the
+	// delete tool's card does.
+	if target.Kind == tools.MutationDelete {
+		return true
+	}
+	// A pure move/rename carries no content change either.
+	return target.TargetPath != "" && target.Added == 0 && target.Removed == 0
 }
 
 func (b *Block) applyPatchDiffSectionDisplay(targets []tools.ApplyPatchDisplayTarget, oldHeader, newHeader string) (marker, path, syntaxPath string) {
-	oldPath := strings.TrimSpace(strings.TrimPrefix(oldHeader, "--- "))
-	newPath := strings.TrimSpace(strings.TrimPrefix(newHeader, "+++ "))
-	for _, target := range targets {
-		matches := false
-		switch {
-		case target.TargetPath != "":
-			matches = oldPath == target.SourcePath && newPath == target.TargetPath
-		case target.Kind == tools.MutationAdd:
-			matches = oldPath == "/dev/null" && newPath == target.SourcePath
-		case target.Kind == tools.MutationDelete:
-			matches = oldPath == target.SourcePath && newPath == "/dev/null"
-		default:
-			matches = oldPath == target.SourcePath && newPath == target.SourcePath
-		}
-		if !matches {
-			continue
-		}
-		marker, _ = applyPatchTargetDisplay(target)
-		source := b.displayToolPath(target.SourcePath)
+	if target, ok := b.applyPatchDiffSectionTarget(targets, oldHeader, newHeader); ok {
+		marker, path = b.displayApplyPatchTarget(target)
 		if target.TargetPath != "" {
-			targetPath := b.displayToolPath(target.TargetPath)
-			return marker, source + " → " + targetPath, targetPath
+			return marker, path, b.displayToolPath(target.TargetPath)
 		}
-		return marker, source, source
+		return marker, path, b.displayToolPath(target.SourcePath)
 	}
 
-	oldPath = b.displayToolPath(oldPath)
-	newPath = b.displayToolPath(newPath)
+	oldPath := b.displayToolPath(diffSectionPath(oldHeader, "--- "))
+	newPath := b.displayToolPath(diffSectionPath(newHeader, "+++ "))
 	switch {
-	case oldPath == "/dev/null":
+	case oldPath == diffSectionDevNull:
 		return "A", newPath, newPath
-	case newPath == "/dev/null":
+	case newPath == diffSectionDevNull:
 		return "D", oldPath, oldPath
 	case oldPath != newPath:
 		return "R", oldPath + " → " + newPath, newPath
@@ -865,7 +880,7 @@ func applyPatchCodeSample(patch string) string {
 	return strings.Join(lines, "\n")
 }
 
-func appendApplyPatchTargetLines(result []string, targets []tools.ApplyPatchDisplayTarget, width int) []string {
+func (b *Block) appendApplyPatchTargetLines(result []string, targets []tools.ApplyPatchDisplayTarget, width int) []string {
 	// A single target is already shown in the tool-card header. Keep the
 	// explicit list only when it adds information for a multi-file patch.
 	if len(targets) <= 1 {
@@ -873,18 +888,18 @@ func appendApplyPatchTargetLines(result []string, targets []tools.ApplyPatchDisp
 	}
 	result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Targets"))
 	for _, target := range targets {
-		marker, path := applyPatchTargetDisplay(target)
+		marker, path := b.displayApplyPatchTarget(target)
 		result = append(result, "    "+currentStyles.DimStyle.Render(truncateApplyPatchDisplayLine(marker+" "+path, width)))
 	}
 	return result
 }
 
-func appendApplyPatchOperationSummaries(result []string, targets []tools.ApplyPatchDisplayTarget, width int) []string {
+func (b *Block) appendApplyPatchOperationSummaries(result []string, targets []tools.ApplyPatchDisplayTarget, width int) []string {
 	if len(targets) <= 1 {
 		return result
 	}
 	for _, target := range targets {
-		marker, path := applyPatchTargetDisplay(target)
+		marker, path := b.displayApplyPatchTarget(target)
 		if marker != "D" && (marker != "R" || target.Added != 0 || target.Removed != 0) {
 			continue
 		}
@@ -896,7 +911,7 @@ func appendApplyPatchOperationSummaries(result []string, targets []tools.ApplyPa
 
 func applyPatchHasSummaryOnlyTargets(targets []tools.ApplyPatchDisplayTarget) bool {
 	for _, target := range targets {
-		marker, _ := applyPatchTargetDisplay(target)
+		marker := applyPatchTargetMarker(target)
 		if marker == "D" || marker == "R" && target.Added == 0 && target.Removed == 0 {
 			return true
 		}
@@ -909,7 +924,7 @@ func applyPatchOnlyMoveOrDeleteTargets(targets []tools.ApplyPatchDisplayTarget) 
 		return false
 	}
 	for _, target := range targets {
-		marker, _ := applyPatchTargetDisplay(target)
+		marker := applyPatchTargetMarker(target)
 		if marker != "D" && (marker != "R" || target.Added != 0 || target.Removed != 0) {
 			return false
 		}
@@ -917,18 +932,49 @@ func applyPatchOnlyMoveOrDeleteTargets(targets []tools.ApplyPatchDisplayTarget) 
 	return true
 }
 
-func applyPatchTargetDisplay(target tools.ApplyPatchDisplayTarget) (marker, path string) {
-	marker, path = "M", target.SourcePath
+// applyPatchTargetMarker is the one-letter mark for an operation: A for a
+// created file, D for a deleted one, R for a move/rename, M for an update.
+func applyPatchTargetMarker(target tools.ApplyPatchDisplayTarget) string {
 	if target.TargetPath != "" {
-		return "R", target.SourcePath + " → " + target.TargetPath
+		return "R"
 	}
 	switch target.Kind {
 	case tools.MutationAdd:
-		marker = "A"
+		return "A"
 	case tools.MutationDelete:
-		marker = "D"
+		return "D"
 	}
-	return marker, path
+	return "M"
+}
+
+// displayApplyPatchTarget renders one operation for the card. The model-facing
+// paths are relativized *before* the marker is added: "D " + path handed to
+// displayToolPath reads as a relative path and maps back onto itself, which is
+// how an absolute path from a codex-style patch used to leak into the header.
+func (b *Block) displayApplyPatchTarget(target tools.ApplyPatchDisplayTarget) (marker, path string) {
+	marker = applyPatchTargetMarker(target)
+	source := b.displayToolPath(target.SourcePath)
+	if target.TargetPath != "" {
+		return marker, source + " → " + b.displayToolPath(target.TargetPath)
+	}
+	return marker, source
+}
+
+// applyPatchPathKey canonicalizes a path for identity comparisons inside one
+// card. The diff header and the parsed target spell the same file differently
+// (base-dir-relative vs the model's, possibly absolute), so equality has to run
+// on the resolved form, against the same base the card displays paths from.
+func (b *Block) applyPatchPathKey(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if base := b.displayBaseDir(); base != "" {
+		if abs, err := tools.ResolveToolPathAbsInDir(path, base); err == nil {
+			return abs
+		}
+	}
+	return filepath.Clean(path)
 }
 
 func (b *Block) applyPatchTargets() []tools.ApplyPatchDisplayTarget {
@@ -1121,7 +1167,8 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 // frame. It resolves the header display path and the undecorated syntax path in
 // one pass: the display form ("a → b", "D path", "path +N files") is not a path,
 // and lexerForFilePath resolves any of those to no lexer at all, which silently
-// turns a card's preview into plain text.
+// turns a card's preview into plain text. The returned path is already
+// display-ready, so callers must not relativize it a second time.
 func (b *Block) diffToolPathsWithTargets(targets []tools.ApplyPatchDisplayTarget) (displayPath, syntaxPath string) {
 	if toolNameKey(b.ToolName) == tools.NameApplyPatch {
 		if len(targets) == 0 {
@@ -1129,10 +1176,10 @@ func (b *Block) diffToolPathsWithTargets(targets []tools.ApplyPatchDisplayTarget
 			if len(paths) == 0 {
 				return "", ""
 			}
-			return applyPatchPathSummary(paths[0], len(paths)), strings.TrimSpace(paths[0])
+			return applyPatchPathSummary(b.displayToolPath(paths[0]), len(paths)), strings.TrimSpace(paths[0])
 		}
 		syntaxPath = applyPatchTargetSyntaxPath(targets[0])
-		marker, path := applyPatchTargetDisplay(targets[0])
+		marker, path := b.displayApplyPatchTarget(targets[0])
 		if marker == "D" {
 			path = marker + " " + path
 		}
@@ -1146,14 +1193,10 @@ func (b *Block) diffToolPathsWithTargets(targets []tools.ApplyPatchDisplayTarget
 		if path == "" {
 			return "", ""
 		}
-		// ExtractEditPathFromArgs resolves to an absolute path. Shorten it to a
-		// cwd-relative form so a long absolute prefix (deep tree, long $HOME,
-		// worktree) does not push the file name out of the width-clipped header.
-		// The caller additionally relativizes against displayWorkingDir.
-		if rel := relToProcessWorkingDir(path); rel != "" {
-			return rel, rel
-		}
-		return path, path
+		// The model may name the file absolutely; a long prefix (deep tree, long
+		// $HOME, worktree) would push the file name out of the width-clipped
+		// header, so show it relative to the working dir like every other card.
+		return b.displayToolPath(path), path
 	}
 	path := strings.TrimSpace(tolerantToolArgValue(b.Content, "path"))
 	return path, path
@@ -1238,25 +1281,3 @@ var processWorkingDir = sync.OnceValue(func() string {
 	}
 	return wd
 })
-
-// relToProcessWorkingDir returns path made relative to the process working
-// directory, or "" if it cannot be cleanly relativized (different root, escapes
-// upward via "..", or already a usable relative path is not produced).
-func relToProcessWorkingDir(path string) string {
-	if !filepath.IsAbs(path) {
-		return path
-	}
-	wd := processWorkingDir()
-	if wd == "" {
-		return ""
-	}
-	rel, err := filepath.Rel(wd, path)
-	if err != nil {
-		return ""
-	}
-	rel = filepath.Clean(rel)
-	if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return ""
-	}
-	return rel
-}

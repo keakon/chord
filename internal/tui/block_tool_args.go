@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/keakon/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/terminaltext"
@@ -294,28 +294,8 @@ func displayToolPath(path, workingDir string) string {
 	if workingDir == "" {
 		return path
 	}
-	resolved, err := tools.ResolveToolPathInDir(path, workingDir)
-	if err != nil {
-		return path
-	}
-	absPath, err := filepath.Abs(resolved)
-	if err != nil {
-		return path
-	}
-	absWorkingDir, err := filepath.Abs(workingDir)
-	if err != nil {
-		return path
-	}
-	rel, err := filepath.Rel(absWorkingDir, absPath)
-	if err != nil {
-		return path
-	}
-	rel = filepath.Clean(rel)
-	if rel == "." || rel == "" {
-		return path
-	}
-	up := ".." + string(os.PathSeparator)
-	if rel == ".." || strings.HasPrefix(rel, up) {
+	rel, ok := displayRelPath(path, workingDir)
+	if !ok || rel == "." {
 		return path
 	}
 	return rel
@@ -329,48 +309,51 @@ func displayToolDir(path, workingDir string) string {
 	if path == "." {
 		return path
 	}
+	workingDir = strings.TrimSpace(workingDir)
 	if workingDir == "" {
 		return path
 	}
-	resolved, err := tools.ResolveToolPathInDir(path, workingDir)
-	if err != nil {
-		return path
+	if rel, ok := displayRelPath(path, workingDir); ok {
+		return rel
 	}
-	absPath, err := filepath.Abs(resolved)
+	return path
+}
+
+// displayRelPath returns path relative to workingDir when it names workingDir
+// itself (".") or something inside it.
+func displayRelPath(path, workingDir string) (string, bool) {
+	absPath, err := tools.ResolveToolPathAbsInDir(path, workingDir)
 	if err != nil {
-		return path
+		return "", false
 	}
 	absWorkingDir, err := filepath.Abs(workingDir)
 	if err != nil {
-		return path
+		return "", false
 	}
-	rel, err := filepath.Rel(absWorkingDir, absPath)
-	if err != nil {
-		return path
+	return pathutil.RelToBase(absPath, absWorkingDir)
+}
+
+// displayBaseDir is the directory a card's paths are shown relative to: the
+// session working dir, or the process one until the session publishes it.
+func (b *Block) displayBaseDir() string {
+	if dir := strings.TrimSpace(b.displayWorkingDir); dir != "" {
+		return dir
 	}
-	rel = filepath.Clean(rel)
-	if rel == "." || rel == "" {
-		return "."
-	}
-	up := ".." + string(os.PathSeparator)
-	if rel == ".." || strings.HasPrefix(rel, up) {
-		return path
-	}
-	return rel
+	return processWorkingDir()
 }
 
 func (b *Block) displayToolPath(path string) string {
 	if b == nil {
 		return strings.TrimSpace(path)
 	}
-	return displayToolPath(path, b.displayWorkingDir)
+	return displayToolPath(path, b.displayBaseDir())
 }
 
 func (b *Block) displayToolDir(path string) string {
 	if b == nil {
 		return strings.TrimSpace(path)
 	}
-	return displayToolDir(path, b.displayWorkingDir)
+	return displayToolDir(path, b.displayBaseDir())
 }
 
 func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]string {
