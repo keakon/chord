@@ -339,6 +339,49 @@ func TestLatePruneKeepsFindingAnotherServerStillReports(t *testing.T) {
 	}
 }
 
+func TestLateDiagnosticsKeepsSameServerNameRootsIsolated(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	nested := filepath.Join(f.mgr.projectRootPath(), "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, ".git"), []byte("gitdir: ../.git\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile .git: %v", err)
+	}
+	nestedPath := filepath.Join(nested, "main.go")
+	if err := os.WriteFile(nestedPath, []byte("package nested\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile nested file: %v", err)
+	}
+	nestedURI := protocol.DocumentURI("file://" + filepath.ToSlash(nestedPath))
+	rootClient := f.clients["gopls"]
+	nestedClient := &Client{
+		cwd:         nested,
+		cfg:         config.LSPServerConfig{FileTypes: []string{".go"}},
+		diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{},
+	}
+	f.mgr.clientsMu.Lock()
+	f.mgr.clients[clientKey{name: "gopls", root: nested}] = nestedClient
+	f.mgr.clientsMu.Unlock()
+
+	rootFinding := lateDiag(protocol.SeverityWarning, 1, "root finding")
+	nestedFinding := lateDiag(protocol.SeverityWarning, 2, "nested finding")
+	rootClient.diagnosticsMu.Lock()
+	rootClient.diagnostics[f.uri] = []protocol.Diagnostic{rootFinding}
+	rootClient.diagnosticsMu.Unlock()
+	nestedClient.diagnosticsMu.Lock()
+	nestedClient.diagnostics[nestedURI] = []protocol.Diagnostic{nestedFinding}
+	nestedClient.diagnosticsMu.Unlock()
+
+	got := f.mgr.diagnosticsForPathsByServer([]string{f.path})[f.path]["gopls"]
+	if len(got) != 1 || got[0].Message != "root finding" {
+		t.Fatalf("root diagnostics = %+v, want only the root client finding", got)
+	}
+	got = f.mgr.diagnosticsForPathsByServer([]string{nestedPath})[nestedPath]["gopls"]
+	if len(got) != 1 || got[0].Message != "nested finding" {
+		t.Fatalf("nested diagnostics = %+v, want only the nested client finding", got)
+	}
+}
+
 func TestLateDiagnosticsQuietWindowCountsAsCompleteButAnOpenWindowDoesNot(t *testing.T) {
 	finding := lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type")
 	for _, tc := range []struct {

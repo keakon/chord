@@ -72,8 +72,6 @@ func (a *MainAgent) installSystemPrompt(prompt string) {
 // via the session-context reminder before the first user message to keep this
 // prefix cache-stable.
 func (a *MainAgent) buildSystemPrompt() string {
-	agentsMD := a.initialDirectoryInstructionsText()
-
 	var parts []string
 	parts = append(parts, mainAgentIdentityPrompt)
 	parts = append(parts, sharedAgentValuesPrompt)
@@ -106,13 +104,12 @@ func (a *MainAgent) buildSystemPrompt() string {
 	if block := a.primaryAgentCoordinationPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
-	if block := agentsMDReminderFramingPromptBlock(agentsMD); block != "" {
-		parts = append(parts, block)
-	}
 	// AGENTS.md is injected as a meta user message (under a
 	// "# AGENTS.md instructions" / <INSTRUCTIONS> self-identifying block) via
-	// injectSessionContextReminder to keep the stable system prompt
-	// small and cacheable.
+	// injectSessionContextReminder. The stable prompt never mentions it: the
+	// block names itself and states its own precedence, and a prompt line that
+	// depends on whether rules exist would both invalidate the cached prefix and
+	// claim a block that the request may not carry.
 	if a.memoryIsActive() {
 		// Only the fixed discipline lives in the stable prompt; the actual
 		// memory data is injected under an untrusted wrapper in the reminder so
@@ -182,13 +179,6 @@ func (a *MainAgent) visibleMCPServersPromptBlock() string {
 		return ""
 	}
 	return mcp.RenderServersPromptBlock(filtered)
-}
-
-func agentsMDReminderFramingPromptBlock(agentsMD string) string {
-	if strings.TrimSpace(agentsMD) == "" {
-		return ""
-	}
-	return "## Workspace Instructions\nEach applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message; follow the requirement stated at the top of that block."
 }
 
 // takePendingLoopContinuationPromptBlock renders and consumes the

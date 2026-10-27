@@ -199,62 +199,27 @@ func TestLoadAgentsMDWithWorkDir_AnchorsWalkAtCheckoutRoot(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry()}
-	setCachedAgentsMDForTest(a, "repo rules")
+// The stable system prompt never mentions AGENTS.md: the injected block names
+// itself and states its own precedence, so a prompt line that depends on whether
+// rules exist would only claim a block the request may not carry — and it would
+// invalidate the cached prefix whenever rules appear or disappear.
+func TestBuildSystemPrompt_NeverFramesAgentsMD(t *testing.T) {
+	withRules := &MainAgent{tools: tools.NewRegistry()}
+	setCachedAgentsMDForTest(withRules, "repo rules")
+	sub := &SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}
+	sub.directoryInstructions.Store(withRules.directoryInstructions.Load())
 
-	got := a.buildSystemPrompt()
-	if !strings.Contains(got, "## Workspace Instructions") {
-		t.Fatalf("buildSystemPrompt() missing AGENTS.md workspace framing when AGENTS.md is present, got:\n%s", got)
-	}
-	for _, want := range []string{
-		"Each applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message",
-		"follow the requirement stated at the top of that block",
+	for name, prompt := range map[string]string{
+		"main without rules": (&MainAgent{tools: tools.NewRegistry()}).buildSystemPrompt(),
+		"main with rules":    withRules.buildSystemPrompt(),
+		"sub without rules":  (&SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}).buildSystemPrompt(),
+		"sub with rules":     sub.buildSystemPrompt(),
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)
+		for _, unwanted := range []string{"## Workspace Instructions", "# AGENTS.md instructions"} {
+			if strings.Contains(prompt, unwanted) {
+				t.Fatalf("%s: system prompt mentions AGENTS.md (%q), got:\n%s", name, unwanted, prompt)
+			}
 		}
-	}
-	for _, unwanted := range []string{"mandatory scoped workspace instructions", "whose instructions were not loaded", "reread"} {
-		if strings.Contains(got, unwanted) {
-			t.Fatalf("buildSystemPrompt() should not duplicate the full AGENTS.md requirement kept in the session reminder (%q), got:\n%s", unwanted, got)
-		}
-	}
-}
-
-func TestBuildSystemPrompt_OmitsAgentsMDReminderFramingWhenAgentsMDAbsent(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry()}
-
-	got := a.buildSystemPrompt()
-	if strings.Contains(got, "## Workspace Instructions") {
-		t.Fatalf("buildSystemPrompt() unexpectedly included AGENTS.md workspace framing without AGENTS.md, got:\n%s", got)
-	}
-}
-
-func TestSubAgentBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t *testing.T) {
-	s := &SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}
-	a := &MainAgent{}
-	setCachedAgentsMDForTest(a, "repo rules")
-	s.directoryInstructions.Store(a.directoryInstructions.Load())
-
-	got := s.buildSystemPrompt()
-	for _, want := range []string{
-		"## Workspace Instructions",
-		"Each applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message",
-		"follow the requirement stated at the top of that block",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("SubAgent buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)
-		}
-	}
-}
-
-func TestSubAgentBuildSystemPrompt_OmitsAgentsMDReminderFramingWhenAgentsMDAbsent(t *testing.T) {
-	s := &SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}
-
-	got := s.buildSystemPrompt()
-	if strings.Contains(got, "## Workspace Instructions") {
-		t.Fatalf("SubAgent buildSystemPrompt() unexpectedly included AGENTS.md workspace framing without AGENTS.md, got:\n%s", got)
 	}
 }
 

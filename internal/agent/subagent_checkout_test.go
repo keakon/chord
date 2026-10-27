@@ -355,7 +355,7 @@ func TestSubAgentInstructionsFollowItsStartingCheckout(t *testing.T) {
 		t.Fatalf("CreateSubAgent (inherited): %v", err)
 	}
 	prepareSubDirectoryInstructionsForTest(t, a.subAgentByTaskID(inherited.TaskID))
-	if got := a.subAgentByTaskID(inherited.TaskID).initialDirectoryInstructionsText(); !strings.Contains(got, "root instructions") {
+	if got := renderInitialDirectoryInstructions(a.subAgentByTaskID(inherited.TaskID).directoryInstructions.Load()); !strings.Contains(got, "root instructions") {
 		t.Fatalf("inherited worker AGENTS.md = %q, want own snapshot; view=%+v", got, a.subAgentByTaskID(inherited.TaskID).directoryInstructions.Load().view.Load())
 	}
 
@@ -382,7 +382,7 @@ func TestSubAgentInstructionsFollowItsStartingCheckout(t *testing.T) {
 		t.Fatalf("inherited worker checkout = %q, want %q", got, installed.Path)
 	}
 	prepareSubDirectoryInstructionsForTest(t, child)
-	if got := child.initialDirectoryInstructionsText(); !strings.Contains(got, "checkout instructions") || strings.Contains(got, "root instructions") {
+	if got := renderInitialDirectoryInstructions(child.directoryInstructions.Load()); !strings.Contains(got, "checkout instructions") || strings.Contains(got, "root instructions") {
 		t.Fatalf("worker in the parent's checkout = %q, want the checkout's instructions", got)
 	}
 	// The reminder is what the model actually reads on every request, so the

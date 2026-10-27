@@ -1627,9 +1627,6 @@ func (s *SubAgent) buildSystemPrompt() string {
 	}
 	parts = append(parts, taskSection)
 
-	if block := agentsMDReminderFramingPromptBlock(s.initialDirectoryInstructionsText()); block != "" {
-		parts = append(parts, block)
-	}
 	// AGENTS.md is delivered as a meta user message under a
 	// "# AGENTS.md instructions" / <INSTRUCTIONS> self-identifying block via
 	// cachedSessionReminder (mirrors MainAgent). It does not belong in the

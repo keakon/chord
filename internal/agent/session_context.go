@@ -234,9 +234,6 @@ func (s *SubAgent) refreshSessionContextReminder() {
 	s.cachedSessionReminderContent.Store(&content)
 }
 
-func (s *SubAgent) initialDirectoryInstructionsText() string {
-	return renderInitialDirectoryInstructions(s.directoryInstructions.Load())
-}
 func renderInitialDirectoryInstructions(r *directoryInstructionRuntime) string {
 	if r != nil {
 		if v := r.view.Load(); v != nil {
