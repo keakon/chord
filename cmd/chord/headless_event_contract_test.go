@@ -708,6 +708,26 @@ func TestHeadlessBackgroundResultRespectsSubscription(t *testing.T) {
 	}
 }
 
+// Late LSP diagnostics are durable transcript rows with no other headless
+// channel, so they are pushed explicitly and only to subscribers.
+func TestHeadlessLSPFollowupPush(t *testing.T) {
+	evt := agent.LSPFollowupEvent{Message: "main.go:\n[W] 3:1 unused value", MessageIndex: 7}
+	unsubscribed := &headlessState{subscriptions: map[string]bool{"context_notice": true}, sessionID: "sess-1"}
+	if envs := filterHeadlessEvent(evt, unsubscribed); findHeadlessEnvelope(envs, "lsp_followup") != nil {
+		t.Fatal("lsp_followup must not be forwarded to a client that did not subscribe to it")
+	}
+
+	state := &headlessState{subscriptions: map[string]bool{"lsp_followup": true}, sessionID: "sess-1"}
+	env := findHeadlessEnvelope(filterHeadlessEvent(evt, state), "lsp_followup")
+	if env == nil {
+		t.Fatal("lsp_followup envelope not emitted")
+	}
+	payload := headlessPayloadMap(t, env.Payload)
+	if payload["session_id"] != "sess-1" || payload["message"] != evt.Message || payload["message_index"] != float64(7) {
+		t.Fatalf("payload = %v, want session, message and index", payload)
+	}
+}
+
 // Context-pressure warnings are durable user-facing alerts with no other
 // headless channel, so they must be pushed explicitly.
 func TestHeadlessContextNoticePush(t *testing.T) {

@@ -205,6 +205,9 @@ func configureRuntimeStateProviders(ac *AppContext) {
 	ac.MainAgent.SetLSPStatusFunc(
 		func() []agent.LSPServerDisplay { return lspServerDisplayList(ac.LSPManager, ac.RuntimeResources) },
 	)
+	if ac.LSPManager != nil {
+		ac.MainAgent.SetLSPFollowupSource(lspFollowupSource{mgr: ac.LSPManager})
+	}
 	ac.MainAgent.SetLSPSessionFuncs(
 		func() {
 			if ac.LSPManager == nil {

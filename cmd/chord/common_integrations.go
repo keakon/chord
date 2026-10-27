@@ -1,10 +1,45 @@
 package main
 
 import (
+	"context"
+
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/mcp"
 )
+
+// lspFollowupSource adapts the manager's late diagnostics for the agent.
+type lspFollowupSource struct {
+	mgr *lsp.Manager
+}
+
+func (s lspFollowupSource) Awaitable(paths []string) bool {
+	return s.mgr.LateDiagnosticsAwaitable(paths, lsp.LateDiagnosticsTurnEndWindow)
+}
+
+func (s lspFollowupSource) Await(ctx context.Context, paths []string) {
+	s.mgr.AwaitLateDiagnostics(ctx, paths, lsp.LateDiagnosticsTurnEndWindow)
+}
+
+// Pending reports the late diagnostics; each item's Ack consumes exactly that
+// item.
+func (s lspFollowupSource) Pending(paths []string, displayBaseDir string) []agent.LSPFollowupItem {
+	mgr := s.mgr
+	pending := mgr.PendingLateDiagnostics(paths, displayBaseDir)
+	if len(pending) == 0 {
+		return nil
+	}
+	items := make([]agent.LSPFollowupItem, 0, len(pending))
+	for _, late := range pending {
+		items = append(items, agent.LSPFollowupItem{
+			DisplayPath: late.DisplayPath,
+			Lines:       late.Lines,
+			Reviews:     late.Reviews,
+			Ack:         func() { mgr.AckLateDiagnostics([]lsp.LateDiagnostics{late}) },
+		})
+	}
+	return items
+}
 
 func lspServerDisplayList(mgr *lsp.Manager, runtimeCtrl *runtimeResourceController) []agent.LSPServerDisplay {
 	if mgr == nil {

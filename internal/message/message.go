@@ -275,6 +275,17 @@ const KindStreamContinue = "stream_continue"
 // (latest-request anchor, terminal title, input statistics).
 const KindContextNotice = "context_notice"
 
+// KindLSPFollowup identifies a durable synthetic user-role message carrying
+// LSP diagnostics that a language server published for files written in the
+// current turn after their tool results were already returned (gopls reports
+// its analyzer pass about a second after the type-check pass a write waits
+// for). The tool results stay unchanged; this message rides the next request
+// as a turn-tail addition and is appended to the transcript when that request
+// dispatches, so the card the user sees and the history the model replays
+// carry the same text. LSPReviews holds the files' review counts at delivery.
+// The IsUserAuthored exclusion keeps it away from user-authored surfaces.
+const KindLSPFollowup = "lsp_followup"
+
 // KindReplayEvidence and KindReplayContinuation mark the pair of messages that
 // modelcompat synthesizes when a target cannot replay a native tool trajectory.
 // They exist only on the request face built for one provider call and are never
@@ -413,7 +424,7 @@ func IsUserAuthored(msg Message) bool {
 		return false
 	}
 	switch msg.Kind {
-	case KindDirectoryInstructions, KindDirectoryInstructionProjection, KindSkillDiscovery, KindQuestionState, KindQuestionResult, KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice:
+	case KindDirectoryInstructions, KindDirectoryInstructionProjection, KindSkillDiscovery, KindQuestionState, KindQuestionResult, KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice, KindLSPFollowup:
 		return false
 	case KindTurnOverlay:
 		// Request-scoped runtime hints ride the request tail as user-role

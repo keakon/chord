@@ -523,6 +523,17 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"message_index": e.MessageIndex,
 			}})
 		}
+	case agent.LSPFollowupEvent:
+		// Durable late LSP diagnostics appended to the transcript at request
+		// dispatch; no other headless channel carries them.
+		touch()
+		if state.isSubscribed("lsp_followup") {
+			out = append(out, &headlessEnvelope{Type: "lsp_followup", Payload: map[string]any{
+				"session_id":    state.sessionID,
+				"message":       e.Message,
+				"message_index": e.MessageIndex,
+			}})
+		}
 	}
 	if len(out) == 0 {
 		if mutated {

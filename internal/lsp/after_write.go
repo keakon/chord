@@ -119,9 +119,13 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 		return prepared.base
 	}
 
-	_, notified := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.after}, prepared.waitTimeout)
+	req := diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.after, immediateServers: m.immediateDiagnosticsServers(prepared.sync.serverVersions)}
+	_, notified := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, req, prepared.waitTimeout)
 	if notified {
 		m.confirmDiagnosticsSync(prepared.sync.token)
+	}
+	if notified && ctx.Err() == nil {
+		m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions)
 	}
 	if !notified && ctx.Err() == nil {
 		// A timeout is logged every time; the model hears about the first one
@@ -158,6 +162,27 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 	coldStart, base, exited := m.beginAfterFileWrite(ctx, absPath, base)
 	prepared := m.prepareAfterFileWrite(ctx, absPath, content, base, changeType, coldStart, exited)
 	return m.awaitPreparedAfterFileWrite(ctx, &prepared, includeOtherFiles, displayBaseDir)
+}
+
+// immediateDiagnosticsServers returns the synced servers whose first publish for
+// the synced version ends the diagnostics wait (see
+// diagnosticsWaitRequest.immediateServers).
+func (m *Manager) immediateDiagnosticsServers(serverVersions map[string]int32) map[string]bool {
+	if m == nil || m.cfg == nil || len(serverVersions) == 0 {
+		return nil
+	}
+	var out map[string]bool
+	for name := range serverVersions {
+		cfg, ok := m.cfg.LSP[name]
+		if !ok || !isGoplsServer(name, cfg) {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]bool, len(serverVersions))
+		}
+		out[name] = true
+	}
+	return out
 }
 
 func (m *Manager) logLSPServiceNote(path, msg string) {

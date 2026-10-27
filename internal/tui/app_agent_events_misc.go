@@ -22,6 +22,10 @@ const streamContinueCardTitle = "REPLY RESUMED"
 // carries no title of its own.
 const infoCardTitle = "NOTICE"
 
+// lspFollowupCardTitle badges the card built from a durable
+// message.KindLSPFollowup message, live and after a restore.
+const lspFollowupCardTitle = "LSP DIAGNOSTICS"
+
 // contextNoticeTitle maps a ContextNoticeEvent level to the badge the card
 // carries. The levels mirror the request-scoped overlays the compaction gate
 // attaches to outgoing requests; surfacing them as cards lets the user see the
@@ -231,6 +235,15 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		return true, effects
 	case agent.ContextNoticeClearedEvent:
 		m.removeContextNoticeBlocks(evt.MessageIndices)
+		return true, effects
+	case agent.LSPFollowupEvent:
+		// The agent persisted the follow-up as a KindLSPFollowup message before
+		// emitting this event; MsgIndex ties the card to that message so a
+		// restored session rebuilds the same card.
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: lspFollowupCardTitle, Content: evt.Message, MsgIndex: evt.MessageIndex, Collapsed: true}
+		m.nextBlockID++
+		m.appendViewportBlock(block)
+		m.markBlockSettled(block)
 		return true, effects
 	case agent.BackgroundResultAppendedEvent:
 		// The result is durable now: drop its pending-area entry and build the

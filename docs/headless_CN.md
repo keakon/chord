@@ -125,7 +125,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`confirm_resolved`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`image_result`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`confirm_resolved`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`lsp_followup`、`image_result`。
 
 ### `status`
 
@@ -404,6 +404,7 @@ Chord 收到带 request ID 的规则意图后，会在尝试写入规则后发�
 | `session_switched`   | 当前会话换了，但进程没重启（执行 handoff plan、`/resume <id>`、`/new`） | `session_id`（换完之后的新会话） |
 | `background_result`  | 后台任务结束后的持久结果；JOB RESULT 卡片唯一的推送通道——它通常在回合 `idle` 之后才落盘，后面不会再有 `assistant_message` 总结它 | `session_id`（Chord 发出该事件时活动会话）、`target_agent_id`、`message_index`、`content` |
 | `context_notice`     | 持久的上下文压力提醒，headless 没有别的通道能收到它 | `session_id`（Chord 发出该事件时活动会话）、`level`、`message`、`message_index` |
+| `lsp_followup`       | 持久的 LSP 晚到诊断：本回合写过的文件在工具结果返回之后，语言服务器又报出的诊断（例如 gopls 的 analyzer 结果），有新的 error 或 warning 时才发出；模型会在下一次请求里收到同样的文字 | `session_id`（Chord 发出该事件时活动会话）、`message`、`message_index` |
 | `error`              | 运行时错误                                   | `agent_id`、`message`，可选 `code` |
 
 如果 stdin 上的单行输入超过协议行长度限制，Chord 会输出带 `code: "stdin_line_too_long"` 的 `error` envelope，并继续读取后续行。集成方应在存在 `code` 时用它做错误分类，把 `message` 作为面向人的诊断信息。

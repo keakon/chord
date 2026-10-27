@@ -25,7 +25,7 @@ func modelDrivenHasProgressSinceCheckpoint(snapshot []message.Message) bool {
 	applyBatch := snapshot[boundary].RequestBatch
 	for _, entry := range snapshot[boundary+1:] {
 		switch entry.Kind {
-		case message.KindContextNotice, message.KindTurnOverlay, message.KindLoopNotice, message.KindStreamContinue, message.KindReplayContinuation:
+		case message.KindContextNotice, message.KindLSPFollowup, message.KindTurnOverlay, message.KindLoopNotice, message.KindStreamContinue, message.KindReplayContinuation:
 			continue
 		}
 		switch entry.Role {

@@ -133,6 +133,20 @@ type Manager struct {
 	waiters   map[string][]chan diagnosticsEvent
 	waitersMu sync.Mutex
 
+	// lateWatches follows written paths after their diagnostics wait returned,
+	// keyed by normalized path (see late_diagnostics.go). Guarded by lateMu,
+	// which is never held while taking another Manager lock.
+	lateMu      sync.Mutex
+	lateWatches map[string]*lateWatch
+	lateSeq     uint64
+	// lateReported holds, per path, the findings already delivered as late
+	// diagnostics this session, so a finding an edit merely moved or kept is
+	// not delivered again.
+	lateReported map[string]map[lateFindingKey]struct{}
+	// lateChanged is closed (and cleared) when a watched path receives its
+	// later same-version publish, waking AwaitLateDiagnostics.
+	lateChanged chan struct{}
+
 	startFailMu sync.Mutex
 	startFail   map[clientKey]string // client -> last start/init error
 
@@ -324,6 +338,7 @@ func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri string, 
 			}
 		}
 		m.diagMu.Unlock()
+		m.noteLateDiagnosticsPublish(path, key.name, version, receivedAt)
 		m.broadcast(TypeLSPDiagnostics, payload)
 		m.notifySidebarChanged()
 
@@ -1189,6 +1204,31 @@ type diagnosticsWaitRequest struct {
 	serverVersions map[string]int32
 	after          time.Time
 	settle         time.Duration
+	// immediateServers lists servers whose first publish for the synced
+	// version is the one this wait can observe: gopls publishes its full
+	// analysis only after diagnosticsDelay (1s by default), so a settle window
+	// never catches it and only delays the result. The wait returns as soon as
+	// every server in serverVersions has delivered a versioned, matching
+	// publish and all of them are listed here; later same-version publishes
+	// are picked up by the late-diagnostics watch instead.
+	immediateServers map[string]bool
+}
+
+// immediateWaitComplete records ev and reports whether the wait may return
+// without a settle window.
+func (req diagnosticsWaitRequest) immediateWaitComplete(ev diagnosticsEvent, confirmed map[string]struct{}) bool {
+	if len(req.serverVersions) == 0 || len(req.immediateServers) == 0 {
+		return false
+	}
+	if ev.version != 0 && req.immediateServers[ev.serverID] {
+		confirmed[ev.serverID] = struct{}{}
+	}
+	for name := range req.serverVersions {
+		if _, ok := confirmed[name]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // AwaitFreshWaiter waits for diagnostics that match the current edit. If an LSP
@@ -1210,25 +1250,40 @@ func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan dia
 		m.waitersMu.Unlock()
 	}()
 
+	started := time.Now()
+	var events, freshEvents int
+	logReturn := func(reason string) {
+		log.Debugf("lsp: diagnostics wait returned path=%v reason=%v elapsed=%v events=%v fresh_events=%v", path, reason, time.Since(started), events, freshEvents)
+	}
 	var gotFresh bool
 	var last []Diagnostic
 	var settle <-chan time.Time
+	confirmed := make(map[string]struct{}, len(req.serverVersions))
 	for {
 		select {
 		case ev := <-ch:
+			events++
 			if !diagnosticsEventFresh(ev, req) {
 				continue
 			}
+			freshEvents++
 			gotFresh = true
 			last = ev.diagnostics
+			if req.immediateWaitComplete(ev, confirmed) {
+				logReturn("versioned")
+				return last, true
+			}
 			settleTimer := time.NewTimer(req.settle)
 			defer settleTimer.Stop()
 			settle = settleTimer.C
 		case <-settle:
+			logReturn("settled")
 			return last, true
 		case <-ctx.Done():
+			logReturn("cancelled")
 			return nil, false
 		case <-deadline.C:
+			logReturn("timeout")
 			return m.Diagnostics(path), gotFresh
 		}
 	}

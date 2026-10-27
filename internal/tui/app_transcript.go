@@ -863,6 +863,18 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 			// A durable context-pressure notice rebuilds the same card the
 			// live ContextNoticeEvent appended, so a restored session shows
 			// the notice exactly as it appeared when it dispatched.
+			if msg.Kind == message.KindLSPFollowup {
+				blocks = append(blocks, &Block{
+					ID:          *nextID,
+					Type:        BlockStatus,
+					StatusTitle: lspFollowupCardTitle,
+					Content:     stripContextNoticeReminder(contentOrPartsText(msg)),
+					MsgIndex:    msgIdx,
+					Collapsed:   true,
+				})
+				*nextID++
+				continue
+			}
 			if msg.Kind == message.KindContextNotice {
 				blocks = append(blocks, &Block{
 					ID:          *nextID,

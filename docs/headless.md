@@ -127,7 +127,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `confirm_resolved`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`, `image_result`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `confirm_resolved`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`, `lsp_followup`, `image_result`.
 
 ### `status`
 
@@ -408,6 +408,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `session_switched`      | The active session changed without restarting the process (handoff plan execution, `/resume <id>`, `/new`) | `session_id` (the new active session) |
 | `background_result`     | A finished background job's durable result; the only delivery channel for the JOB RESULT card, which typically lands after the turn is idle so no later `assistant_message` summarizes it | `session_id` (the session Chord had active when it emitted the event), `target_agent_id`, `message_index`, `content` |
 | `context_notice`        | Durable context-pressure warning with no other headless channel | `session_id` (the session Chord had active when it emitted the event), `level`, `message`, `message_index` |
+| `lsp_followup`          | Durable LSP diagnostics that a language server reported for files written in the current turn after their tool results returned (for example gopls analyzer findings), sent when they add a new error or warning; the model receives the same text with its next request | `session_id` (the session Chord had active when it emitted the event), `message`, `message_index` |
 | `error`                 | Runtime error                                                                                     | `agent_id`, `message`, optional `code`                                                                         |
 
 If an input line on stdin exceeds the protocol line limit, Chord emits an `error` envelope with `code: "stdin_line_too_long"` and continues reading later lines. Integrations should use `code` for classification when present and keep `message` for human-readable diagnostics.

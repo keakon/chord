@@ -215,6 +215,10 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		})
 	}
 
+	if followup, ok := a.buildLSPFollowupOverlay(); ok {
+		overlays = append(overlays, followup)
+	}
+
 	if block := strings.TrimSpace(a.takePendingLSPDiagnosticOverlay()); block != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",

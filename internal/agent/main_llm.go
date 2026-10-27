@@ -738,6 +738,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 		if requestStarted.Load() {
 			confirmDispatch.Do(func() {
 				a.markOverlayClaimsDelivered()
+				a.emitStagedLSPFollowup()
 				a.rememberPressureNoticeRequest(noticeRequestMessages, modelRef)
 			})
 		}

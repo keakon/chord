@@ -842,6 +842,18 @@ type ContextNoticeEvent struct {
 
 func (ContextNoticeEvent) agentEvent() {}
 
+// LSPFollowupEvent tells the TUI that late LSP diagnostics became durable: the
+// dispatch confirmation point appended them to the main transcript as a
+// message.KindLSPFollowup message before emitting this event, so the card is
+// backed by that message and a restored session rebuilds it. Message is the
+// bare follow-up text; MessageIndex is the transcript index of the message.
+type LSPFollowupEvent struct {
+	Message      string
+	MessageIndex int
+}
+
+func (LSPFollowupEvent) agentEvent() {}
+
 // ContextNoticeClearedEvent withdraws only cards whose durable messages were
 // removed. MessageIndices contains sorted indices in the pre-rewrite transcript.
 type ContextNoticeClearedEvent struct {

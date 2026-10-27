@@ -208,7 +208,7 @@ lsp:
     root_markers: ["Cargo.toml", "rust-project.json"]
 ```
 
-`options` 是 Chord 应答服务器 `workspace/configuration` 请求时返回的 workspace settings，键名就是 section 名：gopls 的 `staticcheck`、`analyses` 等设置要放在 `gopls` 键下，Pyright 的设置用 `python`、`python.analysis`。平铺在顶层不会送到服务器——section 找不到对应键时，Chord 返回空对象。`init_options` 只作为 LSP 初始化元数据发送，并不是 gopls settings 的正确位置。可用的 analyzer 名称及其默认值取决于本机安装的 gopls 版本。较新的 gopls 已默认启用大多数 `modernize` analyzer；显式设为 `true` 可以记录并保留项目依赖的检查，设为 `false` 则可关闭单项检查。修改 Go 文件后，Chord 会透传 gopls 的 information 和 hint 诊断，但在默认最多 10 条的输出额度内，error 和 warning 会优先展示。
+`options` 是 Chord 应答服务器 `workspace/configuration` 请求时返回的 workspace settings，键名就是 section 名：gopls 的 `staticcheck`、`analyses` 等设置要放在 `gopls` 键下，Pyright 的设置用 `python`、`python.analysis`。平铺在顶层不会送到服务器——section 找不到对应键时，Chord 返回空对象。`init_options` 只作为 LSP 初始化元数据发送，并不是 gopls settings 的正确位置。可用的 analyzer 名称及其默认值取决于本机安装的 gopls 版本。较新的 gopls 已默认启用大多数 `modernize` analyzer；显式设为 `true` 可以记录并保留项目依赖的检查，设为 `false` 则可关闭单项检查。修改 Go 文件后，Chord 会透传 gopls 的 information 和 hint 诊断，但在默认最多 10 条的输出额度内，error 和 warning 会优先展示。staticcheck 与 analyzer 的结果要比编辑结果等待的类型检查晚一秒以上。它们给编辑过的文件带来新的 error 或 warning 时，Chord 会把它们附在同一回合的下一次请求里，并显示 `LSP DIAGNOSTICS` 卡片；同一文件已经发过的问题，要消失后再出现才会重发。编辑过 Go 文件的回合结束前，会从最后一次编辑起最多等约 3 秒，保证最后一次编辑的问题也能送到模型。
 
 gopls 的设置是一层平铺的 map。gopls 文档里的 `build`、`ui` 只是分组名，不是键：`directoryFilters` 要直接写在 `gopls` 下（也可以写成带点的 `build.directoryFilters`），嵌套的 `build:` 会被 gopls 当作未知设置拒绝。`directoryFilters` 限定 gopls 从哪些目录加载包，适合排除体积大且不含 Go 代码的子目录，例如前端的 `web/`。配置的清单会替换默认的 `["-**/node_modules"]`，需要保留这一项；以 `.` 或 `_` 开头的目录本来就会跳过。这些过滤规则不作用于 gopls 自己的文件监听（`fileWatcher`）。`fileWatcher` 保持默认的 `off` 即可：`fsnotify` 会监听工作区里的每个目录，在 macOS 上可能耗尽文件描述符。
 

@@ -17,6 +17,10 @@ func matchesServerIdentity(name, command string, identities ...string) bool {
 	return slices.Contains(identities, name) || slices.Contains(identities, command)
 }
 
+func isGoplsServer(name string, cfg config.LSPServerConfig) bool {
+	return matchesServerIdentity(name, cfg.Command, "gopls")
+}
+
 func isPyrightServer(name string, cfg config.LSPServerConfig) bool {
 	return matchesServerIdentity(name, cfg.Command, "pyright", "pyright-langserver", "basedpyright", "basedpyright-langserver")
 }

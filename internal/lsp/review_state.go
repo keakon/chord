@@ -385,7 +385,25 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 		key := serverID + "\x00" + path
 		byKey[key] = ReviewedFileSnapshot{Path: path, ServerID: serverID, Errors: review.Errors, Warnings: review.Warnings}
 	}
+	// storeFollowupReview overwrites the snapshot an earlier tool result stored
+	// for the same server and file, whichever path spelling that result used.
+	storeFollowupReview := func(review message.LSPReview) {
+		serverID := strings.TrimSpace(review.ServerID)
+		for key, snap := range byKey {
+			if snap.ServerID == serverID && reviewPathsMatch(snap.Path, review.Path) {
+				byKey[key] = ReviewedFileSnapshot{Path: snap.Path, ServerID: serverID, Errors: review.Errors, Warnings: review.Warnings}
+				return
+			}
+		}
+		storeReview(review.Path, review)
+	}
 	for _, msg := range msgs {
+		if msg.Kind == message.KindLSPFollowup {
+			for _, review := range msg.LSPReviews {
+				storeFollowupReview(review)
+			}
+			continue
+		}
 		succeeded := msg.ToolStatus == message.ToolStatusSuccess ||
 			(msg.ToolStatus == "" && message.ToolResultSucceeded(msg.Content))
 		if msg.Role != "tool" || !succeeded {

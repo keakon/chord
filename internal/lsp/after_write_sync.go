@@ -32,6 +32,7 @@ type afterWriteSync struct {
 // diagnostics that verify this write.
 func (m *Manager) syncAfterWrite(ctx context.Context, absPath, content string, changeType pnprotocol.FileChangeType, notifyWatched bool) afterWriteSync {
 	sync := afterWriteSync{serverErrors: make(map[string]error)}
+	m.dropLateDiagnostics(absPath)
 	if notifyWatched {
 		if errs := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); len(errs) > 0 {
 			mergeServerErrors(sync.serverErrors, errs)

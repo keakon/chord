@@ -48,6 +48,36 @@ func TestRebuildReviewSnapshotsFromMessagesUsesPathAndPaths(t *testing.T) {
 	}
 }
 
+func TestRebuildReviewSnapshotsFromMessagesLSPFollowupOverwritesToolReview(t *testing.T) {
+	msgs := []message.Message{
+		{
+			Role: "assistant",
+			ToolCalls: []message.ToolCall{
+				{ID: "edit-1", Name: toolname.Edit, Args: json.RawMessage(`{"path":"a.go","old_string":"x","new_string":"y"}`)},
+			},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "edit-1",
+			Content:    "Replaced 1 occurrence",
+			ToolStatus: message.ToolStatusSuccess,
+			LSPReviews: []message.LSPReview{{Path: "a.go", ServerID: "gopls", Errors: 0, Warnings: 0}},
+		},
+		{
+			Role:       message.RoleUser,
+			Kind:       message.KindLSPFollowup,
+			Content:    "<system-reminder>\nlate\n</system-reminder>",
+			LSPReviews: []message.LSPReview{{Path: filepath.Join(string(filepath.Separator), "repo", "a.go"), ServerID: "gopls", Errors: 0, Warnings: 2}},
+		},
+	}
+
+	got := RebuildReviewSnapshotsFromMessages(msgs)
+	want := []ReviewedFileSnapshot{{Path: "a.go", ServerID: "gopls", Errors: 0, Warnings: 2}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RebuildReviewSnapshotsFromMessages() = %#v, want %#v", got, want)
+	}
+}
+
 func TestRebuildReviewSnapshotsFromMessagesCleanReviewOverwritesStaleDiagnostics(t *testing.T) {
 	msgs := []message.Message{
 		{

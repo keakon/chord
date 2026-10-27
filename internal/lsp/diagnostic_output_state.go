@@ -164,6 +164,7 @@ func (m *Manager) ResetReportedDiagnostics() {
 	m.diagMu.Lock()
 	m.reportedByPath = make(map[string]map[diagnosticIdentity]struct{})
 	m.diagMu.Unlock()
+	m.resetLateDiagnostics()
 
 	// Degradation notes are session-scoped like the suppression window: a fresh
 	// session should hear about a dead server again.

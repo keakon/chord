@@ -259,6 +259,7 @@ var headlessEventTypes = map[string]bool{
 	"session_switched":           true,
 	"background_result":          true,
 	"context_notice":             true,
+	"lsp_followup":               true,
 	headlessMCPStatusChanged:     true,
 	"input_queue_changed":        true,
 }

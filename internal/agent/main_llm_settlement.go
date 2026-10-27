@@ -10,6 +10,30 @@ import (
 	"github.com/keakon/chord/internal/recovery"
 )
 
+// finishTerminalResponse ends the turn of a response without tool calls: the
+// loop controller assesses it, or its delivery work settles and the agent
+// goes idle.
+func (a *MainAgent) finishTerminalResponse(assistantMsg message.Message, payload *LLMResponsePayload, isTruncated bool) {
+	if assessment := a.nextLoopAssessmentFromAssistant(assistantMsg); assessment != nil {
+		a.rememberIdleTurn(a.turn.ID)
+		a.clearPendingThinkingReplay()
+		a.turn = nil
+		a.pendingModelDriven = nil
+		a.queueLoopEvent(Event{Type: EventLoopAssessment, Payload: assessment})
+		return
+	}
+	outcome := recovery.DeliveryWorkFailed
+	if isDeliveryFinalResponse(payload) && !isTruncated {
+		outcome = recovery.DeliveryWorkCompleted
+	} else if payload.NativeTools != nil && payload.NativeTools.OutcomeUnknown {
+		outcome = recovery.DeliveryWorkUnknown
+	}
+	a.settleDeliveryWork(a.turn.DeliveryWorkID, outcome)
+	a.closeCompletedQuestions()
+	a.emitActivity("main", ActivityIdle, "")
+	a.setIdleAndDrainPending()
+}
+
 // settleMainLLMResponse persists a completed response and settles its tools.
 // Recovery decisions belong to the caller; this path never replaces a response.
 func (a *MainAgent) settleMainLLMResponse(payload *LLMResponsePayload, validCalls, malformedCalls []message.ToolCall, isTruncated, wasLengthRecovery bool) {
@@ -133,24 +157,10 @@ func (a *MainAgent) settleMainLLMResponse(payload *LLMResponsePayload, validCall
 		if a.parkForRequiredQuestions() {
 			return
 		}
-		if assessment := a.nextLoopAssessmentFromAssistant(assistantMsg); assessment != nil {
-			a.rememberIdleTurn(a.turn.ID)
-			a.clearPendingThinkingReplay()
-			a.turn = nil
-			a.pendingModelDriven = nil
-			a.queueLoopEvent(Event{Type: EventLoopAssessment, Payload: assessment})
+		if a.deferTurnEndForLateDiagnostics(lateTurnEnd{turn: a.turn, assistant: assistantMsg, payload: payload, isTruncated: isTruncated}) {
 			return
 		}
-		outcome := recovery.DeliveryWorkFailed
-		if isDeliveryFinalResponse(payload) && !isTruncated {
-			outcome = recovery.DeliveryWorkCompleted
-		} else if payload.NativeTools != nil && payload.NativeTools.OutcomeUnknown {
-			outcome = recovery.DeliveryWorkUnknown
-		}
-		a.settleDeliveryWork(a.turn.DeliveryWorkID, outcome)
-		a.closeCompletedQuestions()
-		a.emitActivity("main", ActivityIdle, "")
-		a.setIdleAndDrainPending()
+		a.finishTerminalResponse(assistantMsg, payload, isTruncated)
 		return
 	}
 

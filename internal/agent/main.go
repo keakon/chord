@@ -518,6 +518,12 @@ type MainAgent struct {
 	// into the next request.
 	pendingContextNotices   []contextNotice
 	pendingContextNoticesMu sync.Mutex
+	// stagedLSPFollowup carries the late LSP diagnostics attached to the
+	// request being assembled until its dispatch confirmation persists them
+	// (see lsp_followup.go). Same hand-off and reset rules as
+	// pendingContextNotices.
+	stagedLSPFollowup   *lspFollowup
+	stagedLSPFollowupMu sync.Mutex
 	// compactionWindowGeneration is the in-memory monotonic compaction-window
 	// id used by the reminder-class overlay claims: every durable apply
 	// increments it, and a session switch / restore resets it to 0. It
@@ -815,6 +821,9 @@ type MainAgent struct {
 	mcpKnownToolNamesFn func(string) []string
 	lspSessionResetFn   func()
 	lspSessionLoadFn    func([]message.Message)
+	// lspFollowupSource reports late LSP diagnostics for written paths (set
+	// via SetLSPFollowupSource).
+	lspFollowupSource LSPFollowupSource
 
 	// Async persistence pump for ordered JSONL writes.
 	persist *persistencePump
