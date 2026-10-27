@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func editLikeSchema() map[string]any {
+func mcpCombinatorSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -57,7 +57,7 @@ func propertyNames(t *testing.T, data []byte) []string {
 }
 
 func TestToolSchemaListsRequiredPropertiesFirst(t *testing.T) {
-	data, err := json.Marshal(toolSchema(editLikeSchema()))
+	data, err := json.Marshal(toolSchema(mcpCombinatorSchema()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestToolSchemaListsCombinatorBranchRequiredNext(t *testing.T) {
 }
 
 func TestToolSchemaMarshalMatchesPlainEncoding(t *testing.T) {
-	schema := editLikeSchema()
+	schema := mcpCombinatorSchema()
 	ordered, err := json.Marshal(toolSchema(schema))
 	if err != nil {
 		t.Fatal(err)

@@ -311,10 +311,6 @@ func (SaveArtifactTool) Parameters() map[string]any {
 				"description": "JSON object to persist without runtime interpretation. Must be given together with result_type and without filename, content, or mode.",
 			},
 		},
-		"anyOf": []map[string]any{
-			{"required": []string{"filename", "content"}},
-			{"required": []string{"result_type", "result"}},
-		},
 		"additionalProperties": false,
 	}
 }
@@ -334,11 +330,8 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	rawResult := bytes.TrimSpace(args.Result)
 	// A present-but-invalid result (including explicit JSON null) counts as
 	// provided, so it falls through to canonicalResultObject's object check
-	// instead of being reported as an absent result. Schema validation gets
-	// there first for a model-issued call — the anyOf groups in Parameters()
-	// mark result as required, so an explicit null is rejected as a wrong type
-	// rather than dropped as an omission — and this check is what an
-	// unvalidated direct call falls back on.
+	// instead of being reported as an absent result. This check is what a
+	// model-issued call and an unvalidated direct call both rely on.
 	resultProvided := len(rawResult) > 0
 	if args.ResultType != "" || resultProvided {
 		if strings.TrimSpace(args.Filename) != "" || content != "" || strings.TrimSpace(args.Mode) != "" {
@@ -360,10 +353,13 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		}
 		return string(out), nil
 	}
+	filename := sanitizeArtifactFilename(args.Filename)
+	if filename == "" && content == "" {
+		return "", fmt.Errorf("filename and content are required when result_type/result are not provided")
+	}
 	if content == "" {
 		return "", fmt.Errorf("content is required")
 	}
-	filename := sanitizeArtifactFilename(args.Filename)
 	if filename == "" {
 		return "", fmt.Errorf("filename is required")
 	}
@@ -526,7 +522,7 @@ func (ReadArtifactTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Session-relative artifact path, for example artifacts/subagents/agent-1/report.md.",
+				"description": "Session-relative artifact path, for example artifacts/subagents/agent-1/report.md. Provide path or rel_path.",
 			},
 			"rel_path": map[string]any{
 				"type":        "string",
@@ -537,10 +533,6 @@ func (ReadArtifactTool) Parameters() map[string]any {
 			"expected_sha256": map[string]any{"type": "string", "description": "Optional lowercase SHA-256 digest expected for the complete artifact."},
 		},
 		"additionalProperties": false,
-		"anyOf": []map[string]any{
-			{"required": []string{"path"}},
-			{"required": []string{"rel_path"}},
-		},
 	}
 }
 

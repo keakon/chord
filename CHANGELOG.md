@@ -48,6 +48,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Batch `edit` calls accept a trailing line-ending difference the same way a single replacement does, so an entry that misses only by its final newline no longer rejects the whole batch and costs another round trip.
+
 - Multi-file `apply_patch` calls no longer serialize their language-server review: every changed file's content reaches the language server before any diagnostics wait starts, and the per-file waits then run concurrently. A slow-starting language server no longer multiplies the wait by the number of changed files, so the batch spends one startup budget in total. The waits and startup budget overlap; Chord does not guarantee how many analysis passes the server performs. The diagnostics reported per file, degradation notes, and timeout reporting are unchanged.
 
 - OpenCode imports map a compaction the source session applied onto a Chord context-summary checkpoint: the paired summary becomes the checkpoint standing immediately before the oldest message the compaction kept, those recent messages stay as history after it, and the earlier messages the source had already folded away are replaced by that checkpoint — the shape the source model itself saw. Only the newest usable compaction shapes the import; when the export does not record what the compaction kept, the full history is kept and the report says so. A compaction that completed with no summary text is skipped the same way, unless the replaced head still holds the original request to anchor it: the checkpoint then carries that request alone, and the report says the summary text was missing. CLI output and `import-report.json` record the mapped checkpoints, replaced messages, and skipped markers.
@@ -80,6 +82,11 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Editing a file no longer deletes text when `new_string` is omitted or set to `null`. Both used to decode as an empty replacement and remove `old_string`; only an explicit empty string now deletes text, and any other missing value is rejected before the file is touched.
+
+- `complete` now rejects a completion that supplies both `result` and `result_ref`. The tool description already required exactly one; previously the same payload passed both checks, and the inline result could be persisted before a mismatch was reported.
+
+- Built-in tool schemas no longer put `anyOf` at the top level. Strict Anthropic endpoints reject such a tool definition with `input_schema does not support oneOf, allOf, or anyOf at the top level`, failing every request that includes the batch-capable `edit` tool. The removed constraints remain stated in the argument descriptions and enforced when the tool runs.
 
 - Remembering a rule from a permission confirmation now suggests rules that actually stop the repeat prompt. apply_patch confirmations report the write/delete rules that blocked the call — for example a delete ask on a moved source path — and the picker offers preselected directory rules named for that tool instead of a broad apply_patch rule that could not lift the ask. Headless clients can pass `rule_tool` with `confirm` to install the rule under the blocking tool.
 

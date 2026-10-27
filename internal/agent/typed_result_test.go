@@ -52,17 +52,31 @@ func TestValidateCompleteTypedResultRejectsInvalidShapesAndSize(t *testing.T) {
 	}
 }
 
-func TestValidateCompleteTypedResultRejectsMismatchedRef(t *testing.T) {
+func TestValidateCompleteTypedResultRejectsBothInlineAndRef(t *testing.T) {
 	dir := t.TempDir()
 	ref, _, err := tools.SaveImmutableResult(dir, "type/test", json.RawMessage(`{"value":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := validateCompleteTypedResult(dir, "type/test", json.RawMessage(`{"value":2}`), &ref); err == nil || !strings.Contains(err.Error(), "does not match") {
-		t.Fatalf("error = %v", err)
+	for name, inline := range map[string]json.RawMessage{
+		"same":      json.RawMessage(`{"value":1}`),
+		"different": json.RawMessage(`{"value":2}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, _, err := validateCompleteTypedResult(dir, "type/test", inline, &ref); err == nil || !strings.Contains(err.Error(), "exactly one") {
+				t.Fatalf("error = %v, want exactly-one rejection", err)
+			}
+		})
 	}
 	if _, _, _, err := validateCompleteTypedResult(dir, "type/other", nil, &ref); err == nil || !strings.Contains(err.Error(), "result_type") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCompleteToolExecuteRejectsBothInlineAndRef(t *testing.T) {
+	raw := json.RawMessage(`{"summary":"done","result_type":"type/test","result":{"value":1},"result_ref":{"id":"ref-1"}}`)
+	if _, err := (tools.CompleteTool{}).Execute(t.Context(), raw); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("Execute error = %v, want exactly-one rejection", err)
 	}
 }
 
@@ -80,52 +94,39 @@ func TestCompletionEnvelopeLegacyJSONStillRestores(t *testing.T) {
 // The following two tests cover the live typed-result contract: the pairing
 // schema and its rejection text.
 
-// TestCompleteParametersSchemaEncodesResultPairing pins the structural form of
-// the Complete argument schema: the result fields must form two anyOf groups —
-// a summary-only completion that carries no result field, and a typed-result
-// completion that pairs result_type with exactly one of result/result_ref — so
-// the pairing constraint is visible to the model while it constructs
-// arguments. The runtime validator in validateCompleteTypedResult stays as the
-// fallback.
-func TestCompleteParametersSchemaEncodesResultPairing(t *testing.T) {
+// TestCompleteParametersSchemaStatesResultPairing pins how the Complete
+// argument schema exposes the pairing: no top-level combinator, because strict
+// Anthropic endpoints reject one, with the rule carried by the field
+// descriptions. The runtime validator in validateCompleteTypedResult stays as
+// the enforcement.
+func TestCompleteParametersSchemaStatesResultPairing(t *testing.T) {
 	params := (tools.CompleteTool{}).Parameters()
 	if got, ok := params["required"].([]string); !ok || !slices.Equal(got, []string{"summary"}) {
 		t.Fatalf(`Parameters()["required"] = %#v, want ["summary"]`, params["required"])
 	}
-	groups, ok := params["anyOf"].([]map[string]any)
-	if !ok || len(groups) != 2 {
-		t.Fatalf(`Parameters()["anyOf"] = %#v, want the summary-only and typed-result groups`, params["anyOf"])
-	}
-
-	summaryGroup := groups[0]
-	if got, ok := summaryGroup["required"].([]string); !ok || !slices.Equal(got, []string{"summary"}) {
-		t.Fatalf("summary-only group required = %#v, want [summary]", summaryGroup["required"])
-	}
-	not, ok := summaryGroup["not"].(map[string]any)
-	if !ok {
-		t.Fatalf("summary-only group = %#v, want not to exclude every result field", summaryGroup)
-	}
-	forbidden, ok := not["anyOf"].([]map[string]any)
-	if !ok || len(forbidden) != 3 {
-		t.Fatalf(`summary-only group not["anyOf"] = %#v, want result_type/result/result_ref`, not["anyOf"])
-	}
-	for i, want := range [][]string{{"result_type"}, {"result"}, {"result_ref"}} {
-		if got, ok := forbidden[i]["required"].([]string); !ok || !slices.Equal(got, want) {
-			t.Fatalf("summary-only group not.anyOf[%d] required = %#v, want %v", i, forbidden[i]["required"], want)
+	for _, key := range []string{"anyOf", "oneOf", "allOf", "not"} {
+		if value, ok := params[key]; ok {
+			t.Fatalf(`Parameters()[%q] = %#v, want no top-level combinator`, key, value)
 		}
 	}
-
-	typedGroup := groups[1]
-	if got, ok := typedGroup["required"].([]string); !ok || !slices.Equal(got, []string{"summary", "result_type"}) {
-		t.Fatalf("typed-result group required = %#v, want [summary result_type]", typedGroup["required"])
+	properties, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf(`Parameters()["properties"] = %#v`, params["properties"])
 	}
-	pair, ok := typedGroup["anyOf"].([]map[string]any)
-	if !ok || len(pair) != 2 {
-		t.Fatalf(`typed-result group anyOf = %#v, want the result and result_ref alternatives`, typedGroup["anyOf"])
+	description := func(field string) string {
+		schema, ok := properties[field].(map[string]any)
+		if !ok {
+			t.Fatalf("Parameters() property %q = %#v", field, properties[field])
+		}
+		desc, _ := schema["description"].(string)
+		return desc
 	}
-	for i, want := range [][]string{{"result"}, {"result_ref"}} {
-		if got, ok := pair[i]["required"].([]string); !ok || !slices.Equal(got, want) {
-			t.Fatalf("typed-result group anyOf[%d] required = %#v, want %v", i, pair[i]["required"], want)
+	if got := description("result_type"); !strings.Contains(got, "exactly one of result or result_ref") {
+		t.Fatalf("result_type description = %q", got)
+	}
+	for _, field := range []string{"result", "result_ref"} {
+		if got := description(field); !strings.Contains(got, "result_type is also provided") {
+			t.Fatalf("%s description = %q", field, got)
 		}
 	}
 }

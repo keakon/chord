@@ -47,7 +47,7 @@ func TestRequestOverridesPreserveSchemaOrderOnEveryWire(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = provider.CompleteStream(context.Background(), "test-key", "model-1", "", []message.Message{{Role: message.RoleUser, Content: "Edit the file."}}, []message.ToolDefinition{{Name: "edit", InputSchema: editLikeSchema()}}, 128, RequestTuning{}, func(message.StreamDelta) {})
+			_, err = provider.CompleteStream(context.Background(), "test-key", "model-1", "", []message.Message{{Role: message.RoleUser, Content: "Edit the file."}}, []message.ToolDefinition{{Name: "edit", InputSchema: mcpCombinatorSchema()}}, 128, RequestTuning{}, func(message.StreamDelta) {})
 			if err == nil {
 				t.Fatal("expected forced server error")
 			}

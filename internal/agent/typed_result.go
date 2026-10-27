@@ -43,6 +43,9 @@ func validateCompleteTypedResult(sessionDir, resultType string, result json.RawM
 		return "", nil, nil, typedResultPairingError{fmt.Errorf(
 			"result_type, result, and result_ref must be provided together: result or result_ref requires result_type%s", typedResultShapeHint)}
 	}
+	if suppliedRef != nil && len(result) > 0 {
+		return "", nil, nil, fmt.Errorf("provide exactly one of result or result_ref, not both%s", typedResultShapeHint)
+	}
 	var ref *tools.ResultRef
 	if suppliedRef != nil {
 		validated, err := tools.ValidateResultRef(sessionDir, *suppliedRef, resultType)
@@ -58,9 +61,6 @@ func validateCompleteTypedResult(sessionDir, resultType string, result json.RawM
 		created, canonical, err := tools.SaveImmutableResult(sessionDir, resultType, result)
 		if err != nil {
 			return "", nil, nil, err
-		}
-		if ref != nil && created.ID != ref.ID {
-			return "", nil, nil, fmt.Errorf("inline result does not match result_ref")
 		}
 		ref = &created
 		result = canonical

@@ -11,9 +11,9 @@ import (
 //
 // MarshalJSON lists each object's properties in the order of its required
 // list, then its anyOf/oneOf branch requirements, then the rest alphabetically.
-// This puts source arguments before replacement arguments for tools such as
-// edit, while keeping the wire representation deterministic for prompt caching.
-// The order is a generation hint, not a guarantee of model argument order.
+// Built-in tool schemas keep their required fields first; combinator branches
+// still order the schemas that declare them, such as MCP server schemas. The
+// order is a generation hint, not a guarantee of model argument order.
 type toolSchema map[string]any
 
 func (s toolSchema) MarshalJSON() ([]byte, error) {

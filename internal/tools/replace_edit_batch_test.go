@@ -144,46 +144,28 @@ func TestEditBatchOverlapAtSameOffsetNamesEntriesInEditsOrder(t *testing.T) {
 	}
 }
 
-// A batch entry that misses only by a trailing newline is not proof the text is
-// absent: the same entry succeeds on its own, because a single edit tolerates
-// that difference. The batch error has to state that fact as a diagnostic clue
-// without telling the model to resend only that entry — the rest of the batch
-// still has to be resubmitted.
-func TestEditBatchNotFoundNamesTheSingleEditFallback(t *testing.T) {
+// A batch entry that misses only by a trailing newline is the same near-miss a
+// single edit tolerates, so the batch resolves it instead of spending a round
+// trip on the atomic-failure report. The result must say which entry matched
+// under tolerance so the model knows its text was adapted.
+func TestEditBatchToleratesTrailingNewlineNearMiss(t *testing.T) {
 	dir := t.TempDir()
-	const original = "alpha beta\n"
-	path := writeEditFixture(t, dir, "sample.txt", original)
-	entry := map[string]any{"old_string": "alpha beta\n\n", "new_string": "alpha omega\n\n"}
-	_, err := runEdit(t, dir, map[string]any{"path": path, "edits": []map[string]any{entry}})
-	if err == nil {
-		t.Fatal("expected the batch to reject a near-miss entry")
-	}
-	if !strings.Contains(err.Error(), "No changes were written (batch edits are atomic).") ||
-		!strings.Contains(err.Error(), "edits[0]: old_string not found in the original file") {
-		t.Fatalf("error = %v, want it to state that nothing was written and name the missing entry", err)
-	}
-	if !strings.Contains(err.Error(), "single edit") || !strings.Contains(err.Error(), tolerantMatchNote) {
-		t.Fatalf("error = %v, want it to name the single-edit tolerance and %q", err, tolerantMatchNote)
-	}
-	if strings.Contains(err.Error(), "retry this entry") || strings.Contains(err.Error(), "retry it on its own") {
-		t.Fatalf("error = %v, want no instruction to resend only the failing entry", err)
-	}
-	if !strings.Contains(err.Error(), "resubmit the complete batch") {
-		t.Fatalf("error = %v, want the complete-batch resubmit guidance", err)
-	}
-	if got, readErr := os.ReadFile(path); readErr != nil || string(got) != original {
-		t.Fatalf("failed batch changed file: %q (%v)", got, readErr)
-	}
-	// The claim in that message: the same entry is accepted as a single edit.
-	if _, err := runEdit(t, dir, map[string]any{"path": path, "old_string": "alpha beta\n\n", "new_string": "alpha omega\n\n"}); err != nil {
-		t.Fatalf("single edit of the same entry failed: %v", err)
-	}
-	got, err := os.ReadFile(path)
+	path := writeEditFixture(t, dir, "sample.txt", "alpha beta\n")
+	out, err := runEdit(t, dir, map[string]any{"path": path, "edits": []map[string]any{
+		{"old_string": "alpha beta\n\n", "new_string": "alpha omega\n\n"},
+	}})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("batch with a trailing-newline near miss failed: %v", err)
+	}
+	if !strings.Contains(out, "edits[0]: matched via trailing-newline tolerance") {
+		t.Fatalf("result = %q, want the trailing-newline tolerance note", out)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
 	}
 	if string(got) != "alpha omega\n" {
-		t.Fatalf("single edit content = %q", got)
+		t.Fatalf("content = %q, want the adapted replacement", got)
 	}
 }
 

@@ -33,20 +33,11 @@ func (CompleteTool) Description() string {
 		"If a true blocker prevents completion, follow the SubAgent Coordination section's blocker route instead of calling this tool. This tool is the only way to signal completion; plain assistant text does not complete the task."
 }
 
-// Parameters declares result_type/result/result_ref as a pairwise group in
-// anyOf: a completion either carries none of them (summary only) or supplies
-// result_type together with exactly one of result/result_ref. Expressing the
-// pairing structurally lets the model see the constraint while constructing
-// arguments; the runtime validation stays as the fallback.
-//
-// Both alternatives need "not": JSON Schema has no positive spelling for
-// "none of these fields" or "exactly one of these two", and dropping the
-// clauses would leave a summary-only alternative that every argument object
-// satisfies, making the whole group vacuous. The keyword therefore depends on
-// provider schema conversion filtering out what the target API cannot express
-// (Gemini's Schema has no "not" field, and an unconverted one fails the whole
-// request); losing it there costs only the structural hint, since the field
-// descriptions state the same rule and the completion path enforces it.
+// Parameters states the result_type/result/result_ref pairing in the field
+// descriptions instead of a top-level combinator: strict Anthropic endpoints
+// reject a tool input_schema carrying anyOf, oneOf, or allOf at the top level,
+// which would fail the whole request. The completion path
+// (validateCompleteTypedResult) enforces the pairing at runtime.
 func (CompleteTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -105,28 +96,6 @@ func (CompleteTool) Parameters() map[string]any {
 		},
 		"required":             []string{"summary"},
 		"additionalProperties": false,
-		"anyOf": []map[string]any{
-			{
-				"required": []string{"summary"},
-				"not": map[string]any{
-					"anyOf": []map[string]any{
-						{"required": []string{"result_type"}},
-						{"required": []string{"result"}},
-						{"required": []string{"result_ref"}},
-					},
-				},
-			},
-			{
-				"required": []string{"summary", "result_type"},
-				"not": map[string]any{
-					"required": []string{"result", "result_ref"},
-				},
-				"anyOf": []map[string]any{
-					{"required": []string{"result"}},
-					{"required": []string{"result_ref"}},
-				},
-			},
-		},
 	}
 }
 
@@ -141,6 +110,9 @@ func (CompleteTool) Execute(_ context.Context, raw json.RawMessage) (string, err
 	}
 	if strings.TrimSpace(a.Summary) == "" {
 		return "", fmt.Errorf("summary is required")
+	}
+	if len(a.Result) > 0 && a.ResultRef != nil {
+		return "", fmt.Errorf("provide exactly one of result or result_ref, not both")
 	}
 	return "Marked as complete: " + strings.TrimSpace(a.Summary), nil
 }

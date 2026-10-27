@@ -740,8 +740,8 @@ func TestGeminiActiveLoopSignatureContract(t *testing.T) {
 // TestGeminiRequestDropsUnrepresentableSchemaKeywords covers the whole path a
 // tool schema takes onto the wire. Gemini parses the request as proto-JSON,
 // where a field its Schema message does not have fails the entire request, so
-// a "not" nested inside an anyOf branch — the shape the completion and notify
-// tools use — must not survive conversion, and the branches around it must.
+// a "not" nested inside an anyOf branch, which an MCP server schema can carry,
+// must not survive conversion, and the branches around it must.
 func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
 	var rawBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -789,7 +789,7 @@ func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
 		"gemini-test",
 		"",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		[]message.ToolDefinition{{Name: "task_complete", Description: "finish", InputSchema: schema}},
+		[]message.ToolDefinition{{Name: "sample_tool", Description: "finish", InputSchema: schema}},
 		128,
 		RequestTuning{},
 		func(message.StreamDelta) {},

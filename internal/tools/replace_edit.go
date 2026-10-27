@@ -37,7 +37,7 @@ type replaceEditArgs struct {
 	Path       string            `json:"path"`
 	Edits      []textReplacement `json:"edits,omitempty"`
 	OldString  string            `json:"old_string"`
-	NewString  string            `json:"new_string"`
+	NewString  *string           `json:"new_string"`
 	ReplaceAll *bool             `json:"replace_all,omitempty"`
 }
 
@@ -51,7 +51,7 @@ func (a *replaceEditArgs) UnmarshalJSON(data []byte) error {
 		Edits      []textReplacement `json:"edits,omitempty"`
 		FilePath   string            `json:"filePath"`
 		OldString  string            `json:"old_string"`
-		NewString  string            `json:"new_string"`
+		NewString  *string           `json:"new_string"`
 		ReplaceAll *bool             `json:"replace_all,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -95,7 +95,7 @@ func (t EditTool) Description() string {
 	// description keeps only the tool's own contract.
 	return "Perform exact string replacement in an existing file. " +
 		"Line breaks adapt to the file: with uniform CRLF or CR line endings, LF text takes that ending; with mixed line endings, each line break in old_string matches any line ending and the replacement takes the matched block's. " +
-		"For several disjoint changes in one file, use edits instead of separate calls: entries that request changes match the original file exactly after line-ending adaptation; overlaps are rejected, and all such entries must pass validation before writing. One failed batch reports all failing entries at once; fix them and resubmit the complete batch. Batch entries whose old_string and new_string are identical are skipped without verifying their text exists and never counted as replacements; a batch that requests no text change reports no changes and writes nothing. A single edit with identical strings returns an error. Do not mix edits with top-level replacement fields. " +
+		"For a single change send old_string/new_string; reserve edits for several disjoint changes in one file and never combine edits with the single-edit fields. Batch entries must be disjoint, pass validation together before one write, and accept only a trailing line-ending difference beyond exact text; one failing entry rejects the whole batch and reports every failing entry at once — fix them and resubmit the complete batch. Entries whose old_string and new_string are identical request no change: skipped in a batch, an error as a single edit. " +
 		"Prefer the smallest unique 2-4 line block instead of a large stale context block; re-read before retrying after any mismatch. Replaces one occurrence by default; set replace_all to replace every occurrence."
 }
 
@@ -109,7 +109,7 @@ func (EditTool) Parameters() map[string]any {
 			},
 			"edits": map[string]any{
 				"type": "array", "minItems": 1,
-				"description": "Disjoint replacements matched exactly against the original file after line-ending adaptation, without trailing-newline or punctuation/whitespace tolerance; validated together before one write.",
+				"description": "Disjoint replacements matched against the original file after line-ending adaptation, accepting only a trailing line-ending difference beyond exact text, without punctuation/whitespace tolerance; validated together before one write.",
 				"items": map[string]any{"type": "object", "properties": map[string]any{
 					"old_string":  map[string]any{"type": "string", "minLength": 1},
 					"new_string":  map[string]any{"type": "string"},
@@ -122,7 +122,7 @@ func (EditTool) Parameters() map[string]any {
 			},
 			"new_string": map[string]any{
 				"type":        "string",
-				"description": "The text to replace old_string with (must be different from old_string). Ensure new_string preserves required indentation/newlines when needed.",
+				"description": "The text to replace old_string with (must be different from old_string). Use an empty string to delete old_string; omit this field only when using edits. Ensure new_string preserves required indentation/newlines when needed.",
 			},
 			"replace_all": map[string]any{
 				"type":        "boolean",
@@ -130,7 +130,6 @@ func (EditTool) Parameters() map[string]any {
 			},
 		},
 		"required":             []string{"path"},
-		"anyOf":                []map[string]any{{"required": []string{"old_string", "new_string"}}, {"required": []string{"edits"}}},
 		"additionalProperties": false,
 	}
 }
@@ -158,7 +157,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		switch {
 		case a.OldString != "":
 			return "", fmt.Errorf("edits cannot be combined with old_string")
-		case a.NewString != "":
+		case a.NewString != nil && *a.NewString != "":
 			return "", fmt.Errorf("edits cannot be combined with new_string")
 		case a.ReplaceAll != nil && *a.ReplaceAll:
 			return "", fmt.Errorf("edits cannot be combined with replace_all")
@@ -168,8 +167,11 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	if a.OldString == "" {
 		return "", fmt.Errorf("old_string is required")
 	}
+	if a.NewString == nil {
+		return "", fmt.Errorf("new_string is required and must be a string; use an empty string to delete old_string")
+	}
 
-	decodedOld, decodedNew, abs, err := prepareReplacementText(a.OldString, a.NewString)
+	decodedOld, decodedNew, abs, err := prepareReplacementText(a.OldString, *a.NewString)
 	if err != nil {
 		return "", err
 	}

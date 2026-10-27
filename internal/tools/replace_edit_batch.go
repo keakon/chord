@@ -41,10 +41,12 @@ type batchEntryProblem struct {
 
 // planExactReplacements matches every entry against the same original text and
 // collects every failure instead of stopping at the first one, so one result
-// names all the entries the model has to fix. Nothing is written until
-// matching and overlap checks succeed. An entry whose old_string and
-// new_string are identical requests no text change and is skipped, reported
-// separately from both applied and failed entries.
+// names all the entries the model has to fix. Matching is exact after
+// line-ending adaptation, with the single trailing-line-ending variance a
+// single edit also tolerates. Nothing is written until matching and overlap
+// checks succeed. An entry whose old_string and new_string are identical
+// requests no text change and is skipped, reported separately from both
+// applied and failed entries.
 func planExactReplacements(content string, edits []textReplacement) (batchReplacementPlan, error) {
 	if len(edits) == 0 {
 		return batchReplacementPlan{}, fmt.Errorf("edits must contain at least one replacement; no changes were written")
@@ -78,6 +80,20 @@ func planExactReplacements(content string, edits []textReplacement) (batchReplac
 		}
 
 		entrySpans, count := entryReplacementSpans(content, newline, oldText, newText, i, edit.ReplaceAll)
+		// A trailing line ending in the entry is the same near-miss a single
+		// edit tolerates; resolve it here instead of spending a round trip on
+		// the atomic-failure report. The helper only succeeds on a unique
+		// match, so a replace_all entry whose stripped form is ambiguous still
+		// fails as before.
+		if count == 0 {
+			if altOld, altNew, _, ok := trailingNewlineTolerantEdit(content, oldText, newText, newline); ok {
+				if altSpans, altCount := entryReplacementSpans(content, newline, altOld, altNew, i, edit.ReplaceAll); altCount > 0 {
+					oldText, newText = altOld, altNew
+					entrySpans, count = altSpans, altCount
+					notes = append(notes, fmt.Sprintf("edits[%d]: matched via trailing-newline tolerance", i))
+				}
+			}
+		}
 		switch {
 		case count == 0:
 			problems = append(problems, batchEntryProblem{
@@ -151,7 +167,7 @@ const (
 	// batchToleranceNote states the matching difference between a batch entry
 	// and a single edit as a diagnostic clue. It must not read as "retry this
 	// entry alone": the batch still needs the complete corrected set.
-	batchToleranceNote = "A single edit accepts a trailing-newline or " + tolerantMatchNote + " difference, but batch entries match exactly; check the missing entries above for that kind of difference."
+	batchToleranceNote = "A single edit also accepts a " + tolerantMatchNote + " difference, but batch entries do not; check the missing entries above for that kind of difference."
 )
 
 // formatBatchFailureReport renders every failed entry of one batch. The report

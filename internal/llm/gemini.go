@@ -701,9 +701,9 @@ func convertSchemaToGemini(schema map[string]any) map[string]any {
 		case "nullable", "default", "$schema", "additionalProperties", "coerceFromString", "coerceFromObject":
 			continue
 		case "not":
-			// "not" has no Schema field at all. The tools that use it also
-			// enforce the same constraint at execution time and state it in
-			// their descriptions, so dropping it costs a structural hint.
+			// "not" has no Schema field at all. Dropping it costs the
+			// structural hint; a built-in tool states the same constraint in
+			// its descriptions and enforces it at execution time.
 			log.Debugf("dropping JSON Schema keyword Gemini cannot represent keyword=%v", k)
 			continue
 		case "anyOf", "allOf", "oneOf":

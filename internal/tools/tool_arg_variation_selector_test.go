@@ -161,6 +161,32 @@ func TestEditToolRejectsSelectorOnlyNewString(t *testing.T) {
 	}
 }
 
+// An omitted or explicit-null new_string must never turn into an empty
+// replacement. Empty string remains the only spelling that deletes old_string.
+func TestEditToolRejectsMissingOrNullNewStringBeforeWriting(t *testing.T) {
+	for name, raw := range map[string]json.RawMessage{
+		"missing": json.RawMessage(`{"path":"sample.txt","old_string":"beta"}`),
+		"null":    json.RawMessage(`{"path":"sample.txt","old_string":"beta","new_string":null}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeEditFixture(t, dir, "sample.txt", "alpha beta\n")
+			tool := EditTool{BaseDir: dir}
+			sanitized, _, _, err := SanitizeUnknownArgsWithDiagnostics(tool, raw)
+			if err != nil {
+				t.Fatalf("SanitizeUnknownArgsWithDiagnostics: %v", err)
+			}
+			out, err := tool.Execute(context.Background(), sanitized)
+			if err == nil || !strings.Contains(err.Error(), "new_string is required") {
+				t.Fatalf("Execute = (%q, %v), want new_string requirement", out, err)
+			}
+			if got := readFileString(t, path); got != "alpha beta\n" {
+				t.Fatalf("file was modified: %q", got)
+			}
+		})
+	}
+}
+
 // Control characters in new_string would land in the file verbatim; the tool
 // must reject them and point at the shell/script channel instead.
 func TestEditToolRejectsControlCharactersInNewString(t *testing.T) {

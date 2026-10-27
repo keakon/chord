@@ -149,17 +149,50 @@ func TestNullFieldOfAnyOfRequiredGroupStillRejected(t *testing.T) {
 	}
 }
 
-// TestSaveArtifactRejectsExplicitNullResult pins the same rule on the real
-// schema: the null reaches the type check instead of being stripped into a
-// report that the field is missing.
-func TestSaveArtifactRejectsExplicitNullResult(t *testing.T) {
-	err := ValidateToolArgs(SaveArtifactTool{}, json.RawMessage(`{"result_type":"sample","result":null}`))
-	if err == nil || !strings.Contains(err.Error(), "args.result must be an object") {
-		t.Fatalf("err = %v, want the explicit null reported as a wrong type", err)
-	}
-	if err := ValidateToolArgs(ReadArtifactTool{}, json.RawMessage(`{"path":null}`)); err == nil ||
-		!strings.Contains(err.Error(), "args.path must be a string") {
-		t.Fatalf("err = %v, want the explicit null reported as a wrong type", err)
+// TestArtifactExplicitNullFallsThroughToExecution pins the contract after the
+// top-level combinators were removed: a null on a property no required group
+// names is stripped like any optional null, and the execution layer rejects
+// the resulting incomplete call.
+func TestArtifactExplicitNullFallsThroughToExecution(t *testing.T) {
+	ctx := WithSessionDir(context.Background(), t.TempDir())
+	for _, tc := range []struct {
+		name    string
+		tool    Tool
+		raw     string
+		ignored message.IgnoredToolArg
+		want    string
+	}{
+		{
+			name:    "save artifact result",
+			tool:    SaveArtifactTool{},
+			raw:     `{"result_type":"sample","result":null}`,
+			ignored: message.IgnoredToolArg{Path: "args.result", ValueJSON: "null", Reason: message.IgnoredToolArgReasonNull},
+			want:    "result is required when result_type is provided",
+		},
+		{
+			name:    "read artifact path",
+			tool:    ReadArtifactTool{},
+			raw:     `{"path":null}`,
+			ignored: message.IgnoredToolArg{Path: "args.path", ValueJSON: "null", Reason: message.IgnoredToolArgReasonNull},
+			want:    "artifact path is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := json.RawMessage(tc.raw)
+			if err := ValidateToolArgs(tc.tool, raw); err != nil {
+				t.Fatalf("ValidateToolArgs = %v, want the optional null dropped", err)
+			}
+			sanitized, ignored, _, err := SanitizeUnknownArgsWithDiagnostics(tc.tool, raw)
+			if err != nil {
+				t.Fatalf("SanitizeUnknownArgsWithDiagnostics = %v", err)
+			}
+			if want := []message.IgnoredToolArg{tc.ignored}; !reflect.DeepEqual(ignored, want) {
+				t.Fatalf("ignored = %#v, want %#v", ignored, want)
+			}
+			if _, err := tc.tool.Execute(ctx, sanitized); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Execute = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

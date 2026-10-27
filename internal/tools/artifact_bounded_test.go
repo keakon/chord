@@ -256,6 +256,19 @@ func TestSaveArtifactResultModeIdentityIncludesResultType(t *testing.T) {
 	}
 }
 
+func TestSaveArtifactRequiresOneArgumentGroup(t *testing.T) {
+	ctx := WithSessionDir(context.Background(), t.TempDir())
+	if _, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "filename and content are required") {
+		t.Fatalf("empty args error = %v", err)
+	}
+	if _, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(`{"filename":"report.md"}`)); err == nil || !strings.Contains(err.Error(), "content is required") {
+		t.Fatalf("missing content error = %v", err)
+	}
+	if _, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(`{"content":"body"}`)); err == nil || !strings.Contains(err.Error(), "filename is required") {
+		t.Fatalf("missing filename error = %v", err)
+	}
+}
+
 func TestSaveArtifactResultModeRequiresResultTypeAndResultPair(t *testing.T) {
 	ctx := WithSessionDir(context.Background(), t.TempDir())
 	if _, err := (SaveArtifactTool{}).Execute(ctx, json.RawMessage(`{"result_type":"type/test"}`)); err == nil || !strings.Contains(err.Error(), "result is required when result_type is provided") {
