@@ -209,13 +209,14 @@ func TestTerminateGroupRefusesMismatchedIdentity(t *testing.T) {
 // escalates to SIGKILL and only claims success once the group is gone.
 func TestSupervisorEscalatesToSIGKILL(t *testing.T) {
 	receiptDir := filepath.Join(t.TempDir(), "receipts")
-	sup := startSupervised(t, "printf 'ready\\n'\ntrap '' TERM\nwhile :; do sleep 0.2; done\n", receiptDir)
+	sup := startSupervised(t, "trap '' TERM\nprintf 'ready\\n'\nwhile :; do sleep 0.2; done\n", receiptDir)
 	pid, pgid, ok := sup.Identity()
 	if !ok {
 		t.Fatal("supervisor did not bind an identity")
 	}
 	// Wait until the fixture reports it is past the trap: a signal that arrives
-	// before it is installed would say nothing about the escalation.
+	// before it is installed would say nothing about the escalation. The fixture
+	// must therefore install the trap before writing the marker.
 	buf := make([]byte, 16)
 	if _, err := sup.Stdout().Read(buf); err != nil {
 		t.Fatalf("read managed stdout: %v", err)
