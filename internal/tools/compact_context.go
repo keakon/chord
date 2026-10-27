@@ -572,7 +572,7 @@ func (CompactContextTool) Parameters() map[string]any {
 				"type":        "array",
 				"maxItems":    12,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Verified outcomes and how each was verified. Do not restate the todo list; it is snapshotted automatically.",
+				"description": "Verified outcomes and how each was verified. Record whether verified changes were committed, pushed, opened for review, or merged; do not infer it from a clean tree. Do not restate the todo list; it is snapshotted automatically.",
 			},
 			"decisions": map[string]any{
 				"type":        "array",

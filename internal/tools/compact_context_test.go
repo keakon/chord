@@ -754,6 +754,26 @@ func TestCompactContextParametersCrossReferenceEvidenceRefsForObservedClaims(t *
 	}
 }
 
+// The runtime captures branch/HEAD/working-tree state, but not whether verified
+// changes were pushed, reviewed, or merged. The checkpoint's completed field is
+// the semantic home for that workflow state; the schema must say so without
+// inviting the model to infer it from a clean tree.
+func TestCompactContextCompletedParamPreservesVerifiedWorkflowState(t *testing.T) {
+	properties := NewCompactContextTool(testCompactValidator()).Parameters()["properties"].(map[string]any)
+	desc := properties["completed"].(map[string]any)["description"].(string)
+	for _, want := range []string{
+		"committed",
+		"pushed",
+		"opened for review",
+		"merged",
+		"do not infer it from a clean tree",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("completed description missing %q: %q", want, desc)
+		}
+	}
+}
+
 // Values that can never resolve are rejected where the error can name the
 // field and the claim they came from: the runtime validates the merged
 // evidence_refs union, so its unknown-ID rejection cannot say which field the
