@@ -120,8 +120,19 @@ func TestBuildCompactionRepairPrompt(t *testing.T) {
 	if strings.Contains(prompt, "bad summary") {
 		t.Fatalf("repair prompt should not include previous summary text:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "Do not restart work listed as completed") {
-		t.Fatalf("repair prompt missing goal-preservation requirement:\n%s", prompt)
+	if !strings.Contains(prompt, "Write only the summary") || !strings.Contains(prompt, "do not invent details") {
+		t.Fatalf("repair prompt missing output discipline:\n%s", prompt)
+	}
+	// The compaction system prompt stays attached during repair and owns the
+	// full summary rules; a copied subset here would drift from it.
+	for _, copied := range []string{
+		"Do not restart work listed as completed",
+		"concrete next action",
+		"directly serve the latest user request",
+	} {
+		if strings.Contains(prompt, copied) {
+			t.Fatalf("repair prompt should not restate system-prompt rules (%q):\n%s", copied, prompt)
+		}
 	}
 }
 

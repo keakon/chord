@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -125,7 +126,7 @@ func TestCompactionPromptAnchorsLatestRequestAgainstStaleTodo(t *testing.T) {
 		"Latest Done rejection",
 		"把这个方案生成一个plan文档",
 		"These todos are not automatically authoritative after compaction",
-		"stale/superseded",
+		checkpointfmt.TodoSubgroupStaleLine,
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)

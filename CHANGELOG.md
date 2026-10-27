@@ -170,6 +170,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Opening the model pool selector from Insert mode now switches to `ime_switch_target` and restores the previous input method after you choose a pool or close the dialog.
 
+- Compaction summaries and extracted memory entries follow the conversation's language instead of defaulting to English in non-English sessions: model-written summary sections follow the latest user request and memory statements follow the source conversation, while headings, label lines, file paths, and identifiers stay verbatim as specified.
+
 ## 0.8.2 - 2026-10-11
 
 ### Highlights

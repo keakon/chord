@@ -119,9 +119,9 @@ func validateCompactionTodoState(summary string) error {
 	if !ok {
 		return nil
 	}
-	active := todoSubsectionLines(section, "Active/relevant to latest request")
-	completed := todoSubsectionLines(section, "Completed/background")
-	stale := todoSubsectionLines(section, "Stale/superseded")
+	active := todoSubsectionLines(section, TodoSubgroupActive)
+	completed := todoSubsectionLines(section, TodoSubgroupCompleted)
+	stale := todoSubsectionLines(section, TodoSubgroupStale)
 	if len(active) == 0 {
 		return nil
 	}
@@ -184,7 +184,7 @@ func todoSubsectionLines(section, label string) []string {
 			}
 			continue
 		}
-		if strings.HasPrefix(bullet, "Active/relevant to latest request:") || strings.HasPrefix(bullet, "Completed/background:") || strings.HasPrefix(bullet, "Stale/superseded:") {
+		if strings.HasPrefix(bullet, TodoSubgroupActive+":") || strings.HasPrefix(bullet, TodoSubgroupCompleted+":") || strings.HasPrefix(bullet, TodoSubgroupStale+":") {
 			inGroup = false
 			continue
 		}

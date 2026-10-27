@@ -1214,6 +1214,10 @@ func buildCompactionRepairPrompt(originalPrompt string, validationErr error) str
 	if missing := compactionMissingHeadings(validationErr); len(missing) > 0 {
 		missingLine = "\n- The missing sections are: " + strings.Join(missing, ", ") + "."
 	}
+	// The compaction system prompt stays attached during the repair call and
+	// already carries the full summary rules, so this prompt restates only the
+	// section contract and the output discipline; copying more rules here would
+	// create a second copy that drifts.
 	return fmt.Sprintf(`Write a valid compaction summary from the original compaction input below.
 
 Requirements:
@@ -1221,10 +1225,6 @@ Requirements:
 - Use only facts from the original compaction input; do not invent details.
 - Use exactly these Markdown headings, in this order, each on its own line:
 %s%s
-- Make "Current User Request" identify the latest user request explicitly.
-- Make "Active Objective" and "Next Step" directly serve that latest user request.
-- Do not restart work listed as completed, background, stale, or superseded.
-- Make "Next Step" a concrete action that can be performed immediately.
 
 Original compaction input:
 %s`, renderCompactionRequiredHeadings(), missingLine, originalPrompt)

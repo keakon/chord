@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -144,6 +145,20 @@ type compactionDraft struct {
 	ModelDrivenSkipBatch  uint64
 }
 
+// compactionTodoSubgroupContractLine restates the Todo State subgroup contract
+// from the shared checkpoint format constants, so the summarize prompt and the
+// validators render the exact same label lines from one source.
+const compactionTodoSubgroupContractLine = `- Under "Todo State", write exactly these subgroup label lines, each followed by its items: "` +
+	checkpointfmt.TodoSubgroupActiveLine + `", "` + checkpointfmt.TodoSubgroupCompletedLine +
+	`", and "` + checkpointfmt.TodoSubgroupStaleLine + `". If a subgroup has no items, write "(none)".`
+
+// compactionSummaryLanguageRules pins the summary language contract: the
+// checkpoint is user-visible text, so model-authored section bodies follow the
+// language of the latest user request, while the markers the runtime parses and
+// the verbatim facts stay exactly as specified.
+const compactionSummaryLanguageRules = `- Write the body of every section you author (such as "Active Objective", "Background Goals", "Progress", "Key Decisions", "Open Problems", and "Next Step") in the language of the latest user request.
+- The exact Markdown section headings and the "Todo State" subgroup label lines above stay in English as written, and file paths, symbols, commands, and error strings stay verbatim regardless of the summary language.`
+
 const compactionSystemPrompt = `You summarize earlier coding-agent conversation history so another agent can continue work without losing important context.
 
 Write only the summary. Do not answer the user. Do not invent facts.
@@ -169,8 +184,9 @@ Requirements:
 - Treat the most recent Done rejected reason as important user feedback/request when it asks for more work, asks a question, changes scope, or corrects the agent.
 - Separate active todos that directly serve the latest user request from historical, completed, or superseded ones; if the user changed topics after todos were created, do not treat stale todos as active work.
 - "Active Objective" and "Next Step" must directly serve the latest user request. Do not restart tasks listed under "Completed/background" or "Stale/superseded".
-- Under "Todo State", write exactly these subgroup label lines, each followed by its items: "- Active/relevant to latest request:", "- Completed/background:", and "- Stale/superseded:". If a subgroup has no items, write "(none)".
+` + compactionTodoSubgroupContractLine + `
 - Use concise bullet-style prose under each heading.
+` + compactionSummaryLanguageRules + `
 - Include concrete files, commands, errors, and decisions when known. Preserve exact file paths, symbols, commands, error strings, URLs, and identifiers; do not paraphrase them. Preserve relevant working verification commands and failed approaches with their observed conditions so continuation does not repeat them without new evidence.
 - Preserve consequential workflow state the transcript establishes: whether changes are uncommitted, committed, pushed, under review, or merged. Do not infer it from a clean tree.
 - Distinguish explicit requirements, verified facts, and unverified assumptions. Keep assumptions labeled even when carried from an earlier checkpoint; they must not become requirements or justify dropping unfinished work.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/filelock"
@@ -1561,8 +1562,8 @@ func messageHasTodoWrite(msg message.Message) bool {
 }
 
 func compactionSummaryMarksTodosStale(summary string) bool {
-	active := compactionSummarySection(summary, "- Active/relevant to latest request:", "- Completed/background:")
-	stale := compactionSummarySection(summary, "- Stale/superseded:", "## SubAgent State")
+	active := compactionSummarySection(summary, checkpointfmt.TodoSubgroupActiveLine, checkpointfmt.TodoSubgroupCompletedLine)
+	stale := compactionSummarySection(summary, checkpointfmt.TodoSubgroupStaleLine, "## SubAgent State")
 	if strings.TrimSpace(stale) == "" || strings.Contains(stale, "  - (none") {
 		return false
 	}

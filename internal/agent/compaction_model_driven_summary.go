@@ -106,11 +106,16 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
 		{checkpointfmt.UserConstraintsHeading, constraints},
 		{"## Active Objective", renderModelState(req.Args.ActiveObjective)},
+		// Intentional placeholder body, not a dropped classification: the
+		// model-driven path has no model-authored goals section, so this heading
+		// carries only the fixed subordination rule the continuation must apply.
 		{"## Background Goals", "- Earlier goals and the model-declared Active Objective are subordinate to the Current User Request and User Constraints."},
 		{"## Next Step", renderModelState(req.Args.NextStep)},
 		{checkpointfmt.OpenProblemsHeading, openIssues},
 		{checkpointfmt.ProgressHeading, completed},
 		{checkpointfmt.KeyDecisionsHeading, decisions},
+		// Intentional placeholder body: this builder selects no key files, so the
+		// section only points at the wrapper's archived history list.
 		{"## Files and Evidence", "- Precise archived history is listed under the checkpoint wrapper's archived history files."},
 		{"## Externalized State", stateFiles},
 		{"## Planned Externalized State", plannedStateFiles},

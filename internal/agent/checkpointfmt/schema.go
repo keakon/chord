@@ -14,6 +14,21 @@ const (
 	CurrentUserRequestHeading = "## Current User Request"
 )
 
+// Todo State subgroup labels. The exact text is load-bearing summary contract:
+// the summarize prompt demands these label lines verbatim, the fallback
+// renderer emits them, and the validator and restore readers match them, so
+// the wording must change everywhere at once.
+const (
+	TodoSubgroupActive    = "Active/relevant to latest request"
+	TodoSubgroupCompleted = "Completed/background"
+	TodoSubgroupStale     = "Stale/superseded"
+	// The label lines the summary contract requires under "## Todo State":
+	// bullet prefix, label, colon, with the subgroup's items on the lines after.
+	TodoSubgroupActiveLine    = "- " + TodoSubgroupActive + ":"
+	TodoSubgroupCompletedLine = "- " + TodoSubgroupCompleted + ":"
+	TodoSubgroupStaleLine     = "- " + TodoSubgroupStale + ":"
+)
+
 const compactSummaryMinChars = 160
 
 var compactionRequiredHeadings = []string{

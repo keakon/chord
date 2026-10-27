@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -72,7 +73,10 @@ func TestBuildCompactionPromptIncludesActiveObjectivePreservationRules(t *testin
 	for _, want := range []string{
 		"Full archived history file for this compaction: history-2.md",
 		"These todos are not automatically authoritative after compaction",
-		"classify it as active/relevant, completed/background, or stale/superseded",
+		"classify it under exactly one of these subgroup label lines",
+		checkpointfmt.TodoSubgroupActiveLine,
+		checkpointfmt.TodoSubgroupCompletedLine,
+		checkpointfmt.TodoSubgroupStaleLine,
 		"continue investigating rate limit",
 	} {
 		if !strings.Contains(prompt, want) {

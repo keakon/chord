@@ -37,6 +37,10 @@ func normalizeMessagesForSummary(messages []message.Message) []message.Message {
 				pdfCount++
 			}
 		}
+		// Summarizer input and retained-anchor echo only, never model-authored
+		// prose: this is a fixed machine-generated placeholder, so it stays in
+		// English regardless of the session language instead of pretending to
+		// follow the summary language contract.
 		if imageCount > 0 {
 			textParts = append(textParts, fmt.Sprintf("[User included %d image attachment(s)]", imageCount))
 		}
@@ -862,11 +866,11 @@ func fallbackNextStepSection(input *compactionInput) string {
 func formatTodosAsRelevanceBullets(todos []tools.TodoItem, anchor fallbackAnchor) string {
 	if strings.TrimSpace(anchor.Text) != "" {
 		lines := []string{
-			"- Active/relevant to latest request:",
+			checkpointfmt.TodoSubgroupActiveLine,
 			"  - (not classified by fallback; the anchor is stated under Current User Request above)",
-			"- Completed/background:",
+			checkpointfmt.TodoSubgroupCompletedLine,
 			"  - (none classified by fallback)",
-			"- Stale/superseded:",
+			checkpointfmt.TodoSubgroupStaleLine,
 		}
 		if anchor.Kind == "done_rejected" {
 			if len(todos) == 0 {
@@ -881,11 +885,11 @@ func formatTodosAsRelevanceBullets(todos []tools.TodoItem, anchor fallbackAnchor
 		return strings.Join(lines, "\n")
 	}
 	return strings.Join([]string{
-		"- Active/relevant to latest request:",
+		checkpointfmt.TodoSubgroupActiveLine,
 		"  - (none reliably classified by fallback)",
-		"- Completed/background:",
+		checkpointfmt.TodoSubgroupCompletedLine,
 		"  - (none classified by fallback)",
-		"- Stale/superseded:",
+		checkpointfmt.TodoSubgroupStaleLine,
 		"  - (none classified by fallback)",
 	}, "\n")
 }
@@ -1209,7 +1213,8 @@ func buildCompactionPromptWithKeyFiles(input *compactionInput, historyPath strin
 	} else {
 		sb.WriteString("- (none)")
 	}
-	sb.WriteString("\n\nCurrent todo list from the pre-compaction agent. These todos are not automatically authoritative after compaction. Evaluate each item against the latest user request and classify it as active/relevant, completed/background, or stale/superseded in the summary:\n")
+	fmt.Fprintf(&sb, "\n\nCurrent todo list from the pre-compaction agent. These todos are not automatically authoritative after compaction. Evaluate each item against the latest user request and classify it under exactly one of these subgroup label lines: %q, %q, or %q:\n",
+		checkpointfmt.TodoSubgroupActiveLine, checkpointfmt.TodoSubgroupCompletedLine, checkpointfmt.TodoSubgroupStaleLine)
 	sb.WriteString(formatTodosForPrompt(todos))
 	sb.WriteString("\n\nCurrent sub-agent state:\n")
 	sb.WriteString(formatSubAgentsAsBullets(subAgents))
