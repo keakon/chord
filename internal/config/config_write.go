@@ -120,5 +120,33 @@ func WriteConfigFileAtomically(path string, data []byte, mode os.FileMode) error
 }
 
 func writeConfigFileAtomicallyReplace(path string, data []byte, mode os.FileMode) error {
+	if target, ok := configWriteTarget(path); ok {
+		path = target
+	}
 	return atomicfile.Replace(path, data, mode)
+}
+
+// configWriteTarget resolves a config file the user deliberately installed as a
+// symlink — a dotfiles repository or a shared checkout beside the project. That
+// link is a deliberate choice made at the location Chord reads the file from, so
+// the rewrite goes to the file it names; renaming a temp file over the link would
+// replace it with a regular file and leave the real source stale. A dangling
+// link still names the file the user meant to keep, so one hop is resolved even
+// when the target does not exist yet.
+func configWriteTarget(path string) (string, bool) {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return path, false
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real, true
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return path, false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(path), target)
+	}
+	return filepath.Clean(target), true
 }
