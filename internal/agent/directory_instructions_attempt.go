@@ -30,10 +30,7 @@ func prepareDirectoryInstructionAttempt(r *directoryInstructionRuntime, requestS
 			}
 		}
 		return llm.WithRequestStarted(ctx, func() {
-			attempt := &directoryInstructionAttempt{request: directoryInstructionRequest{Binding: r.binding, RequestSeq: requestSeq, AttemptSeq: sequence.Add(1), Visible: visible}, gate: &directoryInstructionGate{}}
-			if previous := r.attempt.Swap(attempt); previous != nil {
-				previous.gate.Close(directoryInstructionStopReplan)
-			}
+			r.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: r.binding, RequestSeq: requestSeq, AttemptSeq: sequence.Add(1), Visible: visible}})
 		}), nil
 	}
 }

@@ -210,11 +210,6 @@ func toolCallResult(ctx context.Context, e agent.ToolResultEvent) acp.SessionUpd
 		status = acp.ToolCallStatusFailed
 	}
 	opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
-	if e.ControlReason != "" {
-		opts = append(opts, func(update *acp.SessionToolCallUpdate) {
-			update.Meta = map[string]any{"tool_control_reason": e.ControlReason, "tool_status": string(e.Status)}
-		})
-	}
 	if content := toolResultContent(ctx, e); len(content) > 0 {
 		opts = append(opts, acp.WithUpdateContent(content))
 	}

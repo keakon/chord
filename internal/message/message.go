@@ -312,7 +312,6 @@ type Message struct {
 	DirectoryInstructions      *DirectoryInstructions    `json:"directory_instructions,omitempty"`
 	DirectoryInstructionRefs   []DirectoryInstructionRef `json:"-"`
 	DirectoryInstructionDigest string                    `json:"-"`
-	ToolControlReason          string                    `json:"tool_control_reason,omitempty"`
 	SkillActivation            *SkillActivationFact      `json:"skill_activation,omitempty"`
 	SkillDiscovery             *SkillDiscoveryRecord     `json:"skill_discovery,omitempty"`
 	CompactionSkillActivation  *SkillActivationCarry     `json:"compaction_skill_activation,omitempty"`

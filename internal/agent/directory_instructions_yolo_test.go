@@ -48,7 +48,6 @@ func TestDirectoryInstructionsMainYoloMatchesDispatch(t *testing.T) {
 				if hasRules {
 					pipeline.directoryRequest.Visible[directoryInstructionFactFromObservation(runtime.binding, ".", observation).Ref()] = struct{}{}
 				}
-				pipeline.directoryGate = &directoryInstructionGate{}
 				pipeline.toolBaseDir = runtime.binding.WorkDir
 				pipeline.pathScope = scope
 				_, dispatchIdentity := pipeline.directoryInstructionReadPermission()
@@ -59,21 +58,14 @@ func TestDirectoryInstructionsMainYoloMatchesDispatch(t *testing.T) {
 				if err := pipeline.applyPermission(t.Context(), &call, &ToolExecutionResult{}); err != nil {
 					t.Fatal(err)
 				}
-				if err := pipeline.discoverToolDirectoryInstructions(t.Context(), call, &ToolExecutionResult{}); err != nil {
-					t.Fatalf("allowed write blocked: %v", err)
-				}
-				if !pipeline.directoryInstructionsCovered(call) {
-					t.Fatal("discovered write lost speculative coverage")
-				}
+				pipeline.discoverToolDirectoryInstructions(t.Context(), call, &ToolExecutionResult{})
 				// A directory absent from the initial snapshot must use the same permission.
 				nested := filepath.Join(root, "nested")
 				if err := os.Mkdir(nested, 0700); err != nil {
 					t.Fatal(err)
 				}
 				call.Args = json.RawMessage(`{"path":"nested/sample.txt","content":"sample"}`)
-				if err := pipeline.discoverToolDirectoryInstructions(t.Context(), call, &ToolExecutionResult{}); err != nil {
-					t.Fatalf("dynamic directory blocked: %v", err)
-				}
+				pipeline.discoverToolDirectoryInstructions(t.Context(), call, &ToolExecutionResult{})
 			})
 		}
 	}

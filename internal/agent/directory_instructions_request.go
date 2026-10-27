@@ -84,7 +84,7 @@ func projectDirectoryInstructions(history []message.Message, v directoryInstruct
 	}
 	if len(v.Blocked) > 0 {
 		var b strings.Builder
-		b.WriteString("Directory rules unavailable; modifications in affected scopes remain blocked.\n")
+		b.WriteString("Directory rules could not be loaded for these scopes; treat them as having no extra rules in context.\n")
 		count := 0
 		for _, f := range v.Blocked {
 			line := fmt.Sprintf("%s: %s\n", f.Scope, f.Reason)
@@ -95,7 +95,7 @@ func projectDirectoryInstructions(history []message.Message, v directoryInstruct
 			count++
 		}
 		if count < len(v.Blocked) {
-			fmt.Fprintf(&b, "%d additional blocked scopes.\n", len(v.Blocked)-count)
+			fmt.Fprintf(&b, "%d additional unavailable scopes.\n", len(v.Blocked)-count)
 		}
 		out = append(out, message.Message{Role: message.RoleUser, Kind: message.KindDirectoryInstructionProjection, Content: b.String()})
 	}

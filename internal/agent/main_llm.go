@@ -426,14 +426,13 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		thinkingFlushInterval:   defaultStreamThinkingFlushInterval,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
-		directoryCovered: a.toolExecutionPipeline().directoryInstructionsCovered,
-		agentID:          "",
-		turn:             turn,
-		registry:         a.tools,
-		ruleset:          a.effectiveRuleset,
-		syncHookGate:     a.syncToolHooksConfigured,
-		pathScope:        a.effectivePathScope(),
-		emit:             a.emitToTUI,
+		agentID:      "",
+		turn:         turn,
+		registry:     a.tools,
+		ruleset:      a.effectiveRuleset,
+		syncHookGate: a.syncToolHooksConfigured,
+		pathScope:    a.effectivePathScope(),
+		emit:         a.emitToTUI,
 		flushBeforeTool: func() {
 			streamReducer.content.flushThinkingDelta()
 			streamReducer.content.flushTextDelta()

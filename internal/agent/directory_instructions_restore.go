@@ -44,7 +44,5 @@ func (r *directoryInstructionRuntime) clearTurnDiscovery() {
 		return
 	}
 	r.pending = nil
-	if attempt := r.attempt.Swap(nil); attempt != nil {
-		attempt.gate.Close(directoryInstructionStopReplan)
-	}
+	r.attempt.Store(nil)
 }

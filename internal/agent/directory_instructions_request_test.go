@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -65,29 +64,6 @@ func TestDirectoryInstructionCompactionNewTailWinsAndRemoveSurvives(t *testing.T
 	}
 	if count != 1 {
 		t.Fatal("remove tombstone lost")
-	}
-}
-func TestDirectoryInstructionGateCloseLinearizesAdmission(t *testing.T) {
-	var g directoryInstructionGate
-	if !g.TryAdmit("before") {
-		t.Fatal("initial admission")
-	}
-	g.Close(directoryInstructionStopRequired)
-	var wg sync.WaitGroup
-	for range 20 {
-		wg.Go(func() {
-			if g.TryAdmit("after") {
-				t.Error("admitted after close")
-			}
-		})
-	}
-	wg.Wait()
-	if !g.TryAdmit("before") {
-		t.Fatal("already admitted result cannot settle")
-	}
-	g.Close(directoryInstructionStopBlocked)
-	if g.Reason() != directoryInstructionStopRequired {
-		t.Fatal("first close reason changed")
 	}
 }
 func TestDirectoryInstructionPreparationRechecksRestoredAncestorChain(t *testing.T) {

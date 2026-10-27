@@ -93,9 +93,8 @@ type Block struct {
 	// split, where ResultContent is the only copy.
 	ResultPayload      string
 	ResultNotes        []string
-	ResultStatus       message.ToolResultStatus // success, error, or cancelled
-	ResultDone         bool                     // true once a terminal tool event has been received (even if result is empty)
-	ControlReason      string
+	ResultStatus       message.ToolResultStatus     // success, error, or cancelled
+	ResultDone         bool                         // true once a terminal tool event has been received (even if result is empty)
 	RecoveryState      string                       // tool_recovery_state for synthetic restore / barrier-failure results
 	ToolExecutionState agent.ToolCallExecutionState // empty while speculative/unknown; receiving while arguments stream; queued or running once finalize dispatches execution state
 	// ToolQueuedByExecutionEvent is true when ToolExecutionState=queued originated from

@@ -11,21 +11,18 @@ import (
 )
 
 const (
-	KindDirectoryInstructions                      = "directory_instructions"
-	KindDirectoryInstructionProjection             = "directory_instruction_projection"
-	DirectoryInstructionUpsert                     = "upsert"
-	DirectoryInstructionRemove                     = "remove"
-	DirectoryInstructionBlocked                    = "blocked"
-	DirectoryInstructionReasonIO                   = "io"
-	DirectoryInstructionReasonPermission           = "permission"
-	DirectoryInstructionReasonCapacity             = "capacity"
-	DirectoryInstructionReasonEncoding             = "encoding"
-	DirectoryInstructionReasonSize                 = "size"
-	DirectoryInstructionReasonInputBudget          = "input_budget"
-	DirectoryInstructionReasonOutOfScope           = "out_of_scope"
-	ToolControlReasonDirectoryInstructionsRequired = "directory_instructions_required"
-	ToolControlReasonDirectoryInstructionsReplan   = "directory_instructions_replan"
-	ToolControlReasonDirectoryInstructionsBlocked  = "directory_instructions_blocked"
+	KindDirectoryInstructions             = "directory_instructions"
+	KindDirectoryInstructionProjection    = "directory_instruction_projection"
+	DirectoryInstructionUpsert            = "upsert"
+	DirectoryInstructionRemove            = "remove"
+	DirectoryInstructionBlocked           = "blocked"
+	DirectoryInstructionReasonIO          = "io"
+	DirectoryInstructionReasonPermission  = "permission"
+	DirectoryInstructionReasonCapacity    = "capacity"
+	DirectoryInstructionReasonEncoding    = "encoding"
+	DirectoryInstructionReasonSize        = "size"
+	DirectoryInstructionReasonInputBudget = "input_budget"
+	DirectoryInstructionReasonOutOfScope  = "out_of_scope"
 )
 
 type DirectoryInstructionFact struct {
@@ -186,7 +183,7 @@ func DirectoryInstructionAccountingMessages(messages []Message) []Message {
 	if len(blocked) > 0 {
 		SortDirectoryInstructionFacts(blocked)
 		var b strings.Builder
-		b.WriteString("Directory rules unavailable; modifications in affected scopes remain blocked.\n")
+		b.WriteString("Directory rules could not be loaded for these scopes; treat them as having no extra rules in context.\n")
 		count := 0
 		for _, f := range blocked {
 			line := fmt.Sprintf("%s: %s\n", f.Scope, f.Reason)
@@ -197,7 +194,7 @@ func DirectoryInstructionAccountingMessages(messages []Message) []Message {
 			count++
 		}
 		if count < len(blocked) {
-			fmt.Fprintf(&b, "%d additional blocked scopes.\n", len(blocked)-count)
+			fmt.Fprintf(&b, "%d additional unavailable scopes.\n", len(blocked)-count)
 		}
 		out = append(out, Message{Role: RoleUser, Kind: KindDirectoryInstructionProjection, Content: b.String()})
 	}

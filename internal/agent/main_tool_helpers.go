@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -312,6 +313,27 @@ type toolExecutionBatch struct {
 	AbortSiblingsOnError bool
 }
 
+// toolCallNeedsSeparateBatch isolates a call that may need a confirmation, so a
+// sibling's speculative run cannot execute ahead of the answer. Directory
+// instructions are prompt material and never isolate a call.
+func (p toolExecutionPipeline) toolCallNeedsSeparateBatch(tc message.ToolCall) bool {
+	if p.syncHookGate != nil && p.syncHookGate() {
+		return true
+	}
+	ruleset := permission.Ruleset(nil)
+	if p.currentRuleset != nil {
+		ruleset = p.currentRuleset()
+	}
+	// A possible ask is enough to isolate the call. Exact path evaluation can
+	// canonicalize external paths and belongs to worker permission preparation.
+	for _, rule := range ruleset {
+		if rule.Action == permission.ActionAsk && (p.yoloDowngradeAsk == nil || !p.yoloDowngradeAsk(tc.Name)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p toolExecutionPipeline) buildToolExecutionBatches(calls []message.ToolCall) []toolExecutionBatch {
 	if len(calls) == 0 {
 		return nil
@@ -324,7 +346,7 @@ func (p toolExecutionPipeline) buildToolExecutionBatches(calls []message.ToolCal
 		class := tools.ConcurrencyClassForInstance(tool, call.Name, args)
 		policy := tools.PolicyForInstance(tool, call.Name, args)
 		batch := toolExecutionBatch{Calls: []message.ToolCall{call}, AbortSiblingsOnError: policy.AbortSiblingsOnError}
-		if !tools.ConcurrencyClassBatchable(class) || p.directoryInstructionSeparateBatch(call) {
+		if !tools.ConcurrencyClassBatchable(class) || p.toolCallNeedsSeparateBatch(call) {
 			batches = append(batches, batch)
 			i++
 			continue
@@ -335,7 +357,7 @@ func (p toolExecutionPipeline) buildToolExecutionBatches(calls []message.ToolCal
 			next := calls[j]
 			nextArgs := llm.UnwrapToolArgs(next.Args)
 			nextTool, _ := p.boundToolForCall(next)
-			if !tools.ConcurrencyClassBatchable(tools.ConcurrencyClassForInstance(nextTool, next.Name, nextArgs)) || p.directoryInstructionSeparateBatch(next) {
+			if !tools.ConcurrencyClassBatchable(tools.ConcurrencyClassForInstance(nextTool, next.Name, nextArgs)) || p.toolCallNeedsSeparateBatch(next) {
 				break
 			}
 			nextPolicy := tools.PolicyForInstance(nextTool, next.Name, nextArgs)
@@ -447,14 +469,10 @@ func contextCancelledError(ctx context.Context) error {
 	return context.Canceled
 }
 
-// toolResultStatusWithControlReason preserves a successful read while marking
-// calls stopped before execution as cancelled rather than ordinary failures.
-func toolResultStatusWithControlReason(isError bool, reason string) message.ToolResultStatus {
-	if !isError {
-		return message.ToolStatusSuccess
+// toolResultStatus maps a completed call to its terminal status.
+func toolResultStatus(isError bool) message.ToolResultStatus {
+	if isError {
+		return message.ToolStatusError
 	}
-	if reason == message.ToolControlReasonDirectoryInstructionsRequired || reason == message.ToolControlReasonDirectoryInstructionsReplan {
-		return message.ToolStatusCancelled
-	}
-	return message.ToolStatusError
+	return message.ToolStatusSuccess
 }

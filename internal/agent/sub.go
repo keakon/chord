@@ -45,7 +45,6 @@ type toolResult struct {
 	DeliveredFiles     []message.DeliveredFile
 	SkillActivation    *skillActivationCandidate
 	DirectoryDiscovery *directoryInstructionDiscovery
-	ControlReason      string
 	CallID             string
 	Name               string // tool name, used for empty-args detection
 	ArgsJSON           string // original args JSON string for malformed detection
@@ -1302,14 +1301,13 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		thinkingFlushInterval:        defaultStreamThinkingFlushInterval,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
-		directoryCovered: s.toolExecutionPipeline().directoryInstructionsCovered,
-		agentID:          s.instanceID,
-		syncHookGate:     s.syncToolHooksConfigured,
-		turn:             turn,
-		registry:         s.tools,
-		ruleset:          func() permission.Ruleset { return s.currentRuleset() },
-		pathScope:        s.effectivePathScope(),
-		emit:             s.parent.emitToTUI,
+		agentID:      s.instanceID,
+		syncHookGate: s.syncToolHooksConfigured,
+		turn:         turn,
+		registry:     s.tools,
+		ruleset:      func() permission.Ruleset { return s.currentRuleset() },
+		pathScope:    s.effectivePathScope(),
+		emit:         s.parent.emitToTUI,
 		flushBeforeTool: func() {
 			streamReducer.content.flushThinkingDelta()
 			streamReducer.content.flushTextDelta()

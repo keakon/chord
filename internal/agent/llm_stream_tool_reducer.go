@@ -12,7 +12,6 @@ import (
 )
 
 type streamToolDeltaReducer struct {
-	directoryCovered             func(message.ToolCall) bool
 	agentID                      string
 	turn                         *Turn
 	registry                     *tools.Registry
@@ -225,9 +224,6 @@ func (r streamToolDeltaReducer) maybeStartEarlySpeculativeToolCall(callID string
 	if r.syncHookGate == nil || !r.syncHookGate() {
 		decision = evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID), r.pathScope)
 	}
-	if decision.Allowed && !r.directorySpeculativePrefixCovered(callID, callName, call.ArgsJSON) {
-		decision = rejectSpeculativeExecution("directory_instructions_unknown")
-	}
 	logSpeculativeExecutionDecision(callID, callName, decision)
 	if !decision.Allowed {
 		return
@@ -262,9 +258,6 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 				decision = rejectSpeculativeExecution("invalid_args")
 			}
 		}
-	}
-	if decision.Allowed && !r.directorySpeculativePrefixCovered(callID, callName, argsJSON) {
-		decision = rejectSpeculativeExecution("directory_instructions_unknown")
 	}
 	logSpeculativeExecutionDecision(callID, callName, decision)
 	if decision.Allowed && !delta.ToolCall.DeferExecution && r.turn.streamingToolExec != nil {

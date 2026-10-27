@@ -263,13 +263,12 @@ func (a *MainAgent) buildToolResultMessage(payload *ToolResultPayload, contextRe
 		ToolDiffAdded:     payload.DiffAdded,
 		ToolDiffRemoved:   payload.DiffRemoved,
 		ToolDurationMs:    payload.Duration.Milliseconds(),
-		ToolStatus:        string(toolResultStatusWithControlReason(isError, payload.ControlReason)),
+		ToolStatus:        string(toolResultStatus(isError)),
 		Audit:             payload.Audit.Clone(),
 		LSPReviews:        append([]message.LSPReview(nil), payload.LSPReviews...),
 		FileState:         payload.FileState.Clone(),
 		Provenance:        provenance,
 		ToolRecoveryState: payload.RecoveryState,
-		ToolControlReason: payload.ControlReason,
 		SkillActivation:   skillActivationForResult(a.ctxMgr.Snapshot, a.skillActivationView, a.sessionEpoch, a.workDirState.load().Generation, payload.Name, payload.CallID, payload.Error, payload.SkillActivation),
 	}
 }
@@ -302,7 +301,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 		Result:         displayResult,
 		Payload:        payload.Payload,
 		Notes:          append([]string(nil), payload.Notes...),
-		Status:         toolResultStatusWithControlReason(isError, payload.ControlReason),
+		Status:         toolResultStatus(isError),
 		Parts:          parts,
 		Diff:           payload.Diff,
 		DiffAdded:      payload.DiffAdded,
@@ -311,7 +310,6 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 		FileState:      payload.FileState.Clone(),
 		Duration:       payload.Duration,
 		RecoveryState:  payload.RecoveryState,
-		ControlReason:  payload.ControlReason,
 		DeliveredFiles: successfulDeliveredFiles(payload.DeliveredFiles, isError),
 	}
 	if payload.Name == tools.NameGenerateImage {
@@ -622,10 +620,8 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	// overwritten. Only contextResult changes; displayResult (and the TUI)
 	// stays untouched.
 	toolBaseDir := a.effectiveToolBaseDir()
-	if payload.ControlReason == "" {
-		a.applyPatchRetry.observeResult(payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error)
-		contextResult = appendEditRetryAdvice(&a.editMatchFailStreak, contextResult, payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error, isError)
-	}
+	a.applyPatchRetry.observeResult(payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error)
+	contextResult = appendEditRetryAdvice(&a.editMatchFailStreak, contextResult, payload.Name, payload.ArgsJSON, toolBaseDir, payload.Error, isError)
 	// Bounded stop-loss for the notify response-protocol error family: the
 	// second consecutive failure appends a reinforced corrective note, and the
 	// third flags the turn to pause at the batch closeout (see
@@ -693,7 +689,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			Result:         displayResult,
 			Payload:        payload.Payload,
 			Notes:          append([]string(nil), payload.Notes...),
-			Status:         toolResultStatusWithControlReason(isError, payload.ControlReason),
+			Status:         toolResultStatus(isError),
 			Parts:          parts,
 			Diff:           payload.Diff,
 			DiffAdded:      payload.DiffAdded,
@@ -702,7 +698,6 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			FileState:      payload.FileState.Clone(),
 			Duration:       payload.Duration,
 			RecoveryState:  payload.RecoveryState,
-			ControlReason:  payload.ControlReason,
 			DeliveredFiles: successfulDeliveredFiles(payload.DeliveredFiles, isError),
 		}
 		if payload.Name == tools.NameGenerateImage {

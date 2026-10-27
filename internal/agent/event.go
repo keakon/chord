@@ -89,7 +89,6 @@ type ToolResultPayload struct {
 	DeliveredFiles     []message.DeliveredFile
 	SkillActivation    *skillActivationCandidate
 	DirectoryDiscovery *directoryInstructionDiscovery
-	ControlReason      string
 	CallID             string
 	Name               string
 	ArgsJSON           string
@@ -502,7 +501,6 @@ func (ToolProgressEvent) agentEvent() {}
 // ToolResultEvent is emitted after a tool execution completes.
 type ToolResultEvent struct {
 	DeliveredFiles []message.DeliveredFile
-	ControlReason  string
 	// Diagnostic adds a non-fatal error-panel record without emitting an agent-loop error.
 	Diagnostic *ToolErrorDiagnostic
 	CallID     string

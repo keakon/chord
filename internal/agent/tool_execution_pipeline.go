@@ -35,7 +35,6 @@ type toolExecutionPipeline struct {
 	syncHookGate      func() bool
 	directoryRuntime  *directoryInstructionRuntime
 	directoryRequest  *directoryInstructionRequest
-	directoryGate     *directoryInstructionGate
 	skillView         skillActivationView
 	skillSessionEpoch uint64
 	executionGate     *executiongate.Gate
@@ -454,9 +453,6 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 
-	if p.directoryGate.Reason() != "" {
-		return execResult, p.stopForDirectoryInstructions(&execResult, directoryInstructionStopReplan)
-	}
 	var approvedDeliveries []message.FileLocator
 	captureDeliveryTargets := func() error {
 		if tc.Name != tools.NamePresent {
@@ -499,10 +495,6 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 	if err := p.applyPatchRetry.reject(tc.Name, tc.Args, p.effectiveToolBaseDir()); err != nil {
-		return execResult, err
-	}
-
-	if err := p.admitDirectoryInstructionTool(preparationCtx, tc, &execResult); err != nil {
 		return execResult, err
 	}
 
@@ -661,7 +653,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	readObservation, _ := readObservationSink.Observation()
 	execResult.SkillActivation = p.captureSkillActivation(tc, readObservation)
 	p.applySuccessfulFileState(&execResult, tc, trackedFilePath, readObservation, releaseWrite)
-	p.discoverAfterSuccessfulRead(ctx, tc, readObservation, &execResult)
+	p.discoverAfterToolSuccess(ctx, tc, readObservation, &execResult)
 	result = appendNotes(result, execResult.Notes)
 	stalePathCount := staleWritePathCount(trackedFilePath, deleteLocks)
 	var changeModTime time.Time
@@ -743,15 +735,6 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	if err := p.applyPatchRetry.reject(tc.Name, tc.Args, p.effectiveToolBaseDir()); err != nil {
 		return execResult, err
-	}
-	if !p.directoryInstructionsCovered(tc) {
-		return execResult, errDirectorySpeculationDeferred
-	}
-	if err := p.revalidateSpeculativeDirectoryInstructions(preparationCtx, tc); err != nil {
-		return execResult, err
-	}
-	if !p.directoryGate.TryAdmit(tc.ID) {
-		return execResult, errDirectorySpeculationDeferred
 	}
 	// Wall-clock execution anchor for the speculative run: after schema
 	// validation, before workspace lease acquisition, so lease waits count as

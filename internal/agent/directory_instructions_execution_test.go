@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -21,7 +20,7 @@ func directoryPipelineFixture(t *testing.T) (toolExecutionPipeline, string) {
 	r.initial = directoryInstructionSnapshot{Observations: d.Observations}
 	view := buildDirectoryInstructionView(r.initial, nil, r.binding)
 	r.view.Store(&view)
-	r.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: r.binding, RequestSeq: 1, AttemptSeq: 1, Visible: make(map[directoryInstructionVersion]struct{})}, gate: &directoryInstructionGate{}})
+	r.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: r.binding, RequestSeq: 1, AttemptSeq: 1, Visible: make(map[directoryInstructionVersion]struct{})}})
 	registry := tools.NewRegistry()
 	registry.Register(tools.ReadTool{})
 	registry.Register(tools.WriteTool{})
@@ -32,7 +31,10 @@ func directoryCall(id, name string, args any) message.ToolCall {
 	data, _ := json.Marshal(args)
 	return message.ToolCall{ID: id, Name: name, Args: data}
 }
-func TestDirectoryInstructionsReadThenWriteRequiresNewRequest(t *testing.T) {
+
+// Directory rules are prompt material: a read that discovers new rules must not
+// change what the rest of the response is allowed to do.
+func TestDirectoryInstructionsReadThenWriteStillExecutes(t *testing.T) {
 	p, root := directoryPipelineFixture(t)
 	dir := filepath.Join(root, "module")
 	writeResolverRule(t, dir, "Use the module workflow.")
@@ -44,71 +46,50 @@ func TestDirectoryInstructionsReadThenWriteRequiresNewRequest(t *testing.T) {
 	if err != nil || !read.ExecutionStarted || read.DirectoryDiscovery == nil {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
-	if read.ControlReason != string(directoryInstructionStopRequired) {
-		t.Fatalf("reason=%s", read.ControlReason)
-	}
 	write, err := p.execute(context.Background(), directoryCall("write", tools.NameWrite, map[string]string{"path": path, "content": "changed"}), false)
-	if err == nil || write.ExecutionStarted || write.ControlReason != string(directoryInstructionStopReplan) {
+	if err != nil || !write.ExecutionStarted {
 		t.Fatalf("write=%+v err=%v", write, err)
 	}
-	got, _ := os.ReadFile(path)
-	if string(got) != "original" {
-		t.Fatalf("file changed: %s", got)
-	}
-	// Committing a discovered fact does not amend the producing request's rights.
-	p.directoryRuntime.collectDiscovery(read.DirectoryDiscovery)
-	visible := make(map[directoryInstructionVersion]struct{})
-	for scope, o := range read.DirectoryDiscovery.Observations {
-		if o.Status == "present" {
-			visible[directoryInstructionFactFromObservation(p.directoryRuntime.binding, scope, o).Ref()] = struct{}{}
-		}
-	}
-	p.directoryRuntime.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: p.directoryRuntime.binding, RequestSeq: 2, Visible: visible}, gate: &directoryInstructionGate{}})
-	write, err = p.execute(context.Background(), directoryCall("write-next", tools.NameWrite, map[string]string{"path": path, "content": "changed"}), false)
-	if err != nil || !write.ExecutionStarted {
-		t.Fatalf("new request write=%+v err=%v", write, err)
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "changed" {
+		t.Fatalf("file not written: %q err=%v", got, err)
 	}
 }
-func TestDirectoryInstructionsPatchPreflightsLastTargetBeforeAnyMutation(t *testing.T) {
+
+func TestDirectoryInstructionsPatchAppliesWithoutPreflight(t *testing.T) {
 	p, root := directoryPipelineFixture(t)
 	writeResolverRule(t, filepath.Join(root, "deep"), "Review changes here.")
 	patch := "*** Begin Patch\n*** Add File: first.txt\n+first\n*** Add File: deep/last.txt\n+last\n*** End Patch"
 	result, err := p.execute(context.Background(), directoryCall("patch", tools.NameApplyPatch, map[string]string{"patch": patch}), false)
-	if err == nil || result.ExecutionStarted || !result.ExecStartedAt.IsZero() {
+	if err != nil || !result.ExecutionStarted {
 		t.Fatalf("patch=%+v err=%v", result, err)
 	}
-	for _, path := range []string{"first.txt", "deep/last.txt"} {
-		if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
-			t.Fatalf("target %s changed: %v", path, err)
+	for path, want := range map[string]string{"first.txt": "first\n", "deep/last.txt": "last\n"} {
+		got, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil || string(got) != want {
+			t.Fatalf("target %s=%q err=%v", path, got, err)
 		}
+	}
+	if result.DirectoryDiscovery == nil {
+		t.Fatal("apply_patch did not discover directory rules")
 	}
 }
 
-func TestDirectoryInstructionsClosedGateSkipsPermissionAndHook(t *testing.T) {
-	p, root := directoryPipelineFixture(t)
-	p.directoryRuntime.attempt.Load().gate.Close(directoryInstructionStopRequired)
-	permissionChecked, hookCalled := false, false
-	p.currentRuleset = func() permission.Ruleset { permissionChecked = true; return nil }
-	p.fireHook = func(context.Context, string, uint64, string, map[string]any) (*hook.Result, error) {
-		hookCalled = true
-		return nil, nil
-	}
-	result, err := p.execute(context.Background(), directoryCall("write", tools.NameWrite, map[string]string{"path": filepath.Join(root, "sample.txt"), "content": "sample"}), true)
-	if err == nil || result.ExecutionStarted || permissionChecked || hookCalled || result.ControlReason != string(directoryInstructionStopReplan) {
-		t.Fatalf("result=%+v err=%v permission=%v hook=%v", result, err, permissionChecked, hookCalled)
-	}
-}
-func TestDirectoryInstructionsUnstableReadIdentityPreservesSuccess(t *testing.T) {
+// An unverified read identity cannot name the directory that was read, so it
+// must not attribute rules to it — and must not disturb the read itself.
+func TestDirectoryInstructionsUnstableReadIdentitySkipsDiscovery(t *testing.T) {
 	p, root := directoryPipelineFixture(t)
 	p = p.directoryAttemptSnapshot()
 	result := ToolExecutionResult{ExecutionStarted: true, Result: "read succeeded"}
-	p.discoverAfterSuccessfulRead(context.Background(), directoryCall("read", tools.NameRead, map[string]string{"path": filepath.Join(root, "sample.txt")}), tools.ReadObservation{Path: filepath.Join(root, "sample.txt"), SHA256: "sample"}, &result)
-	if result.Result != "read succeeded" || !result.ExecutionStarted || result.ControlReason != string(directoryInstructionStopBlocked) || p.directoryGate.Reason() != directoryInstructionStopBlocked || result.DirectoryDiscovery == nil || result.DirectoryDiscovery.Complete {
+	p.discoverAfterToolSuccess(context.Background(), directoryCall("read", tools.NameRead, map[string]string{"path": filepath.Join(root, "sample.txt")}), tools.ReadObservation{Path: filepath.Join(root, "sample.txt"), SHA256: "sample"}, &result)
+	if result.Result != "read succeeded" || !result.ExecutionStarted || result.DirectoryDiscovery != nil || len(result.Notes) != 0 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 }
 
-func TestDirectoryInstructionsCurrentPermissionOverridesFrozenBody(t *testing.T) {
+// A rule file the current ruleset forbids reading is recorded as blocked, but
+// it neither injects the cached body nor stops the write.
+func TestDirectoryInstructionsUnreadableRuleDoesNotBlockWrite(t *testing.T) {
 	p, root := directoryPipelineFixture(t)
 	dir := filepath.Join(root, "module")
 	writeResolverRule(t, dir, "module rule")
@@ -119,17 +100,80 @@ func TestDirectoryInstructionsCurrentPermissionOverridesFrozenBody(t *testing.T)
 			visible[directoryInstructionFactFromObservation(p.directoryRuntime.binding, scope, o).Ref()] = struct{}{}
 		}
 	}
-	p.directoryRuntime.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: p.directoryRuntime.binding, RequestSeq: 2, Visible: visible}, gate: &directoryInstructionGate{}})
+	p.directoryRuntime.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: p.directoryRuntime.binding, RequestSeq: 2, Visible: visible}})
 	p.currentRuleset = func() permission.Ruleset {
 		return permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}, {Permission: tools.NameRead, Pattern: "*AGENTS.md", Action: permission.ActionDeny}}
 	}
 	target := filepath.Join(dir, "new.txt")
 	result, err := p.execute(context.Background(), directoryCall("write", tools.NameWrite, map[string]string{"path": target, "content": "sample"}), false)
-	if err == nil || result.ExecutionStarted || result.ControlReason != string(directoryInstructionStopBlocked) {
-		t.Fatalf("cached body bypassed changed deny: %+v, %v", result, err)
+	if err != nil || !result.ExecutionStarted {
+		t.Fatalf("write blocked by directory rules: %+v, %v", result, err)
 	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Fatalf("file changed: %v", err)
+	if got, err := os.ReadFile(target); err != nil || string(got) != "sample" {
+		t.Fatalf("file=%q err=%v", got, err)
+	}
+	if result.DirectoryDiscovery == nil {
+		t.Fatal("write did not discover directory rules")
+	}
+	if o := result.DirectoryDiscovery.Observations["module"]; o.Status != "blocked" || o.Reason != message.DirectoryInstructionReasonPermission {
+		t.Fatalf("unreadable rule not recorded as blocked: %+v", result.DirectoryDiscovery.Observations)
+	}
+}
+
+// A root AGENTS.md that resolves outside the checkout cannot be loaded. That is
+// a prompt-level fact only: tools keep running and sibling calls are not
+// cancelled.
+func TestDirectoryInstructionsExternalRuleSymlinkDoesNotCancelResponse(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(outside, "shared-AGENTS.md")
+	if err := os.WriteFile(shared, []byte("shared rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	binding := directoryInstructionBinding{CheckoutRoot: root, ContentRoot: root, WorkDir: root, FallbackAllowed: true}
+	r := newDirectoryInstructionRuntime(context.Background(), binding)
+	t.Cleanup(r.cancel)
+	d, err := r.Discover(context.Background(), binding, []tools.InstructionTarget{{Path: root, Mode: tools.InstructionTargetDirectory}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.initial = directoryInstructionSnapshot{Observations: d.Observations}
+	view := buildDirectoryInstructionView(r.initial, nil, binding)
+	r.view.Store(&view)
+	r.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: binding, RequestSeq: 1, AttemptSeq: 1, Visible: make(map[directoryInstructionVersion]struct{})}})
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	registry.Register(tools.WriteTool{})
+	p := toolExecutionPipeline{agentID: "sample", registry: registry, toolBaseDir: root, directoryRuntime: r}
+	path := filepath.Join(root, "sample.txt")
+	if err := os.WriteFile(path, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	read, err := p.execute(context.Background(), directoryCall("read", tools.NameRead, map[string]string{"path": path}), false)
+	if err != nil || !read.ExecutionStarted {
+		t.Fatalf("read=%+v err=%v", read, err)
+	}
+	if read.DirectoryDiscovery == nil {
+		t.Fatal("read did not discover directory rules")
+	}
+	if o := read.DirectoryDiscovery.Observations["."]; o.Status != "blocked" || o.Reason != message.DirectoryInstructionReasonPermission {
+		t.Fatalf("external rule not recorded as blocked: %+v", read.DirectoryDiscovery.Observations)
+	}
+	write, err := p.execute(context.Background(), directoryCall("write", tools.NameWrite, map[string]string{"path": path, "content": "changed"}), false)
+	if err != nil || !write.ExecutionStarted {
+		t.Fatalf("sibling write=%+v err=%v", write, err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "changed" {
+		t.Fatalf("file=%q err=%v", got, err)
 	}
 }
 
@@ -141,13 +185,13 @@ func TestDirectoryInstructionsKnownEmptyChainKeepsResponseOpen(t *testing.T) {
 	}
 	for _, id := range []string{"read-one", "read-two"} {
 		result, err := p.execute(context.Background(), directoryCall(id, tools.NameRead, map[string]string{"path": path}), false)
-		if err != nil || result.ControlReason != "" {
+		if err != nil {
 			t.Fatalf("read=%+v err=%v", result, err)
 		}
 		p.directoryRuntime.collectDiscovery(result.DirectoryDiscovery)
 	}
-	if p.directoryRuntime.attempt.Load().gate.Reason() != "" || len(p.directoryRuntime.pending) != 0 {
-		t.Fatal("empty known chain triggered replanning")
+	if len(p.directoryRuntime.pending) != 0 {
+		t.Fatal("empty known chain published facts")
 	}
 }
 
@@ -181,11 +225,8 @@ func TestDirectoryInstructionsGrepMissingPathKeepsResponseOpen(t *testing.T) {
 	}
 	call := directoryCall("grep", tools.NameGrep, map[string]any{"pattern": "sample", "paths": []string{filepath.Join(root, "missing.go"), "present.go"}})
 	var result ToolExecutionResult
-	p.discoverAfterSuccessfulRead(context.Background(), call, tools.ReadObservation{}, &result)
-	if reason := p.directoryGate.Reason(); reason != "" {
-		t.Fatalf("response gate closed: %s notes=%v", reason, result.Notes)
-	}
-	if result.ControlReason != "" || len(result.Notes) != 0 {
+	p.discoverAfterToolSuccess(context.Background(), call, tools.ReadObservation{}, &result)
+	if len(result.Notes) != 0 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 }
@@ -203,11 +244,8 @@ func TestDirectoryInstructionsGrepExpansionFailureKeepsResponseOpen(t *testing.T
 	t.Setenv("HOME", "")
 	call := directoryCall("search", tools.NameGrep, map[string]any{"pattern": "sample", "paths": []string{"~/missing.go", present}})
 	result, err := p.execute(context.Background(), call, false)
-	if err != nil || !result.ExecutionStarted || result.ControlReason != "" {
+	if err != nil || !result.ExecutionStarted {
 		t.Fatalf("grep=%+v err=%v", result, err)
-	}
-	if reason := p.directoryRuntime.attempt.Load().gate.Reason(); reason != "" {
-		t.Fatalf("response gate closed: %s notes=%v", reason, result.Notes)
 	}
 	next, err := p.execute(context.Background(), directoryCall("write", tools.NameWrite, map[string]string{"path": present, "content": "updated"}), false)
 	if err != nil || !next.ExecutionStarted {

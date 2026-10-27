@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +9,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestDirectoryInstructionsSpeculationRechecksRetargetedParent(t *testing.T) {
+func TestDirectoryInstructionsDiscoveryReResolvesRetargetedParent(t *testing.T) {
 	for _, name := range []string{tools.NameWrite, tools.NameApplyPatch, tools.NameRead} {
 		t.Run(name, func(t *testing.T) {
 			p, root := directoryPipelineFixture(t)
@@ -35,43 +34,33 @@ func TestDirectoryInstructionsSpeculationRechecksRetargetedParent(t *testing.T) 
 				args = map[string]string{"patch": "*** Begin Patch\n*** Update File: active/sample.txt\n@@\n-original\n+changed\n*** End Patch"}
 			}
 			call := directoryCall("operation", name, args)
-			targets, err := tools.InstructionTargets(name, call.Args, root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := p.directoryRuntime.Discover(t.Context(), p.directoryRuntime.binding, targets); err != nil {
-				t.Fatal(err)
-			}
-			if !p.directoryInstructionsCovered(call) {
-				t.Fatal("initial target should be eligible")
-			}
+			// Retarget the directory symlink after the target was last observed:
+			// discovery must attribute rules to the directory actually used.
 			if err := os.Remove(link); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Symlink(b, link); err != nil {
 				t.Fatal(err)
 			}
-			result, err := p.executeSpeculative(t.Context(), call)
-			if !errors.Is(err, errDirectorySpeculationDeferred) || result.ExecutionStarted || !result.ExecStartedAt.IsZero() {
-				t.Fatalf("speculation was not deferred before execution: %+v, %v", result, err)
+			result, err := p.execute(t.Context(), call, false)
+			if err != nil || !result.ExecutionStarted {
+				t.Fatalf("%s did not execute: %+v, %v", name, result, err)
 			}
-			if result.DirectoryDiscovery != nil || p.directoryRuntime.attempt.Load().gate.Reason() != "" {
-				t.Fatal("speculation published a discovery or closed the response gate")
+			if result.DirectoryDiscovery == nil {
+				t.Fatal("discovery missing")
 			}
-			result, err = p.execute(t.Context(), call, false)
+			if o := result.DirectoryDiscovery.Observations["b"]; o.Status != "present" {
+				t.Fatalf("rules attributed to the stale directory: %+v", result.DirectoryDiscovery.Observations)
+			}
 			if name == tools.NameRead {
-				if err != nil || !result.ExecutionStarted {
-					t.Fatalf("formal read failed: %v", err)
-				}
-			} else if err == nil || result.ExecutionStarted {
-				t.Fatal("formal mutation ran before the rules were visible")
-			}
-			if result.ControlReason != string(directoryInstructionStopRequired) || result.DirectoryDiscovery == nil {
-				t.Fatalf("formal dispatch lost discovery: %+v", result)
+				return
 			}
 			data, err := os.ReadFile(filepath.Join(b, "sample.txt"))
-			if err != nil || string(data) != "original\n" {
-				t.Fatalf("unseen directory was modified: %q, %v", data, err)
+			if err != nil || string(data) != "changed\n" {
+				t.Fatalf("target not written through the retargeted symlink: %q, %v", data, err)
+			}
+			if data, err := os.ReadFile(filepath.Join(a, "sample.txt")); err != nil || string(data) != "original\n" {
+				t.Fatalf("stale target was modified: %q, %v", data, err)
 			}
 		})
 	}

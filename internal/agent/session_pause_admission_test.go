@@ -83,7 +83,7 @@ func TestSubStartedHostedToolPreservesUnknownOutcome(t *testing.T) {
 			sub.setRuleset(permission.Ruleset{})
 			prepareSubRequestDirectoryFixture(t, sub)
 			runtime := sub.directoryInstructions.Load()
-			runtime.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: runtime.binding, RequestSeq: 1, AttemptSeq: 1}, gate: &directoryInstructionGate{}})
+			runtime.attempt.Store(&directoryInstructionAttempt{request: directoryInstructionRequest{Binding: runtime.binding, RequestSeq: 1, AttemptSeq: 1}})
 			call := message.ToolCall{ID: "started-call", Name: tool.Name(), Args: json.RawMessage(`{}`)}
 			sub.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{call}})
 			sub.turn.toolExecutionBatches = []toolExecutionBatch{{Calls: []message.ToolCall{call}}}

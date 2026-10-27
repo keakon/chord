@@ -22,7 +22,6 @@ type ToolExecutionResult struct {
 	DeliveredFiles     []message.DeliveredFile
 	SkillActivation    *skillActivationCandidate
 	DirectoryDiscovery *directoryInstructionDiscovery
-	ControlReason      string
 	// ExecutionStarted records whether the tool body actually entered Execute.
 	// Gate admission, hooks and journal writes do not establish this fact.
 	ExecutionStarted bool

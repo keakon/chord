@@ -46,11 +46,10 @@ func TestDirectoryInstructionClearTurnDiscoveryRetainsFrozenRules(t *testing.T) 
 	r := newDirectoryInstructionRuntime(t.Context(), directoryInstructionBinding{})
 	defer r.cancel()
 	r.pending = map[string]directoryInstructionObservation{"pkg": {Status: "present"}}
-	previous := &directoryInstructionAttempt{gate: &directoryInstructionGate{}}
-	r.attempt.Store(previous)
+	r.attempt.Store(&directoryInstructionAttempt{})
 	frozen := r.frozen.Load()
 	r.clearTurnDiscovery()
-	if len(r.pending) != 0 || r.attempt.Load() != nil || previous.gate.TryAdmit("late") {
+	if len(r.pending) != 0 || r.attempt.Load() != nil {
 		t.Fatal("turn discovery remained live")
 	}
 	if r.frozen.Load() != frozen || r.ctx.Err() != nil {
