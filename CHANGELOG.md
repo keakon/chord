@@ -86,7 +86,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - The `apply_patch` card spells every file the way the tool reports it and no longer replays deleted contents. A patch that named its target absolutely — what Codex-style models send — printed that absolute path in the header, and a deleted file's diff section was labelled `M` because the card only recognised the conventional `+++ /dev/null` spelling. Deleted files now show as a `D path` row with their removed lines still counted in the header, matching the `delete` tool's card. A multi-file patch names its files only in the body, so its header keeps the file and line counts instead of repeating the first target beside a second copy of the count. While a patch is still streaming, the header counts files the same way as after it arrives: a renamed file, or a file edited in several sections, counts once.
 
-- The `edit` card names its file relative to the session working directory. When the session worked in a different checkout than the directory Chord was started in, a file from the starting directory could be shown as a relative path, as if it belonged to the session's checkout.
+- Tool cards show a file inside the session working directory as a relative path, also when the path goes through a symlink, such as `/tmp` and `/private/tmp` on macOS. The `edit` card no longer relativizes against the directory Chord was started in, so when the session works in a different checkout, a file from the starting directory is no longer shown as if it belonged to the session's checkout.
 
 - Cancelling or timing out a Codex WebSocket request no longer risks crashing Chord while its reader is still starting.
 

@@ -315,6 +315,42 @@ func TestApplyPatchMoveUpdateSectionMatchesAbsoluteTarget(t *testing.T) {
 	}
 }
 
+// A patch that spells its targets through a symlinked working dir still owns
+// the tool's base-dir-relative diff sections: the delete must not fall back to
+// an "M" section replaying the removed lines.
+func TestApplyPatchSymlinkSpelledTargetsMatchDiffSections(t *testing.T) {
+	real, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	args := `{"patch":"*** Begin Patch\n*** Delete File: ` + link + `/notes/old.sh\n*** Update File: ` + link + `/notes/keep.sh\n@@\n-old\n+new\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		displayWorkingDir: real,
+		ResultDone:        true, ResultStatus: message.ToolStatusSuccess,
+		ResultContent: "Applied patch:\nD notes/old.sh\nM notes/keep.sh",
+		Diff: "--- notes/old.sh\n+++ notes/old.sh\n@@ -1,1 +1,0 @@\n-obsolete\n" +
+			"--- notes/keep.sh\n+++ notes/keep.sh\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+
+	plain := terminaltext.StripANSI(strings.Join(block.Render(200, ""), "\n"))
+	for _, want := range []string{"↳ D notes/old.sh", "↳ M notes/keep.sh", "+new"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected %q, got:\n%s", want, plain)
+		}
+	}
+	for _, unwanted := range []string{link, "obsolete", "↳ M notes/old.sh"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected %q to be absent, got:\n%s", unwanted, plain)
+		}
+	}
+}
+
 // An errored patch keeps the section of a delete that already landed: that
 // section header is the only place the committed group is marked ✓.
 func TestApplyPatchErrorCardMarksCommittedDelete(t *testing.T) {

@@ -299,6 +299,36 @@ func TestDisplayToolPathKeepsAbsoluteOutsideWorkingDir(t *testing.T) {
 	}
 }
 
+// The model may reach the working dir by another spelling than the session's:
+// through a linked directory, or the other way round (macOS /tmp is
+// /private/tmp). Either way a file inside it is shown relative to it.
+func TestDisplayToolPathFollowsSymlinkedWorkingDir(t *testing.T) {
+	real, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	outside := t.TempDir()
+	want := filepath.Join("src", "app.go")
+	for _, tc := range []struct {
+		name, path, workingDir, want string
+	}{
+		{"path through the link", filepath.Join(link, "src", "app.go"), real, want},
+		{"working dir through the link", filepath.Join(real, "src", "app.go"), link, want},
+		{"deleted file through the link", filepath.Join(link, "gone", "old.sh"), real, filepath.Join("gone", "old.sh")},
+		{"outside the working dir", filepath.Join(outside, "app.go"), link, filepath.Join(outside, "app.go")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := displayToolPath(tc.path, tc.workingDir); got != tc.want {
+				t.Fatalf("displayToolPath(%q, %q) = %q, want %q", tc.path, tc.workingDir, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDisplayToolPathKeepsExistingRelativePath(t *testing.T) {
 	rel := filepath.Join("internal", "tui", "block_tool.go")
 	if got := displayToolPath(rel, filepath.Join(string(os.PathSeparator), "tmp", "workspace")); got != rel {

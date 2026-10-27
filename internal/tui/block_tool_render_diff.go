@@ -964,12 +964,17 @@ func (b *Block) displayApplyPatchTarget(target tools.ApplyPatchDisplayTarget) (m
 // card. The diff header and the parsed target spell the same file differently
 // (base-dir-relative vs the model's, possibly absolute), so equality has to run
 // on the resolved form, against the same base the card displays paths from.
+// Inside the working dir the relative form is the key: it also folds the
+// spellings a symlinked working dir allows, which absolute forms keep apart.
 func (b *Block) applyPatchPathKey(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
 	}
 	if base := b.displayBaseDir(); base != "" {
+		if rel, ok := displayRelPath(path, base); ok {
+			return rel
+		}
 		if abs, err := tools.ResolveToolPathAbsInDir(path, base); err == nil {
 			return abs
 		}

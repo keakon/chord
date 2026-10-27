@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -320,7 +321,11 @@ func displayToolDir(path, workingDir string) string {
 }
 
 // displayRelPath returns path relative to workingDir when it names workingDir
-// itself (".") or something inside it.
+// itself (".") or something inside it. A lexical check settles the common case;
+// a path that lexically falls outside is re-checked through its symlinks,
+// because the model may reach the working dir by another spelling than the
+// session's (macOS /tmp is /private/tmp, a checkout behind a linked directory),
+// and the tool itself resolves both to the same file.
 func displayRelPath(path, workingDir string) (string, bool) {
 	absPath, err := tools.ResolveToolPathAbsInDir(path, workingDir)
 	if err != nil {
@@ -330,7 +335,51 @@ func displayRelPath(path, workingDir string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	return pathutil.RelToBase(absPath, absWorkingDir)
+	if rel, ok := pathutil.RelToBase(absPath, absWorkingDir); ok {
+		return rel, true
+	}
+	return symlinkedRelPath(absPath, absWorkingDir)
+}
+
+// symlinkedRelPaths memoizes symlinkedRelPath. Resolving symlinks touches the
+// filesystem, and cards re-render their paths on the UI loop, so each pair is
+// resolved once. The bound keeps a long session from growing the memo without
+// limit; dropping it only costs a re-resolution.
+var symlinkedRelPaths struct {
+	sync.Mutex
+	entries map[[2]string]symlinkedRel
+}
+
+const symlinkedRelPathsLimit = 1024
+
+type symlinkedRel struct {
+	rel string
+	ok  bool
+}
+
+func symlinkedRelPath(absPath, absWorkingDir string) (string, bool) {
+	key := [2]string{absWorkingDir, absPath}
+	symlinkedRelPaths.Lock()
+	cached, hit := symlinkedRelPaths.entries[key]
+	symlinkedRelPaths.Unlock()
+	if hit {
+		return cached.rel, cached.ok
+	}
+	var result symlinkedRel
+	// The nearest existing ancestor is resolved, so a deleted or not yet
+	// created file still resolves through its directory.
+	if realPath, ok := pathutil.ResolveSymlinksBestEffort(absPath); ok {
+		if realWorkingDir, ok := pathutil.ResolveSymlinksBestEffort(absWorkingDir); ok {
+			result.rel, result.ok = pathutil.RelToBase(realPath, realWorkingDir)
+		}
+	}
+	symlinkedRelPaths.Lock()
+	if symlinkedRelPaths.entries == nil || len(symlinkedRelPaths.entries) >= symlinkedRelPathsLimit {
+		symlinkedRelPaths.entries = make(map[[2]string]symlinkedRel)
+	}
+	symlinkedRelPaths.entries[key] = result
+	symlinkedRelPaths.Unlock()
+	return result.rel, result.ok
 }
 
 // displayBaseDir is the directory a card's paths are shown relative to: the
