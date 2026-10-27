@@ -240,6 +240,8 @@ lsp:
         maxFileCacheBytes: 4000000000
 ```
 
+`env` 里的条目会附加到语言服务器进程继承的环境上。其中一项与 gopls daemon 共享有关：`-remote=auto` 模式下，gopls 通过 `XDG_RUNTIME_DIR` 定位 daemon socket，未设置时回退到会话的临时目录——用不同 `TMPDIR` 启动的会话会各自起一个 daemon，临时目录被销毁重建后，运行中的 daemon 就找不到了。给 gopls 配置 `XDG_RUNTIME_DIR` 指向一个已存在的用户级目录（Linux 上是 `/run/user/<uid>`）即可跨会话共用同一个 daemon；Windows 不读这个变量，自动启动的 daemon 使用 TCP 回环地址。
+
 这种 LSP 反馈是编辑后的增量检查，不能替代 CI 中的全仓门禁。若项目要在 CI 中采用独立的 `modernize` 命令，应先清理并审查现有发现，再固定命令版本，而不是使用 `@latest`；部分建议修复（例如把 `omitempty` 改为 `omitzero`）会有意改变序列化行为，必须人工审查。
 
 需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 会从 LSP workspace root 向上寻找最近的有效虚拟环境，不越过该文件所属仓库或工作区的边界；类 Unix 查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`，Windows 查找对应的 `Scripts\python.exe`。同一 workspace root 的发现结果会随 LSP client 缓存，避免重复探测。

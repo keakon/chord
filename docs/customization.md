@@ -273,6 +273,8 @@ lsp:
         maxFileCacheBytes: 4000000000
 ```
 
+Entries under `env` are appended to the language server process's inherited environment. One optional entry matters for gopls daemon sharing: with `-remote=auto`, gopls locates the daemon socket through `XDG_RUNTIME_DIR` and falls back to the session's temp directory, so sessions launched with different `TMPDIR` settings get separate daemons, and a recycled temp directory leaves the running daemon unreachable. Setting `XDG_RUNTIME_DIR` for gopls to an existing per-user directory (on Linux, `/run/user/<uid>`) keeps one daemon across such sessions; Windows does not read this variable and uses a TCP loopback address for an auto-started daemon.
+
 This edit-time LSP feedback is incremental and does not replace a whole-repository CI gate. If a project adopts the standalone `modernize` command for CI, first clear and review the existing findings, then pin the command version instead of using `@latest`; some suggested fixes, such as changing `omitempty` to `omitzero`, intentionally change serialization behavior and require review.
 
 Availability depends on whether the corresponding language server is installed locally. Chord automatically discovers nested TypeScript/JavaScript projects and Python environments without per-project configuration. For Pyright, when no Python interpreter is configured, it searches from the LSP workspace root upward for the nearest valid `.venv`, `venv`, or `env`, without crossing the file’s repository or workspace boundary, and caches the resulting LSP client. It probes `.venv/bin/python`, `venv/bin/python`, and `env/bin/python` on Unix-like systems; Windows uses the corresponding `Scripts/python.exe` paths.
