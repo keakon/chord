@@ -137,7 +137,7 @@ func TestAwaitFreshWaiterIgnoresStaleVersionAndSettlesOnFresh(t *testing.T) {
 		}
 	}()
 
-	diags, ok := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
+	diags, ok, _, _ := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
 		serverVersions: map[string]int32{"gopls": 2},
 		settle:         10 * time.Millisecond,
 	}, time.Second)
@@ -160,7 +160,7 @@ func TestAwaitFreshWaiterUsesLatestEventDuringSettleWindow(t *testing.T) {
 		ch <- diagnosticsEvent{diagnostics: []Diagnostic{{Severity: 1, Message: "second"}}, serverID: "gopls", version: 2, receivedAt: time.Now()}
 	}()
 
-	diags, ok := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
+	diags, ok, _, _ := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
 		serverVersions: map[string]int32{"gopls": 2},
 		settle:         25 * time.Millisecond,
 	}, time.Second)
@@ -563,7 +563,8 @@ func TestAllDiagnosticsByAbsPathIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T)
 	mgr.clients[clientKey{name: "gopls", root: mgr.projectRootPath()}] = outer
 	mgr.clients[clientKey{name: "gopls", root: filepath.Join(mgr.projectRootPath(), "nested")}] = inner
 
-	got := mgr.diagnosticsByAbsPath(nil)[path]
+	merged, _ := mgr.diagnosticsByAbsPath(nil)
+	got := merged[path]
 	if len(got) != 1 || got[0].Severity != int(protocol.SeverityWarning) || got[0].Message != "fresh inner" {
 		t.Fatalf("diagnostics = %+v, want only owner-root warning", got)
 	}
@@ -583,7 +584,8 @@ func TestAllDiagnosticsByAbsPathKeepsDistinctServerDiagnosticsPerPath(t *testing
 	// Two servers both own the same file, each from its own root. The owner
 	// cache must distinguish them; keying it by path alone reused the first
 	// server's owner roots and silently dropped the second server's diagnostics.
-	got := mgr.diagnosticsByAbsPath(nil)[path]
+	merged, _ := mgr.diagnosticsByAbsPath(nil)
+	got := merged[path]
 	messages := make(map[string]int, len(got))
 	for _, d := range got {
 		messages[d.Message]++

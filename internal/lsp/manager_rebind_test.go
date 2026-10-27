@@ -179,7 +179,7 @@ func collectDiagnostics(t *testing.T, ctx context.Context, mgr *Manager, path st
 	if len(errs) != 0 {
 		t.Fatalf("sync %s: %v", path, errs)
 	}
-	diags, notified := mgr.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{serverVersions: versions, after: after}, 30*time.Second)
+	diags, notified, _, _ := mgr.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{serverVersions: versions, after: after}, 30*time.Second)
 	if !notified && len(diags) == 0 {
 		t.Fatalf("no diagnostics were published for %s within 30s", path)
 	}

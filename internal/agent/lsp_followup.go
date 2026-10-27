@@ -1,10 +1,7 @@
 package agent
 
 import (
-	"context"
 	"strings"
-
-	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
@@ -13,15 +10,12 @@ import (
 // lspFollowupLead opens every late-diagnostics follow-up. The diagnostics are
 // not in the earlier tool results, so the model is told where they came from
 // and which rules apply instead of guessing.
-const lspFollowupLead = "LSP diagnostics arrived after the tool results of file edits in this turn were returned (a later analysis pass of the language server). They are not in those tool results. Apply the LSP diagnostic follow-up rules to them."
+const lspFollowupLead = "LSP diagnostics arrived after the tool results of recent file edits were returned (a later analysis pass of the language server). They are not in those tool results. Apply the LSP diagnostic follow-up rules to them."
 
-// lspFollowupActivity labels the status while a turn that is about to end
-// waits for its edits' analysis passes.
-const lspFollowupActivity = "LSP diagnostics"
-
-// eventLateDiagnosticsSettled resumes a turn end that waited for late LSP
-// diagnostics (payload: lateTurnEnd).
-const eventLateDiagnosticsSettled = "late_diagnostics_settled"
+// lspFollowupBackscanMessages bounds how far back the request assembly looks
+// for recently written paths. Late watches expire on their own; this bound
+// keeps an old transcript from being scanned on every request.
+const lspFollowupBackscanMessages = 200
 
 // LSPFollowupItem is one written file's late LSP diagnostics, as reported by
 // the language-server layer. Ack consumes the item there once the follow-up
@@ -33,16 +27,11 @@ type LSPFollowupItem struct {
 	Ack         func()
 }
 
-// LSPFollowupSource reports late LSP diagnostics for files the current turn
-// wrote.
+// LSPFollowupSource reports late LSP diagnostics for files recent turns wrote.
 type LSPFollowupSource interface {
 	// Pending returns the late diagnostics worth delivering now, without
 	// consuming them.
 	Pending(paths []string, displayBaseDir string) []LSPFollowupItem
-	// Awaitable reports whether Await would block for paths.
-	Awaitable(paths []string) bool
-	// Await blocks, bounded, until the paths' analysis passes arrived.
-	Await(ctx context.Context, paths []string)
 }
 
 // lspFollowup is the follow-up attached to the request being assembled.
@@ -51,25 +40,16 @@ type lspFollowup struct {
 	items []LSPFollowupItem
 }
 
-// lateTurnEnd carries a terminal response whose turn end waits for late
-// diagnostics; it is finished exactly as it would have been without the wait.
-type lateTurnEnd struct {
-	turn        *Turn
-	paths       []string
-	assistant   message.Message
-	payload     *LLMResponsePayload
-	isTruncated bool
-}
-
 // SetLSPFollowupSource installs the source of late LSP diagnostics.
 func (a *MainAgent) SetLSPFollowupSource(source LSPFollowupSource) {
 	a.lspFollowupSource = source
 }
 
 // buildLSPFollowupOverlay stages and returns the turn-tail message carrying
-// late diagnostics for files this turn wrote. Only the current turn counts:
-// a finished turn's late diagnostics are dropped rather than waking or
-// starting a turn, and other agents' writes are not in this transcript.
+// late diagnostics for recently written files. The write may belong to an
+// earlier turn: analysis passes can take seconds after the tool result, and an
+// idle agent is never woken for them. Only paths within the backscan window
+// are considered; other agents' writes are not in this transcript.
 func (a *MainAgent) buildLSPFollowupOverlay() (message.Message, bool) {
 	a.stagedLSPFollowupMu.Lock()
 	a.stagedLSPFollowup = nil
@@ -77,7 +57,7 @@ func (a *MainAgent) buildLSPFollowupOverlay() (message.Message, bool) {
 	if a.lspFollowupSource == nil || a.ctxMgr == nil {
 		return message.Message{}, false
 	}
-	paths := currentTurnWrittenPaths(a.ctxMgr.ScanBackward)
+	paths := recentWrittenPaths(a.ctxMgr.ScanBackward)
 	if len(paths) == 0 {
 		return message.Message{}, false
 	}
@@ -95,7 +75,9 @@ func (a *MainAgent) buildLSPFollowupOverlay() (message.Message, bool) {
 // emitStagedLSPFollowup persists the follow-up the dispatched request carried
 // and surfaces it as a card backed by that message. The durable row holds the
 // same content the request carried, so later requests replay what the model
-// already saw.
+// already saw. An item is acknowledged only after its row is durable; on a
+// write failure the source keeps it pending for the next request instead of
+// losing it on recovery.
 func (a *MainAgent) emitStagedLSPFollowup() {
 	if a == nil || a.ctxMgr == nil {
 		return
@@ -114,60 +96,28 @@ func (a *MainAgent) emitStagedLSPFollowup() {
 	msg := message.Message{Role: message.RoleUser, Kind: message.KindLSPFollowup, Content: lspFollowupContent(staged.text), LSPReviews: reviews}
 	messageIndex := a.ctxMgr.MessageCount()
 	a.ctxMgr.Append(msg)
-	for _, item := range staged.items {
-		if item.Ack != nil {
-			item.Ack()
-		}
-	}
 	text := staged.text
-	a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
+	enqueued := a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 		if err != nil {
 			a.notePersistenceFailure(err)
 			return
 		}
+		ackLSPFollowupItems(staged.items)
 		a.emitToTUI(LSPFollowupEvent{Message: text, MessageIndex: messageIndex})
 	})
+	if !enqueued {
+		// No persistence channel: the follow-up cannot become durable, so do
+		// not leave it pending forever and re-deliver it into every request.
+		ackLSPFollowupItems(staged.items)
+	}
 }
 
-// deferTurnEndForLateDiagnostics holds a turn that is about to end while its
-// edits' analysis passes may still arrive, so findings on the last edit reach
-// the model instead of being dropped with the turn. The wait runs off the
-// event loop and is bounded by the source; the resume event finishes the turn
-// or continues it with the follow-up attached.
-func (a *MainAgent) deferTurnEndForLateDiagnostics(end lateTurnEnd) bool {
-	if a.lspFollowupSource == nil || a.ctxMgr == nil || end.turn == nil || end.isTruncated {
-		return false
+func ackLSPFollowupItems(items []LSPFollowupItem) {
+	for _, item := range items {
+		if item.Ack != nil {
+			item.Ack()
+		}
 	}
-	end.paths = currentTurnWrittenPaths(a.ctxMgr.ScanBackward)
-	if len(end.paths) == 0 {
-		return false
-	}
-	if !a.lspFollowupSource.Awaitable(end.paths) && len(a.lspFollowupSource.Pending(end.paths, a.workDir())) == 0 {
-		return false
-	}
-	a.emitActivity("main", ActivityExecuting, lspFollowupActivity)
-	source := a.lspFollowupSource
-	go func() {
-		source.Await(end.turn.Ctx, end.paths)
-		a.sendEvent(Event{Type: eventLateDiagnosticsSettled, TurnID: end.turn.ID, Payload: end})
-	}()
-	return true
-}
-
-// handleLateDiagnosticsSettled resumes a turn end after its wait. A turn that
-// was cancelled or replaced meanwhile is left to whoever ended it.
-func (a *MainAgent) handleLateDiagnosticsSettled(evt Event) {
-	end, ok := evt.Payload.(lateTurnEnd)
-	if !ok || end.turn == nil || a.turn != end.turn || end.turn.Ctx.Err() != nil {
-		return
-	}
-	if len(a.lspFollowupSource.Pending(end.paths, a.workDir())) > 0 {
-		log.Debugf("late LSP diagnostics continue the turn turn_id=%v paths=%v", end.turn.ID, len(end.paths))
-		a.mergePendingInputsForTurnContinuation()
-		a.beginMainLLMAfterPreparation(end.turn.Ctx, end.turn.ID, "")
-		return
-	}
-	a.finishTerminalResponse(end.assistant, end.payload, end.isTruncated)
 }
 
 func lspFollowupContent(text string) string {
@@ -192,13 +142,17 @@ func formatLSPFollowup(items []LSPFollowupItem) string {
 	return b.String()
 }
 
-// currentTurnWrittenPaths lists the files successful tool results wrote since
-// the latest user-authored message, newest first.
-func currentTurnWrittenPaths(scan func(func(*message.Message) bool)) []string {
+// recentWrittenPaths lists files successful tool results wrote in the recent
+// transcript, newest first. It crosses user turn boundaries because a late
+// analysis pass may only arrive after the turn that caused it ended, but stops
+// at a compaction summary and at a fixed message budget.
+func recentWrittenPaths(scan func(func(*message.Message) bool)) []string {
 	var paths []string
 	seen := make(map[string]struct{})
+	scanned := 0
 	scan(func(msg *message.Message) bool {
-		if message.IsUserAuthored(*msg) || msg.IsCompactionSummary {
+		scanned++
+		if scanned > lspFollowupBackscanMessages || msg.IsCompactionSummary {
 			return true
 		}
 		if msg.Role != message.RoleTool || msg.FileState == nil {

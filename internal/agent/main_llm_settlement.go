@@ -157,9 +157,6 @@ func (a *MainAgent) settleMainLLMResponse(payload *LLMResponsePayload, validCall
 		if a.parkForRequiredQuestions() {
 			return
 		}
-		if a.deferTurnEndForLateDiagnostics(lateTurnEnd{turn: a.turn, assistant: assistantMsg, payload: payload, isTruncated: isTruncated}) {
-			return
-		}
 		a.finishTerminalResponse(assistantMsg, payload, isTruncated)
 		return
 	}

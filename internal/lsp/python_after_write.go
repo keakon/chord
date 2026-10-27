@@ -65,7 +65,7 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 		waitTimeout = coldStartDiagnosticsWaitTimeout
 	}
 
-	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: sync.serverVersions, after: sync.after}, waitTimeout)
+	_, notified, _, _ := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: sync.serverVersions, after: sync.after}, waitTimeout)
 	if notified {
 		m.confirmDiagnosticsSync(sync.token)
 	}

@@ -181,8 +181,8 @@ func TestAfterFileWriteToolResultReportsTimeoutOnce(t *testing.T) {
 	afterWriteNotifyWatchedFileChanged = func(*Manager, context.Context, string, protocol.FileChangeType) map[string]error {
 		return nil
 	}
-	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool) {
-		return nil, false
+	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+		return nil, false, 0, nil
 	}
 
 	const want = "LSP diagnostics unavailable for this edit (language server: no diagnostics within 3s); do not treat this edit as verified."
@@ -219,8 +219,8 @@ func TestAfterFileWriteToolResultCanceledContextAddsNoDegradationNote(t *testing
 	afterWriteNotifyWatchedFileChanged = func(*Manager, context.Context, string, protocol.FileChangeType) map[string]error {
 		return nil
 	}
-	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool) {
-		return nil, false
+	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+		return nil, false, 0, nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

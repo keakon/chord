@@ -43,7 +43,7 @@ var (
 	afterWriteNotifyWatchedFileChanged = func(m *Manager, ctx context.Context, path string, changeType pnprotocol.FileChangeType) map[string]error {
 		return m.NotifyWatchedFileChanged(ctx, path, changeType)
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		return m.AwaitFreshWaiter(ctx, path, ch, req, timeout)
 	}
 )
@@ -120,12 +120,12 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 	}
 
 	req := diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.after, immediateServers: m.immediateDiagnosticsServers(prepared.sync.serverVersions)}
-	_, notified := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, req, prepared.waitTimeout)
+	_, notified, lastSeq, baseline := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, req, prepared.waitTimeout)
 	if notified {
 		m.confirmDiagnosticsSync(prepared.sync.token)
 	}
 	if notified && ctx.Err() == nil {
-		m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions)
+		m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, baseline, lastSeq)
 	}
 	if !notified && ctx.Err() == nil {
 		// A timeout is logged every time; the model hears about the first one

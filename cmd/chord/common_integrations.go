@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/mcp"
@@ -11,14 +9,6 @@ import (
 // lspFollowupSource adapts the manager's late diagnostics for the agent.
 type lspFollowupSource struct {
 	mgr *lsp.Manager
-}
-
-func (s lspFollowupSource) Awaitable(paths []string) bool {
-	return s.mgr.LateDiagnosticsAwaitable(paths, lsp.LateDiagnosticsTurnEndWindow)
-}
-
-func (s lspFollowupSource) Await(ctx context.Context, paths []string) {
-	s.mgr.AwaitLateDiagnostics(ctx, paths, lsp.LateDiagnosticsTurnEndWindow)
 }
 
 // Pending reports the late diagnostics; each item's Ack consumes exactly that

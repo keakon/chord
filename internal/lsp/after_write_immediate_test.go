@@ -21,7 +21,7 @@ func TestAwaitFreshWaiterReturnsOnVersionedPublishFromImmediateServer(t *testing
 	}
 	done := make(chan result, 1)
 	go func() {
-		diags, ok := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
+		diags, ok, _, _ := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
 			serverVersions:   map[string]int32{"gopls": 2},
 			settle:           time.Hour,
 			immediateServers: map[string]bool{"gopls": true},
@@ -49,7 +49,7 @@ func TestAwaitFreshWaiterSettlesWhenAnotherServerIsNotImmediate(t *testing.T) {
 		ch <- diagnosticsEvent{diagnostics: []Diagnostic{{Severity: 1, Message: "second"}}, serverID: "other", version: 3, receivedAt: time.Now()}
 	}()
 
-	diags, ok := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
+	diags, ok, _, _ := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
 		serverVersions:   map[string]int32{"gopls": 2, "other": 3},
 		settle:           200 * time.Millisecond,
 		immediateServers: map[string]bool{"gopls": true},
@@ -71,7 +71,7 @@ func TestAwaitFreshWaiterIgnoresUnversionedPublishForImmediateReturn(t *testing.
 		ch <- diagnosticsEvent{diagnostics: []Diagnostic{{Severity: 1, Message: "second"}}, serverID: "gopls", receivedAt: time.Now()}
 	}()
 
-	diags, ok := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
+	diags, ok, _, _ := mgr.AwaitFreshWaiter(context.Background(), path, ch, diagnosticsWaitRequest{
 		serverVersions:   map[string]int32{"gopls": 2},
 		after:            after,
 		settle:           200 * time.Millisecond,

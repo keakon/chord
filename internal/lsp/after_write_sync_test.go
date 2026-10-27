@@ -62,7 +62,7 @@ func TestAfterWriteWaitRejectsFailedServerEvents(t *testing.T) {
 					t.Cleanup(func() { afterWriteStart, afterWriteAwaitWaiter = oldStart, oldAwait })
 					afterWriteStart = func(*Manager, context.Context, string) {}
 					waited := false
-					afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, p string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+					afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, p string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 						waited = true
 						if healthyEvent {
 							ch <- diagnosticsEvent{serverID: "samplelsp", version: req.serverVersions["samplelsp"], receivedAt: req.after,
@@ -75,14 +75,14 @@ func TestAfterWriteWaitRejectsFailedServerEvents(t *testing.T) {
 						ch <- diagnosticsEvent{serverID: "gopls", receivedAt: req.after.Add(time.Second),
 							diagnostics: []Diagnostic{{Message: "late diagnostic"}}}
 						req.settle = time.Millisecond
-						diags, notified := m.AwaitFreshWaiter(ctx, p, ch, req, 20*time.Millisecond)
+						diags, notified, _, _ := m.AwaitFreshWaiter(ctx, p, ch, req, 20*time.Millisecond)
 						if notified != healthyEvent {
 							t.Fatalf("notified=%v, want %v", notified, healthyEvent)
 						}
 						if healthyEvent && (len(diags) != 1 || diags[0].Message != "current diagnostic") {
 							t.Fatalf("diagnostics=%v, want the healthy server's result", diags)
 						}
-						return diags, notified
+						return diags, notified, 0, nil
 					}
 					if semantic {
 						mgr.afterWriteLSPToolResult(context.Background(), path, "package main", "written", false, nil, WatchedFileChanged, "")

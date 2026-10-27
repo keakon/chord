@@ -45,7 +45,7 @@
 
 - macOS 和 Linux 支持 TUI 与本机网关之间接管运行中的会话。Chord 会等待已开始的工作结束——状态栏会显示已等待的时长；若等待预算在源释放前结束，状态栏会继续确认交接并自行完成恢复。排队输入会被保存，恢复后保持暂停，直到你明确继续。
 - headless 客户端在送达的 `confirm_request` 进入终态时会收到 `confirm_resolved` 推送：`approved` / `denied` 是客户端作答回执，`timeout` 表示到期无人作答、已自动拒绝，`cancelled` 表示等待提前结束。turn 被取消时，它停留中的确认的回执会先于 turn 结束后的 idle 推送，提示可以在交互状态清空之前收起。没有本地倒计时的集成方不必再让一条无人应答的确认一直可操作到下一次 idle；收到该事件即收起提示——对已终结请求发送 `confirm` 只会被运行时忽略。
-- 文件编辑结果返回之后，语言服务器才报出的诊断现在也能送到模型。gopls 的 staticcheck 与 analyzer 结果要比编辑等待的类型检查晚一秒以上。其中有新的 error 或 warning 时，会连同新的 information、hint 一起附在同一回合的下一次请求里，并显示为 `LSP DIAGNOSTICS` 卡片，随会话恢复；只有 information、hint 时不发送。同一文件已经发过的问题，后续编辑只是挪了位置不会重发，消失后再出现才会重新报告。编辑过 Go 文件的回合在结束前，会从最后一次编辑起最多等约 3 秒，免得最后一次编辑的问题丢掉；带来新的 error 或 warning 时回合会继续。headless 客户端可以订阅 `lsp_followup` 收到它们。
+- 文件编辑结果返回之后，语言服务器才报出的诊断现在也能送到模型。gopls 的 staticcheck 与 analyzer 结果要比编辑等待的类型检查晚一秒以上。其中有新的 error 或 warning 时，会连同新的 information、hint 一起附在下一次请求里，并显示为 `LSP DIAGNOSTICS` 卡片，随会话恢复；只有 information、hint 时不发送。它不会拖住回合：后面没有新请求时，问题会留在队列里，等后续回合的下一次请求，或会话恢复后的下一次请求再送达。同一文件已经发过的问题，后续编辑只是挪了位置不会重发，消失后再出现才会重新报告。headless 客户端可以订阅 `lsp_followup` 收到它们。
 
 ### 改进
 

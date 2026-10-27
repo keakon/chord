@@ -152,6 +152,19 @@ func (m *Manager) pruneMissingRoots(ctx context.Context) {
 // diagnosticsForPaths limits ancillary diagnostics to the instances owning
 // this edit. Another checkout's errors must not appear as fallout from it.
 func (m *Manager) diagnosticsForPaths(paths []string) map[string][]Diagnostic {
+	merged, _ := m.diagnosticsForPathsGrouped(paths)
+	return merged
+}
+
+// diagnosticsForPathsByServer keeps the publishing server's identity so late
+// diagnostics can suppress a finding until every server that reports it has
+// dropped it.
+func (m *Manager) diagnosticsForPathsByServer(paths []string) map[string]map[string][]Diagnostic {
+	_, byServer := m.diagnosticsForPathsGrouped(paths)
+	return byServer
+}
+
+func (m *Manager) diagnosticsForPathsGrouped(paths []string) (map[string][]Diagnostic, map[string]map[string][]Diagnostic) {
 	owners := make(map[clientKey]*Client)
 	m.clientsMu.RLock()
 	for _, path := range paths {

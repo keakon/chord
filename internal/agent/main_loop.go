@@ -272,8 +272,6 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleHandoffResolveEvent(evt)
 	case EventLoopAssessment:
 		a.handleLoopAssessment(evt)
-	case eventLateDiagnosticsSettled:
-		a.handleLateDiagnosticsSettled(evt)
 	case eventDirectoryInstructionsPrepared:
 		a.handleDirectoryInstructionsPrepared(evt)
 	case EventCompactionReady:

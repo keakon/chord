@@ -81,14 +81,14 @@ func TestAfterFileWritesToolResultSyncsAllFilesBeforeWaiting(t *testing.T) {
 		}
 		return m.DidChangeVersions(ctx, path, content)
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		select {
 		case <-bothSynced:
 		case <-time.After(2 * time.Second):
 			t.Errorf("diagnostics wait for %s blocked before both files were synced", path)
-			return nil, true
+			return nil, true, 0, nil
 		}
-		return nil, true
+		return nil, true, 0, nil
 	}
 
 	results := mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
@@ -112,8 +112,8 @@ func TestAfterFileWritesToolResultSyncsAllFilesBeforeWaiting(t *testing.T) {
 // didChange goes out, so a fast server's publish is never missed.
 func TestAfterFileWritesToolResultRegistersWaiterBeforeSync(t *testing.T) {
 	mgr, alpha, beta := newBatchTestManager(t)
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
-		return nil, true
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+		return nil, true, 0, nil
 	}
 
 	var mu sync.Mutex
@@ -152,8 +152,8 @@ func TestAfterFileWritesToolResultMatchesSingleFilePipeline(t *testing.T) {
 	client.diagnostics[uri] = []protocol.Diagnostic{
 		{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 2, Character: 0}}, Message: "undeclared name: sample"},
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
-		return nil, true
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+		return nil, true, 0, nil
 	}
 
 	ctx := context.Background()
@@ -174,8 +174,8 @@ func TestAfterFileWritesToolResultMatchesSingleFilePipeline(t *testing.T) {
 // session degradation note instead of reporting a clean result.
 func TestAfterFileWritesToolResultAppendsTimeoutNote(t *testing.T) {
 	mgr, alpha, _ := newBatchTestManager(t)
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
-		return nil, false
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+		return nil, false, 0, nil
 	}
 
 	results := mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
@@ -231,8 +231,8 @@ func TestAfterFileWritesToolResultWaitsForClientsConcurrently(t *testing.T) {
 		<-release
 		return m.clients[testKey(m, "gopls")], true
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
-		return nil, true
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+		return nil, true, 0, nil
 	}
 
 	done := make(chan map[string]string, 1)
@@ -287,11 +287,11 @@ func TestAfterFileWritesToolResultGivesEveryFileTheColdStartBudget(t *testing.T)
 	}
 	var mu sync.Mutex
 	timeouts := make(map[string]time.Duration)
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		mu.Lock()
 		timeouts[path] = timeout
 		mu.Unlock()
-		return nil, true
+		return nil, true, 0, nil
 	}
 
 	mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{

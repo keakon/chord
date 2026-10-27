@@ -14,10 +14,10 @@ import (
 )
 
 type lateDiagnosticsFixture struct {
-	mgr    *Manager
-	client *Client
-	path   string
-	uri    protocol.DocumentURI
+	mgr     *Manager
+	clients map[string]*Client
+	path    string
+	uri     protocol.DocumentURI
 }
 
 func newLateDiagnosticsFixture(t *testing.T) *lateDiagnosticsFixture {
@@ -31,20 +31,49 @@ func newLateDiagnosticsFixture(t *testing.T) *lateDiagnosticsFixture {
 		t.Fatal(err)
 	}
 	uri := protocol.DocumentURI("file://" + filepath.ToSlash(path))
-	client := &Client{cwd: root, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
-	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "gopls")] = client
-	mgr.clientsMu.Unlock()
-	return &lateDiagnosticsFixture{mgr: mgr, client: client, path: path, uri: uri}
+	f := &lateDiagnosticsFixture{mgr: mgr, clients: make(map[string]*Client), path: path, uri: uri}
+	f.addServer("gopls")
+	return f
+}
+
+func (f *lateDiagnosticsFixture) addServer(name string) *Client {
+	client := &Client{cwd: f.mgr.projectRootPath(), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
+	f.mgr.clientsMu.Lock()
+	f.mgr.clients[clientKey{name: name, root: f.mgr.projectRootPath()}] = client
+	f.mgr.clientsMu.Unlock()
+	f.clients[name] = client
+	return client
 }
 
 // publish mirrors a server publish: the client caches the set before the
-// manager callback runs.
-func (f *lateDiagnosticsFixture) publish(version int32, diags ...protocol.Diagnostic) {
-	f.client.diagnosticsMu.Lock()
-	f.client.diagnostics[f.uri] = diags
-	f.client.diagnosticsMu.Unlock()
-	f.mgr.onDiagnostics(testKey(f.mgr, "gopls"), nil)(string(f.uri), "", diags, version)
+// manager callback runs. It returns the manager-wide publish sequence.
+func (f *lateDiagnosticsFixture) publish(server string, version int32, diags ...protocol.Diagnostic) uint64 {
+	client := f.clients[server]
+	client.diagnosticsMu.Lock()
+	client.diagnostics[f.uri] = diags
+	client.diagnosticsMu.Unlock()
+	f.mgr.onDiagnostics(clientKey{name: server, root: f.mgr.projectRootPath()}, nil)(string(f.uri), "", diags, version)
+	f.mgr.lateMu.Lock()
+	seq := f.mgr.latePublishSeq
+	f.mgr.lateMu.Unlock()
+	return seq
+}
+
+// baseline snapshots what a wait sees now: the state after the publish that
+// satisfied it, before any later analysis pass.
+func (f *lateDiagnosticsFixture) baseline() map[diagnosticIdentity]struct{} {
+	var set map[diagnosticIdentity]struct{}
+	for _, d := range f.mgr.diagnosticsForPaths([]string{f.path})[f.path] {
+		if set == nil {
+			set = make(map[diagnosticIdentity]struct{})
+		}
+		set[diagnosticIdentityKey(d)] = struct{}{}
+	}
+	return set
+}
+
+func (f *lateDiagnosticsFixture) watch(serverVersions map[string]int32, afterSeq uint64) {
+	f.mgr.watchLateDiagnostics(f.path, serverVersions, f.baseline(), afterSeq)
 }
 
 func lateDiag(severity protocol.DiagnosticSeverity, line uint32, msg string) protocol.Diagnostic {
@@ -54,13 +83,13 @@ func lateDiag(severity protocol.DiagnosticSeverity, line uint32, msg string) pro
 func TestLateDiagnosticsReportsOnlyDiagnosticsAddedForTheSyncedVersion(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
 	typeErr := lateDiag(protocol.SeverityError, 3, "undefined: missing")
-	f.publish(2, typeErr)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
+	seq := f.publish("gopls", 2, typeErr)
+	f.watch(map[string]int32{"gopls": 2}, seq)
 
 	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
 		t.Fatalf("pending before any later publish = %+v, want none", got)
 	}
-	f.publish(2, typeErr, lateDiag(protocol.SeverityWarning, 7, "this value is never used"))
+	f.publish("gopls", 2, typeErr, lateDiag(protocol.SeverityWarning, 7, "this value is never used"))
 
 	got := f.mgr.PendingLateDiagnostics([]string{f.path}, filepath.Dir(f.path))
 	if len(got) != 1 {
@@ -77,12 +106,44 @@ func TestLateDiagnosticsReportsOnlyDiagnosticsAddedForTheSyncedVersion(t *testin
 	}
 }
 
+func TestLateDiagnosticsReplaysAPublishThatRacedWatchRegistration(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	typeErr := lateDiag(protocol.SeverityError, 3, "undefined: missing")
+	seq := f.publish("gopls", 2, typeErr)
+	baseline := f.baseline()
+	// The analysis pass lands after the wait returned but before the watch is
+	// registered. The wait baseline is still the type-check set, so the new
+	// analyzer finding must survive the replay.
+	f.publish("gopls", 2, typeErr, lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type"))
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, baseline, seq)
+
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	if len(got) != 1 || !strings.Contains(got[0].Lines, "printf arg has wrong type") {
+		t.Fatalf("pending = %+v, want the publish that raced registration", got)
+	}
+}
+
+func TestLateWatchDoesNotReplayThePublishTheWaitConsumed(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	warning := lateDiag(protocol.SeverityWarning, 1, "analyzer finding")
+	seq := f.publish("gopls", 2, warning)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+
+	f.mgr.lateMu.Lock()
+	watch := f.mgr.lateWatches[f.path]
+	lateGen, pending := watch.lateGen, watch.pending
+	f.mgr.lateMu.Unlock()
+	if lateGen != 0 || pending {
+		t.Fatalf("the consumed publish was replayed: lateGen=%d pending=%v", lateGen, pending)
+	}
+}
+
 func TestLateDiagnosticsAckConsumesAndLaterPublishReportsOnlyNewer(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
-	f.publish(2)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
 	first := lateDiag(protocol.SeverityWarning, 1, "first analyzer finding")
-	f.publish(2, first)
+	f.publish("gopls", 2, first)
 
 	peeked := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
 	if again := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(again) != 1 || len(peeked) != 1 {
@@ -93,7 +154,7 @@ func TestLateDiagnosticsAckConsumesAndLaterPublishReportsOnlyNewer(t *testing.T)
 		t.Fatalf("pending after ack = %+v, want none", got)
 	}
 
-	f.publish(2, first, lateDiag(protocol.SeverityWarning, 9, "second analyzer finding"))
+	f.publish("gopls", 2, first, lateDiag(protocol.SeverityWarning, 9, "second analyzer finding"))
 	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
 	if len(got) != 1 || strings.Contains(got[0].Lines, "first analyzer finding") || !strings.Contains(got[0].Lines, "second analyzer finding") {
 		t.Fatalf("pending after newer publish = %+v, want only the newer finding", got)
@@ -102,12 +163,12 @@ func TestLateDiagnosticsAckConsumesAndLaterPublishReportsOnlyNewer(t *testing.T)
 
 func TestLateDiagnosticsAckKeepsPendingWhenPublishArrivedAfterPeek(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
-	f.publish(2)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
 	first := lateDiag(protocol.SeverityWarning, 1, "first analyzer finding")
-	f.publish(2, first)
+	f.publish("gopls", 2, first)
 	peeked := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
-	f.publish(2, first, lateDiag(protocol.SeverityWarning, 9, "second analyzer finding"))
+	f.publish("gopls", 2, first, lateDiag(protocol.SeverityWarning, 9, "second analyzer finding"))
 
 	f.mgr.AckLateDiagnostics(peeked)
 	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
@@ -118,9 +179,9 @@ func TestLateDiagnosticsAckKeepsPendingWhenPublishArrivedAfterPeek(t *testing.T)
 
 func TestLateDiagnosticsIgnoresOtherVersionsAndPublishesAfterDeadline(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
-	f.publish(2)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
-	f.publish(3, lateDiag(protocol.SeverityWarning, 1, "newer version"))
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+	f.publish("gopls", 3, lateDiag(protocol.SeverityWarning, 1, "newer version"))
 	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
 		t.Fatalf("pending after another version = %+v, want none", got)
 	}
@@ -128,7 +189,7 @@ func TestLateDiagnosticsIgnoresOtherVersionsAndPublishesAfterDeadline(t *testing
 	f.mgr.lateMu.Lock()
 	f.mgr.lateWatches[f.path].deadline = time.Now().Add(-time.Second)
 	f.mgr.lateMu.Unlock()
-	f.publish(2, lateDiag(protocol.SeverityWarning, 1, "too late"))
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "too late"))
 	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
 		t.Fatalf("pending after deadline = %+v, want none", got)
 	}
@@ -136,9 +197,9 @@ func TestLateDiagnosticsIgnoresOtherVersionsAndPublishesAfterDeadline(t *testing
 
 func TestLateDiagnosticsSkipsPathsNotRequestedOrStale(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
-	f.publish(2)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
-	f.publish(2, lateDiag(protocol.SeverityWarning, 1, "analyzer finding"))
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "analyzer finding"))
 
 	if got := f.mgr.PendingLateDiagnostics([]string{filepath.Join(filepath.Dir(f.path), "other.go")}, ""); len(got) != 0 {
 		t.Fatalf("pending for an unwritten path = %+v, want none", got)
@@ -155,9 +216,9 @@ func TestLateDiagnosticsSkipsPathsNotRequestedOrStale(t *testing.T) {
 
 func TestLateDiagnosticsNewSyncReplacesWatchAndStaleAckIsIgnored(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
-	f.publish(2)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
-	f.publish(2, lateDiag(protocol.SeverityWarning, 1, "old version finding"))
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "old version finding"))
 	stale := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
 
 	f.mgr.dropLateDiagnostics(f.path)
@@ -165,8 +226,9 @@ func TestLateDiagnosticsNewSyncReplacesWatchAndStaleAckIsIgnored(t *testing.T) {
 		t.Fatalf("pending after a new sync = %+v, want none", got)
 	}
 
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 4})
-	f.publish(4, lateDiag(protocol.SeverityWarning, 1, "old version finding"), lateDiag(protocol.SeverityWarning, 2, "new version finding"))
+	seq = f.publish("gopls", 4)
+	f.watch(map[string]int32{"gopls": 4}, seq)
+	f.publish("gopls", 4, lateDiag(protocol.SeverityWarning, 1, "old version finding"), lateDiag(protocol.SeverityWarning, 2, "new version finding"))
 	f.mgr.AckLateDiagnostics(stale)
 	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
 	if len(got) != 1 || !strings.Contains(got[0].Lines, "new version finding") {
@@ -176,15 +238,15 @@ func TestLateDiagnosticsNewSyncReplacesWatchAndStaleAckIsIgnored(t *testing.T) {
 
 func TestLateDiagnosticsInformationOnlyDoesNotTriggerButRidesAlong(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
-	f.publish(2)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
 	hint := lateDiag(protocol.SeverityHint, 2, "loop can be simplified")
-	f.publish(2, hint, lateDiag(protocol.SeverityInformation, 4, "var is unused"))
+	f.publish("gopls", 2, hint, lateDiag(protocol.SeverityInformation, 4, "var is unused"))
 	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
 		t.Fatalf("pending with only information and hints = %+v, want none", got)
 	}
 
-	f.publish(2, hint, lateDiag(protocol.SeverityInformation, 4, "var is unused"), lateDiag(protocol.SeverityWarning, 6, "printf arg has wrong type"))
+	f.publish("gopls", 2, hint, lateDiag(protocol.SeverityInformation, 4, "var is unused"), lateDiag(protocol.SeverityWarning, 6, "printf arg has wrong type"))
 	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
 	if len(got) != 1 {
 		t.Fatalf("pending = %+v, want one entry once a warning appeared", got)
@@ -200,9 +262,9 @@ func TestLateDiagnosticsInformationOnlyDoesNotTriggerButRidesAlong(t *testing.T)
 // publish, peeks and acks; it returns what was delivered.
 func (f *lateDiagnosticsFixture) deliverLate(version int32, late ...protocol.Diagnostic) []LateDiagnostics {
 	f.mgr.dropLateDiagnostics(f.path)
-	f.publish(version)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": version})
-	f.publish(version, late...)
+	seq := f.publish("gopls", version)
+	f.watch(map[string]int32{"gopls": version}, seq)
+	f.publish("gopls", version, late...)
 	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
 	f.mgr.AckLateDiagnostics(got)
 	return got
@@ -236,6 +298,47 @@ func TestLateDiagnosticsFindingIsReportedAgainAfterItLeftTheFile(t *testing.T) {
 	}
 }
 
+func TestLatePruneKeepsFindingAnotherServerStillReports(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	f.addServer("other")
+	finding := lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type")
+	key := lateFindingKeyOf(Diagnostic{Severity: int(protocol.SeverityWarning), Message: finding.Message})
+	f.mgr.AckLateDiagnostics([]LateDiagnostics{{
+		Path:           f.path,
+		keys:           []lateFindingKey{key},
+		findingServers: map[lateFindingKey]map[string]struct{}{key: {"gopls": {}, "other": {}}},
+	}})
+
+	// Only the other server still reports the finding.
+	f.publish("other", 2, finding)
+	f.mgr.pruneLateFindingsForServer(f.path, "gopls")
+	f.mgr.lateMu.Lock()
+	_, kept := f.mgr.lateReported[f.path][key]
+	f.mgr.lateMu.Unlock()
+	if !kept {
+		t.Fatal("pruning gopls released a finding the other server still reports")
+	}
+
+	// Both servers have dropped it; a later publish must be delivered again.
+	f.publish("other", 2)
+	f.mgr.pruneLateFindingsForServer(f.path, "other")
+	f.mgr.lateMu.Lock()
+	_, kept = f.mgr.lateReported[f.path][key]
+	f.mgr.lateMu.Unlock()
+	if kept {
+		t.Fatal("the finding stayed suppressed after every server dropped it")
+	}
+
+	f.mgr.dropLateDiagnostics(f.path)
+	seq := f.publish("gopls", 3)
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 3}, nil, seq)
+	f.publish("gopls", 3, finding)
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	if len(got) != 1 || !strings.Contains(got[0].Lines, "printf arg") {
+		t.Fatalf("reintroduced finding = %+v, want it reported again", got)
+	}
+}
+
 func TestLateDiagnosticsQuietWindowCountsAsCompleteButAnOpenWindowDoesNot(t *testing.T) {
 	finding := lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type")
 	for _, tc := range []struct {
@@ -249,8 +352,8 @@ func TestLateDiagnosticsQuietWindowCountsAsCompleteButAnOpenWindowDoesNot(t *tes
 			// The next version's analysis pass never republished: gopls skips a
 			// publish identical to the type-check pass.
 			f.mgr.dropLateDiagnostics(f.path)
-			f.publish(3)
-			f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 3})
+			seq := f.publish("gopls", 3)
+			f.watch(map[string]int32{"gopls": 3}, seq)
 			if tc.expired {
 				f.mgr.lateMu.Lock()
 				f.mgr.lateWatches[f.path].deadline = time.Now().Add(-time.Second)
@@ -261,70 +364,6 @@ func TestLateDiagnosticsQuietWindowCountsAsCompleteButAnOpenWindowDoesNot(t *tes
 				t.Fatalf("delivery = %+v, want %d entries", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestAwaitLateDiagnosticsWaitsOnlyForPendingAnalysisPasses(t *testing.T) {
-	f := newLateDiagnosticsFixture(t)
-	f.publish(2)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
-
-	if !f.mgr.LateDiagnosticsAwaitable([]string{f.path}, time.Hour) {
-		t.Fatal("a write still owed its analysis pass is not awaitable")
-	}
-	done := make(chan struct{})
-	go func() {
-		f.mgr.AwaitLateDiagnostics(context.Background(), []string{f.path}, time.Hour)
-		close(done)
-	}()
-	select {
-	case <-done:
-		t.Fatal("returned before the analysis pass arrived")
-	case <-time.After(50 * time.Millisecond):
-	}
-	f.publish(2, lateDiag(protocol.SeverityWarning, 1, "analyzer finding"))
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the analysis pass did not end the wait")
-	}
-
-	if f.mgr.LateDiagnosticsAwaitable([]string{f.path}, time.Hour) {
-		t.Fatal("a write whose analysis pass arrived is still awaitable")
-	}
-	start := time.Now()
-	f.mgr.AwaitLateDiagnostics(context.Background(), []string{f.path}, time.Hour)
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("a path whose pass already arrived waited %v", elapsed)
-	}
-}
-
-func TestAwaitLateDiagnosticsBoundsAndCancellation(t *testing.T) {
-	f := newLateDiagnosticsFixture(t)
-	f.publish(2)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
-
-	start := time.Now()
-	f.mgr.AwaitLateDiagnostics(context.Background(), []string{f.path}, 100*time.Millisecond)
-	if elapsed := time.Since(start); elapsed < 50*time.Millisecond || elapsed > 5*time.Second {
-		t.Fatalf("window-bounded wait took %v, want about the window", elapsed)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	start = time.Now()
-	f.mgr.AwaitLateDiagnostics(ctx, []string{f.path}, time.Hour)
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("cancelled wait took %v", elapsed)
-	}
-
-	other := newLateDiagnosticsFixture(t)
-	other.mgr.cfg.LSP = config.LSPConfig{"pyright": {Command: "pyright-langserver"}}
-	other.mgr.watchLateDiagnostics(other.path, map[string]int32{"pyright": 2})
-	start = time.Now()
-	other.mgr.AwaitLateDiagnostics(context.Background(), []string{other.path}, time.Hour)
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("a single-pass server held the wait for %v", elapsed)
 	}
 }
 
@@ -346,7 +385,7 @@ func TestResetReportedDiagnosticsForgetsLateState(t *testing.T) {
 
 func TestSyncAfterWriteDropsLateDiagnosticsWatch(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2})
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, nil, 0)
 
 	restoreNotify, restoreChange, restoreSave := afterWriteNotifyWatchedFileChanged, afterWriteDidChange, afterWriteDidSave
 	t.Cleanup(func() {
@@ -376,8 +415,8 @@ func TestAwaitPreparedAfterFileWriteWatchesOnlyNotifiedWrites(t *testing.T) {
 			f := newLateDiagnosticsFixture(t)
 			restore := afterWriteAwaitWaiter
 			t.Cleanup(func() { afterWriteAwaitWaiter = restore })
-			afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool) {
-				return nil, tc.notified
+			afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+				return nil, tc.notified, 0, nil
 			}
 			prepared := afterWritePrepared{path: f.path, base: "ok", wait: true, waitTimeout: time.Second, sync: afterWriteSync{serverVersions: map[string]int32{"gopls": 2}}}
 

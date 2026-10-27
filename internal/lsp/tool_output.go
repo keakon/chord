@@ -352,10 +352,11 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 	return b.String()
 }
 
-func (m *Manager) diagnosticsByAbsPath(owners map[clientKey]*Client) map[string][]Diagnostic {
+func (m *Manager) diagnosticsByAbsPath(owners map[clientKey]*Client) (map[string][]Diagnostic, map[string]map[string][]Diagnostic) {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 	merged := make(map[string][]Diagnostic)
+	byServer := make(map[string]map[string][]Diagnostic)
 	// ownersByPath caches, per absolute path and server name, the workspace
 	// roots of the clients that own that path. The key must pair the path with
 	// the server name: two servers can own the same file from different roots,
@@ -399,19 +400,24 @@ func (m *Manager) diagnosticsByAbsPath(owners map[clientKey]*Client) map[string]
 				}
 			}
 			for _, d := range diags {
-				merged[absP] = append(merged[absP], Diagnostic{
+				converted := Diagnostic{
 					Severity: int(d.Severity),
 					Line:     int(d.Range.Start.Line),
 					Col:      int(d.Range.Start.Character),
 					Code:     diagnosticCodeString(d.Code),
 					Message:  d.Message,
 					Source:   d.Source,
-				})
+				}
+				merged[absP] = append(merged[absP], converted)
+				if byServer[absP] == nil {
+					byServer[absP] = make(map[string][]Diagnostic)
+				}
+				byServer[absP][key.name] = append(byServer[absP][key.name], converted)
 			}
 		}
 		c.diagnosticsMu.RUnlock()
 	}
-	return merged
+	return merged, byServer
 }
 
 func diagnosticsOmittedLine(count int) string {

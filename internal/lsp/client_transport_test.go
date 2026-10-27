@@ -136,12 +136,12 @@ func TestAfterWriteDisconnectSkipsWaitAndRecoversNextOperation(t *testing.T) {
 			m.clientsMu.Unlock()
 		}
 	}
-	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		waits++
 		m.waitersMu.Lock()
 		m.removeWaiter(p, ch)
 		m.waitersMu.Unlock()
-		return nil, true
+		return nil, true, 0, nil
 	}
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "written", false, WatchedFileChanged, "")
 	if waits != 0 || len(mgr.clients) != 0 || fake.kills != 1 {
@@ -253,13 +253,13 @@ func TestAfterWriteSyncFailureWaitsForSurvivingServer(t *testing.T) {
 	starts, awaits := 0, 0
 	var awaitedVersions map[string]int32
 	afterWriteStart = func(*Manager, context.Context, string) { starts++ }
-	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		awaits++
 		awaitedVersions = req.serverVersions
 		m.waitersMu.Lock()
 		m.removeWaiter(p, ch)
 		m.waitersMu.Unlock()
-		return nil, true
+		return nil, true, 0, nil
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "written", false, WatchedFileChanged, "")
@@ -311,12 +311,12 @@ func TestAfterWriteSyncFailureWithAllServersDeadSkipsWait(t *testing.T) {
 	t.Cleanup(func() { afterWriteStart = oldStart; afterWriteAwaitWaiter = oldAwait })
 	awaits := 0
 	afterWriteStart = func(*Manager, context.Context, string) {}
-	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		awaits++
 		m.waitersMu.Lock()
 		m.removeWaiter(p, ch)
 		m.waitersMu.Unlock()
-		return nil, true
+		return nil, true, 0, nil
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "written", false, WatchedFileChanged, "")
@@ -354,12 +354,12 @@ func TestAfterWriteSyncFailureNotesEachFailedServer(t *testing.T) {
 	t.Cleanup(func() { afterWriteStart = oldStart; afterWriteAwaitWaiter = oldAwait })
 	awaits := 0
 	afterWriteStart = func(*Manager, context.Context, string) {}
-	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		awaits++
 		m.waitersMu.Lock()
 		m.removeWaiter(p, ch)
 		m.waitersMu.Unlock()
-		return nil, true
+		return nil, true, 0, nil
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "written", false, WatchedFileChanged, "")
@@ -441,12 +441,12 @@ func TestPythonSemanticDisconnectSkipsWaitAndRecoversNextOperation(t *testing.T)
 			m.clientsMu.Unlock()
 		}
 	}
-	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		waits++
 		m.waitersMu.Lock()
 		m.removeWaiter(p, ch)
 		m.waitersMu.Unlock()
-		return nil, true
+		return nil, true, 0, nil
 	}
 
 	out := mgr.afterWriteLSPToolResult(context.Background(), path, "x = 1\n", "written", false, nil, WatchedFileChanged, "")

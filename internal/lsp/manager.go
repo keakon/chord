@@ -76,6 +76,10 @@ type diagnosticsEvent struct {
 	serverID    string
 	version     int32
 	receivedAt  time.Time
+	// seq is the manager-wide publish sequence. A wait hands the sequence of
+	// the publish it consumed to the late-diagnostics watch, so the watch can
+	// replay only publishes that arrived after that one.
+	seq uint64
 }
 
 // clientKey identifies a language-server client by server name and workspace
@@ -139,13 +143,19 @@ type Manager struct {
 	lateMu      sync.Mutex
 	lateWatches map[string]*lateWatch
 	lateSeq     uint64
+	// latePublishSeq numbers every publish so a watch can tell the publish a
+	// wait already consumed from one that raced the watch registration.
+	latePublishSeq uint64
+	// latePublishes keeps the most recent versioned publishes per path. A
+	// watch created after its wait returned replays the entries newer than the
+	// publish the wait consumed; otherwise a same-version analysis pass that
+	// landed in that gap would be lost.
+	latePublishes map[string][]latePublish
 	// lateReported holds, per path, the findings already delivered as late
-	// diagnostics this session, so a finding an edit merely moved or kept is
-	// not delivered again.
-	lateReported map[string]map[lateFindingKey]struct{}
-	// lateChanged is closed (and cleared) when a watched path receives its
-	// later same-version publish, waking AwaitLateDiagnostics.
-	lateChanged chan struct{}
+	// diagnostics this session and which servers still publish each one. A
+	// finding an edit merely moved or kept is not delivered again; a finding
+	// that left every server is released so a later reintroduction is.
+	lateReported map[string]map[lateFindingKey]map[string]struct{}
 
 	startFailMu sync.Mutex
 	startFail   map[clientKey]string // client -> last start/init error
@@ -338,14 +348,14 @@ func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri string, 
 			}
 		}
 		m.diagMu.Unlock()
-		m.noteLateDiagnosticsPublish(path, key.name, version, receivedAt)
+		seq := m.noteLateDiagnosticsPublish(path, key.name, version, receivedAt)
 		m.broadcast(TypeLSPDiagnostics, payload)
 		m.notifySidebarChanged()
 
 		m.waitersMu.Lock()
 		for _, ch := range m.waiters[path] {
 			select {
-			case ch <- diagnosticsEvent{diagnostics: chordDiags, clientKey: key, serverID: key.name, version: version, receivedAt: receivedAt}:
+			case ch <- diagnosticsEvent{diagnostics: chordDiags, clientKey: key, serverID: key.name, version: version, receivedAt: receivedAt, seq: seq}:
 			default:
 			}
 		}
@@ -1195,7 +1205,8 @@ func (m *Manager) PrepareWaiter(path string) chan diagnosticsEvent {
 // AwaitWaiter waits on a channel obtained from PrepareWaiter.
 // Returns (diags, true) if publishDiagnostics arrived; (cached diags, false) on timeout/cancel.
 func (m *Manager) AwaitWaiter(ctx context.Context, path string, ch chan diagnosticsEvent, timeout time.Duration) ([]Diagnostic, bool) {
-	return m.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{}, timeout)
+	diags, notified, _, _ := m.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{}, timeout)
+	return diags, notified
 }
 
 type diagnosticsWaitRequest struct {
@@ -1237,10 +1248,18 @@ func (req diagnosticsWaitRequest) immediateWaitComplete(ev diagnosticsEvent, con
 // accepted. Once a fresh event arrives, the function waits briefly for additional
 // diagnostics to settle so multi-phase servers such as gopls do not expose a
 // transient first snapshot as final tool output.
-func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
+func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 	path = normalizeWaiterPath(path)
 	if req.settle <= 0 {
 		req.settle = diagnosticsSettleDuration
+	}
+	// The baseline is the set the wait itself observed, captured per server as
+	// each publish arrives. Capturing it later, when the watch is registered,
+	// would make a publish that raced the registration look like it had always
+	// been there and silently drop its new findings.
+	var baseline map[string]map[diagnosticIdentity]struct{}
+	if len(req.serverVersions) > 0 {
+		baseline = m.diagnosticBaselineByServer(path, req.serverVersions)
 	}
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
@@ -1257,6 +1276,7 @@ func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan dia
 	}
 	var gotFresh bool
 	var last []Diagnostic
+	var lastSeq uint64
 	var settle <-chan time.Time
 	confirmed := make(map[string]struct{}, len(req.serverVersions))
 	for {
@@ -1269,22 +1289,28 @@ func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan dia
 			freshEvents++
 			gotFresh = true
 			last = ev.diagnostics
+			lastSeq = ev.seq
+			if baseline != nil {
+				if _, tracked := req.serverVersions[ev.serverID]; tracked {
+					baseline[ev.serverID] = diagnosticIdentitySet(ev.diagnostics)
+				}
+			}
 			if req.immediateWaitComplete(ev, confirmed) {
 				logReturn("versioned")
-				return last, true
+				return last, true, lastSeq, flattenDiagnosticBaseline(baseline)
 			}
 			settleTimer := time.NewTimer(req.settle)
 			defer settleTimer.Stop()
 			settle = settleTimer.C
 		case <-settle:
 			logReturn("settled")
-			return last, true
+			return last, true, lastSeq, flattenDiagnosticBaseline(baseline)
 		case <-ctx.Done():
 			logReturn("cancelled")
-			return nil, false
+			return nil, false, lastSeq, nil
 		case <-deadline.C:
 			logReturn("timeout")
-			return m.Diagnostics(path), gotFresh
+			return m.Diagnostics(path), gotFresh, lastSeq, flattenDiagnosticBaseline(baseline)
 		}
 	}
 }

@@ -170,12 +170,12 @@ func TestAfterFileWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *test
 		didChangeErr = gotCtx.Err()
 		return nil, nil
 	}
-	afterWriteAwaitWaiter = func(_ *Manager, gotCtx context.Context, gotPath string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(_ *Manager, gotCtx context.Context, gotPath string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		if gotPath != path {
 			t.Fatalf("await path = %q, want %q", gotPath, path)
 		}
 		awaitErr = gotCtx.Err()
-		return nil, false
+		return nil, false, 0, nil
 	}
 
 	out := mgr.AfterFileWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
@@ -226,8 +226,8 @@ func TestAfterFileWriteToolResultNotifiesWatchedFileBeforeDidChange(t *testing.T
 		order = append(order, "didChange")
 		return nil, nil
 	}
-	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
-		return nil, true
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+		return nil, true, 0, nil
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileCreated, "")
@@ -279,9 +279,9 @@ func TestAfterFileWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
 		t.Fatal("disabled gopls should not receive watched-file notifications after write")
 		return nil
 	}
-	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		t.Fatal("disabled gopls diagnostics should not be awaited after write")
-		return nil, false
+		return nil, false, 0, nil
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
