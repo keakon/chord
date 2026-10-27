@@ -261,8 +261,16 @@ func TestAppendPriorCheckpointCarryAppendsOnceAndIsIdempotent(t *testing.T) {
 func TestPriorCheckpointSurfacedInSummarizePrompt(t *testing.T) {
 	input := &compactionInput{PriorCheckpoint: "## Key Decisions\n- keep archival profile"}
 	prompt := buildCompactionPromptWithKeyFiles(input, "history-1.md", nil, nil, nil, nil)
-	if !strings.Contains(prompt, "Prior durable checkpoint") || !strings.Contains(prompt, "Do not silently drop or contradict") || !strings.Contains(prompt, "## Key Decisions\n- keep archival profile") {
-		t.Fatalf("prompt must surface the prior checkpoint with a fold instruction, got:\n%s", prompt)
+	for _, want := range []string{
+		"Prior durable checkpoint",
+		"Newer transcript takes precedence",
+		"drop resolved blockers, answered questions",
+		"Standing constraints in the durable session anchors outrank both",
+		"## Key Decisions\n- keep archival profile",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
 	}
 
 	empty := &compactionInput{}

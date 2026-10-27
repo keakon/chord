@@ -1217,7 +1217,7 @@ func buildCompactionPromptWithKeyFiles(input *compactionInput, historyPath strin
 	sb.WriteString(formatBackgroundObjectsForPrompt(backgroundObjects))
 	if input != nil && strings.TrimSpace(input.PriorCheckpoint) != "" {
 		sb.WriteString("\n\nPrior durable checkpoint from an earlier compaction of this session — always present, independent of transcript trimming:\n")
-		sb.WriteString("Fold its still-accurate content into your summary. Do not silently drop or contradict the sections it established.\n\n")
+		sb.WriteString("Fold its still-accurate content into your summary. Newer transcript takes precedence where they conflict: move completed work out of the active objective, drop resolved blockers, answered questions, and content the transcript makes stale, and keep the rest. Do not silently drop or contradict sections the transcript still supports. Standing constraints in the durable session anchors outrank both.\n\n")
 		sb.WriteString(formatPriorCheckpointCarryForPrompt(input.PriorCheckpoint))
 		sb.WriteByte('\n')
 	}

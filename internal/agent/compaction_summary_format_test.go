@@ -14,6 +14,24 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// TestCompactionSystemPromptKeepsContinuationRules pins the durable
+// continuation rules that keep recursive checkpoints from bloating and from
+// losing exact facts the next agent needs.
+func TestCompactionSystemPromptKeepsContinuationRules(t *testing.T) {
+	t.Parallel()
+	for _, want := range []string{
+		"Preserve exact file paths, symbols, commands, error strings, URLs, and identifiers",
+		"Preserve consequential workflow state",
+		"list at most 15 repository files or directories",
+		"Prefer short references over restating details",
+		"only while it remains unanswered or needs action",
+	} {
+		if !strings.Contains(compactionSystemPrompt, want) {
+			t.Errorf("compaction system prompt missing %q", want)
+		}
+	}
+}
+
 // TestModelDrivenSummaryOrderIsDeliberate pins the segment-order contract the
 // model-driven builder intentionally breaks away from: its continuation-first
 // layout (Next Step ahead of Progress, Constraints ahead of Active Objective)

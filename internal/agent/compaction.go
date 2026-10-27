@@ -165,22 +165,25 @@ Requirements:
 - Every section must be present.
 - The runtime overwrites "Current User Request" and "SubAgent State" with authoritative snapshots when it has them; keep those two sections brief and spend detail on the others.
 - The latest user request is authoritative: identify it explicitly, prioritize it over older or conflicting goals, and mention superseded older context only when needed. Do not let old implementation/debugging goals override a later meta-analysis, clarification request, or explicit correction.
+- When carrying an earlier user request into "Background Goals" or "Open Problems", do so only while it remains unanswered or needs action, and preserve its exact wording. Do not repeat requests that newer history has answered or resolved.
 - Treat the most recent Done rejected reason as important user feedback/request when it asks for more work, asks a question, changes scope, or corrects the agent.
 - Separate active todos that directly serve the latest user request from historical, completed, or superseded ones; if the user changed topics after todos were created, do not treat stale todos as active work.
 - "Active Objective" and "Next Step" must directly serve the latest user request. Do not restart tasks listed under "Completed/background" or "Stale/superseded".
 - Under "Todo State", write exactly these subgroup label lines, each followed by its items: "- Active/relevant to latest request:", "- Completed/background:", and "- Stale/superseded:". If a subgroup has no items, write "(none)".
 - Use concise bullet-style prose under each heading.
-- Include concrete files, commands, errors, and decisions when known. Preserve relevant working verification commands and failed approaches with their observed conditions so continuation does not repeat them without new evidence.
+- Include concrete files, commands, errors, and decisions when known. Preserve exact file paths, symbols, commands, error strings, URLs, and identifiers; do not paraphrase them. Preserve relevant working verification commands and failed approaches with their observed conditions so continuation does not repeat them without new evidence.
+- Preserve consequential workflow state the transcript establishes: whether changes are uncommitted, committed, pushed, under review, or merged. Do not infer it from a clean tree.
 - Distinguish explicit requirements, verified facts, and unverified assumptions. Keep assumptions labeled even when carried from an earlier checkpoint; they must not become requirements or justify dropping unfinished work.
 - If a fact is not supported by the transcript or anchors, write "unknown" or omit it; do not infer unstated implementation details.
 - Summarize tool results as conclusions. Do not copy raw tool protocol fields, large JSON blobs, or irrelevant command output unless they are essential evidence.
 - Under "Next Step", write a concrete next action the next agent can perform immediately; do not use a vague instruction such as "continue working".
-- Under "Files and Evidence", first include the archived history file path from the prompt header, then list the most important repository file paths needed for continuation as standalone bullet lines.
+- Under "Files and Evidence", first include the archived history file path from the prompt header, then list at most 15 repository files or directories needed for continuation, most important first; do not list every file that was read or changed.
 - The checkpoint wrapper may also list all archived history files for the full session history chain; preserve that distinction and do not imply the current compaction file is the only historical archive.
 - Prefer workspace-relative file paths when available.
 - Keep each file path on its own bullet line. Do not add inline explanation text on the same line as a file path.
 - Focus on durable continuation context, not narrative recap. When task notes are registered, preserve their paths and relevant section names as the detail source; keep the summary to current progress, blockers and the next action instead of duplicating the notes. If notes are absent or incomplete, preserve the missing recovery facts in the summary.
 - Do not duplicate long verbatim excerpts already present in the evidence pack or recent tail anchor.
+- Prefer short references over restating details the next agent can recover from the listed files or the archived history.
 - Durable session anchors are preserved verbatim outside your summary: do not restate them. Their standing constraints outrank the transcript when the two disagree; the latest user request, not their original request, decides the current objective. Under "User Constraints", list only constraints that are not already in the session anchors, or write "(none)".
 - If details are missing because earliest messages were omitted, say so explicitly instead of inventing facts.`
 
