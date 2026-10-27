@@ -525,6 +525,41 @@ func TestMainAgentResponseClosurePrompt_RequiresContinueUnlessBlocked(t *testing
 	}
 }
 
+// A completion report is only useful if it gets read: the closure block owns
+// the default length, the done tool's report structure owns the per-section
+// shape, and a structure the user or an active instruction demands outranks
+// both — so the length budget must never turn into withholding requested
+// content or dropping verification and limitations.
+func TestMainAgentResponseClosurePrompt_DefaultsToChangeSizedReport(t *testing.T) {
+	t.Parallel()
+	for _, doneVisible := range []bool{false, true} {
+		got := mainAgentResponseClosurePromptText(doneVisible)
+		for _, want := range []string{
+			"Lead with the outcome: the first sentence states what happened or the answer",
+			"Match the report length to the size of the change",
+			"a small single-area change takes 2-5 sentences or up to 3 bullets",
+			"a medium change up to 6 bullets",
+			"a large multi-file change one or two bullets per file",
+			"drop headings and tables unless they carry real structure",
+			"Compress by leaving content out instead of packing sentences",
+			"do not restate the plan or the steps already visible in tool cards",
+			"Never compress failing test output, error messages, security warnings",
+			"verification status, or unresolved limitations",
+			"wins over this default length",
+			"keep that structure and make each required section as short as it can be",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("response closure (doneVisible=%v) missing %q in %q", doneVisible, want, got)
+			}
+		}
+	}
+	// How a response ends lives in Response Closure alone: restating the budget
+	// in User Communication would give it a second source that can drift.
+	if strings.Contains(mainAgentCommunicationPrompt, "Match the report length to the size of the change") {
+		t.Fatalf("mainAgentCommunicationPrompt restates the closure length budget: %q", mainAgentCommunicationPrompt)
+	}
+}
+
 func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())

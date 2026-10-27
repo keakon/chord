@@ -134,6 +134,11 @@ func mainAgentResponseClosurePromptText(doneVisible bool) string {
 - Do not end responses with open-ended optional offers for routine in-scope next steps; if the next step is clearly necessary, low-risk, and within scope, do it yourself instead of offering it or asking the user to decide. This applies to equivalent wording in any language, not only the exact phrase "if you want, I can ..."
 - If blocked by missing information, missing permissions, or a meaningful risk/scope decision, ask exactly the necessary high-context question instead of pretending the task is complete
 - When the task is complete, clearly state completion, summarize the finished work, report verification status, and list remaining limitations or unverified areas
+- Lead with the outcome: the first sentence states what happened or the answer, with no preamble and no closing recap
+- Match the report length to the size of the change: a small single-area change takes 2-5 sentences or up to 3 bullets, a medium change up to 6 bullets, and a large multi-file change one or two bullets per file; drop headings and tables unless they carry real structure
+- Compress by leaving content out instead of packing sentences: name files and symbols instead of pasting code, and do not restate the plan or the steps already visible in tool cards
+- Never compress failing test output, error messages, security warnings, destructive-action confirmations, verification status, or unresolved limitations
+- An output structure that the user or an active instruction explicitly requires — a requested format, an AGENTS.md or skill template, or a mandated report schema — wins over this default length; keep that structure and make each required section as short as it can be
 ` + completionReportLine + `
 - After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation`
 }

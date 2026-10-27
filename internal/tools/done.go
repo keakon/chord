@@ -21,10 +21,16 @@ func NewDoneTool() DoneTool { return DoneTool{} }
 // completion report. It is interpolated into the done tool description, which
 // is the only place the contract is stated to the model: the loop-mode
 // instructions point at the tool instead of restating the sections.
+//
+// The trailing length rules belong here rather than in the system prompt's
+// Response Closure: a report that satisfies this structure by expanding every
+// section is still unreadable, and only the structure's own owner can say which
+// sections may stay short without dropping one.
 const CompletionReportStructure = "- **Completion status**: one line summary (e.g., 'All requested work is finished')\n" +
 	"- **What changed**: files modified, created, deleted or key actions taken\n" +
 	"- **Verification**: tests run and their results\n" +
-	"- **Remaining issues**: any limitations, unverified areas, or known issues"
+	"- **Remaining issues**: any limitations, unverified areas, or known issues\n" +
+	"Keep every section to one or two lines or bullets, and never drop a section to save space: 'Remaining issues: none' is a complete section. Lead with the status line, omit preambles and closing recaps, and reference files and symbols instead of pasting code or diffs."
 
 func (DoneTool) Name() string { return NameDone }
 

@@ -66,6 +66,24 @@ func TestDoneToolDescriptionTargetsActiveLoop(t *testing.T) {
 	}
 }
 
+// The four required sections are what the model expands; without a length rule
+// they come back as four paragraphs. The structure's own owner states that
+// sections stay short and that brevity never justifies dropping one.
+func TestDoneReportStructureKeepsSectionsShort(t *testing.T) {
+	desc := NewDoneTool().Description()
+	for _, want := range []string{
+		"Keep every section to one or two lines or bullets",
+		"never drop a section to save space",
+		"'Remaining issues: none' is a complete section",
+		"omit preambles and closing recaps",
+		"reference files and symbols instead of pasting code or diffs",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("Done description missing report length rule %q: %q", want, desc)
+		}
+	}
+}
+
 func TestDoneToolExecute(t *testing.T) {
 	tool := NewDoneTool()
 	ctx := context.Background()
