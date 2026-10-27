@@ -6,8 +6,22 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 )
+
+// mailboxInjectionPayloadMaxRunes bounds how much free-form payload text one
+// mailbox contributes to the owner's conversation. The structured summary and
+// metadata lines stay whole; only the bulk payload fields are cut, and the
+// marker states the cut. The injection text is also the durable row, so the
+// budget lives in this shared formatter instead of per delivery path.
+const mailboxInjectionPayloadMaxRunes = 2000
+
+// truncateMailboxPayloadText cuts one mailbox payload field to the injection
+// budget with an explicit truncation marker.
+func truncateMailboxPayloadText(s string) string {
+	return texttruncate.Runes(s, mailboxInjectionPayloadMaxRunes, "...(truncated)")
+}
 
 func (a *MainAgent) emitSubAgentMailboxUI(msg SubAgentMailboxMessage) {
 	if strings.TrimSpace(msg.AgentID) == "" {
@@ -132,11 +146,11 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 	summary := strings.TrimSpace(msg.Summary)
 	if payload := strings.TrimSpace(msg.Payload); payload != "" && payload != summary {
 		b.WriteString("\n- payload: ")
-		b.WriteString(msg.Payload)
+		b.WriteString(truncateMailboxPayloadText(payload))
 	}
 	if len(msg.MessagePayload) > 0 {
 		b.WriteString("\n- message_payload: ")
-		b.Write(msg.MessagePayload)
+		b.WriteString(truncateMailboxPayloadText(string(msg.MessagePayload)))
 	}
 	if len(msg.ArtifactRefs) > 0 {
 		b.WriteString("\n- artifact_refs:")

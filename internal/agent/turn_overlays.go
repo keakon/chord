@@ -21,6 +21,14 @@ const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or mo
 // and persisted because they are real owner-visible model input. Other runtime
 // hints remain request-scoped overlays.
 
+// systemReminderOverlayText wraps harness-injected user text in the
+// <system-reminder> marker the content-trust prompt defines, so every audience
+// — the main transcript and a SubAgent owner alike — can tell runtime messages
+// apart from user-authored ones. Callers must pass already-trimmed content.
+func systemReminderOverlayText(content string) string {
+	return "<system-reminder>\n" + content + "\n</system-reminder>"
+}
+
 // appendMailboxMessageToContext persists one pending mailbox message to the
 // durable conversation and reports the request overlay carrying it. It is the
 // shared body of the initial-request path (buildTurnOverlayMessages) and the
@@ -41,10 +49,13 @@ func (a *MainAgent) appendMailboxMessageToContext(mailbox *SubAgentMailboxMessag
 		if content == "" {
 			return message.Message{}, false
 		}
+		// Wrapped like every other harness injection: the durable row is a
+		// bare runtime fact, not user speech, and the trust prompt only
+		// recognizes the <system-reminder> marker.
 		msg := message.Message{
 			Role:    message.RoleUser,
 			Kind:    message.KindBackgroundResult,
-			Content: content,
+			Content: systemReminderOverlayText(content),
 			Mailbox: mailboxMetadata(mailbox),
 		}
 		id := strings.TrimSpace(mailbox.MessageID)
@@ -73,7 +84,7 @@ func (a *MainAgent) appendMailboxMessageToContext(mailbox *SubAgentMailboxMessag
 	if content == "" {
 		return message.Message{}, false
 	}
-	msg := subAgentMailboxConversationMessage(mailbox, "<system-reminder>\n"+content+"\n</system-reminder>")
+	msg := subAgentMailboxConversationMessage(mailbox, systemReminderOverlayText(content))
 	if id := strings.TrimSpace(mailbox.MessageID); id == "" || !mapContains(durableMailboxIDs, id) {
 		messageIndex := a.ctxMgr.MessageCount()
 		a.ctxMgr.Append(msg)
@@ -531,7 +542,6 @@ func (a *MainAgent) hasCoordinationTaskRecords() bool {
 	return len(a.subs.taskRecords) > 0
 }
 
-// conversationMailboxIDs collects the message IDs of the SubAgent mailbox
 // conversationMailboxIDs collects the message IDs of mailbox rows already
 // durable in the conversation (delivered on earlier requests). It also counts
 // a durable background result, which is stored as a KindBackgroundResult

@@ -110,7 +110,12 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	if owner == nil {
 		return false
 	}
-	text := formatSubAgentMailboxInjectionText(&msg)
+	// The owner receives the same <system-reminder>-wrapped injection text the
+	// main transcript uses (systemReminderOverlayText via
+	// appendMailboxMessageToContext): the content-trust prompt only recognizes
+	// that wrapper as the harness-message marker, and wrapping here keeps the
+	// pending user message and the durable context row on one identical text.
+	text := systemReminderOverlayText(formatSubAgentMailboxInjectionText(&msg))
 	reactivateLive := func(live *SubAgent, messageText string, statusMsg string, allowWakeBypass bool) bool {
 		input := pendingUserMessage{Content: messageText, MailboxAckID: strings.TrimSpace(msg.MessageID), Mailbox: mailboxMetadata(&msg)}
 		reservation := live.reserveUserMessage(input)
@@ -167,20 +172,22 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 			return true
 		})
 	}
-	// A background result reaches its owner as the raw KindBackgroundResult
-	// message the main transcript uses, not as a system-reminder mailbox
-	// notice, and it continues the owner's context without a user turn.
+	// A background result reaches its owner as the KindBackgroundResult message
+	// the main transcript uses — still not a mailbox notice, and it continues
+	// the owner's context without a user turn — wrapped in the same
+	// <system-reminder> harness marker as the main-side durable row.
 	enqueueBackgroundContext := func() bool {
 		return a.withRegisteredSubAgent(owner, func(live *SubAgent) bool {
+			content := strings.TrimSpace(msg.Summary)
+			if content == "" {
+				return false
+			}
 			contextMessage := message.Message{
 				Role:         message.RoleUser,
 				Kind:         message.KindBackgroundResult,
-				Content:      strings.TrimSpace(msg.Summary),
+				Content:      systemReminderOverlayText(content),
 				MailboxAckID: strings.TrimSpace(msg.MessageID),
 				Mailbox:      mailboxMetadata(&msg),
-			}
-			if contextMessage.Content == "" {
-				return false
 			}
 			if !live.TryEnqueueContextAppend(contextMessage) {
 				return false

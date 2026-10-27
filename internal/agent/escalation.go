@@ -22,8 +22,10 @@ const maxUnansweredSubAgentEscalations = 2
 // escalationBudgetExhaustedNotice is injected back to a worker whose escalation
 // the engine refused. The refusal must leave the task running and able to close
 // out on its own: the engine cannot declare the task blocked on the worker's
-// behalf, and terminating the blocked side would not unblock the owner.
-const escalationBudgetExhaustedNotice = "Escalation rejected: this task has already escalated its blocker more times than the engine allows without a reply. Do not escalate it again — make progress on what you can do independently, or close the task with complete and record the unanswered blocker in remaining_limitations."
+// behalf, and terminating the blocked side would not unblock the owner. This
+// notice is the only place that states the way out; the escalate tool result
+// itself carries the rejection cause only.
+const escalationBudgetExhaustedNotice = "Escalation rejected: this task has already escalated its blocker more times than the engine allows without a reply. Do not escalate it again — make progress on what you can do independently, or close the task with `" + tools.NameComplete + "` and record the unanswered blocker in `remaining_limitations`."
 
 // blockedEscalationError is the terminal outcome of an escalate call that
 // declared kind=blocked: the worker judged the attempt a dead end, so it closes
@@ -114,7 +116,14 @@ func (s *SubAgent) closeAsBlocked(callID, argsJSON, reason string) {
 		return
 	}
 	blocked := newBlockedEscalationError(reason)
-	s.appendControlToolResult(callID, tools.NameEscalate, argsJSON, "Escalation ended the task as blocked: "+blocked.Error(), message.ToolStatusError)
+	// blocked.Error() already opens with "escalated as blocked", so the tool
+	// result builds its sentence from the reason instead of prefixing that
+	// phrase a second time.
+	toolResult := "Escalation ended the task as blocked"
+	if blocked.reason != "" {
+		toolResult += ": " + blocked.reason
+	}
+	s.appendControlToolResult(callID, tools.NameEscalate, argsJSON, toolResult, message.ToolStatusError)
 	s.sendEvent(Event{Type: EventAgentError, Payload: blocked})
 }
 
@@ -134,7 +143,9 @@ func newEscalationRefusal(callID, argsJSON string) *escalationRefusal {
 	return &escalationRefusal{
 		callID:   callID,
 		argsJSON: argsJSON,
-		cause:    fmt.Errorf("the owner has left %d escalation(s) unanswered; make progress or close out with complete", maxUnansweredSubAgentEscalations),
+		// The tool result keeps the bare rejection cause; the way out (make
+		// progress or close out) is stated once, in the injected user notice.
+		cause: fmt.Errorf("the owner has left %d escalation(s) unanswered", maxUnansweredSubAgentEscalations),
 	}
 }
 

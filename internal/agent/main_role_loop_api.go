@@ -351,7 +351,10 @@ func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
 		"- " + target,
 	}
 	if a.loopState.MaxIterations > 0 {
-		sections = append(sections, fmt.Sprintf("Automatic Done interceptions: %d — %s", a.loopState.MaxIterations, loopBudgetMeaning))
+		// loopBudgetLines(0) renders the same "N of M (R remaining)" shape the
+		// continuation note uses, with nothing spent yet, so the anchor and the
+		// note cannot disagree about what the counter means.
+		sections = append(sections, a.loopBudgetLines(0)...)
 	} else {
 		sections = append(sections, "Automatic Done interceptions: unlimited")
 	}

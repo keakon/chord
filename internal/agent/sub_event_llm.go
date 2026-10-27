@@ -330,24 +330,24 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				ResultRef            *tools.ResultRef    `json:"result_ref,omitempty"`
 			}
 			if err := json.Unmarshal(tc.Args, &args); err != nil {
-				completeRejection = fmt.Errorf("invalid Complete args: %w", err)
+				completeRejection = fmt.Errorf("invalid %s args: %w", toolPromptName(tools.NameComplete), err)
 				taskCompleteCallID = tc.ID
 				break
 			}
 			if strings.TrimSpace(args.Summary) == "" {
-				completeRejection = fmt.Errorf("invalid Complete args: summary is required")
+				completeRejection = fmt.Errorf("invalid %s args: summary is required", toolPromptName(tools.NameComplete))
 				taskCompleteCallID = tc.ID
 				break
 			}
 			artifacts, err := tools.ValidateArtifactRefs(s.sessionDir, args.Artifacts)
 			if err != nil {
-				completeRejection = fmt.Errorf("invalid Complete args: %w", err)
+				completeRejection = fmt.Errorf("invalid %s args: %w", toolPromptName(tools.NameComplete), err)
 				taskCompleteCallID = tc.ID
 				break
 			}
 			resultType, result, resultRef, err := validateCompleteTypedResult(s.sessionDir, args.ResultType, args.Result, args.ResultRef)
 			if err != nil {
-				completeRejection = fmt.Errorf("invalid Complete args: %w", err)
+				completeRejection = fmt.Errorf("invalid %s args: %w", toolPromptName(tools.NameComplete), err)
 				taskCompleteCallID = tc.ID
 				// An incomplete typed-result group is the one rejection that
 				// leaves a usable delivery behind: everything except the group
@@ -405,11 +405,11 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		escalateArgsJSON = string(tc.Args)
 		var args tools.AgentRequestPayload
 		if err := json.Unmarshal(tc.Args, &args); err != nil {
-			escalateFailure = fmt.Errorf("invalid Escalate args: %w", err)
+			escalateFailure = fmt.Errorf("invalid %s args: %w", toolPromptName(tools.NameEscalate), err)
 			break
 		}
 		if err := args.Validate(); err != nil {
-			escalateFailure = fmt.Errorf("invalid Escalate args: %w", err)
+			escalateFailure = fmt.Errorf("invalid %s args: %w", toolPromptName(tools.NameEscalate), err)
 			break
 		}
 		if strings.TrimSpace(args.Kind) == tools.EscalateKindBlocked {
@@ -433,7 +433,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	if taskCompleteCallID != "" && escalateCallID != "" {
 		s.sendEvent(Event{
 			Type:    EventAgentError,
-			Payload: fmt.Errorf("invalid control mix: Complete and Escalate cannot appear in the same response"),
+			Payload: fmt.Errorf("invalid control mix: %s and %s cannot appear in the same response", toolPromptName(tools.NameComplete), toolPromptName(tools.NameEscalate)),
 		})
 		return
 	}

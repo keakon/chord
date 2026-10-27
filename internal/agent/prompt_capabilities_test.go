@@ -292,10 +292,11 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if bashDesc == "" {
 		t.Fatal("missing Shell tool definition")
 	}
-	for _, want := range []string{"If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts."} {
-		if !strings.Contains(bashDesc, want) {
-			t.Fatalf("missing %q in Shell description %q", want, bashDesc)
-		}
+	// The "do not simulate hidden tools" prohibition is owned by the File
+	// Inspection / File Modification Constraints blocks; the shell description
+	// keeps only the positive routing and must not restate it.
+	if strings.Contains(bashDesc, "shell is not a substitute for them") {
+		t.Fatalf("Shell description restates the shared simulation prohibition: %q", bashDesc)
 	}
 	// Discovery routing is owned by the shared Tool Selection block; the
 	// shell description must not restate it.
@@ -787,7 +788,7 @@ shell: allow
 	}
 	for _, want := range []string{
 		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
-		"`escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up",
+		"`escalate` and `notify` are unavailable in this role and plain assistant text does not reach the owner agent; if you cannot proceed independently, close the task with `complete` and record the blocker in `remaining_limitations`",
 		"Call `complete` when the task is done",
 		"Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains",
 		"continue instead of presenting routine next steps as optional follow-up for the owner agent",
@@ -831,7 +832,7 @@ shell: allow
 	got := s.buildSystemPrompt()
 	for _, want := range []string{
 		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
-		"`escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up",
+		"`escalate` and `notify` are unavailable in this role and plain assistant text does not reach the owner agent; if you cannot proceed independently, close the task with `complete` and record the blocker in `remaining_limitations`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("subagent prompt missing %q in %q", want, got)
@@ -897,7 +898,7 @@ edit:
 	if strings.Contains(mainBlock, "## Authorization & Decisions") {
 		t.Fatalf("main capability block should leave authorization to the confirmation section: %q", mainBlock)
 	}
-	if !strings.Contains(subBlock, "Use `question` only when the user must choose between materially different options; route other owner-agent decisions through your SubAgent Coordination section") {
+	if !strings.Contains(subBlock, "Use `question` only for product choices the end user must make; owner-agent decisions — permissions, scope, or next steps — go through the coordination tools named in your SubAgent Coordination section instead") {
 		t.Fatalf("sub capability block missing Question guidance: %q", subBlock)
 	}
 	if !strings.Contains(subBlock, "explain the limitation clearly in assistant text because `escalate` and `notify` are unavailable in this role") {
@@ -940,7 +941,7 @@ escalate: allow
 	visible = s.visibleToolNames()
 	_, authBlock, _ = strings.Cut(s.capabilityPromptBlock(visible), "## Authorization & Decisions")
 	authBlock, _, _ = strings.Cut(authBlock, "\n## ")
-	if strings.Contains(authBlock, "`escalate`") || !strings.Contains(authBlock, "route other owner-agent decisions through your SubAgent Coordination section") {
+	if strings.Contains(authBlock, "`escalate`") || !strings.Contains(authBlock, "go through the coordination tools named in your SubAgent Coordination section") {
 		t.Fatalf("authorization block must defer escalate routing to the coordination section, got %q", authBlock)
 	}
 	if coordination := subAgentCoordinationPromptText(visible); !strings.Contains(coordination, "`escalate`") {

@@ -23,9 +23,6 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 	if block := toolSelectionPromptBlock(visible); block != "" {
 		blocks = append(blocks, block)
 	}
-	if hasVisibleTool(visible, tools.NameGenerateImage) {
-		blocks = append(blocks, "## Image Generation\n"+tools.ImageGenerationUsageGuidance)
-	}
 	if block := shellExecutionBoundaryPromptBlock(visible, audience); block != "" {
 		blocks = append(blocks, block)
 	}
@@ -268,7 +265,12 @@ func authorizationAndDecisionsPromptBlock(visible map[string]struct{}, audience 
 	}
 	lines := []string{executionAuthorizationLine}
 	if hasVisibleTool(visible, tools.NameQuestion) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameQuestion)+" only when the user must choose between materially different options; route other owner-agent decisions through your SubAgent Coordination section.")
+		// The audience split: question reaches the end user directly, while the
+		// coordination tools reach the owner agent. Saying which decisions
+		// belong to whom keeps permission/scope/next-step requests from being
+		// pushed onto the end user and product tradeoffs from being surfaced
+		// through escalate or notify.
+		lines = append(lines, "- Use "+toolPromptName(tools.NameQuestion)+" only for product choices the end user must make; owner-agent decisions — permissions, scope, or next steps — go through the coordination tools named in your SubAgent Coordination section instead.")
 	}
 	return "## Authorization & Decisions\n" + strings.Join(lines, "\n")
 }

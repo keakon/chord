@@ -309,6 +309,10 @@ func (a *MainAgent) buildExecuteSystemPrompt(planPath string) string {
 	// machinery.
 
 	if hasTodoWrite {
+		// Rule 2 has a second source: the plan-execution bootstrap message
+		// (buildPlanExecutionBootstrapMessage via executionStartInstruction)
+		// states the same todo-initialisation step. Both render only for roles
+		// with todo_write, and neither replaces the other; keep them consistent.
 		fmt.Fprintf(&sb, `
 
 ## Execution Mode — Plan Execution

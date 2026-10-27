@@ -280,6 +280,35 @@ func TestCompactionRebuildPreservesBackgroundResultCardState(t *testing.T) {
 	}
 }
 
+// The durable background_result row keeps the <system-reminder> wrapper for
+// the model; the rebuilt card must parse the bare text and keep the wrapper
+// out of the copy content, matching the live event path.
+func TestCompactionRebuildStripsReminderWrapperFromBackgroundResults(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 24)
+	backend.messages = []message.Message{
+		{Role: "user", Kind: message.KindBackgroundResult, Content: message.SystemReminderOverlayText("[Background job job-3 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)"), Mailbox: &message.MailboxMetadata{MessageID: "mb-3"}},
+	}
+	m.rebuildViewportFromMessagesWithReason("session_restored")
+
+	var restored *Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockStatus && b.MailboxMessageID == "mb-3" {
+			restored = b
+			break
+		}
+	}
+	if restored == nil {
+		t.Fatal("rebuilt transcript lost the JOB RESULT card")
+	}
+	if !strings.Contains(restored.Content, "Run production build") {
+		t.Fatalf("rebuilt card Content = %q, want the parsed description", restored.Content)
+	}
+	if strings.Contains(restored.BackgroundCopyContent, message.SystemReminderOverlayOpen) {
+		t.Fatalf("rebuilt copy content carries the harness wrapper: %q", restored.BackgroundCopyContent)
+	}
+}
+
 // A background result whose headline is not the registry's "[Background job
 // <id> finished]" line derives no background object id from its content, so
 // the rebuild must fall back to the durable mailbox message id — the same

@@ -128,7 +128,7 @@ func TestCompleteToolDefinitionsFollowCoordinationVisibility(t *testing.T) {
 				}
 
 				prompt := s.buildSystemPrompt()
-				wantRoute := "explain the blocker clearly in assistant text and wait for owner follow-up"
+				wantRoute := "close the task with `complete` and record the blocker in `remaining_limitations`"
 				if escalate {
 					wantRoute = "Call `escalate` when owner-agent intervention"
 				} else if notify {
@@ -217,17 +217,15 @@ func TestToolSelectionOwnsVisibilityAwareNavigation(t *testing.T) {
 	}
 }
 
-func TestImageGuidanceFollowsVisibleTools(t *testing.T) {
+func TestImageGuidanceStaysInToolDescription(t *testing.T) {
+	// The image-generation prompt block was removed: the GenerateImage tool
+	// description carries the full usage guidance itself, so a prompt block
+	// would resend the same text on every request. The capability block must
+	// never reintroduce it.
 	for _, audience := range []capabilityPromptAudience{capabilityPromptAudienceMain, capabilityPromptAudienceSub} {
-		for _, visible := range []bool{true, false} {
-			names := map[string]struct{}{}
-			if visible {
-				names[tools.NameGenerateImage] = struct{}{}
-			}
-			block := buildDynamicCapabilityPromptBlock(names, nil, audience)
-			if strings.Contains(block, tools.ImageGenerationUsageGuidance) != visible {
-				t.Fatalf("audience=%d visible=%v block=%q", audience, visible, block)
-			}
+		block := buildDynamicCapabilityPromptBlock(map[string]struct{}{tools.NameGenerateImage: {}}, nil, audience)
+		if strings.Contains(block, "## Image Generation") || strings.Contains(block, tools.ImageGenerationUsageGuidance) {
+			t.Fatalf("audience=%d block still duplicates image guidance: %q", audience, block)
 		}
 	}
 }

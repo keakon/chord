@@ -181,11 +181,20 @@ func (a *MainAgent) loopExitRejectionToolResult() string {
 	return "Done rejected automatically: loop exit conditions are not satisfied yet: " + strings.Join(lines, "; ") + ". Finish the remaining work before calling `done` again."
 }
 
-func (a *MainAgent) loopExitInterceptLimitResult() string {
-	if a.loopState.MaxIterations > 0 {
-		return "Done requires user decision: automatic Done interception limit reached (" + strconv.Itoa(a.loopState.MaxIterations) + "). Approve exit or deny to continue."
+// loopExitDecisionRequiredText renders the shared interception-budget decision
+// sentence for the two surfaces that ask the user: the done tool result
+// ("Done") and the TUI notice ("Loop"). One template keeps the limit wording
+// from drifting between the tool result the model sees and the notice the user
+// sees.
+func loopExitDecisionRequiredText(subject string, maxIterations int) string {
+	if maxIterations > 0 {
+		return subject + " requires user decision: automatic Done interception limit reached (" + strconv.Itoa(maxIterations) + "). Approve exit or deny to continue."
 	}
-	return "Done requires user decision: automatic Done interception is disabled. Approve exit or deny to continue."
+	return subject + " requires user decision: automatic Done interception is disabled. Approve exit or deny to continue."
+}
+
+func (a *MainAgent) loopExitInterceptLimitResult() string {
+	return loopExitDecisionRequiredText("Done", a.loopState.MaxIterations)
 }
 
 func (a *MainAgent) awaitDoneConfirmation(ctx context.Context, reason, argsJSON, assistantContent string) (ConfirmResponse, error) {

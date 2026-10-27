@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -498,14 +499,16 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		// A finished background job's result is durable now, and this event is
 		// the only delivery channel for the JOB RESULT card: background output
 		// typically lands after the turn is idle, so no later
-		// assistant_message summarizes it.
+		// assistant_message summarizes it. The durable row keeps the
+		// <system-reminder> wrapper for the model; integrators receive the bare
+		// result text.
 		touch()
 		if state.isSubscribed("background_result") {
 			out = append(out, &headlessEnvelope{Type: "background_result", Payload: map[string]any{
 				"session_id":      state.sessionID,
 				"target_agent_id": e.TargetAgentID,
 				"message_index":   e.MessageIndex,
-				"content":         e.Message.Content,
+				"content":         message.StripSystemReminderOverlay(e.Message.Content),
 			}})
 		}
 	case agent.ContextNoticeEvent:

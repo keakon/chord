@@ -1570,7 +1570,11 @@ func subAgentCoordinationPromptText(visible map[string]struct{}) string {
 	} else if hasVisibleTool(visible, tools.NameNotify) {
 		lines = append(lines, "- "+toolPromptName(tools.NameEscalate)+" is unavailable in this role; use "+toolPromptName(tools.NameNotify)+" to surface blockers or owner-agent decisions when you cannot proceed independently")
 	} else {
-		lines = append(lines, "- "+toolPromptName(tools.NameEscalate)+" is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up")
+		// With neither control tool the worker still has a real exit: plain
+		// assistant text never reaches the owner, and a plain-text stop is
+		// bounced back by the pure-text termination interception, so the only
+		// route that closes the task is the always-registered complete call.
+		lines = append(lines, "- "+toolPromptName(tools.NameEscalate)+" and "+toolPromptName(tools.NameNotify)+" are unavailable in this role and plain assistant text does not reach the owner agent; if you cannot proceed independently, close the task with "+toolPromptName(tools.NameComplete)+" and record the blocker in `remaining_limitations` instead of waiting after plain text")
 	}
 	// complete needs no visibility branch: isSubAgentInternalTool keeps it out
 	// of ruleset filtering and every SubAgent registers it, so a worker can
@@ -1602,7 +1606,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 	// and points back at the coordination section instead.
 	visible := s.visibleToolNames()
 	if _, ok := visible[tools.NamePresent]; ok {
-		parts = append(parts, fileDeliveryPrompt)
+		parts = append(parts, fileDeliveryPrompt(capabilityPromptAudienceSub))
 	}
 	parts = append(parts, subAgentIdentityPrompt, sharedAgentValuesPrompt, subAgentCodingGuidelinesPrompt, sharedContentTrustPrompt, sharedReasoningDisciplinePrompt, subAgentCoordinationPromptText(visible), subAgentResponseClosurePrompt)
 	if s.customPrompt != "" {

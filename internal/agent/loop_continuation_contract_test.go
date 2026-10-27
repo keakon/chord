@@ -293,6 +293,10 @@ func TestLoopContinuationIncludesSubAgentRequirementWhenActiveSubAgents(t *testi
 func TestLoopAnchorIncludesIterationBudget(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
+	// A bounded budget renders the same "N of M (R remaining)" shape the
+	// continuation note uses; a fresh agent without a limit renders the
+	// unlimited line instead.
+	a.loopState.MaxIterations = 10
 	a.sendLoopAnchorFromCommand("finish current task")
 	msgs := a.ctxMgr.Snapshot()
 	var found *message.Message
@@ -305,7 +309,7 @@ func TestLoopAnchorIncludesIterationBudget(t *testing.T) {
 	if found == nil {
 		t.Fatal("expected persisted loop notice message")
 	}
-	if !strings.Contains(found.Content, "Automatic Done interceptions:") {
+	if !strings.Contains(found.Content, "Automatic Done interceptions 0 of 10 (10 remaining)") {
 		t.Fatalf("loop notice should contain iteration budget, got: %q", found.Content)
 	}
 }

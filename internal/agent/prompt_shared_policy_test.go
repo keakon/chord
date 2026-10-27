@@ -658,13 +658,33 @@ func TestMainAgentCommunicationPrompt_ReportsResultsNotBookkeeping(t *testing.T)
 }
 
 func TestFileDeliveryPromptRejectsEditedRepositoryFiles(t *testing.T) {
-	for _, want := range []string{
-		"Call present only when the user needs a file itself",
-		"Do not present repository source, tests, changelog, or configuration files merely because you edited them",
-		"a specific file the user explicitly asked to receive",
-	} {
-		if !strings.Contains(fileDeliveryPrompt, want) {
-			t.Fatalf("fileDeliveryPrompt missing %q in %q", want, fileDeliveryPrompt)
+	for _, audience := range []capabilityPromptAudience{capabilityPromptAudienceMain, capabilityPromptAudienceSub} {
+		got := fileDeliveryPrompt(audience)
+		for _, want := range []string{
+			"Call present only when the user needs a file itself",
+			"Do not present repository source, tests, changelog, or configuration files merely because you edited them",
+			"a specific file the user explicitly asked to receive",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("fileDeliveryPrompt(audience=%d) missing %q in %q", audience, want, got)
+			}
 		}
+	}
+}
+
+// The .chord/ share route follows the audience: the main agent routes through
+// its plan summary or handoff, while a SubAgent never registers handoff and
+// reports through its notify and complete coordination path.
+func TestFileDeliveryPromptShareRouteFollowsAudience(t *testing.T) {
+	main := fileDeliveryPrompt(capabilityPromptAudienceMain)
+	if !strings.Contains(main, "Share task notes and plan documents through the plan summary or handoff") {
+		t.Fatalf("main file delivery missing plan-summary/handoff route: %q", main)
+	}
+	sub := fileDeliveryPrompt(capabilityPromptAudienceSub)
+	if !strings.Contains(sub, "Share task notes and plan information through the notify and complete reports available in this role") {
+		t.Fatalf("sub file delivery missing notify/complete route: %q", sub)
+	}
+	if strings.Contains(sub, "handoff") {
+		t.Fatalf("sub file delivery must not name handoff, which a SubAgent never registers: %q", sub)
 	}
 }

@@ -696,6 +696,32 @@ func TestHeadlessBackgroundResultPush(t *testing.T) {
 	}
 }
 
+// The durable row keeps the <system-reminder> wrapper for the model; the
+// envelope integrators forward must carry the bare result text.
+func TestHeadlessBackgroundResultStripsReminderWrapper(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{"background_result": true}, sessionID: "sess-1"}
+
+	envs := filterHeadlessEvent(agent.BackgroundResultAppendedEvent{
+		Message: message.Message{
+			Role:    message.RoleUser,
+			Kind:    message.KindBackgroundResult,
+			Content: message.SystemReminderOverlayText("[Background job job-1 finished]\n\nStatus: completed (exit code 0)"),
+		},
+		TargetAgentID: "main",
+		MessageIndex:  7,
+	}, state)
+
+	env := findHeadlessEnvelope(envs, "background_result")
+	if env == nil {
+		t.Fatal("background_result envelope not emitted")
+	}
+	payload := headlessPayloadMap(t, env.Payload)
+	want := "[Background job job-1 finished]\n\nStatus: completed (exit code 0)"
+	if payload["content"] != want {
+		t.Errorf("content = %v, want the bare result text %q", payload["content"], want)
+	}
+}
+
 func TestHeadlessBackgroundResultRespectsSubscription(t *testing.T) {
 	state := &headlessState{subscriptions: map[string]bool{}}
 

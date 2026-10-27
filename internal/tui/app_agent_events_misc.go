@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tui/composer"
 )
 
@@ -256,7 +257,11 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if agentID == "main" {
 			agentID = ""
 		}
-		content, headlineID := formatBackgroundResultCardContent(evt.Message.Content, "", "", "", "")
+		// The durable row keeps the <system-reminder> wrapper for the model;
+		// the card and its copy content show the bare result text, matching the
+		// restore path.
+		raw := message.StripSystemReminderOverlay(evt.Message.Content)
+		content, headlineID := formatBackgroundResultCardContent(raw, "", "", "", "")
 		backgroundID := headlineID
 		if evt.Message.Mailbox != nil {
 			// The durable mailbox row identity is the card key. Re-delivery of
@@ -269,7 +274,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		if block, ok := m.findStatusBlockByBackgroundObject(backgroundID); ok {
 			block.Content = content
-			block.BackgroundCopyContent = evt.Message.Content
+			block.BackgroundCopyContent = raw
 			block.StatusTitle = backgroundResultCardTitle
 			block.AgentID = agentID
 			if evt.Message.Mailbox != nil {
@@ -280,7 +285,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.updateViewportBlock(block)
 			m.markBlockSettled(block)
 		} else {
-			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: content, BackgroundCopyContent: evt.Message.Content, AgentID: agentID, BackgroundObjectID: backgroundID, MsgIndex: evt.MessageIndex, Collapsed: true}
+			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: content, BackgroundCopyContent: raw, AgentID: agentID, BackgroundObjectID: backgroundID, MsgIndex: evt.MessageIndex, Collapsed: true}
 			if evt.Message.Mailbox != nil {
 				block.MailboxMessageID = strings.TrimSpace(evt.Message.Mailbox.MessageID)
 			}

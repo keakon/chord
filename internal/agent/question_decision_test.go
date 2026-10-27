@@ -15,7 +15,7 @@ func TestQuestionDecisionTextKeepsSelectionBoundariesAndDescriptions(t *testing.
 	}}
 	fact := QuestionFact{Operation: QuestionOpRevise, Updates: []QuestionSnapshot{{Item: item}}, Result: &tools.QuestionAnswer{QuestionID: "q-1", ResultID: "r-1", Outcome: tools.QuestionOutcomeAnswered, Selected: []string{"Copy, then open", "Copy, then open"}, SelectedIDs: []string{"second", "first"}}}
 	text := questionDecisionText(fact)
-	for _, want := range []string{"Question answer revised: Destinations", "Question: Where should the files go?", "Selected: Copy, then open\nDescription: Second destination\nSelected: Copy, then open\nDescription: First destination", `Selected option IDs: ["second","first"]`, "Question ID: q-1", "Result ID: r-1"} {
+	for _, want := range []string{"Question answer revised: Destinations", "Question: Where should the files go?", "Selected: Copy, then open (id=second)\nDescription: Second destination\nSelected: Copy, then open (id=first)\nDescription: First destination", `Selected option IDs: ["second","first"]`, "Question ID: q-1", "Result ID: r-1"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in %q", want, text)
 		}
@@ -44,7 +44,7 @@ func TestQuestionProjectionPreservesSelectedMeaningAfterCompaction(t *testing.T)
 	if len(projected) != 2 {
 		t.Fatalf("projections = %d", len(projected))
 	}
-	for i, want := range []string{"Selected: Use this\nDescription: Second destination", "Question answer revised: Destination"} {
+	for i, want := range []string{"Selected: Use this (id=second)\nDescription: Second destination", "Question answer revised: Destination"} {
 		if !strings.Contains(projected[i].Content, want) || !strings.Contains(projected[i].Content, item.Question) {
 			t.Fatalf("decision %d lost its meaning: %q", i, projected[i].Content)
 		}

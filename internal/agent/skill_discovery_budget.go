@@ -103,6 +103,10 @@ func buildSkillDiscoveryMessage(history []message.Message, view skillActivationV
 	if len(candidates) == 0 {
 		return nil
 	}
+	// The durable content carries the <system-reminder> wrapper; reserve its
+	// fixed length so the wrapped message stays within the same byte budget the
+	// bare body was measured against.
+	maxBytes -= len(systemReminderOverlayText(""))
 	descriptions := make(map[string]string)
 	for _, meta := range view.Catalog {
 		if meta != nil {
@@ -132,5 +136,10 @@ func buildSkillDiscoveryMessage(history []message.Message, view skillActivationV
 	}
 	record := &message.SkillDiscoveryRecord{TaskID: view.TaskID, CheckoutRoot: view.CheckoutRoot, ContextEpoch: epoch, Mode: mode, Skills: refs, Omitted: omitted}
 	record.ID = skillDiscoveryID(record)
-	return &message.Message{Role: message.RoleUser, Kind: message.KindSkillDiscovery, Content: content.String(), SkillDiscovery: record}
+	// The notice is harness-generated durable user content, so it carries the
+	// <system-reminder> wrapper the content-trust prompt defines; otherwise a
+	// replayed row would read as user speech. The body is trimmed first: the
+	// listing lines end in newlines, and a doubled newline at the wrapper seam
+	// would defeat the blank-line escape guard below it.
+	return &message.Message{Role: message.RoleUser, Kind: message.KindSkillDiscovery, Content: systemReminderOverlayText(strings.TrimSpace(content.String())), SkillDiscovery: record}
 }

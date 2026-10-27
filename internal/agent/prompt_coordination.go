@@ -117,6 +117,11 @@ func (a *MainAgent) hasDelegateWorkflowAccess() bool {
 }
 
 func (a *MainAgent) executionStartInstruction() string {
+	// The todo-bootstrap sentence has a second source: the "Execution Mode —
+	// Plan Execution" rules in buildExecuteSystemPrompt state it too whenever a
+	// role executes a plan with todo_write visible. Keep the two wordings
+	// consistent if either changes; the hasTodoWriteAccess gate below decides
+	// which variant each source renders.
 	if a.hasTodoWriteAccess() {
 		return "then execute the plan using the visible tools and coordination mechanisms available in this role. Initialise todos with " + toolPromptName(tools.NameTodoWrite) + ", begin with tasks that have no unmet dependencies, and keep the todo list aligned with real progress."
 	}

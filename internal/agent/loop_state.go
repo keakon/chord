@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -82,10 +81,9 @@ func (s *loopRuntimeState) enable() {
 	if s.State == "" {
 		s.State = LoopStateIdle
 	}
+	// A zero limit means unlimited (an explicitly set zero stays zero), so
+	// there is nothing to normalize; a negative limit falls back to the default.
 	if s.MaxIterations == 0 {
-		if s.MaxIterationsSet {
-			return
-		}
 		return
 	}
 	if s.MaxIterations < 0 {
@@ -130,7 +128,10 @@ func (s *loopRuntimeState) recordAutoExitIntercept() int {
 }
 
 func (a *MainAgent) markLoopExitDecisionRequired() {
-	message := fmt.Sprintf("Loop requires user decision: automatic Done interception limit reached (%d). Approve exit or deny to continue.", a.loopState.MaxIterations)
+	// The notice shares the done tool result's decision text (see
+	// loopExitDecisionRequiredText) so the model and the user read the same
+	// limit wording, differing only in the surface named.
+	message := loopExitDecisionRequiredText("Loop", a.loopState.MaxIterations)
 	a.emitToTUI(InfoEvent{Message: message})
 	a.emitToTUI(NotificationEvent{
 		Reason:  NotificationReasonUserInputRequired,

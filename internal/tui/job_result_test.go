@@ -80,6 +80,28 @@ func TestBackgroundResultAppendedEventAppendsDurableStatusBlock(t *testing.T) {
 	}
 }
 
+func TestBackgroundResultAppendedEventStripsReminderWrapper(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+
+	wrapped := message.SystemReminderOverlayText("[Background job job-5 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)")
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("builder-2", "subagent-5", wrapped)})
+
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("subagent-5")
+	if !ok {
+		t.Fatal("expected durable status block for background object result")
+	}
+	if !strings.Contains(block.Content, "Run production build") {
+		t.Fatalf("block.Content = %q, want the parsed description", block.Content)
+	}
+	if !strings.HasPrefix(block.BackgroundCopyContent, "[Background job job-5 finished]") || strings.Contains(block.BackgroundCopyContent, message.SystemReminderOverlayOpen) {
+		t.Fatalf("copy content = %q, want the bare result text without the harness wrapper", block.BackgroundCopyContent)
+	}
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.Contains(rendered, "system-reminder") {
+		t.Fatalf("rendered card carries the harness wrapper:\n%s", rendered)
+	}
+}
+
 func TestBackgroundResultAppendedEventRendersFailureInBodyUnderStableLabel(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
 

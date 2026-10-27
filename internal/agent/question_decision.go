@@ -49,7 +49,10 @@ func questionDecisionText(fact QuestionFact) string {
 		fmt.Fprintf(&b, "\nQuestion: %s", question)
 	}
 	for _, option := range result.SelectedOptions(item) {
-		fmt.Fprintf(&b, "\nSelected: %s", option.Label)
+		// The id travels on the line itself: labels may repeat, so pairing
+		// these lines with the trailing Selected option IDs array by order
+		// would not identify which option was chosen.
+		fmt.Fprintf(&b, "\nSelected: %s (id=%s)", option.Label, option.ID)
 		if option.Description != "" {
 			fmt.Fprintf(&b, "\nDescription: %s", option.Description)
 		}

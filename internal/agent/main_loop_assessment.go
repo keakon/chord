@@ -459,7 +459,7 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		reasons = a.currentLoopContinuationReasons()
 	}
 	sections := make([]string, 0, 10)
-	sections = append(sections, "<loop-continuation>", "Continue required.")
+	sections = append(sections, "Continue required.")
 
 	// Automatic Done interception budget. The counter already counts the
 	// rejection that produced this notice: autoRejectLoopExitAndContinue
@@ -538,7 +538,6 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 	if slices.Contains(reasons, "suspected_stall") {
 		instructionLines = append(instructionLines, "- No new progress was detected. Take the next concrete action within the requested scope: gather distinguishing evidence for analysis, implement or verify for coding, or report a real blocker. Do not repeat the same summary.")
 	}
-	instructionLines = append(instructionLines, "</loop-continuation>")
 	sections = append(sections, "", "Instruction:")
 	sections = append(sections, instructionLines...)
 

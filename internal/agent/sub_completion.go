@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // maxResultContractRecoveryAttempts bounds how many times a completion may be
@@ -89,7 +90,7 @@ func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error, de
 	}
 	if s.completionRecoveryBudgetAvailable() {
 		s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error(), message.ToolStatusError)
-		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with corrected, valid arguments.", cause)})
+		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call %s again with corrected, valid arguments.", cause, toolPromptName(tools.NameComplete))})
 		s.asyncCallLLMWithFlightMarked(s.turn)
 		return
 	}
@@ -131,7 +132,7 @@ func (s *SubAgent) rejectResultContractViolation(callID string, violation *Resul
 	}
 	if s.resultContractRecoveryBudgetAvailable() {
 		s.appendCompleteToolResult(callID, "Completion rejected: "+violation.Error(), message.ToolStatusError)
-		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with a result that satisfies the task's result contract.", violation)})
+		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call %s again with a result that satisfies the task's result contract.", violation, toolPromptName(tools.NameComplete))})
 		s.asyncCallLLMWithFlightMarked(s.turn)
 		return
 	}

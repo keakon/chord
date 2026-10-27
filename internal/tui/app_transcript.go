@@ -611,20 +611,10 @@ func contentOrPartsText(msg message.Message) string {
 
 // A durable context notice is persisted wrapped so the model reads it as a
 // system reminder, while the live ContextNoticeEvent carries the bare text.
-// Restore strips the wrapper so the rebuilt card matches what was shown live.
-const (
-	contextNoticeReminderOpen  = "<system-reminder>"
-	contextNoticeReminderClose = "</system-reminder>"
-)
-
-func stripContextNoticeReminder(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if !strings.HasPrefix(trimmed, contextNoticeReminderOpen) || !strings.HasSuffix(trimmed, contextNoticeReminderClose) {
-		return text
-	}
-	inner := strings.TrimSuffix(strings.TrimPrefix(trimmed, contextNoticeReminderOpen), contextNoticeReminderClose)
-	return strings.TrimSpace(inner)
-}
+// Restore strips the wrapper (message.StripSystemReminderOverlay) so the
+// rebuilt card matches what was shown live. Durable background-job results
+// keep the wrapper for the same reason and get the same strip when their
+// cards and copy content are rebuilt.
 
 func assistantThinkingBlocksForTranscript(msg message.Message) []message.ThinkingBlock {
 	if len(msg.ThinkingBlocks) > 0 {
@@ -792,7 +782,11 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 		switch msg.Role {
 		case "user":
 			if msg.Kind == message.KindBackgroundResult {
-				content, headlineID := formatBackgroundResultCardContent(msg.Content, "", "", "", "")
+				// The durable row keeps the <system-reminder> wrapper for the
+				// model; the rebuilt card and its copy content show the bare
+				// result text.
+				raw := message.StripSystemReminderOverlay(msg.Content)
+				content, headlineID := formatBackgroundResultCardContent(raw, "", "", "", "")
 				backgroundID := headlineID
 				mailboxMessageID := ""
 				if msg.Mailbox != nil {
@@ -810,7 +804,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					Type:                  BlockStatus,
 					StatusTitle:           backgroundResultCardTitle,
 					Content:               content,
-					BackgroundCopyContent: msg.Content,
+					BackgroundCopyContent: raw,
 					BackgroundObjectID:    backgroundID,
 					MailboxMessageID:      mailboxMessageID,
 					MsgIndex:              msgIdx,
@@ -868,7 +862,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					ID:          *nextID,
 					Type:        BlockStatus,
 					StatusTitle: lspFollowupCardTitle,
-					Content:     stripContextNoticeReminder(contentOrPartsText(msg)),
+					Content:     message.StripSystemReminderOverlay(contentOrPartsText(msg)),
 					MsgIndex:    msgIdx,
 					Collapsed:   true,
 				})
@@ -880,7 +874,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					ID:          *nextID,
 					Type:        BlockStatus,
 					StatusTitle: contextNoticeTitle(msg.NoticeLevel),
-					Content:     stripContextNoticeReminder(contentOrPartsText(msg)),
+					Content:     message.StripSystemReminderOverlay(contentOrPartsText(msg)),
 					MsgIndex:    msgIdx,
 					NoticeLevel: msg.NoticeLevel,
 					Collapsed:   true,

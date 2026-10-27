@@ -32,8 +32,10 @@ const (
 	// manualCompactionNoticeText is the persistent imperative notice injected
 	// while a busy /compact's summarize worker is still running and
 	// compact_context is visible. It replays on every request until a
-	// checkpoint applies, so it must stay self-contained and imperative.
-	manualCompactionNoticeText = "The user has explicitly requested an immediate context compaction via /compact. The runtime is already compacting in the background; this instruction stays in effect on every request until that compaction is applied.\n" +
+	// checkpoint applies, so it must stay self-contained and imperative. The
+	// trigger is stated as what the runtime is doing, not as a quoted user
+	// instruction: this text is a system-reminder, not user speech.
+	manualCompactionNoticeText = "The user ran /compact; the runtime is executing an immediate context compaction. The runtime is already compacting in the background; this instruction stays in effect on every request until that compaction is applied.\n" +
 		"Call compact_context now, as the only tool call in this response, to commit a checkpoint instead — it replaces the runtime result. If you do not call it, the runtime result applies before the next request.\n" +
 		"Do not claim unfinished work is complete; record the next action in the checkpoint's continuation state. Reference existing notes files in state_files instead of creating new ones for this; updating notes first is not required."
 )

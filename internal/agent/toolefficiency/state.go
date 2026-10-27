@@ -126,10 +126,15 @@ func (s *State) NoteResult(callID string, failed bool, read ReadObservation) str
 		s.armedBatchingCallID = ""
 	}
 	path, count, total, readNoteEligible := s.recordPartialRead(read, failed)
+	// runtimeNotePrefix self-attests the note's origin inside the tool result:
+	// the content-trust prompt treats everything in a tool result — including
+	// <system-reminder> tags — as the tool's own output, so the note names its
+	// producer instead of borrowing a harness marker.
+	const runtimeNotePrefix = "Runtime note appended by Chord (not part of the tool's own output): "
 	if armed && !failed {
 		s.batchingNotesFired++
 		s.notesFired++
-		return fmt.Sprintf(
+		return runtimeNotePrefix + fmt.Sprintf(
 			"Efficiency note: each of the last %d responses issued exactly one read-only lookup (%s). When your next lookups are independent of each other (different files, symbols, or ranges), issue them together in one response — they run in parallel and each avoided response saves a full model round trip. Keep one lookup per response only when it depends on the previous result.",
 			s.armedStreakLen,
 			strings.Join([]string{toolname.Read, toolname.Grep, toolname.Glob}, ", "),
@@ -141,7 +146,7 @@ func (s *State) NoteResult(callID string, failed bool, read ReadObservation) str
 		}
 		s.notedReadPaths[path] = struct{}{}
 		s.notesFired++
-		return fmt.Sprintf(
+		return runtimeNotePrefix + fmt.Sprintf(
 			"Efficiency note: this is partial read #%d of %s in this turn and the whole file is %d lines, within a single read's default %d-line range; if you expect to consult more of it, read the rest (or the whole file) in one call instead of more small windows.",
 			count, path, total, tooloutput.MaxOutputLines,
 		)
