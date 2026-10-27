@@ -15,7 +15,7 @@ GOPLS ?= gopls
 MODERNIZE_VERSION ?= v0.50.0
 MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
-.PHONY: ci preflight fmt fmt-check deps-check test test-fast test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check bench-tui clean
+.PHONY: ci preflight fmt fmt-check deps-check test test-fast test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check model-catalog-check bench-tui clean
 
 ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check
 
@@ -84,7 +84,13 @@ docs-examples-check:
 
 resource-scripts-check:
 	bash -n scripts/test_tmpdir.sh scripts/test_tmpdir_ownership.sh
+	bash -n scripts/check_model_catalog_update.sh
+	bash -n scripts/test_model_catalog_check.sh
 	bash scripts/test_tmpdir_ownership.sh
+	bash scripts/test_model_catalog_check.sh
+
+model-catalog-check:
+	./scripts/check_model_catalog_update.sh
 
 bench-tui:
 	./scripts/bench_tui_regression.sh

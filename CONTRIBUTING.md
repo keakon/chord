@@ -206,6 +206,14 @@ normal push and pull request CI uses only the offline fixture tests.
 local_path: ./catalog-checkout
 ```
 
+Pre-push checks a local chord-models checkout when one is present and prints a
+non-blocking reminder if it has a newer catalog tag than the embedded snapshot.
+The default location is a sibling `../chord-models`; set `CHORD_MODELS_DIR` for
+another path. A missing or unrelated checkout is ignored. The check only sees
+tags already fetched in that checkout, so fetch tags in chord-models to
+discover newer releases. Run `make model-catalog-check` at any time, or set
+`CHORD_SKIP_MODEL_CATALOG_CHECK=1` to silence the reminder.
+
 ## Performance-sensitive changes
 
 `./scripts/bench_tui_regression.sh` is the canonical validation entry point for TUI hot paths — it combines correctness tests, alloc guards, and the stable micro-benchmark set, and accepts two result files for a `benchstat` comparison:

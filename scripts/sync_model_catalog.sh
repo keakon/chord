@@ -6,6 +6,7 @@ set -euo pipefail
 # Usage:
 #   scripts/sync_model_catalog.sh <tag> [path-to-chord-models]
 #
+# The checkout defaults to $CHORD_MODELS_DIR, then ../chord-models.
 # The script pins the given revision, copies the four YAML source files into
 # internal/modelcatalog/data, records the pin in data/snapshot.yaml, and
 # regenerates the committed catalog.json. The golden test keeps the artifact
@@ -21,9 +22,9 @@ if [[ -z "$revision" ]]; then
   exit 1
 fi
 
-repo="${2:-$repo_root/../chord-models}"
+repo="${2:-${CHORD_MODELS_DIR:-$repo_root/../chord-models}}"
 if [[ ! -d "$repo/.git" ]]; then
-  echo "sync_model_catalog: no chord-models checkout at $repo; pass the path as the second argument" >&2
+  echo "sync_model_catalog: no chord-models checkout at $repo; pass the path as the second argument or set CHORD_MODELS_DIR" >&2
   exit 1
 fi
 
