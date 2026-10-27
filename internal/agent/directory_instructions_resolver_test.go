@@ -178,16 +178,37 @@ func TestDirectoryInstructionResolverFallbackAndSourcePermissions(t *testing.T) 
 		t.Fatal("fallback bypassed encoding block")
 	}
 }
-func TestDirectoryInstructionResolverRejectsExternalRuleSymlink(t *testing.T) {
+
+// A rule file symlinked to a shared source outside the checkout is the author's
+// own choice, so the rules load and are attributed to the scope holding the
+// link. The ruleset's read permission still governs the target.
+func TestDirectoryInstructionResolverFollowsExternalRuleSymlink(t *testing.T) {
 	r, root := newResolverFixture(t)
-	external := t.TempDir()
+	external, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeResolverRule(t, external, "external")
-	if err := os.Symlink(filepath.Join(external, "AGENTS.md"), filepath.Join(root, "AGENTS.md")); err != nil {
+	target := filepath.Join(external, "AGENTS.md")
+	if err := os.Symlink(target, filepath.Join(root, "AGENTS.md")); err != nil {
 		t.Fatal(err)
 	}
 	d := discoverResolverDirectory(t, r, root)
+	got := d.Observations["."]
+	if !d.Complete || got.Status != "present" || got.Body != "external" || got.SourcePath != target {
+		t.Fatalf("external rule symlink not followed: %+v complete=%v", got, d.Complete)
+	}
+	r2 := newDirectoryInstructionRuntime(context.Background(), r.binding)
+	t.Cleanup(r2.cancel)
+	r2.permissionCheck = func(_ context.Context, path string) error {
+		if path == target {
+			return fmt.Errorf("denied")
+		}
+		return nil
+	}
+	d = discoverResolverDirectory(t, r2, root)
 	if d.Complete || d.Observations["."].Reason != "permission" {
-		t.Fatal(d)
+		t.Fatalf("external target bypassed read permission: %+v", d.Observations["."])
 	}
 }
 func TestDirectoryInstructionResolverCapacityPreservesEarlierSnapshots(t *testing.T) {

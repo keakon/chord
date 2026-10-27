@@ -159,30 +159,33 @@ func (r *directoryInstructionRuntime) readInstructionFile(ctx context.Context, p
 			return directoryBlocked(real, message.DirectoryInstructionReasonPermission, err)
 		}
 	}
-	allowed := false
+	// A rule file may be a symlink to a shared source outside the checkout, such
+	// as a rules repository beside it: the author who created that link chose the
+	// content, so following it is the same trust decision as writing the rules in
+	// place. The target still has to pass the ruleset's read permission, be a
+	// regular file, and fit the size and encoding limits below. A link into a
+	// nested checkout stays off limits even when it is inside this one: those
+	// rules belong to another project.
 	for _, root := range []string{r.binding.CheckoutRoot, r.binding.ContentRoot} {
 		if root == r.binding.ContentRoot && !r.binding.FallbackAllowed && root != r.binding.CheckoutRoot {
 			continue
 		}
-		if _, ok := relativePathWithin(root, real); ok {
-			if real != path {
-				scopes, _ := instructionScopeChain(root, filepath.Dir(real))
-				for _, scope := range scopes[1:] {
-					_, err := os.Lstat(filepath.Join(root, filepath.FromSlash(scope), ".git"))
-					if err == nil {
-						return directoryBlocked(real, message.DirectoryInstructionReasonPermission, fmt.Errorf("rule source crosses a nested checkout: %s", real))
-					}
-					if !os.IsNotExist(err) {
-						return directoryBlocked(real, message.DirectoryInstructionReasonIO, err)
-					}
+		if _, ok := relativePathWithin(root, real); !ok {
+			continue
+		}
+		if real != path {
+			scopes, _ := instructionScopeChain(root, filepath.Dir(real))
+			for _, scope := range scopes[1:] {
+				_, err := os.Lstat(filepath.Join(root, filepath.FromSlash(scope), ".git"))
+				if err == nil {
+					return directoryBlocked(real, message.DirectoryInstructionReasonPermission, fmt.Errorf("rule source crosses a nested checkout: %s", real))
+				}
+				if !os.IsNotExist(err) {
+					return directoryBlocked(real, message.DirectoryInstructionReasonIO, err)
 				}
 			}
-			allowed = true
-			break
 		}
-	}
-	if !allowed {
-		return directoryBlocked(real, message.DirectoryInstructionReasonPermission, fmt.Errorf("rule source is outside the authorized project: %s", real))
+		break
 	}
 	f, err := pathutil.OpenCanonicalRegular(real)
 	if err != nil {

@@ -22,7 +22,6 @@ const (
 	DirectoryInstructionReasonEncoding    = "encoding"
 	DirectoryInstructionReasonSize        = "size"
 	DirectoryInstructionReasonInputBudget = "input_budget"
-	DirectoryInstructionReasonOutOfScope  = "out_of_scope"
 )
 
 type DirectoryInstructionFact struct {

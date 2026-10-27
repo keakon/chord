@@ -120,10 +120,10 @@ func TestDirectoryInstructionsUnreadableRuleDoesNotBlockWrite(t *testing.T) {
 	}
 }
 
-// A root AGENTS.md that resolves outside the checkout cannot be loaded. That is
-// a prompt-level fact only: tools keep running and sibling calls are not
-// cancelled.
-func TestDirectoryInstructionsExternalRuleSymlinkDoesNotCancelResponse(t *testing.T) {
+// A root AGENTS.md symlinked to a shared source outside the checkout loads from
+// that source, is attributed to the scope holding the link, and leaves the rest
+// of the response free to run.
+func TestDirectoryInstructionsExternalRuleSymlinkLoadsAndKeepsResponseOpen(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -165,8 +165,8 @@ func TestDirectoryInstructionsExternalRuleSymlinkDoesNotCancelResponse(t *testin
 	if read.DirectoryDiscovery == nil {
 		t.Fatal("read did not discover directory rules")
 	}
-	if o := read.DirectoryDiscovery.Observations["."]; o.Status != "blocked" || o.Reason != message.DirectoryInstructionReasonPermission {
-		t.Fatalf("external rule not recorded as blocked: %+v", read.DirectoryDiscovery.Observations)
+	if o := read.DirectoryDiscovery.Observations["."]; o.Status != "present" || o.Body != "shared rule" || o.SourcePath != shared {
+		t.Fatalf("external rule not loaded: %+v", read.DirectoryDiscovery.Observations)
 	}
 	write, err := p.execute(context.Background(), directoryCall("write", tools.NameWrite, map[string]string{"path": path, "content": "changed"}), false)
 	if err != nil || !write.ExecutionStarted {
