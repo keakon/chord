@@ -1172,18 +1172,23 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 func (b *Block) diffToolPathsWithTargets(targets []tools.ApplyPatchDisplayTarget) (displayPath, syntaxPath string) {
 	if toolNameKey(b.ToolName) == tools.NameApplyPatch {
 		if len(targets) == 0 {
-			paths := b.unparsedApplyPatchPaths()
-			if len(paths) == 0 {
+			// No per-file rows exist until the patch parses, so the header names
+			// the first operation and counts the rest.
+			targets = b.unparsedApplyPatchTargets()
+			if len(targets) == 0 {
 				return "", ""
 			}
-			return applyPatchPathSummary(b.displayToolPath(paths[0]), len(paths)), strings.TrimSpace(paths[0])
+			return b.applyPatchSummaryPath(targets), applyPatchTargetSyntaxPath(targets[0])
 		}
 		syntaxPath = applyPatchTargetSyntaxPath(targets[0])
-		marker, path := b.displayApplyPatchTarget(targets[0])
-		if marker == "D" {
-			path = marker + " " + path
+		if len(targets) > 1 {
+			// The body names every file — "↳ D path" / "↳ M path" rows for
+			// operations without a diff, one section header per diff — so the
+			// header stays a pure summary. Repeating the first target here also
+			// printed the same file count twice ("path +1 files · 2 files").
+			return "", syntaxPath
 		}
-		return applyPatchPathSummary(path, len(targets)), syntaxPath
+		return b.applyPatchSummaryPath(targets), syntaxPath
 	}
 	if b.ToolName == tools.NameEdit {
 		path := tools.ExtractEditPathFromArgs(json.RawMessage(b.Content))
@@ -1202,12 +1207,28 @@ func (b *Block) diffToolPathsWithTargets(targets []tools.ApplyPatchDisplayTarget
 	return path, path
 }
 
-// unparsedApplyPatchPaths resolves the file paths visible while the args cannot
-// yet be read as a complete apply_patch document: the explicit "paths" argument
-// when present, otherwise the markers in the still-streaming patch text.
-func (b *Block) unparsedApplyPatchPaths() []string {
+// applyPatchSummaryPath names a patch on one line: its first operation plus a
+// count of the rest. It is the only place the files are named wherever no body
+// lists them: a single-file header, the header of a patch that cannot be parsed
+// yet, and the message directory.
+func (b *Block) applyPatchSummaryPath(targets []tools.ApplyPatchDisplayTarget) string {
+	if len(targets) == 0 {
+		return ""
+	}
+	marker, path := b.displayApplyPatchTarget(targets[0])
+	if marker == "D" {
+		path = marker + " " + path
+	}
+	return applyPatchPathSummary(path, len(targets))
+}
+
+// unparsedApplyPatchTargets resolves the operations visible while the args
+// cannot yet be read as a complete apply_patch document: the explicit "paths"
+// argument when present, otherwise the markers in the still-streaming patch
+// text. Without a parsed document there are no line counts.
+func (b *Block) unparsedApplyPatchTargets() []tools.ApplyPatchDisplayTarget {
 	if strings.HasPrefix(strings.TrimSpace(b.Content), "*** ") {
-		return streamingApplyPatchFilePaths(b.Content)
+		return streamingApplyPatchTargets(b.Content)
 	}
 	var parsed struct {
 		Paths []string `json:"paths"`
@@ -1225,10 +1246,18 @@ func (b *Block) unparsedApplyPatchPaths() []string {
 		// the header target from the patch markers directly, so the header shows
 		// a real path while the patch is still arriving.
 		if patch := applyPatchStreamingPreview(b.Content); patch != "" {
-			paths = streamingApplyPatchFilePaths(patch)
+			return streamingApplyPatchTargets(patch)
+		}
+		return nil
+	}
+	// The "paths" argument names files without their operations.
+	targets := make([]tools.ApplyPatchDisplayTarget, 0, len(paths))
+	for _, path := range paths {
+		if path = strings.TrimSpace(path); path != "" {
+			targets = append(targets, tools.ApplyPatchDisplayTarget{Kind: tools.MutationUpdate, SourcePath: path})
 		}
 	}
-	return paths
+	return targets
 }
 
 // applyPatchTargetSyntaxPath picks the path whose content the diff shows: the
@@ -1240,28 +1269,54 @@ func applyPatchTargetSyntaxPath(target tools.ApplyPatchDisplayTarget) string {
 	return target.SourcePath
 }
 
-// streamingApplyPatchFilePaths returns the model-facing file paths mentioned in
+// streamingApplyPatchOperationMarkers are the begin markers that open a file
+// operation. "Move to" is not among them: it renames the update before it.
+var streamingApplyPatchOperationMarkers = []struct {
+	prefix string
+	kind   tools.MutationKind
+}{
+	{tools.ApplyPatchUpdateFileMarker, tools.MutationUpdate},
+	{tools.ApplyPatchAddFileMarker, tools.MutationAdd},
+	{tools.ApplyPatchDeleteFileMarker, tools.MutationDelete},
+}
+
+// streamingApplyPatchTargets returns the model-facing operations named in
 // still-streaming apply_patch text (freeform custom-tool input or an
 // in-progress JSON document). It scans begin markers so a live patch card keeps
 // a readable header target even when the strict ParseApplyPatch parser cannot
-// yet read an incomplete document.
-func streamingApplyPatchFilePaths(text string) []string {
-	markers := []string{
-		tools.ApplyPatchUpdateFileMarker,
-		tools.ApplyPatchAddFileMarker,
-		tools.ApplyPatchDeleteFileMarker,
-		tools.ApplyPatchMoveToMarker,
+// yet read an incomplete document. The list counts files the way the parsed
+// patch will: a "Move to" line becomes the destination of the update it
+// follows, and repeated plain updates of one file merge into one target.
+func streamingApplyPatchTargets(text string) []tools.ApplyPatchDisplayTarget {
+	var targets []tools.ApplyPatchDisplayTarget
+	// An operation is held until the next marker: only then is it known
+	// whether a "Move to" turns an update into a rename, which must not merge
+	// with a plain update of the same source.
+	var pending *tools.ApplyPatchDisplayTarget
+	flush := func() {
+		if pending != nil {
+			targets = tools.AppendApplyPatchDisplayTarget(targets, *pending)
+			pending = nil
+		}
 	}
-	var paths []string
 	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
-		for _, prefix := range markers {
-			if rest, ok := strings.CutPrefix(line, prefix); ok {
-				paths = append(paths, strings.TrimSpace(rest))
+		if rest, ok := strings.CutPrefix(line, tools.ApplyPatchMoveToMarker); ok {
+			if pending != nil && pending.Kind == tools.MutationUpdate {
+				pending.TargetPath = strings.TrimSpace(rest)
+			}
+			continue
+		}
+		for _, marker := range streamingApplyPatchOperationMarkers {
+			if rest, ok := strings.CutPrefix(line, marker.prefix); ok {
+				flush()
+				pending = &tools.ApplyPatchDisplayTarget{Kind: marker.kind, SourcePath: strings.TrimSpace(rest)}
+				break
 			}
 		}
 	}
-	return paths
+	flush()
+	return targets
 }
 
 func applyPatchPathSummary(path string, count int) string {

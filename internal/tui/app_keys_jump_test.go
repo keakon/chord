@@ -341,6 +341,10 @@ func TestToolCallSummaryIncludesPrimaryArg(t *testing.T) {
 		{"shell command", &Block{Type: BlockToolCall, ToolName: tools.NameShell, Content: `{"command":"go test ./internal/tui -count=1"}`}, "Tool: shell", "go test ./internal/tui -count=1"},
 		{"shell description", &Block{Type: BlockToolCall, ToolName: tools.NameShell, Content: `{"command":"true","description":"run the build"}`}, "Tool: shell", "run the build"},
 		{"edit path", &Block{Type: BlockToolCall, ToolName: tools.NameEdit, Content: `{"path":"internal/tui/app.go","old_string":"a","new_string":"b"}`}, "Tool: edit", "app.go"},
+		{"apply_patch single file", &Block{Type: BlockToolCall, ToolName: tools.NameApplyPatch, Content: `{"patch":"*** Begin Patch\n*** Delete File: tmp/old.txt\n*** End Patch"}`}, "Tool: apply_patch", "D tmp/old.txt"},
+		// The multi-file card header carries only counts because its body lists
+		// the files; the one-line summary has no body, so it keeps a path.
+		{"apply_patch multiple files", &Block{Type: BlockToolCall, ToolName: tools.NameApplyPatch, Content: `{"patch":"*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n@@\n-a\n+b\n*** Add File: docs/new.md\n+x\n*** End Patch"}`}, "Tool: apply_patch", "src/old.go → src/new.go +1 files"},
 		{"write path", &Block{Type: BlockToolCall, ToolName: tools.NameWrite, Content: `{"path":"notes.md","content":"x"}`}, "Tool: write", "notes.md"},
 		{"read path", &Block{Type: BlockToolCall, ToolName: tools.NameRead, Content: `{"path":"docs/usage.md"}`}, "Tool: read", "docs/usage.md"},
 		{"no args", &Block{Type: BlockToolCall, ToolName: tools.NameGrep, Content: `{}`}, "Tool: grep", ""},

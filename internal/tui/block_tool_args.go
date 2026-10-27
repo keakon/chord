@@ -709,9 +709,20 @@ func (b *Block) toolCallSummaryMainPart() string {
 		return sanitizeToolDisplayText(mainPart)
 	}
 	switch b.ToolName {
-	case tools.NameEdit, tools.NameApplyPatch:
+	case tools.NameEdit:
 		if path := strings.TrimSpace(b.diffToolFilePath()); path != "" {
-			return sanitizeToolDisplayText(b.displayToolPath(path))
+			return sanitizeToolDisplayText(path)
+		}
+	case tools.NameApplyPatch:
+		// The card header of a multi-file patch carries only counts because its
+		// body lists the files; a one-line summary has no body, so it keeps the
+		// first operation and the count of the rest.
+		targets := b.applyPatchTargets()
+		if len(targets) == 0 {
+			targets = b.unparsedApplyPatchTargets()
+		}
+		if path := b.applyPatchSummaryPath(targets); path != "" {
+			return sanitizeToolDisplayText(path)
 		}
 	case tools.NameWrite, tools.NameRead, tools.NameViewImage:
 		if path := strings.TrimSpace(vals["path"]); path != "" && path != "." {

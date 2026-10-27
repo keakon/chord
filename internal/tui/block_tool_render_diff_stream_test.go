@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -240,10 +241,10 @@ func streamingArgsApplyPatchTestBlock(patch string) *Block {
 }
 
 // TestStreamingApplyPatchHighlightsMultiFilePatch pins the lexer seed for a
-// live multi-file patch. The header shows a display summary ("path +1 files"),
-// and feeding that summary to lexerForFilePath resolves to no lexer at all,
-// which used to turn every preview line into plain text for the rest of the
-// stream.
+// live multi-file patch. A header display summary ("path +1 files", which the
+// card still uses while the args cannot be parsed into targets) resolves to no
+// lexer at all, so feeding it to lexerForFilePath used to turn every preview
+// line into plain text for the rest of the stream.
 func TestStreamingApplyPatchHighlightsMultiFilePatch(t *testing.T) {
 	patch := "*** Begin Patch\n" +
 		"*** Update File: internal/tools/jobs_tools.go\n" +
@@ -306,14 +307,11 @@ func TestDiffToolPathsSeparateDisplaySummaryFromLexerSeed(t *testing.T) {
 		"*** End Patch"
 	block := applyPatchStreamingTestBlock(multi)
 	display, syntaxPath := block.diffToolPathsWithTargets(block.applyPatchTargets())
-	if want := "src/demo.go +1 files"; display != want {
-		t.Fatalf("display path = %q, want %q", display, want)
+	if display != "" {
+		t.Fatalf("display path = %q, want no header path for a multi-file patch", display)
 	}
 	if want := "src/demo.go"; syntaxPath != want {
 		t.Fatalf("syntax path = %q, want %q", syntaxPath, want)
-	}
-	if syntax.New(display, "", "").Line("package main", "") != "package main" {
-		t.Fatal("a decorated display summary must not resolve to a lexer")
 	}
 	if syntax.New(syntaxPath, "", "").Line("package main", "") == "package main" {
 		t.Fatal("syntax path must resolve to a lexer")
@@ -349,6 +347,75 @@ func TestDiffToolPathsSeparateDisplaySummaryFromLexerSeed(t *testing.T) {
 	}
 	if want := "src/demo.go"; streamSyntax != want {
 		t.Fatalf("streaming syntax path = %q, want %q", streamSyntax, want)
+	}
+	if syntax.New(streamDisplay, "", "").Line("package main", "") != "package main" {
+		t.Fatal("a decorated display summary must not resolve to a lexer")
+	}
+}
+
+// A "Move to" line renames the update before it, and a patch may edit one file
+// in several plain Update sections. Counting either as more files made the live
+// header read "old +1 files" until the patch parsed and the count dropped.
+func TestStreamingApplyPatchHeaderCountsRenameOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name, patch, want string
+	}{
+		{
+			name:  "rename",
+			patch: "*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n@@\n-package old\n+package ne",
+			want:  "src/old.go → src/new.go",
+		},
+		{
+			name:  "rename then add",
+			patch: "*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n@@\n-a\n+b\n*** Add File: docs/new.md\n+# Ne",
+			want:  "src/old.go → src/new.go +1 files",
+		},
+		{
+			name:  "delete first",
+			patch: "*** Begin Patch\n*** Delete File: tmp/old.txt\n*** Add File: docs/new.md\n+# Ne",
+			want:  "D tmp/old.txt +1 files",
+		},
+		{
+			name:  "one file in several update sections",
+			patch: "*** Begin Patch\n*** Update File: src/app.go\n@@\n-a\n+b\n*** Update File: src/./app.go\n@@\n-c\n+d\n*** Update File: src/app.go\n@@\n-e\n+",
+			want:  "src/app.go",
+		},
+		{
+			name:  "rename does not merge with an update of its source",
+			patch: "*** Begin Patch\n*** Update File: src/app.go\n@@\n-a\n+b\n*** Update File: src/app.go\n*** Move to: src/new.go\n@@\n-c\n+",
+			want:  "src/app.go +1 files",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			block := streamingArgsApplyPatchTestBlock(tc.patch)
+			display, syntaxPath := block.diffToolPathsWithTargets(nil)
+			if display != tc.want {
+				t.Fatalf("streaming display path = %q, want %q", display, tc.want)
+			}
+			if strings.ContainsAny(syntaxPath, " →") {
+				t.Fatalf("syntax path = %q, want an undecorated path", syntaxPath)
+			}
+		})
+	}
+}
+
+// Once the patch is complete the header comes from the parsed targets; the
+// streaming count must already agree with it, so the header does not jump when
+// the last byte arrives.
+func TestStreamingApplyPatchFileCountMatchesParsedPatch(t *testing.T) {
+	for _, patch := range []string{
+		"*** Begin Patch\n*** Update File: src/app.go\n@@\n-a\n+b\n*** Update File: src/./app.go\n@@\n-c\n+d\n*** Add File: docs/new.md\n+x\n*** End Patch",
+		"*** Begin Patch\n*** Update File: src/app.go\n@@\n-a\n+b\n*** Update File: src/app.go\n*** Move to: src/new.go\n@@\n-c\n+d\n*** Update File: src/app.go\n@@\n-e\n+f\n*** End Patch",
+		"*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n*** Delete File: tmp/old.txt\n*** End Patch",
+	} {
+		args, _ := json.Marshal(map[string]string{"patch": patch})
+		parsed, err := tools.ApplyPatchDisplayTargets(args)
+		if err != nil {
+			t.Fatalf("ApplyPatchDisplayTargets: %v", err)
+		}
+		if streamed := streamingApplyPatchTargets(patch); len(streamed) != len(parsed) {
+			t.Fatalf("streaming counts %d files, parsed patch %d:\n%s", len(streamed), len(parsed), patch)
+		}
 	}
 }
 

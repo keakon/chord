@@ -502,19 +502,9 @@ func ApplyPatchDisplayTargets(raw json.RawMessage) ([]ApplyPatchDisplayTarget, e
 		return nil, err
 	}
 	targets := make([]ApplyPatchDisplayTarget, 0, len(doc.Operations))
-	plainUpdateIndexByPath := make(map[string]int)
 	for _, op := range doc.Operations {
 		added, removed := applyPatchOperationLineStats(op)
-		if op.Kind == MutationUpdate && op.MovePath == "" {
-			pathKey := filepath.Clean(strings.TrimSpace(op.Path))
-			if index, ok := plainUpdateIndexByPath[pathKey]; ok {
-				targets[index].Added += added
-				targets[index].Removed += removed
-				continue
-			}
-			plainUpdateIndexByPath[pathKey] = len(targets)
-		}
-		targets = append(targets, ApplyPatchDisplayTarget{
+		targets = AppendApplyPatchDisplayTarget(targets, ApplyPatchDisplayTarget{
 			Kind:       op.Kind,
 			SourcePath: op.Path,
 			TargetPath: op.MovePath,
@@ -523,6 +513,29 @@ func ApplyPatchDisplayTargets(raw json.RawMessage) ([]ApplyPatchDisplayTarget, e
 		})
 	}
 	return targets, nil
+}
+
+// AppendApplyPatchDisplayTarget appends one operation to a display list. A
+// patch may split its edits to one file over several plain Update sections; the
+// display shows that file once, with the line counts summed. Displays built
+// from still-streaming patch text append through here too, so a live card
+// counts the same files the parsed patch will.
+func AppendApplyPatchDisplayTarget(targets []ApplyPatchDisplayTarget, target ApplyPatchDisplayTarget) []ApplyPatchDisplayTarget {
+	if isPlainApplyPatchUpdate(target) {
+		key := filepath.Clean(strings.TrimSpace(target.SourcePath))
+		for i := range targets {
+			if isPlainApplyPatchUpdate(targets[i]) && filepath.Clean(strings.TrimSpace(targets[i].SourcePath)) == key {
+				targets[i].Added += target.Added
+				targets[i].Removed += target.Removed
+				return targets
+			}
+		}
+	}
+	return append(targets, target)
+}
+
+func isPlainApplyPatchUpdate(target ApplyPatchDisplayTarget) bool {
+	return target.Kind == MutationUpdate && target.TargetPath == ""
 }
 
 func applyPatchOperationLineStats(op applyPatchOperation) (added, removed int) {

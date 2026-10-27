@@ -110,7 +110,7 @@ func TestApplyPatchToolCardSummarizesMultiplePaths(t *testing.T) {
 	block := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch, Content: applyPatchToolDisplayArgs(string(args)), RawArgs: string(args)}
 	plain := terminaltext.StripANSI(strings.Join(block.Render(120, "●"), "\n"))
 	for _, want := range []string{
-		"apply_patch src/old.go → src/new.go +2 files",
+		"apply_patch 3 files",
 		"↳ Targets:",
 		"R src/old.go → src/new.go",
 		"A docs/new.md",
@@ -118,6 +118,13 @@ func TestApplyPatchToolCardSummarizesMultiplePaths(t *testing.T) {
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected multi-file apply_patch display to contain %q, got:\n%s", want, plain)
+		}
+	}
+	// The Targets rows name every file, so the header keeps only the count: it
+	// used to repeat the first target and print the file count twice.
+	for _, unwanted := range []string{"src/old.go → src/new.go +2 files", "apply_patch src/old.go"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected multi-file header to drop %q, got:\n%s", unwanted, plain)
 		}
 	}
 }
@@ -268,7 +275,7 @@ func TestApplyPatchMultiFileRowsRelativizeAbsoluteTargets(t *testing.T) {
 	}
 
 	plain := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
-	if !strings.Contains(plain, "· 2 files · +1 -3 lines") {
+	if !strings.Contains(plain, "✓ apply_patch 2 files · +1 -3 lines") {
 		t.Fatalf("expected the header to count the hidden delete section, got:\n%s", plain)
 	}
 	for _, want := range []string{"↳ D .chord/notes/old.sh", "↳ M .chord/notes/keep.sh", "+new"} {
