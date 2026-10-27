@@ -319,7 +319,6 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	parts = append(parts,
 		"When one visible built-in tool can do the job directly, use it instead of simulating it in shell.",
 		"For native filesystem operations with no dedicated built-in tool, shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
-		"If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.",
 	)
 	if line := shellFileDeletionHint(visible); line != "" {
 		parts = append(parts, line)

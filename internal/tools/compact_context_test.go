@@ -478,9 +478,14 @@ func TestCompactContextClaimEvidenceAcceptsStandaloneClaim(t *testing.T) {
 }
 
 func TestCompactContextDescriptionDoesNotTreatPlannedFilesAsExternalized(t *testing.T) {
-	description := NewCompactContextTool(testCompactValidator()).Description()
-	if !strings.Contains(description, "planned_state_files") || !strings.Contains(description, "do not externalize state") {
-		t.Fatalf("description must distinguish planned files from externalized state: %q", description)
+	properties := NewCompactContextTool(testCompactValidator()).Parameters()["properties"].(map[string]any)
+	planned, ok := properties["planned_state_files"].(map[string]any)
+	if !ok {
+		t.Fatal("Parameters() must declare planned_state_files")
+	}
+	desc, _ := planned["description"].(string)
+	if !strings.Contains(desc, "do not externalize state") {
+		t.Fatalf("planned_state_files schema must distinguish planned files from externalized state: %q", desc)
 	}
 }
 
@@ -493,7 +498,7 @@ func TestCompactContextDescriptionExplainsPressureAwareSafeStops(t *testing.T) {
 		"stage remains active or candidate",
 		"task is complete and only the final response remains",
 		"A checkpoint never completes the task or replaces the final response",
-		"use the normal question or waiting mechanism",
+		"deliver the question to the user and wait",
 		"A terminal TODO state alone is not a reason to checkpoint",
 		"Without context pressure, finish a remaining commit, handoff, or final response directly",
 		"under pressure, preserve a safe continuation even near completion",
@@ -563,7 +568,6 @@ func TestCompactContextStatesWhenStateFilesMayBeEmpty(t *testing.T) {
 		"When recovery state is genuinely small or file writing is unavailable",
 		"bring the task-notes file described under Long-session context management up to date and register it in state_files",
 		"keep those details in the notes instead of duplicating them in the handoff",
-		"write that file before submitting the checkpoint",
 	} {
 		if !strings.Contains(description, want) {
 			t.Fatalf("description must mention %q, got:\n%s", want, description)
@@ -590,7 +594,7 @@ func TestCompactContextStatesWhenStateFilesMayBeEmpty(t *testing.T) {
 		t.Fatal("Parameters() must declare state_files")
 	}
 	schema, _ := stateFiles["description"].(string)
-	for _, want := range []string{"Leave empty when structured arguments carry the state", "never reads them and never verifies that they exist", "current read permission allows it"} {
+	for _, want := range []string{"Leave empty when structured arguments carry the state", "never reads them and never verifies that they exist", "current read permission allows it", "a referenced file must be written before the checkpoint is submitted"} {
 		if !strings.Contains(schema, want) {
 			t.Fatalf("state_files schema must mention %q, got:\n%s", want, schema)
 		}
@@ -827,6 +831,9 @@ func TestCompactContextRejectsNonEvidenceIDReferences(t *testing.T) {
 // claim_evidence/evidence_refs is the observed first-attempt failure, and the
 // [evidence:ev-...] rendering lives only in the summarization prompt, so
 // pointing the main model at it sends it looking for an ID it cannot find.
+// The full rule (stand-in prohibition plus fallback classification) has one
+// home in evidence_refs; claim_evidence and claim_kinds point at it while
+// still requiring conversation-visible IDs at their own point of use.
 func TestCompactContextEvidenceParamsStateVisibleIDContract(t *testing.T) {
 	properties := NewCompactContextTool(testCompactValidator()).Parameters()["properties"].(map[string]any)
 	for _, field := range []string{"claim_evidence", "claim_kinds", "evidence_refs"} {
@@ -841,10 +848,14 @@ func TestCompactContextEvidenceParamsStateVisibleIDContract(t *testing.T) {
 			t.Errorf("%s description must not point at the summarization-only [evidence:...] rendering, got: %q", field, desc)
 		}
 	}
-	claimEvidence, _ := properties["claim_evidence"].(map[string]any)["description"].(string)
-	for _, want := range []string{"File paths", "are not evidence IDs", "claim kinds", "derived or assumed"} {
-		if !strings.Contains(claimEvidence, want) {
-			t.Errorf("claim_evidence description must forbid stand-in values and name the fallback, missing %q in: %q", want, claimEvidence)
+	evidenceRefs, _ := properties["evidence_refs"].(map[string]any)["description"].(string)
+	for _, want := range []string{"File paths", "are not evidence IDs", "claim kinds", "derived, assumed or proposed"} {
+		if !strings.Contains(evidenceRefs, want) {
+			t.Errorf("evidence_refs description must forbid stand-in values and name the fallback, missing %q in: %q", want, evidenceRefs)
 		}
+	}
+	claimEvidence, _ := properties["claim_evidence"].(map[string]any)["description"].(string)
+	if !strings.Contains(claimEvidence, "evidence rule under evidence_refs") {
+		t.Errorf("claim_evidence description must point at the single evidence rule, got: %q", claimEvidence)
 	}
 }

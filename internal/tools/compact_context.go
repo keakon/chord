@@ -543,20 +543,20 @@ func (t CompactContextTool) Description() string {
 		todoSync = "Before requesting, sync drifted entries with todo_write: the checkpoint snapshots runtime todos verbatim.\n"
 	}
 	// Timing and preparation under pressure are repeated by the context
-	// reminder when it fires, and each evidence rule is restated by the
-	// rejection that enforces it, so this always-sent text keeps only the call
+	// reminder when it fires, each evidence rule is restated by the rejection
+	// that enforces it, and every field-level rule lives in the matching
+	// parameter description, so this always-sent text keeps only the call
 	// contract.
 	return "Request a durable context checkpoint: the runtime rewrites session history from these arguments plus runtime facts and continues the same turn. It is a costed state transition, not a routine progress save. A checkpoint never completes the task or replaces the final response.\n" +
-		"Do not call it when the task is complete and only the final response remains, or to wait for input (use the normal question or waiting mechanism). A terminal TODO state alone is not a reason to checkpoint. Without context pressure, finish a remaining commit, handoff, or final response directly instead of checkpointing solely for closure; under pressure, preserve a safe continuation even near completion. " +
+		"Do not call it when the task is complete and only the final response remains, or to wait for input (deliver the question to the user and wait). A terminal TODO state alone is not a reason to checkpoint. Without context pressure, finish a remaining commit, handoff, or final response directly instead of checkpointing solely for closure; under pressure, preserve a safe continuation even near completion. " +
 		"Call it alone (no sibling tool calls) at a safe stop after the current atomic operation. Under context pressure, a provisional checkpoint is expected even if the stage remains active or candidate.\n" +
-		"Only active_objective and next_step are required. Report new progress and changed decisions; earlier entries carry forward until named in retired_items. Set open_issues_complete=true only when open_issues is a complete current issue list; otherwise omitted earlier issues remain current. Evidence and stage fields are optional. Label unverified assumptions explicitly, including carried decisions; do not turn them into requirements or omit unfinished work on their basis. Keep structured fields a concise handoff: objective, verified progress, current blockers, next action, and the relevant notes section to read. " +
-		"Use the schema's exact types: list fields are string arrays, claim_evidence and claim_kinds are objects, and decisions has at most 8 items; never encode an object or array as a JSON string.\n" +
-		"Before checkpointing a long task with reusable investigation or verification details, bring the task-notes file described under Long-session context management up to date and register it in state_files; keep those details in the notes instead of duplicating them in the handoff. When recovery state is genuinely small or file writing is unavailable, carry it fully in structured arguments and leave state_files empty. A referenced file must exist: write that file before submitting the checkpoint. planned_state_files name future paths and do not externalize state.\n" +
-		"The runtime records observed file mutations, shell tool outcomes, the todo snapshot and build-time repository state in bounded historical sections. Newer runtime state and tool results take precedence. Keep your fields for semantic progress, decisions, open questions and next steps rather than restating those mechanical facts.\n" +
+		"Only active_objective and next_step are required; every other field is optional. Report new progress and changed decisions, and keep the structured fields a concise handoff: objective, verified progress, current blockers, next action, and the relevant notes section to read. Use the schema's exact JSON types; never encode an object or array as a JSON string.\n" +
+		"The runtime records observed file mutations, shell tool outcomes, the todo snapshot and build-time repository state in bounded historical sections, where newer runtime state and tool results take precedence. Keep your fields for semantic progress, decisions, open questions and next steps rather than restating those mechanical facts.\n" +
+		"Before checkpointing a long task with reusable investigation or verification details, bring the task-notes file described under Long-session context management up to date and register it in state_files; keep those details in the notes instead of duplicating them in the handoff. When recovery state is genuinely small or file writing is unavailable, carry it fully in structured arguments and leave state_files empty.\n" +
 		todoSync +
 		"Acceptance is not application: a later model-driven [Context Summary] checkpoint confirms the reset was applied. A skip is a normal policy result, not an error: continue the work or deliver the final response.\n" +
 		budget +
-		"For evidence, copy only complete visible ev- IDs; without one, omit evidence fields and classify claims as derived, assumed or proposed. If the arguments are rejected, fix the reported problem and retry; re-submitting the same values cannot succeed, and splitting the checkpoint cannot work."
+		"If the arguments are rejected, fix the reported problem and retry; re-submitting the same values cannot succeed, and splitting the checkpoint cannot work."
 }
 
 func (CompactContextTool) Parameters() map[string]any {
@@ -578,7 +578,7 @@ func (CompactContextTool) Parameters() map[string]any {
 				"type":        "array",
 				"maxItems":    8,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Important decisions, each one plain string with an optional one-line reason (not an object).",
+				"description": "Important decisions, each one plain string with an optional one-line reason (not an object); at most 8 items.",
 			},
 			"open_issues": map[string]any{
 				"type":        "array",
@@ -601,26 +601,33 @@ func (CompactContextTool) Parameters() map[string]any {
 				"description": "Exact text of earlier completed, decision, open issue or claim entries that are resolved or superseded. Retiring only clears the entries it names: it never removes runtime facts or user instructions, and an entry that matches nothing is harmless. Omission alone never deletes an entry.",
 			},
 			"state_files": map[string]any{
-				"type":        "array",
-				"maxItems":    16,
-				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Existing files inside the project carrying recovery state. The tool never reads them and never verifies that they exist; after the reset a bounded head may be injected when the current read permission allows it, so keep the head self-contained. Refresh the files you rely on before referencing their contents. Leave empty when structured arguments carry the state.",
+				"type":     "array",
+				"maxItems": 16,
+				"items":    map[string]any{"type": "string", "minLength": 1},
+				// The existence wording here is the single home for the rule:
+				// the runtime does not verify references, but every referenced
+				// file must be written before the checkpoint is submitted.
+				"description": "Existing files inside the project carrying recovery state. The tool never reads them and never verifies that they exist; a referenced file must be written before the checkpoint is submitted. Refresh the files you rely on before referencing their contents. After the reset a bounded head may be injected when the current read permission allows it, so keep the head self-contained. Leave empty when structured arguments carry the state.",
 			},
 			"planned_state_files": map[string]any{
 				"type": "array", "maxItems": 16,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Project paths planned for future state; not evidence that a file exists or that work is complete.",
+				"description": "Project paths planned for future state; they do not externalize state and are not evidence that a file exists or that work is complete.",
 			},
 			"evidence_refs": map[string]any{
 				"type": "array", "maxItems": 24,
-				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Evidence IDs (ev- plus 12 hex characters) copied verbatim from Evidence ID lines visible in this conversation; leave empty when none is visible. IDs in claim_evidence are automatically included in evidence_refs.",
+				"items": map[string]any{"type": "string", "minLength": 1},
+				// The evidence rule (copy only visible ev- IDs; without one,
+				// omit evidence fields and classify as derived/assumed/
+				// proposed) is stated here once; claim_evidence and claim_kinds
+				// only point at it.
+				"description": "Evidence IDs (ev- plus 12 hex characters) copied verbatim from Evidence ID lines visible in this conversation. File paths, tool names, descriptions and claim kinds are not evidence IDs; copy only complete visible IDs, and with none visible, omit the evidence fields and classify the claims as derived, assumed or proposed. IDs in claim_evidence are automatically included in evidence_refs.",
 			},
 			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
 			"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "State of this work stage, not of the whole request."},
 			"checkpoint_kind": map[string]any{"type": "string", "enum": compactContextCheckpointKinds, "description": "provisional reduces context; committed also requires stage_status=completed and an evidence_refs entry."},
-			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps a natural-language claim to the evidence IDs visible in this conversation that support it. File paths, tool names, descriptions and claim kinds are not evidence IDs; with no visible ID, omit the claim here and classify it derived or assumed. These IDs are automatically included in evidence_refs."},
-			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies a claim; observed needs an evidence ID visible in this conversation in claim_evidence, otherwise use derived, assumed or proposed."},
+			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps a natural-language claim to the evidence IDs visible in this conversation that support it, following the evidence rule under evidence_refs. These IDs are automatically included in evidence_refs."},
+			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies a claim; observed requires an evidence ID visible in this conversation in claim_evidence (see the evidence rule under evidence_refs), otherwise use derived, assumed or proposed. Label unverified assumptions explicitly, including carried decisions; do not turn them into requirements or omit unfinished work on their basis."},
 		},
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,

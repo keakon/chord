@@ -35,8 +35,14 @@ type skillArgs struct {
 
 func (SkillTool) Name() string { return NameSkill }
 
+// skillToolLoadContract is the tool's load contract and the first sentence of
+// its full description. The short Description() and DescriptionForTools share
+// this constant so the tool_search index (which reads the short text) and the
+// model-visible long text cannot drift apart.
+const skillToolLoadContract = "Load a skill's full instructions on demand when a task clearly matches an available skill."
+
 func (SkillTool) Description() string {
-	return "Load a skill's full instructions on demand when a task matches an available skill."
+	return skillToolLoadContract
 }
 
 // Listing budget constants for the Available Skills section.  The section
@@ -121,7 +127,7 @@ func BuildStartupSkillListing(entries []SkillListingEntry, header string) string
 
 func (t SkillTool) DescriptionForTools(_ map[string]struct{}) string {
 	base := []string{
-		"Load a skill's full instructions on demand when a task clearly matches an available skill.",
+		skillToolLoadContract,
 		"The loaded result includes the skill body plus the skill root directory so relative `scripts/`, `references/`, and `assets/` paths are unambiguous.",
 		"Relative paths mentioned by a skill should be interpreted relative to the reported `<root>` directory.",
 	}

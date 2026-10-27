@@ -6,12 +6,14 @@ import (
 	"github.com/keakon/chord/internal/imagegen"
 )
 
-// ImageGenerationUsageGuidance is shared by the tool and visibility-aware prompt.
+// ImageGenerationUsageGuidance owns the model-facing usage rules for image
+// generation; the tool description is its only consumer, so the rules are
+// stated once per request instead of being duplicated into a prompt block.
 const ImageGenerationUsageGuidance = "When generate_image appears in the actual request's tool declarations, use it to fulfill image generation or editing requests. This configured image service is independent of the conversation model; do not invent temporary-chat or image-capability restrictions. Omit optional size, quality, aspect_ratio, background and output_format unless required by the user. All supplied options must be supported by one target. Eligible targets and API keys are tried internally. Successful results automatically include an image preview for image-capable conversation models; do not call a tool again just to view or confirm it. Text-only models receive saved file references and must not claim visual inspection. Chord completes downloads and saving internally, including bounded retries of temporary delivery errors. If an image was generated but delivery could not finish, report that distinction; do not issue a new generation request. Never retry an outcome_unknown; remote execution and billing are unconfirmed. After a quota, credential or all-keys-cooling failure, report the actionable reason or retry timing; do not use shell sleep or repeatedly regenerate."
 
 func (t *GenerateImageTool) Description() string {
 	var description strings.Builder
-	description.WriteString(ImageGenerationUsageGuidance + " Generate one image or edit explicitly named reference images using the configured image service. Requires a specific prompt. Originals are saved as session artifacts; optional output_path publishes a workspace copy without overwriting. Only implemented target parameters are accepted. An outcome_unknown means the paid request may have executed: do not retry generation or switch services. Use view_image only when an additional saved image needs inspection.")
+	description.WriteString(ImageGenerationUsageGuidance + " Generate one image or edit explicitly named reference images using the configured image service. Requires a specific prompt. Originals are saved as session artifacts; optional output_path publishes a workspace copy without overwriting. Only implemented target parameters are accepted. An outcome_unknown means the paid request may have executed: do not retry generation or switch services. When view_image is available, use it only when an additional saved image needs inspection.")
 	if t.Backend != nil {
 		targets := []imagegen.Target{t.Backend.Target()}
 		if catalog, ok := t.Backend.(interface{ Targets() []imagegen.Target }); ok {

@@ -270,7 +270,8 @@ type saveArtifactArgs struct {
 func (SaveArtifactTool) Name() string { return NameSaveArtifact }
 
 func (SaveArtifactTool) Description() string {
-	return "Save or update a runtime artifact for optional downstream worker handoff, such as a research report, task graph, review report, or verification log. This writes only under the current session's artifacts directory and does not modify project files. Multiple artifacts are allowed. Use mode=create for a new artifact, mode=append to add to an existing artifact, and mode=overwrite to replace an existing artifact intentionally. Alternatively, provide result_type with a JSON-object result (instead of filename, content, and mode) to store it as an immutable content-addressed result under artifacts/results/; the returned ResultRef can be passed directly as complete's result_ref."
+	return "Save a runtime artifact for optional downstream worker handoff, such as a research report, task graph, review report, or verification log. This writes only under the current session's artifacts directory and does not modify project files. Multiple artifacts are allowed. File mode: provide filename and content, and use mode=create for a new artifact, mode=append to add to an existing artifact, and mode=overwrite to replace an existing artifact intentionally. " +
+		"Result mode: provide result_type with a JSON-object result instead of filename, content, and mode to store it as an immutable content-addressed result under artifacts/results/; the returned ResultRef can be passed directly as complete's result_ref. The two modes are mutually exclusive: one call uses either the file fields or result_type/result, never both."
 }
 
 func (SaveArtifactTool) Parameters() map[string]any {

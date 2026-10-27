@@ -95,7 +95,7 @@ func (t EditTool) Description() string {
 	// description keeps only the tool's own contract.
 	return "Perform exact string replacement in an existing file. " +
 		"Line breaks adapt to the file: with uniform CRLF or CR line endings, LF text takes that ending; with mixed line endings, each line break in old_string matches any line ending and the replacement takes the matched block's. " +
-		"For a single change send old_string/new_string; reserve edits for several disjoint changes in one file and never combine edits with the single-edit fields. Batch entries must be disjoint, pass validation together before one write, and accept only a trailing line-ending difference beyond exact text; one failing entry rejects the whole batch and reports every failing entry at once — fix them and resubmit the complete batch. Entries whose old_string and new_string are identical request no change: skipped in a batch, an error as a single edit. " +
+		"For a single change send old_string/new_string; reserve edits for several disjoint changes in one file and never combine edits with the single-edit fields — the batch contract is described on edits. Entries whose old_string and new_string are identical request no change: skipped in a batch, an error as a single edit. " +
 		"Prefer the smallest unique 2-4 line block instead of a large stale context block; re-read before retrying after any mismatch. Replaces one occurrence by default; set replace_all to replace every occurrence."
 }
 
@@ -109,7 +109,7 @@ func (EditTool) Parameters() map[string]any {
 			},
 			"edits": map[string]any{
 				"type": "array", "minItems": 1,
-				"description": "Disjoint replacements matched against the original file after line-ending adaptation, accepting only a trailing line-ending difference beyond exact text, without punctuation/whitespace tolerance; validated together before one write.",
+				"description": "Batch of disjoint replacements in one file, matched against the original file after line-ending adaptation and accepting only a trailing line-ending difference beyond exact text, without punctuation/whitespace tolerance; validated together before one write. One failing entry rejects the whole batch and reports every failing entry at once — fix them and resubmit the complete batch.",
 				"items": map[string]any{"type": "object", "properties": map[string]any{
 					"old_string":  map[string]any{"type": "string", "minLength": 1},
 					"new_string":  map[string]any{"type": "string"},

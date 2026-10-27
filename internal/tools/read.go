@@ -56,7 +56,7 @@ func (t ReadTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (ReadTool) Description() string {
-	return "Read file contents by line for code inspection and edits, with optional offset/limit line paging (up to 2000 lines by default).\n" +
+	return "Read file contents by line for code inspection and edits, with optional offset/limit line paging.\n" +
 		"Usage:\n" +
 		"- For a file you will edit or consult repeatedly, prefer reading it in full once (a single read covers up to 2000 lines by default) over paging it in many small windows; each extra window costs a full model round trip.\n" +
 		"- offset is a 1-based line number (1 = the first line); omit it to start from the beginning.\n" +

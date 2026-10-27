@@ -40,7 +40,7 @@ func webSearchHostedSpec() HostedToolSpec {
 		Name:          NameWebSearch,
 		Description: `Search the public web and return a summary with numbered sources (URL and title).
 
-Use this when the answer depends on current information beyond your knowledge, and cite the numbered sources in your reply. The search runs server-side on the configured provider; results are a summary, not the full page, so use web_fetch when you need a specific page's content.
+Use this when the answer depends on current information beyond your knowledge, and cite the numbered sources in your reply. The search runs server-side on the configured provider; results are a summary, not the full page, so when a local web-fetch tool is available, use it for a specific page's content.
 
 Domain filters are optional and mutually exclusive: allowed_domains restricts results to the listed domains, blocked_domains excludes them. Each list accepts up to 100 bare domains (e.g. "example.com"), without scheme or path.`,
 		Parameters: map[string]any{
