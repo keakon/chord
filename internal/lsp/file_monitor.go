@@ -239,8 +239,12 @@ func (m *Manager) reconcileFiles(ctx context.Context, observed map[string]os.Fil
 		} // Permission/IO failures are not deletion.
 		previous, known := observed[path]
 		entries := files[path]
-		changed := deleted || (known && !sameDiskFile(previous, info))
-		if !known && info != nil {
+		// An open overlay is judged only against the disk state recorded when
+		// Chord last synced it: a tool rewrite changes the file the monitor
+		// observed earlier, yet the overlay synced right after it still matches
+		// the disk, so the earlier observation cannot prove an external change.
+		changed := deleted || (len(entries) == 0 && known && !sameDiskFile(previous, info))
+		if !known && info != nil && len(entries) == 0 {
 			m.diagMu.RLock()
 			state, tracked := m.diagState[path]
 			m.diagMu.RUnlock()

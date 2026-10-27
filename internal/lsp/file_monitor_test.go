@@ -99,6 +99,37 @@ func TestFileMaintenancePreservesConcurrentSync(t *testing.T) {
 	}
 }
 
+// A tool write changes the disk file the monitor observed earlier, but the
+// overlay Chord synced right after it matches the new disk state; that is not
+// an external change, and closing the overlay would make the server re-read
+// the file from disk and publish unversioned diagnostics.
+func TestFileMaintenanceKeepsOverlaySyncedAfterToolRewrite(t *testing.T) {
+	m, c, fake, path := monitoredTestFile(t)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := map[string]os.FileInfo{path: before}
+
+	const rewritten = "package sample\n\nconst rewritten = true\n"
+	if err := os.WriteFile(path, []byte(rewritten), 0600); err != nil {
+		t.Fatal(err)
+	}
+	later := before.ModTime().Add(time.Second)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.DidChange(context.Background(), path, rewritten); err != nil {
+		t.Fatal(err)
+	}
+
+	cursor := 0
+	m.reconcileFiles(context.Background(), observed, map[string]fsnotify.Op{path: fsnotify.Write}, &cursor, false)
+	if len(c.openFiles) != 1 || len(fake.didCloseURIs) != 0 {
+		t.Fatalf("tool-synced overlay was closed: open=%v didClose=%v", c.openFiles, fake.didCloseURIs)
+	}
+}
+
 func TestDocumentVersionDoesNotRepeatAfterReopen(t *testing.T) {
 	_, c, _, path := monitoredTestFile(t)
 	old := c.openFiles[path]
