@@ -74,7 +74,8 @@ make preflight     # Same Go gates as the pre-push hook; docs checks depend on c
 make fmt-check
 make deps-check
 make test-cover    # CI requires total coverage >= 80.0%.
-make race
+make race-fast     # Race gate with a memory-backed temp dir (local default).
+make race          # Same race gate with the default temp dir (CI parity).
 make stress        # Full lifecycle repetition and resource-leak checks.
 make vet
 make staticcheck
@@ -150,14 +151,20 @@ TMPDIR=$(scripts/test_tmpdir.sh) make test-cover
 
 `make deadcode-check` compares the symbols that are unreachable from the production entry points against the baselines in `scripts/deadcode-baseline/`, one file per analyzed `GOOS/GOARCH`. CI checks every baseline — linux/amd64, windows/amd64, and darwin/arm64 — by pointing `GOOS`/`GOARCH` at each target from one runner; a local run analyzes the host platform unless the environment selects another. A new unreachable symbol fails the gate: remove it, or add it to the matching baseline in a dedicated commit with the platform and a reason. Removing symbols shrinks the baseline, so cleanup commits carry their own baseline updates.
 
-`make race` delegates to `scripts/check_ci_race.sh`, the same entry point used
-by GitHub Actions. In addition to `go test -race`, that script rejects
-unexpected stderr and leaked runtime or interactive output. You can pass a
-focused package set through `PKGS`, for example:
+`make race-fast` is the local default. It delegates to
+`scripts/check_ci_race.sh`, the same entry point used by GitHub Actions, and
+points `TMPDIR`/`TMP`/`TEMP` at a memory-backed filesystem when one is available.
+In addition to `go test -race`, that script rejects unexpected stderr and leaked
+runtime or interactive output. You can pass a focused package set through
+`PKGS`, for example:
 
 ```bash
-make race PKGS=./internal/tui
+make race-fast PKGS=./internal/tui
 ```
+
+Use `make race` instead when you need to reproduce CI's default temporary
+directory (or when a memory-backed temp dir is not desired). It runs the same
+script without overriding the temp dir.
 
 If your changes touch TUI performance-critical paths, also run the checks in [Performance-sensitive changes](#performance-sensitive-changes).
 

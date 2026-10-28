@@ -15,7 +15,7 @@ GOPLS ?= gopls
 MODERNIZE_VERSION ?= v0.50.0
 MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
-.PHONY: ci preflight fmt fmt-check deps-check test test-fast test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check model-catalog-check bench-tui clean
+.PHONY: ci preflight fmt fmt-check deps-check test test-fast test-cover stress race race-fast vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check model-catalog-check bench-tui clean
 
 ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check
 
@@ -60,6 +60,14 @@ stress:
 
 race:
 	./scripts/check_ci_race.sh $(PKGS)
+
+# Local race gate: same script and checks as CI, with a memory-backed temp dir
+# when one is available. Use `make race` to reproduce the default-temp path.
+race-fast:
+	@tmp="$$( ./scripts/test_tmpdir.sh )"; \
+	 if [[ -n "$$tmp" ]]; then echo "race-fast: TMPDIR=$$tmp"; \
+	 else echo "race-fast: no memory-backed temp dir; using the default temp dir"; fi; \
+	 TMPDIR="$$tmp" TMP="$$tmp" TEMP="$$tmp" ./scripts/check_ci_race.sh $(PKGS)
 
 vet:
 	$(GO) vet $(PKGS)
