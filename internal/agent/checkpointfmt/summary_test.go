@@ -83,6 +83,30 @@ func TestValidateCompactionSummaryRejectsStaleTodoAsActive(t *testing.T) {
 	}
 }
 
+func TestValidateCompactionSummaryAcceptsLocalizedEmptyTodoMarkers(t *testing.T) {
+	summary := strings.Replace(
+		validCompactionSummaryForTest("history-1.md"),
+		"- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)",
+		"- Active/relevant to latest request: （无）\n- Completed/background: （无）\n- Stale/superseded: （无）",
+		1,
+	)
+	if err := ValidateSummary(summary); err != nil {
+		t.Fatalf("localized empty todo markers rejected: %v", err)
+	}
+}
+
+func TestValidateCompactionSummaryRejectsSameTodoIDAcrossGroups(t *testing.T) {
+	summary := strings.Replace(
+		validCompactionSummaryForTest("history-1.md"),
+		"- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)",
+		"- Active/relevant to latest request: [in_progress] task-1: finish export docs\n- Completed/background: [completed] task-1: finish export docs\n- Stale/superseded: (none)",
+		1,
+	)
+	if err := ValidateSummary(summary); err == nil {
+		t.Fatal("expected the same todo ID in active and completed groups to be rejected")
+	}
+}
+
 func TestValidateCompactionSummaryRejectsOutOfOrderSections(t *testing.T) {
 	summary := strings.Replace(validCompactionSummaryForTest("history-1.md"),
 		"## Open Problems\n- none\n\n## Next Step\n- Inspect src/current_task.go and continue the current task.",

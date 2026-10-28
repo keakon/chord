@@ -583,9 +583,12 @@ type MainAgent struct {
 	// without the deferred event the TUI would keep the message's waiting row
 	// until the session switches. Guarded by pendingOverlayAppendsMu; bounded
 	// (see maxPendingOverlayAppends) and cleared at a session boundary.
-	pendingOverlayAppendsMu sync.Mutex
-	pendingOverlayAppends   []pendingOverlayAppend
-	pendingOverlayReconcile bool
+	// pendingOverlayReconcileFrom is the oldest dropped transcript index that
+	// reconciliation must replay; older cards are already settled.
+	pendingOverlayAppendsMu     sync.Mutex
+	pendingOverlayAppends       []pendingOverlayAppend
+	pendingOverlayReconcile     bool
+	pendingOverlayReconcileFrom int
 	// lastCompactionMessageCount is the compacted message count at the previous
 	// compaction apply, used to report the interval (in messages) since the
 	// last compaction in lifecycle analytics.

@@ -610,7 +610,8 @@ func requestInjectedMailboxIDs(durableMailboxIDs map[string]struct{}, pendingMai
 // maxPendingOverlayAppends bounds the deferred card-event backlog. The list is
 // only populated by transcript writes that failed, and a persistence recovery
 // drains it; overflow switches recovery to the authoritative transcript rather
-// than retaining an unbounded duplicate of its messages.
+// than retaining an unbounded duplicate of its messages. The replay starts at
+// the oldest dropped index so cards from before the backlog remain settled.
 const maxPendingOverlayAppends = 128
 
 // pendingOverlayAppend is one durable-mailbox or background-result card event
@@ -642,8 +643,7 @@ func (a *MainAgent) noteOverlayAppendPersistFailure(msg message.Message, targetA
 		return
 	}
 	if len(a.pendingOverlayAppends) >= maxPendingOverlayAppends {
-		a.pendingOverlayAppends = nil
-		a.pendingOverlayReconcile = true
+		a.beginPendingOverlayReconcileLocked(messageIndex)
 		return
 	}
 	a.pendingOverlayAppends = append(a.pendingOverlayAppends, pendingOverlayAppend{
@@ -651,6 +651,25 @@ func (a *MainAgent) noteOverlayAppendPersistFailure(msg message.Message, targetA
 		targetAgent:  targetAgentID,
 		messageIndex: messageIndex,
 	})
+}
+
+// beginPendingOverlayReconcileLocked switches from retaining failed card
+// payloads to replaying the transcript. The replay starts at the oldest
+// dropped index, so a later flush neither skips a failed card nor re-emits
+// cards that already reached the viewport.
+func (a *MainAgent) beginPendingOverlayReconcileLocked(messageIndex int) {
+	from := messageIndex
+	for _, p := range a.pendingOverlayAppends {
+		if p.messageIndex < from {
+			from = p.messageIndex
+		}
+	}
+	if from < 0 {
+		from = 0
+	}
+	a.pendingOverlayAppends = nil
+	a.pendingOverlayReconcile = true
+	a.pendingOverlayReconcileFrom = from
 }
 
 // noteContextNoticePersistFailure remembers a context-notice card whose
@@ -668,8 +687,7 @@ func (a *MainAgent) noteContextNoticePersistFailure(level, text string, messageI
 		return
 	}
 	if len(a.pendingOverlayAppends) >= maxPendingOverlayAppends {
-		a.pendingOverlayAppends = nil
-		a.pendingOverlayReconcile = true
+		a.beginPendingOverlayReconcileLocked(messageIndex)
 		return
 	}
 	a.pendingOverlayAppends = append(a.pendingOverlayAppends, pendingOverlayAppend{
@@ -689,11 +707,14 @@ func (a *MainAgent) flushPendingOverlayAppends() {
 	a.pendingOverlayAppendsMu.Lock()
 	pending := a.pendingOverlayAppends
 	reconcile := a.pendingOverlayReconcile
+	reconcileFrom := a.pendingOverlayReconcileFrom
 	a.pendingOverlayAppends = nil
 	a.pendingOverlayReconcile = false
+	a.pendingOverlayReconcileFrom = 0
 	a.pendingOverlayAppendsMu.Unlock()
 	if reconcile {
-		for index, msg := range a.ctxMgr.Snapshot() {
+		for offset, msg := range a.ctxMgr.SnapshotFrom(reconcileFrom) {
+			index := reconcileFrom + offset
 			switch msg.Kind {
 			case message.KindBackgroundResult:
 				if msg.Mailbox != nil {
@@ -705,6 +726,10 @@ func (a *MainAgent) flushPendingOverlayAppends() {
 				}
 			case message.KindLSPFollowup:
 				a.emitToTUI(LSPFollowupEvent{Message: message.StripSystemReminderOverlay(msg.Content), MessageIndex: index})
+			case message.KindContextNotice:
+				if msg.NoticeLevel != "" {
+					a.emitToTUI(ContextNoticeEvent{Level: msg.NoticeLevel, Message: message.StripSystemReminderOverlay(msg.Content), MessageIndex: index})
+				}
 			}
 		}
 		return
@@ -735,6 +760,7 @@ func (a *MainAgent) clearPendingOverlayAppends() {
 	a.pendingOverlayAppendsMu.Lock()
 	a.pendingOverlayAppends = nil
 	a.pendingOverlayReconcile = false
+	a.pendingOverlayReconcileFrom = 0
 	a.pendingOverlayAppendsMu.Unlock()
 }
 

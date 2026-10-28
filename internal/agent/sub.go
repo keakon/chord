@@ -117,20 +117,23 @@ type SubAgent struct {
 	// bytes). Both are immutable after construction; resultContractMu guards
 	// only the terminal failure diagnostics, which the run loop writes and the
 	// main event loop reads when the task settles.
-	resultSchema       map[string]any
-	resultSchemaJSON   json.RawMessage
-	resultContractMu   sync.Mutex
-	resultContract     *TaskContractDiagnostics
-	ownerMu            sync.RWMutex
-	ownerAgentID       string
-	ownerTaskID        string
-	depth              int
-	joinToOwner        bool
-	delegation         config.DelegationConfig
-	color              string // optional ANSI color code from agent config for TUI display
-	llmMu              sync.RWMutex
-	llmClient          *llm.Client
-	llmRequestInFlight atomic.Bool
+	resultSchema        map[string]any
+	resultSchemaJSON    json.RawMessage
+	resultContractMu    sync.Mutex
+	resultContract      *TaskContractDiagnostics
+	ownerMu             sync.RWMutex
+	ownerAgentID        string
+	ownerTaskID         string
+	depth               int
+	joinToOwner         bool
+	delegation          config.DelegationConfig
+	color               string // optional ANSI color code from agent config for TUI display
+	llmMu               sync.RWMutex
+	llmClient           *llm.Client
+	lspFollowupSource   LSPFollowupSource
+	stagedLSPFollowup   *lspFollowup
+	stagedLSPFollowupMu sync.Mutex
+	llmRequestInFlight  atomic.Bool
 	// llmRequestSeq counts this agent's LLM request goroutines. It is written
 	// only by the run loop before spawning one, so the goroutine can capture a
 	// stable streaming-segment identity (see StreamSegmentEndedEvent).
@@ -596,26 +599,27 @@ type SubAgentConfig struct {
 	// ResultSchemaJSON its canonical bytes. Both come from
 	// tools.CompileResultSchema, so the map and the persisted encoding cannot
 	// drift; empty means the task has no contract.
-	ResultSchema     map[string]any
-	ResultSchemaJSON json.RawMessage
-	OwnerAgentID     string
-	OwnerTaskID      string
-	Depth            int
-	JoinToOwner      bool
-	Delegation       config.DelegationConfig
-	Color            string
-	SystemPrompt     string // custom role instructions from agent YAML body; empty = use built-in
-	LLMClient        *llm.Client
-	Recovery         *recovery.RecoveryManager
-	SessionEpoch     uint64 // parent session epoch this agent's writes belong to
-	Parent           *MainAgent
-	ParentCtx        context.Context
-	Cancel           context.CancelFunc
-	BaseTools        *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
-	ExtraMCPTools    []tools.Tool    // agent-specific MCP tools
-	MCPPreparation   func(context.Context, permission.Ruleset) (MCPRequestSnapshot, error)
-	Ruleset          permission.Ruleset
-	WorkDir          string
+	ResultSchema      map[string]any
+	ResultSchemaJSON  json.RawMessage
+	OwnerAgentID      string
+	OwnerTaskID       string
+	Depth             int
+	JoinToOwner       bool
+	Delegation        config.DelegationConfig
+	Color             string
+	SystemPrompt      string // custom role instructions from agent YAML body; empty = use built-in
+	LLMClient         *llm.Client
+	LSPFollowupSource LSPFollowupSource
+	Recovery          *recovery.RecoveryManager
+	SessionEpoch      uint64 // parent session epoch this agent's writes belong to
+	Parent            *MainAgent
+	ParentCtx         context.Context
+	Cancel            context.CancelFunc
+	BaseTools         *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
+	ExtraMCPTools     []tools.Tool    // agent-specific MCP tools
+	MCPPreparation    func(context.Context, permission.Ruleset) (MCPRequestSnapshot, error)
+	Ruleset           permission.Ruleset
+	WorkDir           string
 	// WorkDirState is the checkout the worker starts in: the worktree a
 	// Delegate named, the caller's worktree when the worker inherits its
 	// directory, or the checkout a rehydrated worker is resumed into. It is
@@ -755,6 +759,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		delegation:        cfg.Delegation,
 		color:             cfg.Color,
 		llmClient:         cfg.LLMClient,
+		lspFollowupSource: cfg.LSPFollowupSource,
 		ctxMgr:            ctxMgr,
 		tools:             subTools,
 		mcpPreparation:    cfg.MCPPreparation,
@@ -1032,6 +1037,9 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 		return
 	}
 	messages = s.injectSessionContextReminder(messages)
+	if followup, ok := s.buildLSPFollowupOverlay(); ok {
+		messages = append(messages, followup)
+	}
 	llmClient, modelName := s.llmSnapshot()
 	if llmClient == nil {
 		select {
@@ -1166,6 +1174,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 		requestCtx := llm.WithResponsesTurnState(turn.Ctx, turn.LLMResponsesState)
 		requestCtx = llm.WithRequestStarted(requestCtx, func() {
 			s.pauseRequestStarted.Store(true)
+			s.emitStagedLSPFollowup()
 			if len(requestInputIDs) > 0 {
 				s.parent.NoteSessionInputsDispatched(s.taskID, requestInputIDs)
 			}

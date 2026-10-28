@@ -197,6 +197,27 @@ func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message,
 		messages = out
 	}
 	valid := pressureNoticeRecord{pressure, compaction, manual}
+	var durable [pressureNoticeSlotCount]message.Message
+	needDurable := false
+	for slot, keep := range valid {
+		if keep && !present[slot] && slot != pressureNoticeSlot(contextNoticeManual) {
+			needDurable = true
+			break
+		}
+	}
+	if needDurable {
+		a.ctxMgr.ScanBackward(func(row *message.Message) bool {
+			if row.Kind != message.KindContextNotice {
+				return false
+			}
+			rowSlot := pressureNoticeSlot(row.NoticeLevel)
+			if rowSlot < 0 || durable[rowSlot].Kind != "" {
+				return false
+			}
+			durable[rowSlot] = row.Clone()
+			return durable[pressureNoticeSlot(contextNoticePressure)].Kind != "" && durable[pressureNoticeSlot(contextNoticeWarning)].Kind != ""
+		})
+	}
 	var appended bool
 	for slot, keep := range valid {
 		if !keep || present[slot] {
@@ -216,13 +237,7 @@ func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message,
 		if slot == 1 && a.higherPriorityNoticeActive(contextNoticeWarning) {
 			continue
 		}
-		var notice message.Message
-		for _, row := range a.ctxMgr.Snapshot() {
-			if row.Kind == message.KindContextNotice && pressureNoticeSlot(row.NoticeLevel) == slot {
-				notice = row
-				break
-			}
-		}
+		notice := durable[slot]
 		if notice.Kind == "" {
 			level, text := contextNoticePressure, buildContextPressureReminderText()
 			if slot == 1 {

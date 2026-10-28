@@ -70,19 +70,20 @@ func (a *MainAgent) subAgentWorkDir() string {
 
 func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID string, client *llm.Client, parentCtx context.Context, cancel context.CancelFunc, extraMCPTools []tools.Tool) SubAgentConfig {
 	return SubAgentConfig{
-		InstanceID:    instanceID,
-		AgentDefName:  agentDef.Name,
-		Delegation:    agentDef.Delegation,
-		Color:         agentDef.Color,
-		SystemPrompt:  agentDef.SystemPrompt,
-		LLMClient:     client,
-		Recovery:      a.recoveryManager(),
-		SessionEpoch:  a.recoverySessionEpoch(),
-		Parent:        a,
-		ParentCtx:     parentCtx,
-		Cancel:        cancel,
-		BaseTools:     a.tools,
-		ExtraMCPTools: extraMCPTools,
+		InstanceID:        instanceID,
+		AgentDefName:      agentDef.Name,
+		Delegation:        agentDef.Delegation,
+		Color:             agentDef.Color,
+		SystemPrompt:      agentDef.SystemPrompt,
+		LLMClient:         client,
+		LSPFollowupSource: a.lspFollowupSource,
+		Recovery:          a.recoveryManager(),
+		SessionEpoch:      a.recoverySessionEpoch(),
+		Parent:            a,
+		ParentCtx:         parentCtx,
+		Cancel:            cancel,
+		BaseTools:         a.tools,
+		ExtraMCPTools:     extraMCPTools,
 		MCPPreparation: func(ctx context.Context, rules permission.Ruleset) (MCPRequestSnapshot, error) {
 			a.stateMu.RLock()
 			current := a.agentConfigs[agentDef.Name]

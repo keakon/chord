@@ -407,7 +407,7 @@ func limitationEscalationLine(visible map[string]struct{}, audience capabilityPr
 		case hasNotify:
 			return "- If " + needClause + " beyond your scope, explain the limitation and use " + toolPromptName(tools.NameNotify) + " so the owner agent knows a scope or permission adjustment is needed."
 		default:
-			return "- If " + needClause + " beyond your scope, explain the limitation clearly in assistant text because " + toolPromptName(tools.NameEscalate) + " and " + toolPromptName(tools.NameNotify) + " are unavailable in this role."
+			return "- If " + needClause + " beyond your scope, close the task with " + toolPromptName(tools.NameComplete) + " and record the blocker in `remaining_limitations` (and the key result in `summary`) because " + toolPromptName(tools.NameEscalate) + " and " + toolPromptName(tools.NameNotify) + " are unavailable in this role."
 		}
 	}
 	if limited {

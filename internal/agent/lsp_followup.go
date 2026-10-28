@@ -43,6 +43,9 @@ type lspFollowup struct {
 // SetLSPFollowupSource installs the source of late LSP diagnostics.
 func (a *MainAgent) SetLSPFollowupSource(source LSPFollowupSource) {
 	a.lspFollowupSource = source
+	for _, sub := range a.subs.snapshotSubAgents() {
+		sub.SetLSPFollowupSource(source)
+	}
 }
 
 // buildLSPFollowupOverlay stages and returns the turn-tail message carrying

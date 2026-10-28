@@ -241,7 +241,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// The agent persisted the follow-up as a KindLSPFollowup message before
 		// emitting this event; MsgIndex ties the card to that message so a
 		// restored session rebuilds the same card.
-		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: lspFollowupCardTitle, Content: evt.Message, MsgIndex: evt.MessageIndex, Collapsed: true}
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: lspFollowupCardTitle, Content: evt.Message, AgentID: evt.AgentID, MsgIndex: evt.MessageIndex, Collapsed: true}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

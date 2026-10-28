@@ -149,6 +149,11 @@ type Manager struct {
 	lateMu      sync.Mutex
 	lateWatches map[string]*lateWatch
 	lateSeq     uint64
+	// lateSyncSeq counts document synchronizations. A watch records the value
+	// at registration; a later sync of any document invalidates it because the
+	// server may publish a project-wide analysis pass that no longer belongs
+	// solely to the watched write.
+	lateSyncSeq uint64
 	// latePublishSeq numbers every publish so a watch can tell the publish a
 	// wait already consumed from one that raced the watch registration.
 	latePublishSeq uint64
@@ -1059,7 +1064,12 @@ func (m *Manager) DidOpen(ctx context.Context, path string, content string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	synced := false
 	m.forEachClientForPath(path, func(_ clientKey, c *Client) {
+		if !synced {
+			m.noteLateDocumentSync()
+			synced = true
+		}
 		_, _ = c.DidOpen(ctx, path, content)
 	})
 }
@@ -1080,7 +1090,12 @@ func (m *Manager) NotifyWatchedFileChanged(ctx context.Context, path string, cha
 	}
 	path = normalizeWaiterPath(path)
 	errs := make(map[string]error)
+	synced := false
 	m.forEachClientForPath(path, func(key clientKey, c *Client) {
+		if !synced {
+			m.noteLateDocumentSync()
+			synced = true
+		}
 		if err := c.NotifyWatchedFileChange(ctx, path, changeType); err != nil {
 			errs[key.name] = err
 		}
@@ -1100,7 +1115,12 @@ func (m *Manager) DidChangeVersions(ctx context.Context, path string, content st
 	}
 	versions := make(map[string]int32)
 	errs := make(map[string]error)
+	synced := false
 	m.forEachClientForPath(path, func(key clientKey, c *Client) {
+		if !synced {
+			m.noteLateDocumentSync()
+			synced = true
+		}
 		version, err := c.DidChange(ctx, path, content)
 		if err != nil {
 			errs[key.name] = err
@@ -1131,8 +1151,14 @@ func (m *Manager) ResyncFile(ctx context.Context, path, content string) {
 	}
 	path = normalizeWaiterPath(path)
 	disconnected := false
+	synced := false
 	m.forEachClientForPath(path, func(_ clientKey, c *Client) {
-		if _, err := c.ResyncFileIfChanged(ctx, path, content); err != nil {
+		sent, err := c.ResyncFileIfChanged(ctx, path, content)
+		if sent && !synced {
+			m.noteLateDocumentSync()
+			synced = true
+		}
+		if err != nil {
 			log.Debugf("lsp: resync changed file failed path=%v name=%v error=%v", path, c.name, err)
 			if !c.IsRunning() {
 				disconnected = true

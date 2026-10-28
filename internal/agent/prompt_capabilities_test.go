@@ -901,8 +901,8 @@ edit:
 	if !strings.Contains(subBlock, "Use `question` only for product choices the end user must make; owner-agent decisions — permissions, scope, or next steps — go through the coordination tools named in your SubAgent Coordination section instead") {
 		t.Fatalf("sub capability block missing Question guidance: %q", subBlock)
 	}
-	if !strings.Contains(subBlock, "explain the limitation clearly in assistant text because `escalate` and `notify` are unavailable in this role") {
-		t.Fatalf("sub capability block should acknowledge missing control tools, got %q", subBlock)
+	if !strings.Contains(subBlock, "close the task with `complete` and record the blocker in `remaining_limitations`") || !strings.Contains(subBlock, "`escalate` and `notify` are unavailable in this role") {
+		t.Fatalf("sub capability block should route blockers through complete when control tools are missing, got %q", subBlock)
 	}
 
 	reg.Register(tools.NewNotifyTool(nil, nil, true, false))

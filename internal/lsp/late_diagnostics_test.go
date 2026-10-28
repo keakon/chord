@@ -203,6 +203,26 @@ func TestLateDiagnosticsIgnoresOtherVersionsAndPublishesAfterDeadline(t *testing
 	}
 }
 
+func TestLateDiagnosticsDropsPendingAfterDeadline(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "pending before deadline"))
+
+	f.mgr.lateMu.Lock()
+	f.mgr.lateWatches[f.path].deadline = time.Now().Add(-time.Second)
+	f.mgr.lateMu.Unlock()
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
+		t.Fatalf("pending after deadline = %+v, want none", got)
+	}
+	f.mgr.lateMu.Lock()
+	pending := f.mgr.lateWatches[f.path].pending
+	f.mgr.lateMu.Unlock()
+	if pending {
+		t.Fatal("pending stayed set after the deadline expired")
+	}
+}
+
 func TestLateDiagnosticsSkipsPathsNotRequestedOrStale(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
 	seq := f.publish("gopls", 2)
@@ -529,6 +549,33 @@ func TestResetReportedDiagnosticsForgetsLateState(t *testing.T) {
 	}
 	if got := f.deliverLate(3, finding); len(got) != 1 {
 		t.Fatalf("delivery in a new session = %+v, want the finding reported", got)
+	}
+}
+
+func TestLateDiagnosticsDropsWatchAfterAnotherDocumentSync(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	client := f.clients["gopls"]
+	client.client = &fakePowernapClient{}
+	client.openFiles = make(map[string]int32)
+	client.syncedDigest = make(map[string][32]byte)
+	client.syncedFiles = make(map[string]syncedFile)
+
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+
+	other := filepath.Join(filepath.Dir(f.path), "other.go")
+	if _, errs := f.mgr.DidChangeVersions(context.Background(), other, "package main\n"); len(errs) != 0 {
+		t.Fatalf("DidChangeVersions(other) errors = %v", errs)
+	}
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "project-wide analysis after another sync"))
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
+		t.Fatalf("pending after another document sync = %+v, want none", got)
+	}
+	f.mgr.lateMu.Lock()
+	_, watched := f.mgr.lateWatches[f.path]
+	f.mgr.lateMu.Unlock()
+	if watched {
+		t.Fatal("another document sync kept the late-diagnostics watch")
 	}
 }
 

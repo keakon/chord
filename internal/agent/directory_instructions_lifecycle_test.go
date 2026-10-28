@@ -8,8 +8,32 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func TestInstructionReadDeniedRequiresNamedPathRule(t *testing.T) {
+	root := t.TempDir()
+	s := &SubAgent{workDir: root}
+	universal := parsePermissionNode(t, `
+"*": deny
+read:
+  "*": deny
+`)
+	s.setRuleset(permission.ParsePermission(&universal))
+	if s.instructionReadDenied(filepath.Join(root, "AGENTS.md")) {
+		t.Fatal("a path-universal read rule must not hide directory instructions")
+	}
+	named := parsePermissionNode(t, `
+"*": deny
+read:
+  "AGENTS.md": deny
+`)
+	s.setRuleset(permission.ParsePermission(&named))
+	if !s.instructionReadDenied(filepath.Join(root, "AGENTS.md")) {
+		t.Fatal("a named path read deny must hide directory instructions")
+	}
+}
 
 func TestDirectoryInstructionTurnCancelRetainsBindingSnapshot(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())

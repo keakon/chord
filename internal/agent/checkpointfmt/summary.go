@@ -126,14 +126,20 @@ func validateCompactionTodoState(summary string) error {
 		return nil
 	}
 	inactive := append(completed, stale...)
+	inactiveIDs := todoStateLineIDs(inactive)
 	for _, activeLine := range active {
 		activeKey := normalizeTodoStateLine(activeLine)
-		if activeKey == "" || activeKey == "none" {
+		if isNoneTodoStateLine(activeKey) {
 			continue
+		}
+		if id, ok := todoStateLineID(activeLine); ok {
+			if _, duplicate := inactiveIDs[id]; duplicate {
+				return fmt.Errorf("compaction summary marks completed or stale todo as active: %s", activeLine)
+			}
 		}
 		for _, inactiveLine := range inactive {
 			inactiveKey := normalizeTodoStateLine(inactiveLine)
-			if inactiveKey == "" || inactiveKey == "none" {
+			if isNoneTodoStateLine(inactiveKey) {
 				continue
 			}
 			if activeKey == inactiveKey {
@@ -142,6 +148,40 @@ func validateCompactionTodoState(summary string) error {
 		}
 	}
 	return nil
+}
+
+func todoStateLineIDs(lines []string) map[string]struct{} {
+	ids := make(map[string]struct{}, len(lines))
+	for _, line := range lines {
+		if id, ok := todoStateLineID(line); ok {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
+}
+
+func todoStateLineID(line string) (string, bool) {
+	match := todoSubgroupIDLineRe.FindStringSubmatch(line)
+	if match == nil {
+		return "", false
+	}
+	id := strings.TrimSpace(match[1])
+	return id, id != ""
+}
+
+// isNoneTodoStateLine treats explicit empty markers in the languages the
+// model commonly emits as equivalent. Without this, a translated "(none)"
+// such as "（无）" would be compared as a real todo and could be reported as
+// duplicated across subgroups.
+func isNoneTodoStateLine(normalized string) bool {
+	normalized = strings.Trim(normalized, "()（）[]【】")
+	normalized = strings.TrimSpace(normalized)
+	switch normalized {
+	case "", "none", "n/a", "na", "无", "無", "なし", "없음":
+		return true
+	default:
+		return false
+	}
 }
 
 // SectionBounds locates a summary section's body: start is the offset

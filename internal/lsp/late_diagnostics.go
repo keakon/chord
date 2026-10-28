@@ -46,6 +46,10 @@ type lateWatch struct {
 	// are only claimed by that agent: a worker's write may appear in the
 	// main transcript, but its late diagnostics belong to the worker.
 	writerAgentID string
+	// syncSeq is the manager-wide document synchronization counter at
+	// registration. Any later sync can make a same-version publish describe a
+	// project state this write did not produce, so the watch is dropped.
+	syncSeq uint64
 	// baseline holds every diagnostic the path had when the wait returned
 	// plus every diagnostic already delivered as late; only identities outside
 	// it are reported.
@@ -166,6 +170,7 @@ func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]in
 		seq:           m.lateSeq,
 		versions:      versions,
 		writerAgentID: writerAgentID,
+		syncSeq:       m.lateSyncSeq,
 		baseline:      baseline,
 		frozen:        make(map[string][]Diagnostic, len(versions)),
 		registered:    now,
@@ -241,6 +246,18 @@ func (m *Manager) pruneLateFindings(path string) {
 	}
 }
 
+// noteLateDocumentSync advances the synchronization generation. Callers run
+// it only when a notification was actually sent to at least one server, so a
+// path with no owning client does not invalidate unrelated watches.
+func (m *Manager) noteLateDocumentSync() {
+	if m == nil {
+		return
+	}
+	m.lateMu.Lock()
+	m.lateSyncSeq++
+	m.lateMu.Unlock()
+}
+
 // noteLateDiagnosticsPublish records a publish and freezes it for a watched
 // path when its server published again for the watched version inside the
 // window. The publish contents are not pruned here: gopls publishes the
@@ -272,7 +289,9 @@ func (m *Manager) noteLateDiagnosticsPublish(path, serverID string, version int3
 	watch := m.lateWatches[path]
 	drop := false
 	if watch != nil {
-		if want, owner := watch.versions[serverID]; owner {
+		if watch.syncSeq != m.lateSyncSeq {
+			drop = true
+		} else if want, owner := watch.versions[serverID]; owner {
 			switch {
 			case version == 0:
 				drop = true
@@ -330,6 +349,7 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 	}
 	var candidates []candidate
 	seen := make(map[string]struct{}, len(paths))
+	now := time.Now()
 	m.lateMu.Lock()
 	for _, path := range paths {
 		path = normalizeWaiterPath(path)
@@ -339,6 +359,13 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 		seen[path] = struct{}{}
 		watch := m.lateWatches[path]
 		if watch == nil || !watch.pending {
+			continue
+		}
+		if !now.Before(watch.deadline) {
+			// A publish can set pending just before the window closes. Do not
+			// deliver it once the window has elapsed: the wait already returned
+			// and the follow-up is no longer attributable to this write.
+			watch.pending = false
 			continue
 		}
 		if watch.writerAgentID != "" && agentID != "" && watch.writerAgentID != agentID {

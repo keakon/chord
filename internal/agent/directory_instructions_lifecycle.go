@@ -32,17 +32,18 @@ type directoryInstructionsPrepared struct {
 	committed   bool
 }
 
-// instructionReadDenied matches only a specific read rule, not the wildcard
-// default deny: directory rules are prompt material, and a blanket default must
-// not hide them. An explicit read deny is a user decision about the path and
-// also covers a rule-file symlink that points at the denied target.
+// instructionReadDenied matches only a read rule that names a path, not the
+// wildcard default deny or a path-universal read rule: directory rules are
+// prompt material, and a blanket default must not hide them. An explicit path
+// deny is a user decision and also covers a rule-file symlink that points at
+// the denied target.
 func (a *MainAgent) instructionReadDenied(path string) bool {
-	match := a.effectiveRuleset().LastSpecificToolMatchPath(tools.NameRead, path, a.effectivePathScope())
+	match := a.effectiveRuleset().LastNamedPathMatch(tools.NameRead, path, a.effectivePathScope())
 	return match.Found && match.Rule.Action == permission.ActionDeny
 }
 
 func (s *SubAgent) instructionReadDenied(path string) bool {
-	match := s.currentRuleset().LastSpecificToolMatchPath(tools.NameRead, path, s.effectivePathScope())
+	match := s.currentRuleset().LastNamedPathMatch(tools.NameRead, path, s.effectivePathScope())
 	return match.Found && match.Rule.Action == permission.ActionDeny
 }
 

@@ -343,10 +343,28 @@ func (m *Manager) Snapshot() []message.Message {
 	return m.snapshotLocked()
 }
 
+// SnapshotFrom returns a deep copy of the messages starting at start. The
+// returned slice is safe to mutate without affecting the Manager's state.
+func (m *Manager) SnapshotFrom(start int) []message.Message {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.snapshotFromLocked(start)
+}
+
 func (m *Manager) snapshotLocked() []message.Message {
-	out := make([]message.Message, len(m.messages))
-	for i, msg := range m.messages {
-		out[i] = msg.Clone()
+	return m.snapshotFromLocked(0)
+}
+
+func (m *Manager) snapshotFromLocked(start int) []message.Message {
+	if start < 0 {
+		start = 0
+	}
+	if start > len(m.messages) {
+		start = len(m.messages)
+	}
+	out := make([]message.Message, len(m.messages)-start)
+	for i := start; i < len(m.messages); i++ {
+		out[i-start] = m.messages[i].Clone()
 	}
 	return out
 }

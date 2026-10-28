@@ -850,6 +850,7 @@ func (ContextNoticeEvent) agentEvent() {}
 type LSPFollowupEvent struct {
 	Message      string
 	MessageIndex int
+	AgentID      string
 }
 
 func (LSPFollowupEvent) agentEvent() {}

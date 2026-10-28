@@ -63,6 +63,26 @@ func TestSnapshotDeepCopiesNestedMessageState(t *testing.T) {
 	}
 }
 
+func TestSnapshotFromDeepCopiesOnlySuffix(t *testing.T) {
+	m := NewManager(1000, 0)
+	m.Append(message.Message{Role: message.RoleUser, Content: "before"})
+	m.Append(message.Message{Role: message.RoleUser, Content: "after", Mailbox: &message.MailboxMetadata{MessageID: "mail-1"}})
+	snapshot := m.SnapshotFrom(1)
+	if len(snapshot) != 1 || snapshot[0].Content != "after" {
+		t.Fatalf("SnapshotFrom(1) = %+v", snapshot)
+	}
+	snapshot[0].Mailbox.MessageID = "changed"
+	if got := m.Snapshot()[1].Mailbox.MessageID; got != "mail-1" {
+		t.Fatalf("suffix snapshot aliased nested state: %q", got)
+	}
+	if got := m.SnapshotFrom(-1); len(got) != 2 {
+		t.Fatalf("SnapshotFrom(-1) length = %d, want 2", len(got))
+	}
+	if got := m.SnapshotFrom(3); len(got) != 0 {
+		t.Fatalf("SnapshotFrom(3) length = %d, want 0", len(got))
+	}
+}
+
 func TestEstimateMessageTokensCountsOpaqueReasoningState(t *testing.T) {
 	msg := message.Message{
 		Role:           message.RoleAssistant,

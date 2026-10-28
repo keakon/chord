@@ -164,7 +164,7 @@ var subAgentResponseClosurePrompt = `## SubAgent Task Closure
 - Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains
 - If more in-scope, low-risk work remains, continue instead of presenting routine next steps as optional follow-up for the owner agent
 - If blocked, use the control path named in the SubAgent Coordination section rather than implying the task is complete
-- Deliver the final task report through ` + toolPromptName(tools.NameComplete) + `: the key result and verification status in ` + "`summary`" + `, the changed files in ` + "`files_changed`" + `, and non-blocking gaps in ` + "`remaining_limitations`" + `; progress and blockers go through the coordination channels above
+- Deliver the final task report through ` + toolPromptName(tools.NameComplete) + `: the key result and verification status in ` + "`summary`" + `, the changed files in ` + "`files_changed`" + `, and known gaps or unresolved blockers in ` + "`remaining_limitations`" + `; progress and blockers go through the coordination channels above when available
 - Assistant text alongside that call is read by the human watching this task, not by the owner: keep it to what a reader needs beyond the call, and do not compose the report a second time there
 - ` + responseClosureStopLine + " to the owner agent"
 

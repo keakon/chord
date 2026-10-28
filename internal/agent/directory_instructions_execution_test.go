@@ -77,6 +77,34 @@ func TestDirectoryInstructionsSpeculativeReadDiscoversRules(t *testing.T) {
 	}
 }
 
+// The streaming speculative path must use the same discovery result as a
+// directly executed read; otherwise a read promoted from the stream silently
+// loses its directory rules.
+func TestDirectoryInstructionsStreamingReadPromotesDiscovery(t *testing.T) {
+	p, root := directoryPipelineFixture(t)
+	dir := filepath.Join(root, "module")
+	writeResolverRule(t, dir, "Use the module workflow.")
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("sample"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	exec := NewStreamingToolExecutor(7, t.Context(), nil, p.executeSpeculative)
+	call := directoryCall("read", tools.NameRead, map[string]string{"path": path})
+	if !exec.Start(call) {
+		t.Fatal("Start returned false")
+	}
+	result, ok, drift := exec.Promote(call)
+	if drift || !ok || result == nil {
+		t.Fatalf("Promote result=%+v ok=%v drift=%v", result, ok, drift)
+	}
+	if result.DirectoryDiscovery == nil {
+		t.Fatal("streamed read did not discover directory rules")
+	}
+	if o := result.DirectoryDiscovery.Observations["module"]; o.Status != "present" || o.Body != "Use the module workflow." {
+		t.Fatalf("module rule not discovered: %+v", result.DirectoryDiscovery.Observations)
+	}
+}
+
 // Rules reach the model only when a file inside a directory is read. A patch
 // that creates files in two directories applies unchanged and discovers nothing.
 func TestDirectoryInstructionsPatchAppliesWithoutDiscovery(t *testing.T) {
