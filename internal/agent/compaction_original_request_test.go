@@ -263,7 +263,7 @@ func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testi
 	}
 
 	// Rewrite session with compaction summary as first message
-	_, err := a.rewriteSessionAfterCompaction(1, []message.Message{compactionMsg}, "")
+	_, err := a.rewriteSessionAfterCompaction(1, []message.Message{compactionMsg}, "", nil)
 	if err != nil {
 		t.Fatalf("rewriteSessionAfterCompaction: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestRewriteSessionAfterCompactionNeverAdoptsTailPromptAsOriginal(t *testing
 		{Role: "assistant", Content: "ack"},
 		{Role: "user", Content: "mid-session prompt"},
 	}
-	if _, err := a.rewriteSessionAfterCompaction(1, applied, ""); err != nil {
+	if _, err := a.rewriteSessionAfterCompaction(1, applied, "", nil); err != nil {
 		t.Fatalf("rewriteSessionAfterCompaction: %v", err)
 	}
 
@@ -373,7 +373,7 @@ func TestRecordCommittedUserMessageDoesNotFillUnknownOriginal(t *testing.T) {
 		{Role: "assistant", Content: "ack"},
 		{Role: "user", Content: "mid-session prompt"},
 	}
-	if _, err := a.rewriteSessionAfterCompaction(1, applied, ""); err != nil {
+	if _, err := a.rewriteSessionAfterCompaction(1, applied, "", nil); err != nil {
 		t.Fatalf("rewriteSessionAfterCompaction: %v", err)
 	}
 

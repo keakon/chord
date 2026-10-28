@@ -597,11 +597,16 @@ const maxPendingOverlayAppends = 128
 // pendingOverlayAppend is one durable-mailbox or background-result card event
 // whose backing transcript write failed. msg is the exact value appended to
 // ctxmgr, so a flush re-emits the same card the successful write would have.
+// For a context notice the bare card text is stored alongside instead of being
+// derived from msg, whose Content keeps the <system-reminder> wrapper the
+// model must see and the card must not.
 type pendingOverlayAppend struct {
 	msg          message.Message
 	targetAgent  string
 	messageIndex int
 	background   bool
+	noticeLevel  string
+	noticeText   string
 }
 
 // noteOverlayAppendPersistFailure remembers a card event whose transcript write
@@ -628,6 +633,32 @@ func (a *MainAgent) noteOverlayAppendPersistFailure(msg message.Message, targetA
 		targetAgent:  targetAgentID,
 		messageIndex: messageIndex,
 		background:   background,
+	})
+}
+
+// noteContextNoticePersistFailure remembers a context-notice card whose
+// transcript write failed so a later persistence recovery can re-emit it. The
+// backing row is already in ctxmgr and later requests replay it to the model,
+// so the pressure-cycle reservation is NOT released: re-staging would append a
+// second row the model sees twice. Only the card is deferred.
+func (a *MainAgent) noteContextNoticePersistFailure(level, text string, messageIndex int) {
+	if a == nil {
+		return
+	}
+	a.pendingOverlayAppendsMu.Lock()
+	defer a.pendingOverlayAppendsMu.Unlock()
+	if a.pendingOverlayReconcile {
+		return
+	}
+	if len(a.pendingOverlayAppends) >= maxPendingOverlayAppends {
+		a.pendingOverlayAppends = nil
+		a.pendingOverlayReconcile = true
+		return
+	}
+	a.pendingOverlayAppends = append(a.pendingOverlayAppends, pendingOverlayAppend{
+		messageIndex: messageIndex,
+		noticeLevel:  level,
+		noticeText:   text,
 	})
 }
 
@@ -659,6 +690,10 @@ func (a *MainAgent) flushPendingOverlayAppends() {
 		return
 	}
 	for _, p := range pending {
+		if p.noticeLevel != "" {
+			a.emitToTUI(ContextNoticeEvent{Level: p.noticeLevel, Message: p.noticeText, MessageIndex: p.messageIndex})
+			continue
+		}
 		if p.background {
 			a.emitToTUI(BackgroundResultAppendedEvent{Message: p.msg, TargetAgentID: p.targetAgent, MessageIndex: p.messageIndex})
 			continue

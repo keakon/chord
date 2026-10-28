@@ -56,7 +56,7 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 	ac.MainAgent.SetBusyPreparationHook(resourceCtrl.EnsureReady)
 
 	confirmTimeout := time.Duration(ac.Cfg.ConfirmTimeout) * time.Second
-	wireMainAgentRuntime(ac.Ctx, ac.MainAgent, ac.Registry, confirmTimeout, ac.Cfg.Context.Compaction.ModelDriven, ac.ACPMode)
+	wireMainAgentRuntime(ac.Ctx, ac.MainAgent, ac.Registry, confirmTimeout, ac.Cfg.Context.Compaction.ModelDrivenEnabled(), ac.ACPMode)
 	startRuntimeMCP(ac)
 	startRuntimeWarmups(ac)
 

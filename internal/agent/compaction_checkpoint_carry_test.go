@@ -386,9 +386,9 @@ func TestCompactionDraftCarriesPriorCheckpointBody(t *testing.T) {
 	a.resetRuntimeEvidenceFromMessages(snapshot)
 	evidenceItems := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
 
-	first, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1,
+	first, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
-		"port the config loader to the new schema", evidenceItems, a.captureCompactionArchiveMeta())
+		"port the config loader to the new schema", evidenceItems, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("first produceCompactionDraftAsync: %v", err)
 	}
@@ -407,9 +407,9 @@ func TestCompactionDraftCarriesPriorCheckpointBody(t *testing.T) {
 	}...)
 	a.resetRuntimeEvidenceFromMessages(next)
 	secondEvidence := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
-	second, err := a.produceCompactionDraftAsync(t.Context(), next, false, 2,
+	second, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(next, false, 2,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(next), compactionProfileArchival,
-		first.NewMessages[0].Content, secondEvidence, a.captureCompactionArchiveMeta())
+		first.NewMessages[0].Content, secondEvidence, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("second produceCompactionDraftAsync: %v", err)
 	}
@@ -450,9 +450,9 @@ func TestCompactionDraftCarryKeepsProgressAfterLongRequest(t *testing.T) {
 		{Role: message.RoleAssistant, Content: "a2"},
 	}
 	a.resetRuntimeEvidenceFromMessages(snapshot)
-	first, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1,
+	first, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
-		request, a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()), a.captureCompactionArchiveMeta())
+		request, a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()), a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("first produceCompactionDraftAsync: %v", err)
 	}
@@ -473,9 +473,9 @@ func TestCompactionDraftCarryKeepsProgressAfterLongRequest(t *testing.T) {
 		{Role: message.RoleAssistant, Content: "done"},
 	}...)
 	a.resetRuntimeEvidenceFromMessages(next)
-	second, err := a.produceCompactionDraftAsync(t.Context(), next, false, 2,
+	second, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(next, false, 2,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(next), compactionProfileArchival,
-		first.NewMessages[0].Content, a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()), a.captureCompactionArchiveMeta())
+		first.NewMessages[0].Content, a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()), a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("second produceCompactionDraftAsync: %v", err)
 	}

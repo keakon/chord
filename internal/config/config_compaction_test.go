@@ -18,10 +18,10 @@ func TestDefaultConfigCompactionProfileDefaultsToAuto(t *testing.T) {
 	}
 }
 
-func TestDefaultConfigCompactionModelDrivenDisabled(t *testing.T) {
+func TestDefaultConfigCompactionModelDrivenEnabled(t *testing.T) {
 	cfg := DefaultConfig()
-	if cfg.Context.Compaction.ModelDriven {
-		t.Fatal("DefaultConfig().Context.Compaction.ModelDriven = true, want false (opt-in)")
+	if !cfg.Context.Compaction.ModelDrivenEnabled() {
+		t.Fatal("DefaultConfig().Context.Compaction.ModelDrivenEnabled() = false, want true (default on)")
 	}
 }
 
@@ -36,8 +36,27 @@ func TestLoadConfigFromPathParsesCompactionModelDriven(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfigFromPath: %v", err)
 	}
-	if !cfg.Context.Compaction.ModelDriven {
+	if !cfg.Context.Compaction.ModelDrivenEnabled() {
 		t.Fatal("context.compaction.model_driven: true should enable model-driven reset")
+	}
+	if cfg.Context.Compaction.ModelDriven == nil || !*cfg.Context.Compaction.ModelDriven {
+		t.Fatal("an explicit model_driven: true must be visible as a set pointer")
+	}
+}
+
+func TestLoadConfigFromPathExplicitModelDrivenFalseOverridesDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := []byte("context:\n  compaction:\n    model_driven: false\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg, err := LoadConfigFromPath(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if cfg.Context.Compaction.ModelDrivenEnabled() {
+		t.Fatal("an explicit model_driven: false must disable model-driven reset despite the enabled default")
 	}
 }
 
@@ -70,7 +89,7 @@ func TestMergeProjectConfigModelDrivenCombinations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MergeProjectConfig: %v", err)
 		}
-		if !merged.Context.Compaction.ModelDriven {
+		if !merged.Context.Compaction.ModelDrivenEnabled() {
 			t.Fatal("global true + project unset should stay enabled")
 		}
 	})
@@ -81,7 +100,7 @@ func TestMergeProjectConfigModelDrivenCombinations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MergeProjectConfig: %v", err)
 		}
-		if merged.Context.Compaction.ModelDriven {
+		if merged.Context.Compaction.ModelDrivenEnabled() {
 			t.Fatal("project explicit false should override global true")
 		}
 	})
@@ -92,10 +111,10 @@ func TestMergeProjectConfigModelDrivenCombinations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MergeProjectConfig: %v", err)
 		}
-		if !projectCfg.Context.Compaction.ModelDriven {
+		if !projectCfg.Context.Compaction.ModelDrivenEnabled() {
 			t.Fatal("project explicit true should enable model-driven reset")
 		}
-		if !merged.Context.Compaction.ModelDriven {
+		if !merged.Context.Compaction.ModelDrivenEnabled() {
 			t.Fatal("merged config should carry the project true")
 		}
 	})
@@ -106,7 +125,7 @@ func TestMergeProjectConfigModelDrivenCombinations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MergeProjectConfig: %v", err)
 		}
-		if merged.Context.Compaction.ModelDriven {
+		if merged.Context.Compaction.ModelDrivenEnabled() {
 			t.Fatal("global false + project unset should stay disabled")
 		}
 	})

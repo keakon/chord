@@ -388,7 +388,7 @@ func TestCompactionSummaryProjectionFailurePreservesHistory(t *testing.T) {
 					t.Fatal(err)
 				}
 				before := a.ctxMgr.Snapshot()
-				draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "Continue the visible task.", nil, a.captureCompactionArchiveMeta())
+				draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "Continue the visible task.", nil, a.captureCompactionArchiveMeta()))
 				if draft != nil || !errors.Is(err, errCompactionSummaryProjection) {
 					t.Fatalf("draft = %#v, error = %v; want no draft and projection error", draft, err)
 				}

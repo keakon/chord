@@ -187,10 +187,10 @@ type CompactionConfig struct {
 	Reminder float64 `json:"reminder,omitempty" yaml:"reminder,omitempty"`
 	// ModelDriven exposes the compact_context tool so the model can request a
 	// durable context checkpoint once its working state is externalized.
-	// Defaults to false; only the merged effective value decides whether the
-	// tool is registered, so a project setting this false overrides a global
-	// true like any other scalar override.
-	ModelDriven bool `json:"model_driven,omitempty" yaml:"model_driven,omitempty"`
+	// The pointer distinguishes an explicit value from an unset one: unset
+	// enables it, so a project setting this false overrides the default and a
+	// global false like any other scalar override.
+	ModelDriven *bool `json:"model_driven,omitempty" yaml:"model_driven,omitempty"`
 	// RetainRecentTokens is the estimated-token budget for the newest real
 	// user messages (plus a dangling interrupted assistant reply) kept
 	// verbatim inside every compaction checkpoint, so the continuation can
@@ -203,6 +203,12 @@ type CompactionConfig struct {
 // CompactionReminderDisabled is the reminder value that switches the
 // context-pressure reminder off without touching the compaction threshold.
 const CompactionReminderDisabled = -1
+
+// ModelDrivenEnabled reports whether the compact_context tool is registered:
+// an explicit value wins, an unset value enables it (the default).
+func (c CompactionConfig) ModelDrivenEnabled() bool {
+	return c.ModelDriven == nil || *c.ModelDriven
+}
 
 // ModelCompactionConfig carries per-model overrides for the compaction
 // threshold and reminder lines. Pointer fields distinguish "not configured"

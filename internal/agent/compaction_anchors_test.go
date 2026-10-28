@@ -334,9 +334,9 @@ func TestCompactionDraftEmbedsAndInheritsSessionAnchors(t *testing.T) {
 	a.resetRuntimeEvidenceFromMessages(snapshot)
 
 	evidenceItems := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1,
+	draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
-		"port the config loader to the new schema", evidenceItems, a.captureCompactionArchiveMeta())
+		"port the config loader to the new schema", evidenceItems, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync: %v", err)
 	}
@@ -363,9 +363,9 @@ func TestCompactionDraftEmbedsAndInheritsSessionAnchors(t *testing.T) {
 		{Role: message.RoleAssistant, Content: "done"},
 	}...)
 	secondEvidence := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
-	secondDraft, err := a.produceCompactionDraftAsync(t.Context(), next, false, 2,
+	secondDraft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(next, false, 2,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(next), compactionProfileArchival,
-		checkpoint.Content, secondEvidence, a.captureCompactionArchiveMeta())
+		checkpoint.Content, secondEvidence, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("second produceCompactionDraftAsync: %v", err)
 	}
@@ -409,9 +409,9 @@ func TestCompactionDraftFoldsDerivedRequestConstraint(t *testing.T) {
 	a.resetRuntimeEvidenceFromMessages(snapshot)
 	evidenceItems := a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens())
 
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1,
+	draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1,
 		compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
-		request, evidenceItems, a.captureCompactionArchiveMeta())
+		request, evidenceItems, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync: %v", err)
 	}

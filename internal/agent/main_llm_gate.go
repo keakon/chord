@@ -530,6 +530,22 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 
 	input := snapshotLLMRequest(a.ctxMgr)
 	snapshot := input.Messages
+	// Withdraw a stale crossing before the trigger is captured: an armed
+	// usage-driven request whose live decision has fallen back below the
+	// reminder line is no longer justified — the queue's below-line branch
+	// clears the arm, so this gate must take the not-needed path instead of
+	// starting a compaction whose staged warning the same branch would
+	// immediately clear. The decision reads observed provider usage, so this
+	// is not the forbidden local-estimate cancellation of an armed request;
+	// and AutoCompactDecision is stable within one gate pass — usage updates
+	// only land with a completed response on this same event loop — so the
+	// later queue calls cannot re-enter the branch with a different verdict.
+	if a.contextPressureBelowReminderLine(a.ctxMgr.AutoCompactDecision(), -1) {
+		a.queueContextPressureReminderForNextRequest()
+		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
+		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, input, agentErrSourceID)
+		return
+	}
 	trigger := a.compactionTriggerForMainLLM()
 	// The context-pressure reminder is sticky (re-queued on every request above
 	// the reminder line until the model calls compact_context or the window
@@ -549,8 +565,8 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// Threshold grace period: while compact_context is visible, the first
 	// crossing in a compaction window defers the usage-driven start for
 	// minCompactionGracePeriodBatches requests and keeps the "compaction
-	// imminent" notice attached to every deferred request with the true
-	// remaining countdown, so the model can wrap up the phase and request a
+	// imminent" notice attached to every deferred request, so the model can
+	// wrap up the phase and request a
 	// model-driven checkpoint (or externalize state) first. The grace is
 	// bypassed above the hard ceiling and spent once per window; the oversize
 	// safety valve below is unaffected.
@@ -876,9 +892,28 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 			// usage-driven gate run normally on the old context.
 			a.settleModelDrivenSkip(draft)
 		} else if err := a.applyCompactionDraft(draft); err != nil {
+			// A question commit still in flight blocks history rewrites
+			// transiently: park the draft for the next barrier instead of
+			// failing a paid-for draft. The compaction state keeps its
+			// continuation, so applyReadyDraft applies and resumes the same
+			// resume plan once the commit settles. The permanent
+			// questions.failed case falls through to the failure branch.
+			if errors.Is(err, errQuestionHistoryRewriteUnsettled) && a.questions.active != nil {
+				a.compactionState.readyDraft = draft
+				log.Infof("compaction apply deferred: question commit unsettled plan_id=%v", draft.PlanID)
+				a.emitToTUI(a.compactionStatusEvent(CompactionStatusReady, ""))
+				a.emitCompactionSlotActivity()
+				return
+			}
 			class := classifyCompactionFailure(err)
 			a.recordCompactionFailureAnalyticsEvent(err, class, "apply")
-			a.noteCompactionFailure(err)
+			// The question barrier is not a compaction defect and must not
+			// feed the usage-driven breaker: suppression would not make the
+			// question state settle, and the root cause is already recorded
+			// by the persistence-failure path that set it.
+			if !errors.Is(err, errQuestionHistoryRewriteUnsettled) {
+				a.noteCompactionFailure(err)
+			}
 			log.Warnf("apply compaction draft failed error=%v", err)
 			// Apply left main.jsonl untouched, so the exported archive is an
 			// orphan. Without this it survives until the next restore sweep.
@@ -961,7 +996,11 @@ func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier b
 	if err := a.applyCompactionDraft(draft); err != nil {
 		class := classifyCompactionFailure(err)
 		a.recordCompactionFailureAnalyticsEvent(err, class, "apply_barrier")
-		a.noteCompactionFailure(err)
+		// See handleCompactionReady: the question barrier is not a compaction
+		// defect and must not feed the usage-driven breaker.
+		if !errors.Is(err, errQuestionHistoryRewriteUnsettled) {
+			a.noteCompactionFailure(err)
+		}
 		log.Warnf("apply compaction draft at barrier failed error=%v", err)
 		// See handleCompactionReady: a failed apply leaves the archive orphaned.
 		cleanupOrphanCompactionFiles(draft.AbsHistoryPath)
@@ -1374,14 +1413,12 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 }
 
 func (a *MainAgent) handleCompactionFailed(evt Event) {
-	var payload *compactionFailure
-	switch p := evt.Payload.(type) {
-	case *compactionFailure:
-		payload = p
-	case error:
-		payload = &compactionFailure{err: p}
-	}
-	if payload == nil {
+	// Only *compactionFailure payloads are valid: every sender (the draft
+	// workers and the watchdog) carries the plan ID, and a bare error payload
+	// would carry planID=0, which the stale checks below deliberately treat
+	// as "match anything" — settling whichever compaction happens to run.
+	payload, ok := evt.Payload.(*compactionFailure)
+	if !ok || payload == nil {
 		log.Errorf("handleCompactionFailed: invalid payload type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}

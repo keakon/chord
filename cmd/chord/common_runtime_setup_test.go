@@ -88,7 +88,7 @@ func TestCreateRuntimeModelDrivenCompactionWiresFlagAndTool(t *testing.T) {
 	ac.Ctx, ac.Cancel = context.WithCancel(context.Background())
 	defer ac.Cancel()
 	ac.Registry = tools.NewRegistry()
-	ac.Cfg = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{ModelDriven: true}}}
+	ac.Cfg = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{ModelDriven: new(true)}}}
 
 	rt, err := createRuntime(ac)
 	if err != nil {
@@ -124,7 +124,7 @@ func TestCreateRuntimeWithoutModelDrivenCompactionLeavesCapabilityOff(t *testing
 	ac.Ctx, ac.Cancel = context.WithCancel(context.Background())
 	defer ac.Cancel()
 	ac.Registry = tools.NewRegistry()
-	ac.Cfg = &config.Config{}
+	ac.Cfg = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{ModelDriven: new(false)}}}
 
 	rt, err := createRuntime(ac)
 	if err != nil {

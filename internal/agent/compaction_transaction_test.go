@@ -337,6 +337,39 @@ func TestApplyCompactionDraftKeepsManifestWhenAppliedSnapshotSaveFails(t *testin
 	}
 }
 
+func TestCompactionRecordFingerprintMatchesRestoredImageTranscript(t *testing.T) {
+	dir := t.TempDir()
+	rm := recovery.NewRecoveryManager(dir)
+	t.Cleanup(func() { _ = rm.Close() })
+
+	msg := message.Message{
+		Role: message.RoleUser,
+		Parts: []message.ContentPart{{
+			Type:     message.ContentPartImage,
+			MimeType: "image/png",
+			FileName: "shot.png",
+			Data:     []byte{0x89, 'P', 'N', 'G'},
+		}},
+	}
+	rec, err := rm.PersistedRecord(msg)
+	if err != nil {
+		t.Fatalf("PersistedRecord: %v", err)
+	}
+	if err := rm.WritePersistedRecord(identity.MainAgentID, rec); err != nil {
+		t.Fatalf("WritePersistedRecord: %v", err)
+	}
+	restored, err := rm.LoadMessages(identity.MainAgentID)
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if len(restored) != 1 {
+		t.Fatalf("restored messages = %d, want 1", len(restored))
+	}
+	if got, want := compactionTranscriptFingerprint(restored), compactionRecordsFingerprint([][]byte{rec}); got != want {
+		t.Fatalf("restored transcript fingerprint = %s, want the persisted record fingerprint %s", got, want)
+	}
+}
+
 func TestReconcilePreparedCompactionTransaction(t *testing.T) {
 	dir := t.TempDir()
 	messages := []message.Message{{Role: message.RoleUser, Content: "checkpoint"}}

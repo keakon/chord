@@ -1,6 +1,6 @@
 # 上下文管理
 
-<!-- description: 长会话如何留在模型上下文窗口内：请求剪裁、持久压缩，以及可选的模型驱动 checkpoint。 -->
+<!-- description: 长会话如何留在模型上下文窗口内：请求剪裁、持久压缩，以及模型驱动 checkpoint。 -->
 
 Chord 提供两层互补的上下文管理机制：**上下文压缩（Compaction）**调用 LLM 生成摘要并持久化改写会话历史，**上下文剪裁（Reduction）**在每次请求前用启发式规则剪裁 prompt。两者分别作用于持久化历史和单次请求，各司其职。
 
@@ -73,7 +73,7 @@ context:
 | `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从固定压缩预算中扣除，再应用 `threshold`。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 | `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；等于或高于 threshold 的 reminder 不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本就携带上阈值通知。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
-| `model_driven` | 布尔 | `false` | 实验性开关：给主 agent 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求，随后在同一 turn 的压缩上下文上继续。工具仅 MainAgent 可见、必须单独调用、`state_files` 与 `planned_state_files` 只作路径引用，工具自身不读取也不校验存在性；reset 后 runtime 会重新载入登记文件与 checkpoint 关键文件的一小段头部，且仅当当前 read 权限规则允许该路径。低收益请求会被自动跳过。默认关闭。 |
+| `model_driven` | 布尔 | `true` | 给主 agent 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求，随后在同一 turn 的压缩上下文上继续。工具仅 MainAgent 可见、必须单独调用、`state_files` 与 `planned_state_files` 只作路径引用，工具自身不读取也不校验存在性；reset 后 runtime 会重新载入登记文件与 checkpoint 关键文件的一小段头部，且仅当当前 read 权限规则允许该路径。低收益请求会被自动跳过。设为 `false` 可让压缩完全由运行时接管。 |
 | `retain_recent_tokens` | 整数 | `4096`（内置） | 每个压缩 checkpoint 内嵌的最近真实用户消息的估计 token 预算（见上文的「保留最近消息」）；`0` 或缺省使用内置默认值，只算消息正文。需要跨压缩保住更多最近轮次就调大，想让压缩多回收上下文就调小；保留段不替代摘要，只把最新指令边界原样钉住（与当前请求完全相同的重复消息会改写为一条去重说明）。 |
 
 按模型覆盖写在**模型定义**上（`ModelConfig.compaction`，含 `threshold` 与 `reminder` 两个子字段），可经 `model_templates` 用 `<<:` 共享；**没有** `context.compaction.models` 这张表。
@@ -120,9 +120,9 @@ providers:
 
 切换模型会应用新阈值并重置宽限窗口。上一模型的 usage 不能直接触发自动压缩，必须等待新窗口的有效用量观测。请求照常发出；只有服务商因长度拒绝时，才会先压缩再重试。
 
-### 模型驱动上下文 checkpoint（实验性）
+### 模型驱动上下文 checkpoint
 
-设置 `context.compaction.model_driven: true` 后，主 agent 获得 `compact_context` 工具。注册该工具是启用功能的一部分：仅含通配符的权限规则（例如 allowlist 式的 `"*": deny` 加少量显式放行的工具）不会隐藏或拦截它：只有匹配 `compact_context` 的非全局工具规则仍然生效（`deny` 会移除工具并给出一次性诊断，`ask` 保留工具但每次调用需确认，`allow` 与默认一致）。像 `compact_*` 这样的窄匹配也算匹配规则。即使角色的 allowlist 没有放行任何文件工具，模型仍可把状态完整写进结构化参数来完成 checkpoint。
+启用 `context.compaction.model_driven`（默认）后，主 agent 获得 `compact_context` 工具。注册该工具是启用功能的一部分：仅含通配符的权限规则（例如 allowlist 式的 `"*": deny` 加少量显式放行的工具）不会隐藏或拦截它：只有匹配 `compact_context` 的非全局工具规则仍然生效（`deny` 会移除工具并给出一次性诊断，`ask` 保留工具但每次调用需确认，`allow` 与默认一致）。像 `compact_*` 这样的窄匹配也算匹配规则。即使角色的 allowlist 没有放行任何文件工具，模型仍可把状态完整写进结构化参数来完成 checkpoint。
 
 模型应在「用 checkpoint 替换当前历史」比继续携带历史更划算，且后续需要的事实已经充分外化时单独调用它（同一响应里不能有其他工具调用）：这些事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中（`completed` 只记录已验证的结果及验证方式，todo 列表由运行时自动快照、无需复述）。长任务中，主 agent 把可复用的细节记在任务笔记里（见[系统提示词指引](#系统提示词指引)），checkpoint 前先更新笔记并通过 `state_files` 登记。结构化参数只作简短交接：目标、已验证进展、当前阻碍、下一步，以及需要读取的笔记小节。恢复信息很少或角色没有文件写入权限时，可以全部使用结构化参数，`state_files` 留空。没有上下文压力时，剩下的提交、交接或最终回复由 agent 直接完成，不为收尾单独调用 checkpoint；存在上下文压力时，即使临近完成也要保留安全的续跑状态。checkpoint 是有成本的状态转移，不是例行保存进度。runtime 校验请求，等工具批次收口后：
 

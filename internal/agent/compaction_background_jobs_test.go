@@ -214,7 +214,7 @@ func TestProduceCompactionDraftCarriesTheActiveJobSnapshot(t *testing.T) {
 		{Role: "user", Content: "u3"},
 		{Role: "assistant", Content: "a3"},
 	}
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta())
+	draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync: %v", err)
 	}

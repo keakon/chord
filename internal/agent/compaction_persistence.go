@@ -468,6 +468,13 @@ func (a *MainAgent) captureOriginalFirstUserHint() string {
 	if a.ctxMgr != nil {
 		snapshot = a.ctxMgr.Snapshot()
 	}
+	return a.originalFirstUserHintFromSnapshot(snapshot)
+}
+
+// originalFirstUserHintFromSnapshot derives the hint from a caller-provided
+// snapshot, so the apply path can share one history snapshot across its
+// pre-replace reads instead of cloning the transcript again here.
+func (a *MainAgent) originalFirstUserHintFromSnapshot(snapshot []message.Message) string {
 	// A transcript head that is a real user prompt is authoritative: a history
 	// that still starts with one has never been compacted, so that message *is*
 	// the original request. A cached preview can disagree with it only when the
@@ -551,7 +558,7 @@ func headIsCompactionCheckpoint(messages []message.Message) bool {
 	return false
 }
 
-func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.Message, originalFirstUserHint string) (string, error) {
+func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.Message, originalFirstUserHint string, beforeWrite func(records [][]byte, fingerprint string) error) (string, error) {
 	a.recoverySnapshotMu.Lock()
 	protectedInputs := a.pause.checkpoint != nil && len(a.pause.checkpoint.PendingInputs) > 0
 	a.recoverySnapshotMu.Unlock()
@@ -609,15 +616,35 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 	}
 
 	rm := recovery.NewRecoveryManager(a.sessionDir)
-	for _, msg := range messages {
-		if err := rm.PersistMessage(identity.MainAgentID, msg); err != nil {
-			rm.Close()
-			_ = os.Remove(mainPath)
-			if hadMain {
-				_ = os.Rename(backupPath, mainPath)
-			}
-			a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
-			return "", err
+	rollback := func(err error) (string, error) {
+		rm.Close()
+		_ = os.Remove(mainPath)
+		if hadMain {
+			_ = os.Rename(backupPath, mainPath)
+		}
+		a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
+		return "", err
+	}
+	// Render every record first: one marshal serves both the transaction
+	// fingerprint and the write, and the fingerprint then covers the exact
+	// bytes that reach the transcript (binary parts already replaced by their
+	// persisted references), which is what the restore-side reconcile hashes.
+	records := make([][]byte, len(messages))
+	for i, msg := range messages {
+		rec, err := rm.PersistedRecord(msg)
+		if err != nil {
+			return rollback(err)
+		}
+		records[i] = rec
+	}
+	if beforeWrite != nil {
+		if err := beforeWrite(records, compactionRecordsFingerprint(records)); err != nil {
+			return rollback(err)
+		}
+	}
+	for _, rec := range records {
+		if err := rm.WritePersistedRecord(identity.MainAgentID, rec); err != nil {
+			return rollback(err)
 		}
 	}
 	a.installRecoveryManager(rm)

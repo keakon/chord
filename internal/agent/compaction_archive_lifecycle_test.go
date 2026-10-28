@@ -45,7 +45,7 @@ func TestProduceCompactionDraftCapturesSummaryKeyFileRevision(t *testing.T) {
 		{Role: message.RoleTool, ToolCallID: "read-1", Content: "READ_RESULT lines=1-1 total=1\npackage current"},
 		{Role: message.RoleAssistant, Content: "continue"},
 	}
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta())
+	draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync: %v", err)
 	}

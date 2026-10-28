@@ -50,7 +50,7 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 	// Abrupt crossing: the observation reached the threshold without the
 	// pressure reminder ever being delivered in this window — usage jumped
 	// instead of climbing past the reminder line, so the model has had no
-	// early warning to act on. The grace countdown has no one to serve: skip
+	// early warning to act on. The grace has no one to serve: skip
 	// it, start compaction immediately, and let the crossing request carry a
 	// single externalization warning (the reminder never injects on a request
 	// that already stages the warning — the ladder in stageContextNotice).
@@ -73,7 +73,7 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 		return true
 	}
 	// Grace remains active. Retry the notice only if no request delivered it;
-	// later requests read the retained history without a changing countdown.
+	// later requests replay the retained history or the durable row.
 	if current >= a.compactionGraceStartBatch && current-a.compactionGraceStartBatch < minCompactionGracePeriodBatches {
 		a.queueCompactionImminentNotice()
 		return true
@@ -147,8 +147,13 @@ func (a *MainAgent) exhaustCompactionGraceAfterModelDriven() {
 	a.endCompactionGrace("model_driven_settled", a.currentRequestBatch(nil))
 }
 
-// clearCompactionGrace resets the grace state for a fresh compaction window
-// (durable apply, session switch, model change).
+// clearCompactionGrace resets the grace state for a fresh compaction window:
+// a durable apply, a session switch, a model change, or a restore. The
+// below-line withdrawal in queueContextPressureReminder also calls it WITHOUT
+// advancing the window generation, so a usage dip below the reminder line and
+// a re-crossing inside the same window grants the grace again — bounded by the
+// hard ceiling, and the reminder claim the dip does not reset keeps its
+// one-delivery-per-window guarantee.
 func (a *MainAgent) clearCompactionGrace() {
 	if a == nil {
 		return

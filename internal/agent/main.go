@@ -483,7 +483,7 @@ type MainAgent struct {
 	pendingCompactionWarning       string
 	// pendingCompactionImminent is the grace-period "compaction imminent"
 	// notice. It is re-queued on every request inside the threshold grace
-	// window with the true remaining countdown (compaction_grace.go).
+	// window (compaction_grace.go).
 	pendingCompactionImminent string
 	// pendingCompactionManual is the manual /compact imperative notice staged
 	// by the compaction gate while the armed intent's worker is still running

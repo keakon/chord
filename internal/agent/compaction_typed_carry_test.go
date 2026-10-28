@@ -860,9 +860,9 @@ func TestTypedStateSurvivesTwoRealGenericAppliesIntoModelDriven(t *testing.T) {
 	genericApply := func(planID uint64) message.Message {
 		t.Helper()
 		snapshot := a.ctxMgr.Snapshot()
-		draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, planID,
+		draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, planID,
 			compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
-			snapshot[0].Content, nil, a.captureCompactionArchiveMeta())
+			snapshot[0].Content, nil, a.captureCompactionArchiveMeta()))
 		if err != nil {
 			t.Fatalf("produce usage draft: %v", err)
 		}

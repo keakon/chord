@@ -118,8 +118,9 @@ func DefaultConfig() *Config {
 				mode:                    contextReductionEnabled,
 			},
 			Compaction: CompactionConfig{
-				Threshold: DefaultContextCompactUsage,
-				Profile:   CompactionProfileAuto,
+				Threshold:   DefaultContextCompactUsage,
+				Profile:     CompactionProfileAuto,
+				ModelDriven: new(true),
 			},
 		},
 		Diagnostics: DefaultDiagnosticsConfig(),

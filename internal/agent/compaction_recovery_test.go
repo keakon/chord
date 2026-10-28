@@ -194,7 +194,7 @@ func TestProduceCompactionDraftCarriesRuntimeRecoveryState(t *testing.T) {
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-unsettled", Name: "Bash"}}},
 		{Role: message.RoleTool, ToolCallID: "call-unsettled", Content: "session restored before the result was persisted", ToolRecoveryState: message.ToolRecoveryStateOutcomeUnknown},
 	}
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta())
+	draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync: %v", err)
 	}

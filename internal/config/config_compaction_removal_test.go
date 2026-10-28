@@ -11,7 +11,7 @@ func TestRemovedCompactionPresetReportsIssueAndKeepsOtherSettings(t *testing.T) 
 	if !strings.Contains(logs, "field preset not found in type config.CompactionConfig") {
 		t.Fatalf("config warning = %q, want unknown compaction preset", logs)
 	}
-	if comp := cfg.Context.Compaction; comp.Threshold != 0.75 || comp.Reminder != 0.6 || !comp.ModelDriven || comp.ModelPool != "summary-pool" {
+	if comp := cfg.Context.Compaction; comp.Threshold != 0.75 || comp.Reminder != 0.6 || !comp.ModelDrivenEnabled() || comp.ModelPool != "summary-pool" {
 		t.Fatalf("other compaction settings were lost: %+v", comp)
 	}
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", content)

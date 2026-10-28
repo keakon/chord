@@ -142,7 +142,7 @@ func TestProduceCompactionDraftArchivalProfileOmitsRecentTail(t *testing.T) {
 	// Test bypasses ctxmgr so use a non-zero headSplit directly. The async path
 	// requires headSplit > 0 because tail is preserved by ReplacePrefixAtomic.
 	headSplit := len(snapshot)
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit, compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta())
+	draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit, compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync error: %v", err)
 	}

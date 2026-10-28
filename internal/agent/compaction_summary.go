@@ -57,10 +57,38 @@ func normalizeMessagesForSummary(messages []message.Message) []message.Message {
 }
 
 func trimMessagesToBudget(mgr *ctxmgr.Manager, messages []message.Message, targetTokens int) ([]message.Message, int) {
+	ratio := float64(0)
+	if mgr != nil {
+		ratio = mgr.CalibratedRatio()
+	}
+	return trimMessagesToBudgetWithRatio(messages, ratio, targetTokens)
+}
+
+// trimMessagesToBudgetWithReservedTail trims to the target with the last
+// reserveTail tokens held back, falling back to the unreserved target when
+// nothing survives the tighter budget.
+func trimMessagesToBudgetWithReservedTail(messages []message.Message, ratio float64, targetTokens int, reserveTail int) ([]message.Message, int) {
+	if reserveTail <= 0 {
+		return trimMessagesToBudgetWithRatio(messages, ratio, targetTokens)
+	}
+	trimmed, omitted := trimMessagesToBudgetWithRatio(messages, ratio, targetTokens-reserveTail)
+	if len(trimmed) > 0 {
+		return trimmed, omitted
+	}
+	return trimMessagesToBudgetWithRatio(messages, ratio, targetTokens)
+}
+
+// trimMessagesToBudgetWithRatio is the estimator behind the trim variants, on
+// a caller-snapshot calibration ratio (0 = plain bytes/3, matching
+// EstimateMessagesTokensCalibrated's no-sample behavior). Repeated fit
+// attempts pass one snapshot instead of re-reading the live calibration
+// window per message per attempt — see CalibratedRatio's guidance on keeping
+// multiple estimates on the same calibration.
+func trimMessagesToBudgetWithRatio(messages []message.Message, ratio float64, targetTokens int) ([]message.Message, int) {
 	if len(messages) == 0 || targetTokens <= 0 {
 		return nil, len(messages)
 	}
-	if estimateMessagesTokens(mgr, messages) <= targetTokens {
+	if ctxmgr.EstimateMessagesTokensWithRatio(messages, ratio) <= targetTokens {
 		out := make([]message.Message, len(messages))
 		copy(out, messages)
 		return out, 0
@@ -69,7 +97,7 @@ func trimMessagesToBudget(mgr *ctxmgr.Manager, messages []message.Message, targe
 	start := len(messages)
 	remaining := targetTokens
 	for i, message := range slices.Backward(messages) {
-		cost := estimateMessageTokens(mgr, message)
+		cost := ctxmgr.EstimateMessageTokensWithRatio(message, ratio)
 		if remaining-cost < 0 {
 			break
 		}
@@ -232,17 +260,6 @@ func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, cont
 	}, nil
 }
 
-func trimMessagesToBudgetWithReservedTail(mgr *ctxmgr.Manager, messages []message.Message, targetTokens int, reserveTail int) ([]message.Message, int) {
-	if reserveTail <= 0 {
-		return trimMessagesToBudget(mgr, messages, targetTokens)
-	}
-	trimmed, omitted := trimMessagesToBudget(mgr, messages, targetTokens-reserveTail)
-	if len(trimmed) > 0 {
-		return trimmed, omitted
-	}
-	return trimMessagesToBudget(mgr, messages, targetTokens)
-}
-
 // compactionPromptTokenEstimate sizes the assembled compaction prompt for
 // fitCompactionInputToContextLimit. It deliberately stays on bytes/3 instead of
 // the usage-calibrated estimator: this is the admission gate that decides
@@ -282,11 +299,19 @@ func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, inp
 		return nil, nil, fmt.Errorf("prepare compaction transcript during fit: %w", err)
 	}
 	budget := compactionInputBudget(contextLimit)
+	// One calibration snapshot serves every attempt: re-reading the live
+	// window per message per attempt only re-buys the same ratio, and a
+	// mid-loop change would make the attempts incomparable. A nil manager (a
+	// unit-test agent without ctxmgr) keeps the uncalibrated bytes/3 ratio.
+	trimRatio := float64(0)
+	if a.ctxMgr != nil {
+		trimRatio = a.ctxMgr.CalibratedRatio()
+	}
 	for attempts := range 6 {
 		candidateKeyFiles, candidateTodos, candidateSubAgents, candidateBackground := compactionPromptInputsForAttempt(
 			keyFiles, todos, subAgents, backgroundObjects, attempts,
 		)
-		trimmed, omittedMessages := trimMessagesToBudgetWithReservedTail(a.ctxMgr, normalized, budget, attempts*512)
+		trimmed, omittedMessages := trimMessagesToBudgetWithReservedTail(normalized, trimRatio, budget, attempts*512)
 		if len(trimmed) == 0 {
 			continue
 		}

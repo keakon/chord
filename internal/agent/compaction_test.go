@@ -8,6 +8,29 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// testCompactionInput builds the schedule-time compactionWorkerInput for tests
+// that drive the draft worker directly, mirroring the event-loop capture in
+// startCompactionAsyncWithContinuation: the runtime snapshot sections are read
+// here, at the equivalent of schedule time, not inside the worker.
+func (a *MainAgent) testCompactionInput(snapshot []message.Message, manual bool, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, originalRequest string, evidenceItems []evidenceItem, archiveMeta compactionArchiveMeta) compactionWorkerInput {
+	backgroundObjects, jobSnapshotAt := jobStatesForSnapshotWithTime()
+	return compactionWorkerInput{
+		snapshot:          snapshot,
+		planID:            planID,
+		target:            target,
+		headSplit:         headSplit,
+		profile:           profile,
+		manual:            manual,
+		originalRequest:   originalRequest,
+		evidenceItems:     evidenceItems,
+		archiveMeta:       archiveMeta,
+		todos:             a.GetTodos(),
+		subAgents:         a.taskInfosForCompaction(),
+		backgroundObjects: backgroundObjects,
+		jobSnapshotAt:     jobSnapshotAt,
+	}
+}
+
 type countingCompactionProvider struct {
 	keys          []string
 	models        []string

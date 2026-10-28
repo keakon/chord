@@ -1197,6 +1197,17 @@ func EstimateMessagesTokensWithRatio(messages []message.Message, ratio float64) 
 	return max(int(float64(bytes)*ratio), 1) + imageTokens
 }
 
+// EstimateMessageTokensWithRatio is the per-message primitive behind
+// EstimateMessagesTokensWithRatio, so per-message budget walks can share one
+// snapshot ratio instead of re-reading the live calibration per message.
+func EstimateMessageTokensWithRatio(msg message.Message, ratio float64) int {
+	if ratio <= 0 {
+		return EstimateMessageTokens(msg)
+	}
+	bytes, imageTokens := messageEstimateBytesAndImages([]message.Message{msg})
+	return max(int(float64(bytes)*ratio), 1) + imageTokens
+}
+
 // EstimateBytesForTokensCalibrated converts a token budget back into a byte
 // allowance using the same usage-calibrated ratio as
 // EstimateMessagesTokensCalibrated, falling back to tokens*3. Used where a
@@ -1444,8 +1455,11 @@ func (m *Manager) refreshMessageByteStateLocked() {
 }
 
 // repairOrphanToolResultsInTail removes tool messages from tail that don't have
-// a matching tool_call in the prefix. This ensures the resulting message list
-// is valid for strict APIs that require tool_results to have matching tool_calls.
+// a matching tool_call in the prefix or in an EARLIER tail assistant message.
+// A strict API requires every tool result's call to be declared before the
+// result appears, so a call declared only later in the tail cannot rescue it.
+// This ensures the resulting message list is valid for strict APIs that require
+// tool_results to have matching tool_calls.
 func repairOrphanToolResultsInTail(prefix []message.Message, tail []message.Message) ([]message.Message, int) {
 	if len(tail) == 0 {
 		return tail, 0
@@ -1461,27 +1475,25 @@ func repairOrphanToolResultsInTail(prefix []message.Message, tail []message.Mess
 		}
 	}
 
-	// Also collect tool call IDs from tail's assistant messages
-	// (tool results can reference tool_calls from earlier in tail)
-	tailCallIDs := make(map[string]struct{})
+	// Single forward pass: declare each assistant's calls as it is reached, so
+	// a tool result can only match a declaration at or before its own position.
+	var repaired []message.Message
+	dropped := 0
+	declared := make(map[string]struct{})
 	for _, msg := range tail {
 		if msg.Role == message.RoleAssistant {
 			for _, tc := range msg.ToolCalls {
 				if tc.ID != "" {
-					tailCallIDs[tc.ID] = struct{}{}
+					declared[tc.ID] = struct{}{}
 				}
 			}
+			repaired = append(repaired, msg)
+			continue
 		}
-	}
-
-	// Filter out orphan tool results
-	var repaired []message.Message
-	dropped := 0
-	for _, msg := range tail {
 		if msg.Role == message.RoleTool && msg.ToolCallID != "" {
 			// Check if the tool_call_id exists in prefix or earlier in tail
 			_, inPrefix := prefixCallIDs[msg.ToolCallID]
-			_, inTail := tailCallIDs[msg.ToolCallID]
+			_, inTail := declared[msg.ToolCallID]
 			if !inPrefix && !inTail {
 				dropped++
 				continue

@@ -97,14 +97,39 @@ var errCompactionWatchdog = errors.New("compaction draft production timed out (w
 // compaction-originated compacting activity emission.
 const compactionActivityDetail = "context"
 
+// compactionWorkerInput carries every schedule-time capture the draft
+// goroutine consumes. The worker must not read live MainAgent state: the
+// archived head, the evidence slice and the runtime snapshot sections (todos,
+// sub-agents, background jobs) must all describe the same moment, mirroring
+// the frozen-barrier discipline the model-driven path enforces.
+type compactionWorkerInput struct {
+	snapshot          []message.Message
+	planID            uint64
+	target            compactionTarget
+	headSplit         int
+	profile           compactionProfile
+	manual            bool
+	originalRequest   string
+	evidenceItems     []evidenceItem
+	archiveMeta       compactionArchiveMeta
+	todos             []tools.TodoItem
+	subAgents         []SubAgentInfo
+	backgroundObjects []recovery.BackgroundObjectState
+	jobSnapshotAt     time.Time
+}
+
 func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Message, planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, manual bool) {
 	if a.sessionExecutionPaused() {
 		return
 	}
 	a.recordCompactionLifecycleEvent("started", map[string]string{"trigger": trigger.analyticsName(), "message_count": strconv.Itoa(len(snapshot))})
+	// Runtime snapshot inputs are read on the event loop together with the
+	// evidence slice (which owns the tracker discipline) so the checkpoint's
+	// runtime sections describe the same moment as the archived head instead
+	// of a later build-time re-read.
 	todos := a.GetTodos()
 	subAgents := a.taskInfosForCompaction()
-	backgroundObjects := jobStatesForSnapshot()
+	backgroundObjects, jobSnapshotAt := jobStatesForSnapshotWithTime()
 	// evidenceItemsForCompaction reads the event-loop-owned evidence tracker;
 	// capture the slice here and hand it to the worker so the draft never
 	// touches the tracker from another goroutine.
@@ -139,8 +164,23 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 
 	a.emitCompactionSlotActivity()
 	a.emitToTUI(a.compactionStatusEvent(CompactionStatusStarted, ""))
+	input := compactionWorkerInput{
+		snapshot:          snapshot,
+		planID:            planID,
+		target:            target,
+		headSplit:         headSplit,
+		profile:           profile,
+		manual:            manual,
+		originalRequest:   originalRequest,
+		evidenceItems:     evidenceItems,
+		archiveMeta:       archiveMeta,
+		todos:             todos,
+		subAgents:         subAgents,
+		backgroundObjects: backgroundObjects,
+		jobSnapshotAt:     jobSnapshotAt,
+	}
 	a.compactionWg.Add(1)
-	go func(ctx context.Context, snapshot []message.Message, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, manual bool, originalRequest string, evidenceItems []evidenceItem, archiveMeta compactionArchiveMeta) {
+	go func(ctx context.Context, input compactionWorkerInput) {
 		defer a.compactionWg.Done()
 		defer cancel()
 
@@ -156,23 +196,23 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 			select {
 			case <-draftDone:
 			case <-timer.C:
-				log.Errorf("compaction draft watchdog fired plan_id=%v head_split=%v", planID, headSplit)
-				a.sendEvent(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: planID, target: target, err: errCompactionWatchdog}})
+				log.Errorf("compaction draft watchdog fired plan_id=%v head_split=%v", input.planID, input.headSplit)
+				a.sendEvent(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: input.planID, target: input.target, err: errCompactionWatchdog}})
 			}
 		}()
 
-		draft, err := a.produceCompactionDraftAsync(ctx, snapshot, manual, planID, target, headSplit, profile, originalRequest, evidenceItems, archiveMeta)
+		draft, err := a.produceCompactionDraftAsync(ctx, input)
 		if err != nil {
-			a.sendEvent(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: planID, target: target, err: err, absHistoryPath: getAbsHistoryPathFromDraft(draft)}})
+			a.sendEvent(Event{Type: EventCompactionFailed, Payload: &compactionFailure{planID: input.planID, target: input.target, err: err, absHistoryPath: getAbsHistoryPathFromDraft(draft)}})
 			return
 		}
 		if draft != nil {
-			draft.PlanID = planID
-			draft.Target = target
-			draft.HeadSplit = headSplit
+			draft.PlanID = input.planID
+			draft.Target = input.target
+			draft.HeadSplit = input.headSplit
 		}
 		a.sendEvent(Event{Type: EventCompactionReady, Payload: draft})
-	}(ctx, snapshot, planID, target, headSplit, profile, manual, originalRequest, evidenceItems, archiveMeta)
+	}(ctx, input)
 }
 
 func (a *MainAgent) maybeRunAutoCompaction() {
@@ -240,11 +280,26 @@ func (a *MainAgent) handleCompactCommand() {
 // new message list. Safe to call from a background goroutine (read-only use of
 // MainAgent fields + LLM / filesystem). Tail messages [headSplit:) are preserved
 // by ReplacePrefixAtomic at apply time, so the draft only carries the summary.
-func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []message.Message, manual bool, planID uint64, target compactionTarget, headSplit int, profile compactionProfile, originalRequest string, evidenceItems []evidenceItem, archiveMeta compactionArchiveMeta) (*compactionDraft, error) {
+// Every input arrives through the schedule-time compactionWorkerInput capture.
+func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, input compactionWorkerInput) (*compactionDraft, error) {
 	// Check for cancellation before starting expensive work
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
+
+	snapshot := input.snapshot
+	manual := input.manual
+	planID := input.planID
+	target := input.target
+	headSplit := input.headSplit
+	profile := input.profile
+	originalRequest := input.originalRequest
+	evidenceItems := input.evidenceItems
+	archiveMeta := input.archiveMeta
+	todos := input.todos
+	subAgents := input.subAgents
+	backgroundObjects := input.backgroundObjects
+	jobSnapshotAt := input.jobSnapshotAt
 
 	if len(snapshot) < 4 {
 		return &compactionDraft{
@@ -268,12 +323,9 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		}, nil
 	}
 
-	todos := a.GetTodos()
-	subAgents := a.taskInfosForCompaction()
-	backgroundObjects, jobSnapshotAt := jobStatesForSnapshotWithTime()
 	headSnapshot := questionCompactionMessages(snapshot[:headSplit])
 
-	evidenceItems, _ = applyCompactionProfile(a.ctxMgr, profile, headSnapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)
+	evidenceItems = applyCompactionProfileToEvidence(profile, evidenceItems)
 	// Anchors are inherited from the previous checkpoint rather than re-derived,
 	// so recursive compaction cannot erode the original request or a standing
 	// constraint one summary at a time.
@@ -525,13 +577,17 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		}()
 	}
 	headSplit := d.HeadSplit
+	// One snapshot serves every pre-replace read below: the apply runs on the
+	// event loop, the only ctxmgr appender, and nothing between here and
+	// ReplacePrefixAtomic mutates the history except reconcileAfterFlush —
+	// which runs after the last of these uses and keeps its own snapshot.
+	current := a.ctxMgr.Snapshot()
 	if d.SummaryMode == compactionSummaryModeModelDriven && d.RuntimeGeneration > 0 {
 		// One transcript snapshot serves both staleness guards; the runtime
 		// input capture below fetches only the four state slices the
 		// fingerprint hashes (never the full barrier bundle), so the apply
 		// never rebuilds the barrier for a fingerprint re-check.
-		currentSnapshot := a.ctxMgr.Snapshot()
-		if currentGeneration := a.currentRequestBatch(currentSnapshot); currentGeneration != d.RuntimeGeneration {
+		if currentGeneration := a.currentRequestBatch(current); currentGeneration != d.RuntimeGeneration {
 			return fmt.Errorf("model-driven compaction draft is stale: runtime generation changed from %d to %d; new input was received after the checkpoint was prepared — process that input first, then retry compact_context", d.RuntimeGeneration, currentGeneration)
 		}
 		if d.RuntimeStateFingerprint != "" {
@@ -543,7 +599,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	}
 	if len(d.SourceRefs) > 0 {
 		started := time.Now()
-		currentMessages := a.ctxMgr.Snapshot()
+		currentMessages := current
 		if headSplit > len(currentMessages) {
 			a.recordCompactionProvenanceEvent("boundary_mismatch", map[string]string{"source_ref_count": strconv.Itoa(len(d.SourceRefs)), "head_split": strconv.Itoa(headSplit), "current_message_count": strconv.Itoa(len(currentMessages)), "duration_us": strconv.FormatInt(time.Since(started).Microseconds(), 10)})
 			return fmt.Errorf("compaction source boundary %d exceeds current message count %d", headSplit, len(currentMessages))
@@ -568,15 +624,14 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// replace below; settle them durably before that (see
 	// settleCompactionDroppedMailboxRows). The replay IDs must be re-enqueued
 	// after the replace commits.
-	mailboxReplayIDs, mailboxSettleErr := a.settleCompactionDroppedMailboxRows(a.ctxMgr.Snapshot(), headSplit)
+	mailboxReplayIDs, mailboxSettleErr := a.settleCompactionDroppedMailboxRows(current, headSplit)
 	if mailboxSettleErr != nil {
 		return mailboxSettleErr
 	}
 	d.NewMessages = a.refreshCompactionFileRevisions(d.NewMessages)
 	for i := range d.NewMessages {
 		if d.NewMessages[i].IsCompactionSummary {
-			snapshot := a.ctxMgr.Snapshot()
-			d.NewMessages[i].CompactionDeliveredFiles = message.CollectDeliveredFiles(snapshot[:min(max(0, headSplit), len(snapshot))])
+			d.NewMessages[i].CompactionDeliveredFiles = message.CollectDeliveredFiles(current[:min(max(0, headSplit), len(current))])
 			break
 		}
 	}
@@ -587,21 +642,20 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// restored counter would restart from 0 and read as a stale anchor,
 	// re-admitting requests the interval gate meant to throttle. The stamp
 	// keeps the persisted sequence continuous across the restart.
-	applyBatch := a.currentRequestBatch(nil)
+	applyBatch := a.currentRequestBatch(current)
 	d.NewMessages[0].RequestBatch = applyBatch
 
 	// Capture the original first user message BEFORE entering ReplacePrefixAtomic,
 	// because the rewrite callback runs while ctxmgr's write lock is held and
-	// cannot itself call Snapshot() (which RLocks the same mutex). Pulling the
-	// snapshot here keeps rewriteSessionAfterCompaction lock-free with respect
-	// to ctxmgr.
-	originalFirstUserHint := a.captureOriginalFirstUserHint()
+	// cannot itself call Snapshot() (which RLocks the same mutex). The shared
+	// snapshot keeps this lock-free with respect to ctxmgr.
+	originalFirstUserHint := a.originalFirstUserHintFromSnapshot(current)
 	// Measured before the replace so the apply log can report what durable
 	// compaction actually reclaimed. Without it the only published number is
 	// "archived N messages", which says nothing about the context those
 	// messages occupied and cannot be compared against what request-level
 	// reduction saves.
-	tokensBeforeApply := estimateMessagesTokens(a.ctxMgr, a.ctxMgr.Snapshot())
+	tokensBeforeApply := estimateMessagesTokens(a.ctxMgr, current)
 	var compactedMessages []message.Message
 
 	// Use ReplacePrefixAtomic: replace [0, headSplit) with d.NewMessages,
@@ -648,16 +702,23 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		// fingerprint after the rewrite landed, and an applied compaction can
 		// never be left reading as prepared. Recording it after
 		// ReplacePrefixAtomic returned would open a crash window in which a
-		// committed rewrite still reconciles as aborted.
-		if d.TransactionID != "" {
-			if err := updateCompactionTransactionTarget(d.TransactionSessionDir, d.TransactionID, compactionTranscriptFingerprint(newMessages)); err != nil {
-				return nil, fmt.Errorf("record compaction transcript fingerprint: %w", err)
+		// committed rewrite still reconciles as aborted. The fingerprint is
+		// supplied by the rewrite itself and hashes the exact JSONL records it
+		// appends, so a restore-side fingerprint over the reloaded transcript
+		// matches byte for byte.
+		beforeWrite := func(records [][]byte, fingerprint string) error {
+			if d.TransactionID == "" {
+				return nil
 			}
+			if err := updateCompactionTransactionTarget(d.TransactionSessionDir, d.TransactionID, fingerprint); err != nil {
+				return fmt.Errorf("record compaction transcript fingerprint: %w", err)
+			}
+			return nil
 		}
 
 		// Rewrite session file atomically
 		var rewriteErr error
-		backupPath, rewriteErr = a.rewriteSessionAfterCompaction(d.Index, newMessages, originalFirstUserHint)
+		backupPath, rewriteErr = a.rewriteSessionAfterCompaction(d.Index, newMessages, originalFirstUserHint, beforeWrite)
 		if rewriteErr != nil {
 			return nil, fmt.Errorf("rewrite compacted session: %w", rewriteErr)
 		}

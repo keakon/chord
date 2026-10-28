@@ -88,8 +88,11 @@ const (
 	compactPromptSubAgentLimit   = 6
 	compactPromptDescMaxChars    = 240
 	compactPromptSummaryMaxChars = 320
-	// Budget ratio for compaction input - use 1/6 of context window
-	// to reduce transcript size and speed up model calls.
+	// Denominator for the compaction input budget's floor: on a large window
+	// the budget is the context limit minus output reserve, prompt overhead and
+	// the preflight buffer; on a tiny window that difference can shrink to
+	// nothing, so the floor keeps a minimum slice (contextLimit/6) for the
+	// transcript. It bounds the input from below, not from above.
 	compactBudgetRatio = 6
 )
 

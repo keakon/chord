@@ -45,6 +45,19 @@ func compactionTranscriptFingerprint(messages []message.Message) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+// compactionRecordsFingerprint hashes the exact JSONL records the compaction
+// rewrite appends. It is the apply-side twin of compactionTranscriptFingerprint:
+// restore re-marshals the reloaded transcript, which reproduces the persisted
+// records byte for byte, so the two agree even for messages whose binary parts
+// were persisted as file references (an in-memory hash would diverge there).
+func compactionRecordsFingerprint(records [][]byte) string {
+	h := sha256.New()
+	for _, rec := range records {
+		_, _ = h.Write(rec)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 func updateCompactionTransactionTarget(sessionDir, transactionID, targetFingerprint string) error {
 	path := compactionTransactionManifestPath(sessionDir, transactionID)
 	data, err := os.ReadFile(path)

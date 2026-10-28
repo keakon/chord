@@ -78,13 +78,16 @@ func (a *MainAgent) resolveCompactionProfile(todos []tools.TodoItem, subAgents [
 	}
 }
 
-func applyCompactionProfile(mgr *ctxmgr.Manager, profile compactionProfile, messages []message.Message, contextLimit int, evidenceItems []evidenceItem) ([]evidenceItem, []message.Message) {
-	switch profile {
-	case compactionProfileArchival:
-		return filterCompactionEvidenceForArchival(evidenceItems), nil
-	default:
-		return evidenceItems, selectRecentTailMessages(mgr, messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
+// applyCompactionProfileToEvidence filters the evidence pack for the profile.
+// The async draft carries no recent raw tail — the continuation tail is the
+// live [headSplit:] range preserved at apply time, and the schedule-side
+// compactionHeadSplitForProfile already sized that boundary with the same
+// selectRecentTailMessages budget — so no tail selection runs here.
+func applyCompactionProfileToEvidence(profile compactionProfile, evidenceItems []evidenceItem) []evidenceItem {
+	if profile == compactionProfileArchival {
+		return filterCompactionEvidenceForArchival(evidenceItems)
 	}
+	return evidenceItems
 }
 
 func compactionHeadSplitForProfile(mgr *ctxmgr.Manager, profile compactionProfile, messages []message.Message, contextLimit int) int {

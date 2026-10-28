@@ -348,29 +348,49 @@ func (r *RecoveryManager) PersistMessageDurable(agentID string, msg message.Mess
 	return r.persistMessage(agentID, msg, true)
 }
 
-func (r *RecoveryManager) persistMessage(agentID string, msg message.Message, durable bool) error {
+// persistedRecord renders the exact JSONL record persistMessage appends for
+// msg: binary parts are moved to image files first, then the message is
+// marshaled with a trailing newline. Attachment I/O and marshal only touch the
+// message value, so keep them outside r.mu: they can take milliseconds for
+// large tool results while SaveSnapshot and RewriteLog wait on the same lock.
+func (r *RecoveryManager) persistedRecord(msg message.Message, durable bool) ([]byte, error) {
 	if msg.Kind == message.KindDirectoryInstructionProjection {
-		return fmt.Errorf("request-only directory instruction projection cannot be persisted")
+		return nil, fmt.Errorf("request-only directory instruction projection cannot be persisted")
 	}
 	if err := message.ValidateDirectoryInstructions(msg); err != nil {
-		return err
+		return nil, err
 	}
+	msg, err := r.persistBinaryParts(msg, durable)
+	if err != nil {
+		return nil, persistWriteError(fmt.Errorf("persist binary parts: %w", err), true)
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return nil, persistWriteError(err, true)
+	}
+	return append(data, '\n'), nil
+}
+
+// PersistedRecord renders the durable JSONL record for msg without writing it.
+// Compaction renders every record first so the transaction fingerprint hashes
+// the exact bytes that reach the transcript, then writes them in order via
+// WritePersistedRecord.
+func (r *RecoveryManager) PersistedRecord(msg message.Message) ([]byte, error) {
+	return r.persistedRecord(msg, true)
+}
+
+// WritePersistedRecord appends a record rendered by PersistedRecord to the
+// agent's message log and syncs it.
+func (r *RecoveryManager) WritePersistedRecord(agentID string, rec []byte) error {
+	return r.writePersistedRecord(agentID, rec, true)
+}
+
+func (r *RecoveryManager) writePersistedRecord(agentID string, data []byte, durable bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		return ErrClosed
 	}
-
-	var err error
-	msg, err = r.persistBinaryParts(msg, durable)
-	if err != nil {
-		return persistWriteError(fmt.Errorf("persist binary parts: %w", err), true)
-	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return persistWriteError(err, true)
-	}
-	data = append(data, '\n')
 
 	f, ok := r.handles[agentID]
 	if !ok {
@@ -378,10 +398,11 @@ func (r *RecoveryManager) persistMessage(agentID string, msg message.Message, du
 		if err := repairMessageTail(r.sessionDir, path); err != nil {
 			return persistWriteError(fmt.Errorf("repair message log tail: %w", err), true)
 		}
-		f, err = privatefs.OpenFile(r.sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+		opened, err := privatefs.OpenFile(r.sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 		if err != nil {
 			return persistWriteError(err, true)
 		}
+		f = opened
 		r.handles[agentID] = f
 	}
 
@@ -413,6 +434,14 @@ func (r *RecoveryManager) persistMessage(agentID string, msg message.Message, du
 		}
 	}
 	return nil
+}
+
+func (r *RecoveryManager) persistMessage(agentID string, msg message.Message, durable bool) error {
+	data, err := r.persistedRecord(msg, durable)
+	if err != nil {
+		return err
+	}
+	return r.writePersistedRecord(agentID, data, durable)
 }
 
 // AppendToolActivity durably appends and syncs one started record to the

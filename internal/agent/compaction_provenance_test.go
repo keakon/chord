@@ -165,7 +165,7 @@ func TestProduceCompactionDraftRefsCoverUnfilteredPrefix(t *testing.T) {
 	snapshot := a.ctxMgr.Snapshot()
 	headSplit := len(snapshot)
 
-	draft, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit, compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta())
+	draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, false, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, headSplit, compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta()))
 	if err != nil {
 		t.Fatalf("produceCompactionDraftAsync: %v", err)
 	}

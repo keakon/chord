@@ -469,6 +469,11 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 		a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 			if err != nil {
 				a.notePersistenceFailure(err)
+				// The row is in ctxmgr and the reservation stays: recovery
+				// makes the row durable and the deferred card event re-emits,
+				// so the card/message pair converges instead of the level
+				// being written twice.
+				a.noteContextNoticePersistFailure(level, text, messageIndex)
 				return
 			}
 			a.emitToTUI(ContextNoticeEvent{Level: level, Message: text, MessageIndex: messageIndex})

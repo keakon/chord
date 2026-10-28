@@ -49,6 +49,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Model-driven compaction is on by default: the main agent registers the `compact_context` tool without configuration, so a session nearing its compaction line gets the model's wrap-up and a durable checkpoint before the runtime's summary-based compaction runs. Set `context.compaction.model_driven: false` to keep compaction fully runtime-owned.
+
 - Editing a Go file returns about 300 ms sooner: Chord no longer waits for a second gopls publish once gopls has reported diagnostics for the version it just received.
 
 - Batch `edit` calls accept a trailing line-ending difference the same way a single replacement does, so an entry that misses only by its final newline no longer rejects the whole batch and costs another round trip.
@@ -86,6 +88,12 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Headless `models_response` payloads echo the optional `request_id` a `models` command carries, so integrators can tell a late reply from the result of a later request; commands without an ID omit the field.
 
 ### Fixes
+
+- A usage-driven compaction no longer starts from a request whose live usage has already fallen back below the pressure-reminder line. The armed request is withdrawn instead, where previously the same request still started the compaction — with its externalization warning cleared — whenever provider usage readings fluctuated near the line.
+
+- A ready compaction draft no longer fails permanently, deleting its archive and counting a failure toward the automatic-compaction breaker, when a Question commit is still settling. The draft now waits for the next continuation barrier and applies there; a Question persistence failure that will not settle still ends the attempt, but no longer counts toward the breaker — the root cause is reported by the persistence-health path that raised it.
+
+- Restoring a session whose last compaction carried image attachments now reconciles the compaction transaction correctly. The transaction fingerprint is computed from the exact bytes written to the transcript, matching what a restore reads back; the previous in-memory hash diverged once image parts were persisted as file references, so such a crash-window manifest always reconciled as aborted.
 
 - The `apply_patch` card spells every file the way the tool reports it and no longer replays deleted contents. A patch that named its target absolutely — what Codex-style models send — printed that absolute path in the header, and a deleted file's diff section was labelled `M` because the card only recognised the conventional `+++ /dev/null` spelling. Deleted files now show as a `D path` row with their removed lines still counted in the header, matching the `delete` tool's card. A multi-file patch names its files only in the body, so its header keeps the file and line counts instead of repeating the first target beside a second copy of the count. While a patch is still streaming, the header counts files the same way as after it arrives: a renamed file, or a file edited in several sections, counts once.
 
