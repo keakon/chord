@@ -196,6 +196,7 @@ func TestNestedRootsRouteToTheirOwnClient(t *testing.T) {
 // without launching a real server process.
 func existingTrivialClient(root string, fileTypes ...string) *Client {
 	return &Client{
+		client:    &fakePowernapClient{},
 		cwd:       root,
 		cfg:       config.LSPServerConfig{FileTypes: fileTypes},
 		openFiles: map[string]int32{},

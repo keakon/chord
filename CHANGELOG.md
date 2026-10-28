@@ -69,7 +69,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Duplicate detection for delegated tasks now uses only the identity the caller declares. A description that happens to overlap another task no longer produces a `duplicate_detected` hint; an explicit `semantic_task_key` still rejects a live duplicate with `already_exists`, and a shared `plan_task_ref` still adds a hint when the caller does not declare a different key.
 
-- File edits in other worktrees and repositories now receive LSP diagnostics using separate workspace instances. Switching directories preserves existing instances, and the sidebar keeps one row per server, adding up the counts reported by every workspace. Background monitoring refreshes externally changed files, clears deleted-file diagnostics, and releases idle documents and instances.
+- File edits in other worktrees and repositories now receive LSP diagnostics using separate workspace instances. Switching directories preserves existing instances, and the sidebar keeps one row per server, adding up the counts reported by every workspace. Background monitoring refreshes externally changed files, clears deleted-file diagnostics, and releases idle documents and instances; an instance whose server process exited is reclaimed the same way, so the sidebar drops its stale counts.
 
 - The **SKILLS** panel and the `/skill` selector mark skill state with icons instead of text suffixes: `○` idle, `◎` path-matched or notified, `●` loaded, `↻` reload after compaction, `◌` manual-only, and `⊘` denied. Green marks a live body, amber one that needs reloading.
 

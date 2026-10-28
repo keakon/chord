@@ -95,8 +95,9 @@ func (m *Manager) settingsBoundary(root string) string {
 	return root
 }
 
-// pruneMissingRoots releases vanished workspaces and idle instances without
-// open documents. It runs on tool access and background maintenance, never UI.
+// pruneMissingRoots releases vanished workspaces, exited instances, and idle
+// instances without open documents. It runs on tool access and background
+// maintenance, never UI.
 func (m *Manager) pruneMissingRoots(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -119,7 +120,11 @@ func (m *Manager) pruneMissingRoots(ctx context.Context) {
 		client.openFilesMu.Lock()
 		idle := len(client.openFiles) == 0 && client.lastUsed.Load() > 0 && time.Since(time.Unix(0, client.lastUsed.Load())) > workspaceIdleTimeout
 		client.openFilesMu.Unlock()
-		if !missing && !idle {
+		// A registered instance whose process already exited can neither publish
+		// nor clear diagnostics. Reclaim it like a vanished workspace so the
+		// sidebar stops reporting its last counts; the next Start relaunches the
+		// server on demand.
+		if !missing && !idle && client.IsRunning() {
 			continue
 		}
 		if missing {

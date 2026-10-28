@@ -234,6 +234,53 @@ func TestIdleInstanceReleasesDiagnostics(t *testing.T) {
 	}
 }
 
+// A registered instance whose process exited can never publish or clear
+// diagnostics again. Background maintenance must reclaim it and its counts so
+// the sidebar returns to "not started" instead of reporting the last snapshot.
+func TestExitedInstanceIsReleasedByMaintenance(t *testing.T) {
+	root := resolvedTempDir(t)
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package sample\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fake := &stoppedPowernapClient{}
+	c := newResyncTestClient(&fake.fakePowernapClient)
+	c.client = fake
+	c.cwd = root
+	c.diagnostics = make(map[protocol.DocumentURI][]protocol.Diagnostic)
+	c.cfg = config.LSPServerConfig{FileTypes: []string{"go"}}
+	m := NewManager(&config.Config{LSP: config.LSPConfig{"gopls": {FileTypes: []string{".go"}}}}, root, nil)
+	key := clientKey{name: "gopls", root: root}
+	m.clients[key] = c
+	if _, err := c.DidOpen(context.Background(), path, "package sample\n"); err != nil {
+		t.Fatal(err)
+	}
+	m.MarkTouched(path)
+	diags := []protocol.Diagnostic{{Severity: 1, Message: "sample diagnostic"}}
+	uri := c.pathToURI(path)
+	m.onDiagnostics(key, c)(uri, uriToPath(uri), nil, "gopls", diags, 1)
+	m.recordReviewSnapshot(path)
+	if rows := m.SidebarEntries(); len(rows) != 1 || !rows[0].OK || rows[0].Errors != 1 {
+		t.Fatalf("rows before exit = %+v, want one connected gopls row with an error", rows)
+	}
+
+	m.pruneMissingRoots(context.Background())
+
+	if len(m.clients) != 0 || len(m.reviewByServer) != 0 || len(m.diagByServer) != 0 {
+		t.Fatalf("exited instance retained state: clients=%d review=%+v diag=%+v", len(m.clients), m.reviewByServer, m.diagByServer)
+	}
+	if len(m.TouchedPaths()) != 1 {
+		t.Fatal("exited instance changed session history")
+	}
+	rows := m.SidebarEntries()
+	if len(rows) != 1 || rows[0].OK || !rows[0].Pending || rows[0].Errors != 0 || rows[0].Warnings != 0 {
+		t.Fatalf("rows after exit = %+v, want one pending gopls row without counts", rows)
+	}
+	if fake.shutdowns == 0 && fake.kills == 0 {
+		t.Fatal("exited instance was not closed")
+	}
+}
+
 type pausedChangeClient struct {
 	*fakePowernapClient
 	entered chan struct{}
