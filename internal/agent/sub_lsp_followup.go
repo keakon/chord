@@ -60,7 +60,7 @@ func (s *SubAgent) emitStagedLSPFollowup() {
 	msg := message.Message{
 		Role:       message.RoleUser,
 		Kind:       message.KindLSPFollowup,
-		Content:    lspFollowupContent(staged.text),
+		Content:    message.SystemReminderOverlayText(staged.text),
 		LSPReviews: reviews,
 	}
 	messageIndex := s.ctxMgr.MessageCount()

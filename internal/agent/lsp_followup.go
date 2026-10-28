@@ -41,7 +41,7 @@ type lspFollowup struct {
 }
 
 func (f *lspFollowup) overlay() message.Message {
-	return message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: lspFollowupContent(f.text)}
+	return message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: message.SystemReminderOverlayText(f.text)}
 }
 
 // Reading pending diagnostics neither stages a request nor acknowledges its
@@ -113,7 +113,7 @@ func (a *MainAgent) emitStagedLSPFollowup() {
 	for _, item := range staged.items {
 		reviews = append(reviews, item.Reviews...)
 	}
-	msg := message.Message{Role: message.RoleUser, Kind: message.KindLSPFollowup, Content: lspFollowupContent(staged.text), LSPReviews: reviews}
+	msg := message.Message{Role: message.RoleUser, Kind: message.KindLSPFollowup, Content: message.SystemReminderOverlayText(staged.text), LSPReviews: reviews}
 	messageIndex := a.ctxMgr.MessageCount()
 	a.ctxMgr.Append(msg)
 	ackLSPFollowupItems(staged.items)
@@ -139,10 +139,6 @@ func ackLSPFollowupItems(items []LSPFollowupItem) {
 			item.Ack()
 		}
 	}
-}
-
-func lspFollowupContent(text string) string {
-	return "<system-reminder>\n" + text + "\n</system-reminder>"
 }
 
 func formatLSPFollowup(items []LSPFollowupItem) string {

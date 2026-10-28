@@ -111,11 +111,11 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		return false
 	}
 	// The owner receives the same <system-reminder>-wrapped injection text the
-	// main transcript uses (systemReminderOverlayText via
+	// main transcript uses (message.SystemReminderOverlayText via
 	// appendMailboxMessageToContext): the content-trust prompt only recognizes
 	// that wrapper as the harness-message marker, and wrapping here keeps the
 	// pending user message and the durable context row on one identical text.
-	text := systemReminderOverlayText(formatSubAgentMailboxInjectionText(&msg))
+	text := message.SystemReminderOverlayText(formatSubAgentMailboxInjectionText(&msg))
 	reactivateLive := func(live *SubAgent, messageText string, statusMsg string, allowWakeBypass bool) bool {
 		input := pendingUserMessage{Content: messageText, MailboxAckID: strings.TrimSpace(msg.MessageID), Mailbox: mailboxMetadata(&msg)}
 		reservation := live.reserveUserMessage(input)
@@ -185,7 +185,7 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 			contextMessage := message.Message{
 				Role:         message.RoleUser,
 				Kind:         message.KindBackgroundResult,
-				Content:      systemReminderOverlayText(content),
+				Content:      message.SystemReminderOverlayText(content),
 				MailboxAckID: strings.TrimSpace(msg.MessageID),
 				Mailbox:      mailboxMetadata(&msg),
 			}

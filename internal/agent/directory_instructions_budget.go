@@ -37,7 +37,7 @@ func (a *MainAgent) directoryCandidateInputs(history []message.Message) director
 	}
 	add := func(text string) {
 		if text = strings.TrimSpace(text); text != "" {
-			in.overlays = append(in.overlays, message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "<system-reminder>\n" + text + "\n</system-reminder>"})
+			in.overlays = append(in.overlays, message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: message.SystemReminderOverlayText(text)})
 		}
 	}
 	durableIDs := conversationMailboxIDs(history)

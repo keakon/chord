@@ -106,7 +106,7 @@ func buildSkillDiscoveryMessage(history []message.Message, view skillActivationV
 	// The durable content carries the <system-reminder> wrapper; reserve its
 	// fixed length so the wrapped message stays within the same byte budget the
 	// bare body was measured against.
-	maxBytes -= len(systemReminderOverlayText(""))
+	maxBytes -= len(message.SystemReminderOverlayText(""))
 	descriptions := make(map[string]string)
 	for _, meta := range view.Catalog {
 		if meta != nil {
@@ -141,5 +141,5 @@ func buildSkillDiscoveryMessage(history []message.Message, view skillActivationV
 	// replayed row would read as user speech. The body is trimmed first: the
 	// listing lines end in newlines, and a doubled newline at the wrapper seam
 	// would defeat the blank-line escape guard below it.
-	return &message.Message{Role: message.RoleUser, Kind: message.KindSkillDiscovery, Content: systemReminderOverlayText(strings.TrimSpace(content.String())), SkillDiscovery: record}
+	return &message.Message{Role: message.RoleUser, Kind: message.KindSkillDiscovery, Content: message.SystemReminderOverlayText(strings.TrimSpace(content.String())), SkillDiscovery: record}
 }

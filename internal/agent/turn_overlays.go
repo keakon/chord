@@ -21,14 +21,6 @@ const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or mo
 // and persisted because they are real owner-visible model input. Other runtime
 // hints remain request-scoped overlays.
 
-// systemReminderOverlayText wraps harness-injected user text in the
-// <system-reminder> marker the content-trust prompt defines, so every audience
-// — the main transcript and a SubAgent owner alike — can tell runtime messages
-// apart from user-authored ones. Callers must pass already-trimmed content.
-func systemReminderOverlayText(content string) string {
-	return "<system-reminder>\n" + content + "\n</system-reminder>"
-}
-
 // appendMailboxMessageToContext persists one pending mailbox message to the
 // durable conversation and reports the request overlay carrying it. It is the
 // shared body of the initial-request path (buildTurnOverlayMessages) and the
@@ -55,7 +47,7 @@ func (a *MainAgent) appendMailboxMessageToContext(mailbox *SubAgentMailboxMessag
 		msg := message.Message{
 			Role:    message.RoleUser,
 			Kind:    message.KindBackgroundResult,
-			Content: systemReminderOverlayText(content),
+			Content: message.SystemReminderOverlayText(content),
 			Mailbox: mailboxMetadata(mailbox),
 		}
 		id := strings.TrimSpace(mailbox.MessageID)
@@ -84,7 +76,7 @@ func (a *MainAgent) appendMailboxMessageToContext(mailbox *SubAgentMailboxMessag
 	if content == "" {
 		return message.Message{}, false
 	}
-	msg := subAgentMailboxConversationMessage(mailbox, systemReminderOverlayText(content))
+	msg := subAgentMailboxConversationMessage(mailbox, message.SystemReminderOverlayText(content))
 	if id := strings.TrimSpace(mailbox.MessageID); id == "" || !mapContains(durableMailboxIDs, id) {
 		messageIndex := a.ctxMgr.MessageCount()
 		a.ctxMgr.Append(msg)
@@ -140,7 +132,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
+			Content: message.SystemReminderOverlayText(block),
 		})
 	}
 
@@ -163,13 +155,13 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + notice + "\n</system-reminder>",
+			Content: message.SystemReminderOverlayText(notice),
 		})
 	}
 	if a.stageCompletionCandidatePending && !a.stageCompletionCandidatePromptDelivered {
 		a.stageCompletionCandidatePromptDelivered = true
 		reminder := a.stageCompletionCandidateReminder()
-		overlays = append(overlays, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "<system-reminder>\n" + reminder + "\n</system-reminder>"})
+		overlays = append(overlays, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: message.SystemReminderOverlayText(reminder)})
 	}
 
 	// Attach each undelivered threshold once. Grace and compaction startup
@@ -184,7 +176,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:        "user",
 			Kind:        message.KindTurnOverlay,
-			Content:     "<system-reminder>\n" + manual + "\n</system-reminder>",
+			Content:     message.SystemReminderOverlayText(manual),
 			NoticeLevel: contextNoticeManual,
 		})
 	}
@@ -194,7 +186,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:        "user",
 			Kind:        message.KindTurnOverlay,
-			Content:     "<system-reminder>\n" + reminder + "\n</system-reminder>",
+			Content:     message.SystemReminderOverlayText(reminder),
 			NoticeLevel: contextNoticePressure,
 		})
 	}
@@ -204,7 +196,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:        "user",
 			Kind:        message.KindTurnOverlay,
-			Content:     "<system-reminder>\n" + imminent + "\n</system-reminder>",
+			Content:     message.SystemReminderOverlayText(imminent),
 			NoticeLevel: contextNoticeImminent,
 		})
 	}
@@ -214,7 +206,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:        "user",
 			Kind:        message.KindTurnOverlay,
-			Content:     "<system-reminder>\n" + warning + "\n</system-reminder>",
+			Content:     message.SystemReminderOverlayText(warning),
 			NoticeLevel: contextNoticeWarning,
 		})
 	}
@@ -223,7 +215,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
+			Content: message.SystemReminderOverlayText(block),
 		})
 	}
 
@@ -235,7 +227,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
+			Content: message.SystemReminderOverlayText(block),
 		})
 	}
 
@@ -245,7 +237,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + recoveryPrompt + "\n</system-reminder>",
+			Content: message.SystemReminderOverlayText(recoveryPrompt),
 		})
 	}
 
@@ -267,7 +259,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + strings.Join(autoContinueParts, "\n") + "\n</system-reminder>",
+			Content: message.SystemReminderOverlayText(strings.Join(autoContinueParts, "\n")),
 		})
 	}
 

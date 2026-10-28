@@ -252,7 +252,7 @@ func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message,
 				a.noteCompactionWarningAttached()
 			}
 			a.stashContextNotice(level, text)
-			notice = message.Message{Role: message.RoleUser, NoticeLevel: level, Content: "<system-reminder>\n" + text + "\n</system-reminder>"}
+			notice = message.Message{Role: message.RoleUser, NoticeLevel: level, Content: message.SystemReminderOverlayText(text)}
 			appended = true
 		}
 		// A model switch permits reselecting notices. Reusing a durable notice

@@ -456,7 +456,7 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 			// other harness injection uses, so the model can tell it apart from
 			// a user-written message when a later request replays the notice.
 			// The live card is built from the bare event text below.
-			Content:         "<system-reminder>\n" + text + "\n</system-reminder>",
+			Content:         message.SystemReminderOverlayText(text),
 			NoticeLevel:     level,
 			PressureCycleID: cycleID,
 		}

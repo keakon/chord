@@ -230,7 +230,7 @@ func TestSubAgentRecoveryCheckpointReemitsDeferredLSPFollowupCard(t *testing.T) 
 	found := false
 	for _, msg := range messages {
 		if msg.Kind == message.KindLSPFollowup {
-			found = msg.Content == lspFollowupContent(lspFollowupLead+"\n\nmain.go:\n[W] 3:1 unused")
+			found = msg.Content == message.SystemReminderOverlayText(lspFollowupLead+"\n\nmain.go:\n[W] 3:1 unused")
 			break
 		}
 	}

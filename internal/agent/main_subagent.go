@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -597,7 +598,7 @@ func (a *MainAgent) handleAgentDone(evt Event) {
 	a.queueLoopEvent(Event{Type: EventSubAgentMailbox, SourceID: evt.SourceID, Payload: mailbox})
 	mailboxMessage := formatSubAgentMailboxInjectionText(mailbox)
 	if ownerAgentID == "" {
-		mailboxMessage = "<system-reminder>\n" + mailboxMessage + "\n</system-reminder>"
+		mailboxMessage = message.SystemReminderOverlayText(mailboxMessage)
 	}
 
 	a.emitToTUI(AgentDoneEvent{
