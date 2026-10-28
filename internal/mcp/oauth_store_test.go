@@ -46,7 +46,7 @@ func TestCredentialStoreConfirmationAndCache(t *testing.T) {
 	if err := storeEnsureTestSlot(t.Context(), s, target); err != nil {
 		t.Fatal(err)
 	}
-	other := NewCredentialStore(s.home)
+	other := NewCredentialStore(s.stateDir)
 	writes := 0
 	other.replace = func(path string, data []byte, mode os.FileMode) (atomicfile.ReplaceOutcome, error) {
 		writes++
@@ -151,7 +151,7 @@ func TestCredentialStoreFailedConfirmationDoesNotExposeSecrets(t *testing.T) {
 	if err := storeEnsureTestSlot(t.Context(), s, target); err != nil {
 		t.Fatal(err)
 	}
-	other := NewCredentialStore(s.home)
+	other := NewCredentialStore(s.stateDir)
 	other.replace = func(string, []byte, os.FileMode) (atomicfile.ReplaceOutcome, error) {
 		return atomicfile.NotReplaced, errors.New("injected persistence failure")
 	}
@@ -258,7 +258,7 @@ func TestCredentialStoreProcessTransactions(t *testing.T) {
 	children := make([]*exec.Cmd, 3)
 	for i := range children {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestCredentialStoreProcessTransactions$")
-		cmd.Env = append(os.Environ(), "CHORD_STORE_CHILD_HOME="+s.home)
+		cmd.Env = append(os.Environ(), "CHORD_STORE_CHILD_HOME="+s.stateDir)
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}

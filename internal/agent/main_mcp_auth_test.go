@@ -18,7 +18,7 @@ func authControlTestAgent(t *testing.T) (*MainAgent, mcp.ServerRef, *mcp.Manager
 	target := mcp.Target{Ref: ref, ConfigGeneration: 1, Config: mcp.ServerConfig{Name: ref.ServerName, URL: "https://example.invalid/mcp", Auth: config.MCPAuthNone, Manual: true}}
 	manager := mcp.NewPendingManagerWithClientInfo([]mcp.Target{target}, mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	t.Cleanup(manager.Close)
-	a.SetMCPRuntime([]mcp.Target{target}, manager, nil, t.TempDir())
+	a.SetMCPRuntime([]mcp.Target{target}, manager, nil)
 	a.SetMCPStatusSnapshotFunc(manager.Snapshot)
 	drainAgentEvents(a.Events())
 	return a, ref, manager

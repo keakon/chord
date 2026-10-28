@@ -267,7 +267,7 @@ func TestOAuthRefreshProcessTransactions(t *testing.T) {
 	var children []*exec.Cmd
 	for range 3 {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestOAuthRefreshProcessTransactions$")
-		cmd.Env = append(os.Environ(), "CHORD_REFRESH_CHILD_HOME="+store.home, "CHORD_REFRESH_TEST_CERT="+base64.StdEncoding.EncodeToString(server.Certificate().Raw), "CHORD_REFRESH_TEST_ADDRESS="+server.Listener.Addr().String())
+		cmd.Env = append(os.Environ(), "CHORD_REFRESH_CHILD_HOME="+store.stateDir, "CHORD_REFRESH_TEST_CERT="+base64.StdEncoding.EncodeToString(server.Certificate().Raw), "CHORD_REFRESH_TEST_ADDRESS="+server.Listener.Addr().String())
 		cmd.Stdout = new(bytes.Buffer)
 		cmd.Stderr = cmd.Stdout
 		if err := cmd.Start(); err != nil {
@@ -301,7 +301,7 @@ func TestOAuthRefreshProcessCrash(t *testing.T) {
 	target := refreshTestTarget()
 	expected := seedRefreshTest(t, store, target, time.Now())
 	cmd := exec.Command(os.Args[0], "-test.run=^TestOAuthRefreshProcessTransactions$")
-	cmd.Env = append(os.Environ(), "CHORD_REFRESH_CHILD_HOME="+store.home, "CHORD_REFRESH_TEST_CERT="+base64.StdEncoding.EncodeToString(server.Certificate().Raw), "CHORD_REFRESH_TEST_ADDRESS="+server.Listener.Addr().String())
+	cmd.Env = append(os.Environ(), "CHORD_REFRESH_CHILD_HOME="+store.stateDir, "CHORD_REFRESH_TEST_CERT="+base64.StdEncoding.EncodeToString(server.Certificate().Raw), "CHORD_REFRESH_TEST_ADDRESS="+server.Listener.Addr().String())
 	if err := cmd.Start(); err != nil {
 		close(release)
 		t.Fatal(err)

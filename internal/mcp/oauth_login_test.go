@@ -52,7 +52,7 @@ func loginFixture(t *testing.T) (*AuthService, Target, *atomic.Int32) {
 	business := &http.Client{Transport: probeRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 	})}
-	service := NewAuthService(AuthOptions{ConfigHome: t.TempDir(), HTTPClient: client, MCPHTTPClient: business})
+	service := NewAuthService(AuthOptions{StateDir: t.TempDir(), HTTPClient: client, MCPHTTPClient: business})
 	t.Cleanup(service.Close)
 	return service, targets[0], exchange
 }

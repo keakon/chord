@@ -50,11 +50,11 @@ func newDoctorMCPCmd() *cobra.Command {
 			serverName = args[0]
 		}
 		started := time.Now()
-		targets, home, err := loadMCPCommandConfig(cmd.Context(), agentName, serverName)
+		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, serverName)
 		if err != nil {
 			return mcpCommandError(err, 2)
 		}
-		auth := mcp.NewAuthService(mcp.AuthOptions{ConfigHome: home, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
+		auth := mcp.NewAuthService(mcp.AuthOptions{StateDir: stateDir, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
 		defer auth.Close()
 		report := doctorMCPReport{SchemaVersion: 1, Mode: "offline", CheckedAt: started.UTC(), Targets: make([]doctorMCPTarget, 0, len(targets)), OK: true}
 		if connect {

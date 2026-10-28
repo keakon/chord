@@ -13,7 +13,7 @@ func configureRuntimeMCPAuth(ac *AppContext) {
 	if ac == nil || ac.MainAgent == nil {
 		return
 	}
-	ac.MainAgent.SetMCPRuntime(ac.MCPTargets, ac.MCPMgr, ac.MCPAuth, ac.ConfigHome)
+	ac.MainAgent.SetMCPRuntime(ac.MCPTargets, ac.MCPMgr, ac.MCPAuth)
 	ac.MainAgent.SetMCPPreparationHook(func(ctx context.Context) error { return reconcileRuntimeMCPCredentials(ctx, ac) })
 	if ac.MCPMgr != nil {
 		ac.MainAgent.SetMCPStatusSnapshotFunc(ac.MCPMgr.Snapshot)

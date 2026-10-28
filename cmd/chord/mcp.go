@@ -33,11 +33,11 @@ func newMCPListCmd() *cobra.Command {
 	var agentName string
 	var jsonOutput bool
 	cmd := &cobra.Command{Use: "list", Short: "List visible MCP servers and saved credential status (offline)", Args: mcpCommandArgs(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		targets, home, err := loadMCPCommandConfig(cmd.Context(), agentName, "")
+		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, "")
 		if err != nil {
 			return mcpCommandError(err, 2)
 		}
-		auth := mcp.NewAuthService(mcp.AuthOptions{ConfigHome: home, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
+		auth := mcp.NewAuthService(mcp.AuthOptions{StateDir: stateDir, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
 		defer auth.Close()
 		entries := make([]mcpListEntry, 0, len(targets))
 		failed := false
@@ -105,7 +105,7 @@ func newMCPLoginCmd() *cobra.Command {
 	var agentName string
 	var noBrowser, reauth bool
 	cmd := &cobra.Command{Use: "login <server>", Short: "Authorize an HTTP MCP server on this host", Args: mcpCommandArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		targets, home, err := loadMCPCommandConfig(cmd.Context(), agentName, args[0])
+		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, args[0])
 		if err != nil {
 			return mcpCommandError(err, 2)
 		}
@@ -113,7 +113,7 @@ func newMCPLoginCmd() *cobra.Command {
 		if err := requireManagedMCP(target); err != nil {
 			return mcpCommandError(err, 2)
 		}
-		auth := mcp.NewAuthService(mcp.AuthOptions{ConfigHome: home, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
+		auth := mcp.NewAuthService(mcp.AuthOptions{StateDir: stateDir, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
 		defer auth.Close()
 		result, err := auth.Login(cmd.Context(), target, mcp.LoginOptions{Reauth: reauth}, func(progress mcp.LoginProgress) {
 			if progress.AuthorizationURL == "" {
@@ -152,7 +152,7 @@ func newMCPLoginCmd() *cobra.Command {
 func newMCPLogoutCmd() *cobra.Command {
 	var agentName string
 	cmd := &cobra.Command{Use: "logout <server>", Short: "Remove a saved MCP login from this host", Args: mcpCommandArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		targets, home, err := loadMCPCommandConfig(cmd.Context(), agentName, args[0])
+		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, args[0])
 		if err != nil {
 			return mcpCommandError(err, 2)
 		}
@@ -160,7 +160,7 @@ func newMCPLogoutCmd() *cobra.Command {
 		if err := requireManagedMCP(target); err != nil {
 			return mcpCommandError(err, 2)
 		}
-		auth := mcp.NewAuthService(mcp.AuthOptions{ConfigHome: home, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
+		auth := mcp.NewAuthService(mcp.AuthOptions{StateDir: stateDir, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
 		defer auth.Close()
 		if _, err := auth.Logout(cmd.Context(), target); err != nil {
 			return mcpCommandError(err, 1)

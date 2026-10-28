@@ -196,7 +196,7 @@ A brief gray pending state after startup can be normal. Run `chord doctor mcp <s
 - **Missing scope:** sign in again to request the additional access. A failure for one tool does not automatically disable other tools or grant them permission.
 - **Callback unavailable:** port 41937 may be occupied by another authorization. Client metadata requires that fixed port. For SSH, establish a matching loopback port forward before login; `--no-browser` still needs the callback listener.
 - **Network policy or direct-connect failure:** authorization servers must be public HTTPS endpoints. OAuth control requests ignore environment proxies, so confirm the host can reach the server directly even if ordinary MCP requests work through a proxy. Private-network authorization servers are unsupported. The connection report distinguishes network policy, TLS, and protocol failures; it also indicates direct OAuth connections and whether proxy environment variables are present.
-- **Credential file permission error:** check ownership and user-only access under `<config-home>/mcp/oauth/`; Chord does not silently loosen existing permissions or replace damaged credential files. Keep a copy for diagnosis before repairing the files.
+- **Credential file permission error:** check ownership and user-only access under `<state-dir>/mcp/oauth/`; Chord does not silently loosen existing permissions or replace damaged credential files. Keep a copy for diagnosis before repairing the files.
 
 Login, logout, and `doctor --connect` do not change a manual server's enablement. Enable it separately when needed. An authentication error from a business tool is returned to that call; Chord does not silently replay it. See [MCP sign-in](./usage.md#mcp-sign-in-and-connection-diagnostics).
 

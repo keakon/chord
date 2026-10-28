@@ -49,7 +49,6 @@ type ResolveTargetOptions struct {
 	Agent       string
 	Ruleset     permission.Ruleset
 	ContentRoot string
-	ConfigHome  string
 }
 
 var targetGeneration atomic.Uint64

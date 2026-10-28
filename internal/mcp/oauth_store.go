@@ -19,14 +19,17 @@ import (
 const credentialFileLimit = 4 << 20
 
 type CredentialStore struct {
-	home      string
+	stateDir  string
 	mu        sync.Mutex
 	confirmed map[string][sha256.Size]byte
 	replace   func(string, []byte, os.FileMode) (atomicfile.ReplaceOutcome, error)
 }
 
-func NewCredentialStore(configHome string) *CredentialStore {
-	return &CredentialStore{home: configHome, confirmed: make(map[string][sha256.Size]byte), replace: atomicfile.ReplaceDurable}
+// NewCredentialStore roots the store at stateDir; credential files live under
+// <stateDir>/mcp/oauth and the state dir must be expendable user state, not a
+// backed-up configuration tree.
+func NewCredentialStore(stateDir string) *CredentialStore {
+	return &CredentialStore{stateDir: stateDir, confirmed: make(map[string][sha256.Size]byte), replace: atomicfile.ReplaceDurable}
 }
 
 func storeFailure(class ErrorClass, outcome atomicfile.ReplaceOutcome) error {
@@ -60,16 +63,16 @@ func (s *CredentialStore) path(t Target) (string, error) {
 	if err != nil || len(b) != sha256.Size || t.TargetID != hex.EncodeToString(b) {
 		return "", storeFailure(ErrorCredentialStoreFailed, atomicfile.NotReplaced)
 	}
-	return filepath.Join(s.home, "mcp", "oauth", t.TargetID+".json"), nil
+	return filepath.Join(s.stateDir, "mcp", "oauth", t.TargetID+".json"), nil
 }
 
-// prepare validates all components beneath ConfigHome. Read-only callers never
+// prepare validates all components beneath StateDir. Read-only callers never
 // create directories, lock files, or confirmation writes.
 func (s *CredentialStore) prepare(write bool) error {
-	if s.home == "" {
+	if s.stateDir == "" {
 		return storeFailure(ErrorCredentialStoreFailed, atomicfile.NotReplaced)
 	}
-	for i, path := range []string{s.home, filepath.Join(s.home, "mcp"), filepath.Join(s.home, "mcp", "oauth")} {
+	for i, path := range []string{s.stateDir, filepath.Join(s.stateDir, "mcp"), filepath.Join(s.stateDir, "mcp", "oauth")} {
 		info, err := os.Lstat(path)
 		if os.IsNotExist(err) && write {
 			if err = atomicfile.EnsurePrivateDirectory(path); err == nil {

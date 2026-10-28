@@ -44,7 +44,7 @@ func TestRuntimeReconnectStagesNewTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	ac.MCPTargets = targets
-	ac.MCPAuth = mcp.NewAuthService(mcp.AuthOptions{ConfigHome: t.TempDir()})
+	ac.MCPAuth = mcp.NewAuthService(mcp.AuthOptions{StateDir: t.TempDir()})
 	defer ac.MCPAuth.Close()
 	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(targets, mcp.ClientInfo{}, ac.MCPAuth)
 	defer ac.MCPMgr.Close()

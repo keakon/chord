@@ -651,7 +651,6 @@ type MainAgent struct {
 	mcpRuntimeMain       *mcp.Manager
 	mcpRuntimeAuth       *mcp.AuthService
 	mcpRuntimeTargets    []mcp.Target
-	mcpRuntimeConfigHome string
 	mcpRuntimeGeneration uint64
 
 	// Custom slash commands loaded from MD files / YAML config.

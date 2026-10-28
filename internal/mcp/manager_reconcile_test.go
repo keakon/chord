@@ -92,7 +92,7 @@ func TestReconcilePreservesAnonymousAutoConnection(t *testing.T) {
 	target.Config.Name = "sample"
 	target.Ref.ServerName = "sample"
 	target.Config.Auth = "auto"
-	service := NewAuthService(AuthOptions{ConfigHome: t.TempDir()})
+	service := NewAuthService(AuthOptions{StateDir: t.TempDir()})
 	defer service.Close()
 	manager := NewPendingManagerWithClientInfo([]Target{target}, testClientInfo, service)
 	defer manager.Close()

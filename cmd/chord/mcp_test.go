@@ -17,6 +17,8 @@ import (
 func TestMCPListWithoutLLMOrStorageWrites(t *testing.T) {
 	t.Chdir(t.TempDir())
 	setupDoctorConfigHome(t, "mcp:\n  sample:\n    url: https://example.invalid/mcp?private=query-value\n    oauth:\n      issuer: https://auth.example.invalid\n      client_id: sample-client\n      token_endpoint_auth_method: client_secret_basic\n      client_secret_env: CHORD_SAMPLE_UNSET_SECRET\n")
+	stateDir := filepath.Join(t.TempDir(), "state")
+	t.Setenv("CHORD_STATE_DIR", stateDir)
 	t.Setenv("CHORD_SAMPLE_UNSET_SECRET", "")
 	var out bytes.Buffer
 	cmd := newMCPCmd()
@@ -39,8 +41,26 @@ func TestMCPListWithoutLLMOrStorageWrites(t *testing.T) {
 	if strings.Contains(out.String(), "query-value") || strings.Contains(out.String(), "CHORD_SAMPLE_UNSET_SECRET") {
 		t.Fatal("private config leaked into list output")
 	}
-	if _, err := os.Stat(filepath.Join(os.Getenv("CHORD_CONFIG_HOME"), "mcp")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("list created credential storage: %v", err)
+	for _, root := range []string{os.Getenv("CHORD_CONFIG_HOME"), stateDir} {
+		if _, err := os.Stat(filepath.Join(root, "mcp")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("list created credential storage under %s: %v", root, err)
+		}
+	}
+}
+
+func TestMCPCommandConfigUsesStateDir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	setupDoctorConfigHome(t, "mcp:\n  sample:\n    url: https://example.invalid/mcp\n")
+	stateDir := filepath.Join(t.TempDir(), "state")
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	for _, serverName := range []string{"", "sample"} {
+		targets, got, err := loadMCPCommandConfig(t.Context(), "", serverName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(targets) != 1 || got != stateDir {
+			t.Fatalf("server %q: targets=%v, directory=%q, want %q", serverName, targets, got, stateDir)
+		}
 	}
 }
 
@@ -49,6 +69,8 @@ func TestMCPDoctorOfflineDoesNotStartStdio(t *testing.T) {
 	t.Chdir(root)
 	marker := filepath.Join(root, "marker")
 	setupDoctorConfigHome(t, "mcp:\n  sample:\n    command: sh\n    args: ['-c', 'touch "+marker+"']\n")
+	stateDir := filepath.Join(t.TempDir(), "state")
+	t.Setenv("CHORD_STATE_DIR", stateDir)
 	var out bytes.Buffer
 	cmd := newDoctorMCPCmd()
 	cmd.SetOut(&out)
@@ -71,6 +93,11 @@ func TestMCPDoctorOfflineDoesNotStartStdio(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("offline doctor started stdio")
+	}
+	for _, dir := range []string{os.Getenv("CHORD_CONFIG_HOME"), stateDir} {
+		if _, err := os.Stat(filepath.Join(dir, "mcp")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("offline doctor created credential storage under %s: %v", dir, err)
+		}
 	}
 }
 

@@ -35,7 +35,7 @@ func agentMCPServerCacheKey(agentName, serverName string) string {
 
 // SetMCPRuntime supplies owner-independent runtime services. Owner-specific
 // permissions are applied to snapshots, never through the focused UI route.
-func (a *MainAgent) SetMCPRuntime(targets []mcp.Target, main *mcp.Manager, auth *mcp.AuthService, configHome string) {
+func (a *MainAgent) SetMCPRuntime(targets []mcp.Target, main *mcp.Manager, auth *mcp.AuthService) {
 	a.stateMu.RLock()
 	roles := make(map[string]*config.AgentConfig, len(a.agentConfigs))
 	maps.Copy(roles, a.agentConfigs)
@@ -44,7 +44,7 @@ func (a *MainAgent) SetMCPRuntime(targets []mcp.Target, main *mcp.Manager, auth 
 		auth.UpdateTargets(mcp.MainOwner, targets)
 	}
 	a.mcpServerCacheMu.Lock()
-	a.mcpRuntimeMain, a.mcpRuntimeAuth, a.mcpRuntimeConfigHome = main, auth, configHome
+	a.mcpRuntimeMain, a.mcpRuntimeAuth = main, auth
 	a.mcpRuntimeTargets = make([]mcp.Target, len(targets))
 	for i, t := range targets {
 		a.mcpRuntimeTargets[i] = t.Snapshot()
@@ -156,7 +156,7 @@ func (a *MainAgent) getOrCreateAgentMCP(agentName string, cfg config.MCPConfig) 
 		}
 		a.mcpServerCacheMu.Lock()
 		entry := a.mcpServerCache[key]
-		generation, auth, home := a.mcpRuntimeGeneration, a.mcpRuntimeAuth, a.mcpRuntimeConfigHome
+		generation, auth := a.mcpRuntimeGeneration, a.mcpRuntimeAuth
 		if entry != nil && entry.Mgr != nil && entry.RuntimeGeneration == generation && reflect.DeepEqual(entry.Target.Config, converted) {
 			a.mcpServerCacheMu.Unlock()
 			current, _ := entry.Mgr.ToolSnapshot()
@@ -164,7 +164,7 @@ func (a *MainAgent) getOrCreateAgentMCP(agentName string, cfg config.MCPConfig) 
 			continue
 		}
 		a.mcpServerCacheMu.Unlock()
-		resolved, err := mcp.ResolveTargets(a.parentCtx, mcp.ResolveTargetOptions{Agent: agentName, Agents: map[string]*config.AgentConfig{agentName: {Name: agentName, MCP: config.MCPConfig{name: sc}}}, ContentRoot: a.contentRoot, ConfigHome: home})
+		resolved, err := mcp.ResolveTargets(a.parentCtx, mcp.ResolveTargetOptions{Agent: agentName, Agents: map[string]*config.AgentConfig{agentName: {Name: agentName, MCP: config.MCPConfig{name: sc}}}, ContentRoot: a.contentRoot})
 		if err != nil {
 			return nil, err
 		}

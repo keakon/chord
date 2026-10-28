@@ -56,9 +56,10 @@ func (e *authFailure) Error() string   { return "MCP authorization: " + string(e
 func authError(class ErrorClass) error { return &authFailure{class: class} }
 
 type AuthOptions struct {
-	ClientInfo    ClientInfo
+	ClientInfo ClientInfo
+	// StateDir roots the credential store; credentials live under <StateDir>/mcp/oauth.
+	StateDir      string
 	MCPHTTPClient *http.Client
-	ConfigHome    string
 	Clock         func() time.Time
 	Random        io.Reader
 	Store         *CredentialStore
@@ -101,7 +102,7 @@ type AuthService struct {
 
 func NewAuthService(opts AuthOptions) *AuthService {
 	if opts.Store == nil {
-		opts.Store = NewCredentialStore(opts.ConfigHome)
+		opts.Store = NewCredentialStore(opts.StateDir)
 	}
 	if opts.Clock == nil {
 		opts.Clock = time.Now

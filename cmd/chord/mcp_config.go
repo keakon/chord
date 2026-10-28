@@ -13,7 +13,8 @@ import (
 )
 
 // loadMCPCommandConfig resolves only configuration, visibility and repository
-// identity. It never creates an agent, LLM client, or MCP subprocess.
+// identity. It never creates an agent, LLM client, or MCP subprocess. The
+// returned directory is the state dir that roots the MCP credential store.
 func loadMCPCommandConfig(ctx context.Context, agentName, serverName string) ([]mcp.Target, string, error) {
 	root, err := os.Getwd()
 	if err != nil {
@@ -47,17 +48,17 @@ func loadMCPCommandConfig(ctx context.Context, agentName, serverName string) ([]
 	if agentConfig == nil {
 		return nil, "", fmt.Errorf("unknown agent %q", role)
 	}
-	targets, err := mcp.ResolveTargets(ctx, mcp.ResolveTargetOptions{Main: cfg.MCP, Agents: agents, Agent: agentName, Ruleset: permission.ParsePermission(&agentConfig.Permission), ContentRoot: root, ConfigHome: paths.ConfigHome})
+	targets, err := mcp.ResolveTargets(ctx, mcp.ResolveTargetOptions{Main: cfg.MCP, Agents: agents, Agent: agentName, Ruleset: permission.ParsePermission(&agentConfig.Permission), ContentRoot: root})
 	if err != nil {
 		return nil, "", err
 	}
 	if serverName != "" {
 		for _, target := range targets {
 			if target.Ref.ServerName == serverName {
-				return []mcp.Target{target}, paths.ConfigHome, nil
+				return []mcp.Target{target}, paths.StateDir, nil
 			}
 		}
 		return nil, "", fmt.Errorf("MCP server %q is not configured or is not visible to agent %q", serverName, role)
 	}
-	return targets, paths.ConfigHome, nil
+	return targets, paths.StateDir, nil
 }

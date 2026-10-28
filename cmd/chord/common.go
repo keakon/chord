@@ -700,11 +700,11 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.Registry.Register(tools.NewWebFetchTool(cfg.WebFetch, cfg.Proxy))
 
 	// MCP servers.
-	mcpTargets, err := mcp.ResolveTargets(ac.Ctx, mcp.ResolveTargetOptions{Main: cfg.MCP, ContentRoot: ac.ContentRoot, ConfigHome: ac.ConfigHome})
+	mcpTargets, err := mcp.ResolveTargets(ac.Ctx, mcp.ResolveTargetOptions{Main: cfg.MCP, ContentRoot: ac.ContentRoot})
 	if err != nil {
 		return nil, fmt.Errorf("resolve MCP targets: %w", err)
 	}
-	ac.MCPAuth = mcp.NewAuthService(mcp.AuthOptions{ConfigHome: ac.ConfigHome, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
+	ac.MCPAuth = mcp.NewAuthService(mcp.AuthOptions{StateDir: pathLocator.StateDir, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
 	syncMCPPromptBlock := ""
 	if len(mcpTargets) > 0 {
 		if asyncMCP {
