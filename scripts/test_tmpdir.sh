@@ -19,6 +19,7 @@
 # Usage:
 #   scripts/test_tmpdir.sh            # print the directory to use
 #   scripts/test_tmpdir.sh --destroy  # tear down the macOS RAM disk this may create
+#   scripts/test_tmpdir.sh --release DIR  # eject DIR if it is a private RAM disk
 
 set -euo pipefail
 
@@ -50,9 +51,10 @@ usable() {
 }
 
 mounted_identity() {
-	[[ -d "${mount_point}" ]] || return 1
+	local dir="${1:-${mount_point}}"
+	[[ -d "${dir}" ]] || return 1
 	local info device uuid parent
-	info="$(diskutil info -plist "${mount_point}" 2>/dev/null)" || return 1
+	info="$(diskutil info -plist "${dir}" 2>/dev/null)" || return 1
 	device="$(printf '%s' "${info}" | plutil -extract DeviceNode raw -o - - 2>/dev/null)" || return 1
 	uuid="$(printf '%s' "${info}" | plutil -extract VolumeUUID raw -o - - 2>/dev/null)" || return 1
 	parent="$(printf '%s' "${info}" | plutil -extract ParentWholeDisk raw -o - - 2>/dev/null)" || return 1
@@ -135,8 +137,65 @@ eject_created_device() {
 	diskutil eject "${device}" >/dev/null
 }
 
+# abandon_attached_disk reports the disk this run attached for the shared mount
+# when that mount cannot use it. The caller passes eject=1 only when the mount
+# provably does not sit on that disk; a disk left attached stays removable only
+# by hand, so the warning must name it.
+abandon_attached_disk() {
+	local dev="$1" eject="$2"
+	if [[ "${eject}" == 1 ]] && eject_created_device "${dev}"; then
+		return 0
+	fi
+	echo "warning: ${dev} was attached for ${mount_point} and stays attached; eject it manually with diskutil eject ${dev}" >&2
+}
+
+# Creates a RAM disk at a path that did not exist before, for the case where the
+# shared mount cannot be confirmed as the disk attached in this run. The shared
+# mount is left untouched rather than ejected or renamed: another process may
+# already use it, and its users would fail on a path that disappears mid-run.
+use_unique_ram_disk() {
+	local reason="$1" attempt name target dev volumes_root
+	volumes_root="$(dirname "${mount_point}")"
+	for attempt in 1 2 3 4 5; do
+		name="${volume_name}-$$-${RANDOM}"
+		target="${volumes_root}/${name}"
+		if [[ -e "${target}" ]]; then
+			continue
+		fi
+		dev="$(hdiutil attach -nomount "ram://${size_sectors}" 2>/dev/null | awk '{print $1; exit}' || true)"
+		[[ "${dev}" =~ ^/dev/disk[0-9]+$ ]] || return 1
+		if ! diskutil erasevolume APFS "${name}" "${dev}" >/dev/null 2>&1 || ! usable "${target}"; then
+			eject_created_device "${dev}" >/dev/null 2>&1 || true
+			return 1
+		fi
+		echo "warning: ${reason}; leaving ${mount_point} untouched and using ${target} instead (make test-fast and race-fast eject it when the run ends; otherwise run scripts/test_tmpdir.sh --release ${target})" >&2
+		printf '%s\n' "${target}"
+		return 0
+	done
+	return 1
+}
+
+# Ejects a private disk created by use_unique_ram_disk once its run is done.
+# Only that naming pattern qualifies: such a path is created fresh for one run,
+# while the shared mount may serve other processes and is left to --destroy.
+release_private_ram_disk() {
+	local dir="${1:-}" identity parent stores store
+	[[ "$(dirname "${dir}")" == "$(dirname "${mount_point}")" && "$(basename "${dir}")" =~ ^${volume_name}-[0-9]+-[0-9]+$ ]] || return 0
+	[[ -d "${dir}" ]] || return 0
+	if identity="$(mounted_identity "${dir}")"; then
+		parent="$(sed -n '3p' <<<"${identity}")"
+		stores="$(diskutil info -plist "/dev/${parent}" 2>/dev/null | plutil -extract APFSPhysicalStores json -o - - 2>/dev/null)" || stores=""
+		store="$(grep -oE '"APFSPhysicalStore"[[:space:]]*:[[:space:]]*"disk[0-9]+"' <<<"${stores}" | grep -oE 'disk[0-9]+' || true)"
+		if [[ "${store}" =~ ^disk[0-9]+$ ]] && diskutil eject "/dev/${store}" >/dev/null; then
+			return 0
+		fi
+	fi
+	echo "warning: could not release the private RAM disk at ${dir}; eject it manually with diskutil eject ${dir}" >&2
+	return 1
+}
+
 resolve_darwin_tmpdir() {
-	local identity dev dev_name parent
+	local identity dev dev_name parent unique
 	# A usable mount is reused whether or not it has an owner record. The
 	# record only authorizes --destroy to eject a disk this helper created.
 	if usable "${mount_point}"; then
@@ -154,16 +213,34 @@ resolve_darwin_tmpdir() {
 		echo "warning: could not create an APFS RAM disk; falling back to the default temp dir" >&2
 		return 0
 	fi
-	identity="$(mounted_identity)" || {
-		eject_created_device "${dev}" >/dev/null 2>&1 || true
-		echo "warning: created RAM disk identity could not be verified; falling back to the default temp dir" >&2
+	# Whatever sits at the shared path is never ejected or renamed here: other
+	# processes may already have taken it as their TMPDIR. When it cannot be
+	# confirmed as this run's disk, this run gets a disk of its own instead.
+	if ! identity="$(mounted_identity)"; then
+		abandon_attached_disk "${dev}" 0
+		if unique="$(use_unique_ram_disk "created RAM disk identity could not be verified")"; then
+			printf '%s\n' "${unique}"
+			return 0
+		fi
+		echo "warning: could not create a usable APFS RAM disk; falling back to the default temp dir" >&2
 		return 0
-	}
+	fi
 	parent="$(sed -n '3p' <<<"${identity}")"
-	if ! parent_has_physical_store "${parent}" "${dev_name}" || ! write_owner_record "${identity}" "${dev_name}"; then
-		eject_created_device "${dev}" >/dev/null 2>&1 || true
-		echo "warning: created RAM disk ownership could not be recorded; falling back to the default temp dir" >&2
+	if ! parent_has_physical_store "${parent}" "${dev_name}"; then
+		# The mount is not on this run's disk, so ejecting that disk cannot take
+		# the mount down.
+		abandon_attached_disk "${dev}" 1
+		if unique="$(use_unique_ram_disk "${mount_point} is not backed by the RAM disk attached in this run")"; then
+			printf '%s\n' "${unique}"
+			return 0
+		fi
+		echo "warning: could not create a usable APFS RAM disk; falling back to the default temp dir" >&2
 		return 0
+	fi
+	# The mount is this run's disk, so keep using it even when the record cannot
+	# be written; --destroy then refuses it and the warning says how to eject.
+	if ! write_owner_record "${identity}" "${dev_name}"; then
+		echo "warning: created RAM disk ownership could not be recorded; using ${mount_point} anyway (eject it manually with diskutil eject ${dev})" >&2
 	fi
 	echo "${mount_point}"
 }
@@ -174,9 +251,13 @@ main() {
 			destroy_owned_ram_disk
 			return
 			;;
+		--release)
+			release_private_ram_disk "${2:-}"
+			return
+			;;
 		"") ;;
 		*)
-			echo "usage: $0 [--destroy]" >&2
+			echo "usage: $0 [--destroy | --release DIR]" >&2
 			return 2
 			;;
 	esac
