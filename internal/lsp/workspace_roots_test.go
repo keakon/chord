@@ -20,11 +20,12 @@ func TestExternalWorkspaceDiscovery(t *testing.T) {
 	for _, gitMarker := range []string{"directory", "file", "none"} {
 		t.Run(gitMarker, func(t *testing.T) {
 			root := resolvedTempDir(t)
-			if gitMarker == "directory" {
+			switch gitMarker {
+			case "directory":
 				if err := os.Mkdir(filepath.Join(root, ".git"), 0755); err != nil {
 					t.Fatal(err)
 				}
-			} else if gitMarker == "file" {
+			case "file":
 				if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: /sample/git/worktrees/task\n"), 0644); err != nil {
 					t.Fatal(err)
 				}

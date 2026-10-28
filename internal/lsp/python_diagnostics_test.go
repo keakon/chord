@@ -249,9 +249,9 @@ func TestPythonQuickDiagnosticsNotifyReadyLSPClientWithoutSemanticSync(t *testin
 		t.Fatal("quick diagnostics should not wait for semantic LSP clients")
 		return nil, false
 	}
-	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, map[string]error) {
+	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, map[clientKey]uint64, map[string]error) {
 		t.Fatal("quick diagnostics should not send didChange semantic sync")
-		return nil, nil
+		return nil, nil, nil
 	}
 	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		t.Fatal("quick diagnostics should not await semantic diagnostics")

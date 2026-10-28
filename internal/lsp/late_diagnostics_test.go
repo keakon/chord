@@ -74,7 +74,18 @@ func (f *lateDiagnosticsFixture) baseline() map[diagnosticIdentity]struct{} {
 }
 
 func (f *lateDiagnosticsFixture) watch(serverVersions map[string]int32, afterSeq uint64) {
-	f.mgr.watchLateDiagnostics(f.path, serverVersions, f.baseline(), afterSeq, "")
+	f.mgr.watchLateDiagnostics(f.path, serverVersions, f.generations(serverVersions), f.baseline(), afterSeq, "")
+}
+
+func (f *lateDiagnosticsFixture) generations(servers map[string]int32) map[clientKey]uint64 {
+	f.mgr.lateMu.Lock()
+	defer f.mgr.lateMu.Unlock()
+	out := make(map[clientKey]uint64, len(servers))
+	for server := range servers {
+		key := clientKey{name: server, root: f.mgr.projectRootPath()}
+		out[key] = f.mgr.lateSyncSeq[key]
+	}
+	return out
 }
 
 func lateDiag(severity protocol.DiagnosticSeverity, line uint32, msg string) protocol.Diagnostic {
@@ -116,7 +127,7 @@ func TestLateDiagnosticsReplaysAPublishThatRacedWatchRegistration(t *testing.T) 
 	// registered. The wait baseline is still the type-check set, so the new
 	// analyzer finding must survive the replay.
 	f.publish("gopls", 2, typeErr, lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type"))
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, baseline, seq, "")
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, f.generations(map[string]int32{"gopls": 2}), baseline, seq, "")
 
 	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	if len(got) != 1 || !strings.Contains(got[0].Lines, "printf arg has wrong type") {
@@ -203,7 +214,7 @@ func TestLateDiagnosticsIgnoresOtherVersionsAndPublishesAfterDeadline(t *testing
 	}
 }
 
-func TestLateDiagnosticsDropsPendingAfterDeadline(t *testing.T) {
+func TestLateDiagnosticsKeepsTimelyPublishAfterDeadlineUntilAck(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
 	seq := f.publish("gopls", 2)
 	f.watch(map[string]int32{"gopls": 2}, seq)
@@ -212,14 +223,35 @@ func TestLateDiagnosticsDropsPendingAfterDeadline(t *testing.T) {
 	f.mgr.lateMu.Lock()
 	f.mgr.lateWatches[f.path].deadline = time.Now().Add(-time.Second)
 	f.mgr.lateMu.Unlock()
+	// A later publish must not replace the frozen result accepted in time.
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 2, "arrived after deadline"))
+	for range 2 {
+		got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
+		if len(got) != 1 || !strings.Contains(got[0].Lines, "pending before deadline") || strings.Contains(got[0].Lines, "arrived after deadline") {
+			t.Fatalf("pending after deadline = %+v, want the timely frozen finding", got)
+		}
+	}
+	f.mgr.AckLateDiagnostics(f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""))
 	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
-		t.Fatalf("pending after deadline = %+v, want none", got)
+		t.Fatalf("pending after ack = %+v, want none", got)
+	}
+}
+
+func TestLateDiagnosticsDropsUnclaimedWatchAfterRetention(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "unclaimed finding"))
+	f.mgr.lateMu.Lock()
+	f.mgr.lateWatches[f.path].registered = time.Now().Add(-lateWatchRetention - time.Second)
+	f.mgr.lateMu.Unlock()
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
+		t.Fatalf("pending after retention = %+v, want none", got)
 	}
 	f.mgr.lateMu.Lock()
-	pending := f.mgr.lateWatches[f.path].pending
-	f.mgr.lateMu.Unlock()
-	if pending {
-		t.Fatal("pending stayed set after the deadline expired")
+	defer f.mgr.lateMu.Unlock()
+	if _, ok := f.mgr.lateWatches[f.path]; ok {
+		t.Fatal("unclaimed watch outlived retention")
 	}
 }
 
@@ -364,7 +396,7 @@ func TestLatePruneKeepsFindingAnotherServerStillReports(t *testing.T) {
 
 	f.mgr.dropLateDiagnostics(f.path)
 	seq := f.publish("gopls", 3)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 3}, nil, seq, "")
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 3}, f.generations(map[string]int32{"gopls": 3}), nil, seq, "")
 	f.publish("gopls", 3, finding)
 	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	if len(got) != 1 || !strings.Contains(got[0].Lines, "printf arg") {
@@ -468,7 +500,7 @@ func TestLateDiagnosticsTypeCheckPublishDoesNotReleaseAnalysisFinding(t *testing
 func TestLateDiagnosticsWriterFiltering(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
 	seq := f.publish("gopls", 2)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, f.baseline(), seq, "worker-1")
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, f.generations(map[string]int32{"gopls": 2}), f.baseline(), seq, "worker-1")
 	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 7, "analyzer finding"))
 
 	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", identity.MainAgentID); len(got) != 0 {
@@ -579,17 +611,99 @@ func TestLateDiagnosticsDropsWatchAfterAnotherDocumentSync(t *testing.T) {
 	}
 }
 
+func TestLateDiagnosticsNoOpResyncKeepsWatch(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	client := f.clients["gopls"]
+	client.client = &fakePowernapClient{}
+	client.openFiles = map[string]int32{normalizeWaiterPath(f.path): 1}
+	client.recordSyncedContent(f.path, "package main\n")
+
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "analysis after the write"))
+
+	f.mgr.ResyncFile(context.Background(), f.path, "package main\n")
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 1 {
+		t.Fatalf("pending after a no-op resync = %+v, want the existing late finding", got)
+	}
+	if got := len(client.client.(*fakePowernapClient).didChangeURIs); got != 0 {
+		t.Fatalf("no-op resync sent %d didChange notifications, want none", got)
+	}
+}
+
+func TestLateDiagnosticsPendingDropsWatchAfterFailedSyncAttempt(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	seq := f.publish("gopls", 2)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "project-wide analysis"))
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 1 {
+		t.Fatalf("pending before sync attempt = %+v, want one entry", got)
+	}
+
+	// Even a failed notification may have reached the server. Advancing the
+	// client generation must invalidate the old watch when Pending is read.
+	f.mgr.noteLateDocumentSync(clientKey{name: "gopls", root: f.mgr.projectRootPath()})
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
+		t.Fatalf("pending after failed sync attempt = %+v, want none", got)
+	}
+	f.mgr.lateMu.Lock()
+	_, watched := f.mgr.lateWatches[f.path]
+	f.mgr.lateMu.Unlock()
+	if watched {
+		t.Fatal("failed sync attempt kept the old late-diagnostics watch")
+	}
+}
+
+func TestLateDiagnosticsWatchRejectsGenerationCapturedBeforeAnotherSync(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	key := clientKey{name: "gopls", root: f.mgr.projectRootPath()}
+	captured := f.mgr.noteLateDocumentSync(key)
+	f.mgr.recordLateDocumentSync(key, captured)
+	newer := f.mgr.noteLateDocumentSync(key)
+	f.mgr.recordLateDocumentSync(key, newer)
+
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, map[clientKey]uint64{key: captured}, nil, 0, "")
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "analysis after another sync"))
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
+		t.Fatalf("pending for stale generation = %+v, want none", got)
+	}
+	f.mgr.lateMu.Lock()
+	_, watched := f.mgr.lateWatches[f.path]
+	f.mgr.lateMu.Unlock()
+	if watched {
+		t.Fatal("watch registration reused an older client generation")
+	}
+}
+
+func TestLateDiagnosticsDoesNotRepeatReportedIdentityFromTranscript(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	warning := lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type")
+	f.mgr.RestoreReportedDiagnostics(map[string][]Diagnostic{
+		f.path: convertDiagnostics([]protocol.Diagnostic{warning}),
+	})
+	f.watch(map[string]int32{"gopls": 2}, 0)
+	f.publish("gopls", 2, warning)
+
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
+		t.Fatalf("pending included a diagnostic already shown in the transcript: %+v", got)
+	}
+}
+
 func TestSyncAfterWriteDropsLateDiagnosticsWatch(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, nil, 0, "")
+	key := clientKey{name: "gopls", root: f.mgr.projectRootPath()}
+	generation := f.mgr.noteLateDocumentSync(key)
+	f.watch(map[string]int32{"gopls": 2}, 0)
 
 	restoreNotify, restoreChange, restoreSave := afterWriteNotifyWatchedFileChanged, afterWriteDidChange, afterWriteDidSave
 	t.Cleanup(func() {
 		afterWriteNotifyWatchedFileChanged, afterWriteDidChange, afterWriteDidSave = restoreNotify, restoreChange, restoreSave
 	})
 	afterWriteNotifyWatchedFileChanged = func(*Manager, context.Context, string, protocol.FileChangeType) map[string]error { return nil }
-	afterWriteDidChange = func(*Manager, context.Context, string, string) (map[string]int32, map[string]error) {
-		return map[string]int32{"gopls": 3}, nil
+	afterWriteDidChange = func(m *Manager, _ context.Context, path string, _ string) (map[string]int32, map[clientKey]uint64, map[string]error) {
+		next := m.noteLateDocumentSync(key)
+		m.recordLateDocumentSync(key, next)
+		return map[string]int32{"gopls": 3}, map[clientKey]uint64{key: generation}, nil
 	}
 	afterWriteDidSave = func(*Manager, context.Context, string, string) map[string]error { return nil }
 
@@ -614,7 +728,7 @@ func TestAwaitPreparedAfterFileWriteWatchesOnlyNotifiedWrites(t *testing.T) {
 			afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 				return nil, tc.notified, 0, nil
 			}
-			prepared := afterWritePrepared{path: f.path, base: "ok", wait: true, waitTimeout: time.Second, sync: afterWriteSync{serverVersions: map[string]int32{"gopls": 2}}}
+			prepared := afterWritePrepared{path: f.path, base: "ok", wait: true, waitTimeout: time.Second, sync: afterWriteSync{serverVersions: map[string]int32{"gopls": 2}, generations: f.generations(map[string]int32{"gopls": 2})}}
 
 			f.mgr.awaitPreparedAfterFileWrite(context.Background(), &prepared, false, "")
 			f.mgr.lateMu.Lock()

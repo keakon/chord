@@ -40,6 +40,28 @@ type lspFollowup struct {
 	items []LSPFollowupItem
 }
 
+func (f *lspFollowup) overlay() message.Message {
+	return message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: lspFollowupContent(f.text)}
+}
+
+// Reading pending diagnostics neither stages a request nor acknowledges its
+// source, so budget estimation can use exactly the text dispatch will carry.
+func pendingLSPFollowup(source LSPFollowupSource, scan func(func(*message.Message) bool), baseDir, agentID string) *lspFollowup {
+	if source == nil {
+		return nil
+	}
+	paths := recentWrittenPaths(scan)
+	if len(paths) == 0 {
+		return nil
+	}
+	items := source.Pending(paths, baseDir, agentID)
+	text := formatLSPFollowup(items)
+	if text == "" {
+		return nil
+	}
+	return &lspFollowup{text: text, items: items}
+}
+
 // SetLSPFollowupSource installs the source of late LSP diagnostics.
 func (a *MainAgent) SetLSPFollowupSource(source LSPFollowupSource) {
 	a.lspFollowupSource = source
@@ -60,19 +82,14 @@ func (a *MainAgent) buildLSPFollowupOverlay() (message.Message, bool) {
 	if a.lspFollowupSource == nil || a.ctxMgr == nil {
 		return message.Message{}, false
 	}
-	paths := recentWrittenPaths(a.ctxMgr.ScanBackward)
-	if len(paths) == 0 {
-		return message.Message{}, false
-	}
-	items := a.lspFollowupSource.Pending(paths, a.workDir(), a.instanceID)
-	text := formatLSPFollowup(items)
-	if text == "" {
+	followup := pendingLSPFollowup(a.lspFollowupSource, a.ctxMgr.ScanBackward, a.workDir(), a.instanceID)
+	if followup == nil {
 		return message.Message{}, false
 	}
 	a.stagedLSPFollowupMu.Lock()
-	a.stagedLSPFollowup = &lspFollowup{text: text, items: items}
+	a.stagedLSPFollowup = followup
 	a.stagedLSPFollowupMu.Unlock()
-	return message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: lspFollowupContent(text)}, true
+	return followup.overlay(), true
 }
 
 // emitStagedLSPFollowup persists the follow-up the dispatched request carried

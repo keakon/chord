@@ -59,7 +59,8 @@ func TestToolDiscoveryPreservesLoadedToolsAcrossProviderFallback(t *testing.T) {
 					if !found || !foundDeferred {
 						t.Error("eager or loaded deferred tool was removed")
 					}
-					if body.Model == "test-model" {
+					switch body.Model {
+					case "test-model":
 						primaryCalls.Add(1)
 						if rejectPrimary {
 							w.Header().Set("Content-Type", "application/json")
@@ -67,9 +68,9 @@ func TestToolDiscoveryPreservesLoadedToolsAcrossProviderFallback(t *testing.T) {
 							_, _ = io.WriteString(w, `{"error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Input is too long"}}`)
 							return
 						}
-					} else if body.Model == "fallback-model" {
+					case "fallback-model":
 						fallbackCalls.Add(1)
-					} else {
+					default:
 						t.Errorf("unexpected model %q", body.Model)
 					}
 					w.Header().Set("Content-Type", "text/event-stream")

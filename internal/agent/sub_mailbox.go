@@ -72,6 +72,7 @@ type ArtifactRef = tools.ArtifactRef
 
 type CompletionEnvelope struct {
 	Summary                   string              `json:"summary,omitempty"`
+	BlockedReason             string              `json:"blocked_reason,omitempty"`
 	FilesChanged              []string            `json:"files_changed,omitempty"`
 	ReportedFilesChanged      []string            `json:"reported_files_changed,omitempty"`
 	ActualFilesChanged        []string            `json:"actual_files_changed,omitempty"`

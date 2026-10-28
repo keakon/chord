@@ -174,6 +174,76 @@ func TestLSPFollowupPersistenceFailureAcksAndDefersTheCard(t *testing.T) {
 	}
 }
 
+func TestSubAgentRecoveryCheckpointReemitsDeferredLSPFollowupCard(t *testing.T) {
+	t.Parallel()
+	parent, sub := newMixedBatchTestSubAgent(t)
+	parent.installRecoveryManager(newBrokenPathRecoveryManager(t))
+
+	const path = "/repo/main.go"
+	sub.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "write-1", Name: "edit"}}})
+	sub.ctxMgr.Append(message.Message{
+		Role:       message.RoleTool,
+		ToolCallID: "write-1",
+		ToolStatus: message.ToolStatusSuccess,
+		FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, Exists: true}}},
+	})
+	var acked atomic.Int32
+	source := &fakeLSPFollowupSource{}
+	source.setItems(LSPFollowupItem{DisplayPath: "main.go", Lines: "[W] 3:1 unused", Ack: func() { acked.Add(1) }})
+	sub.SetLSPFollowupSource(source)
+	if _, ok := sub.buildLSPFollowupOverlay(); !ok {
+		t.Fatal("expected the late diagnostics on the dispatched request")
+	}
+
+	messageIndex := sub.ctxMgr.MessageCount()
+	sub.emitStagedLSPFollowup()
+	parent.flushPersist()
+	if sub.PersistenceHealth().State != PersistenceDegraded {
+		t.Fatal("SubAgent persistence should be degraded after the follow-up write failed")
+	}
+	for _, evt := range drainAgentEvents(parent.outputCh) {
+		if _, ok := evt.(LSPFollowupEvent); ok {
+			t.Fatal("follow-up card emitted before its transcript row was durable")
+		}
+	}
+
+	manager := recovery.NewRecoveryManager(parent.sessionDir)
+	parent.installRecoveryManager(manager)
+	if err := sub.checkpointTranscript(); err != nil {
+		t.Fatalf("checkpointTranscript: %v", err)
+	}
+	if sub.PersistenceHealth().State != PersistenceHealthy {
+		t.Fatal("SubAgent persistence should recover after the transcript checkpoint")
+	}
+	if acked.Load() != 1 {
+		t.Fatalf("acked = %d, want the dispatched follow-up consumed once", acked.Load())
+	}
+
+	event := waitForLSPFollowupEvent(t, parent)
+	if event.AgentID != sub.instanceID || event.MessageIndex != messageIndex || !strings.Contains(event.Message, "main.go:\n[W] 3:1 unused") {
+		t.Fatalf("recovered follow-up event = %+v", event)
+	}
+	messages, err := manager.LoadMessages(sub.instanceID)
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	found := false
+	for _, msg := range messages {
+		if msg.Kind == message.KindLSPFollowup {
+			found = msg.Content == lspFollowupContent(lspFollowupLead+"\n\nmain.go:\n[W] 3:1 unused")
+			break
+		}
+	}
+	if !found {
+		t.Fatal("checkpointed transcript does not contain the event's LSP follow-up row")
+	}
+	for _, evt := range drainAgentEvents(parent.outputCh) {
+		if _, ok := evt.(LSPFollowupEvent); ok {
+			t.Fatal("recovery emitted the same follow-up card more than once")
+		}
+	}
+}
+
 func TestLSPFollowupUndispatchedRequestIsNeitherPersistedNorAcked(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())

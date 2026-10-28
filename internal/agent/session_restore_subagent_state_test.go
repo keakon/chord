@@ -1386,7 +1386,7 @@ func restoredRiskAlertsForTask(a *MainAgent, taskID string) []SubAgentMailboxMes
 // this extension fixes for handleAgentError (the failure mailbox persist is
 // deferred past the terminal commit in older builds, so the notification can
 // be lost between the commit and the delivery).
-func restoreFailedRiskAlertFixture(t *testing.T, projectRoot, sessionDir string) {
+func restoreFailedRiskAlertFixture(t *testing.T, sessionDir string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(subagents): %v", err)
@@ -1447,7 +1447,7 @@ func TestRestoreSessionSynthesizesRiskAlertForFailedTaskWithLostMailbox(t *testi
 	const taskID = "adhoc-lost-failure"
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "lost-failure-mailbox")
-	restoreFailedRiskAlertFixture(t, projectRoot, sessionDir)
+	restoreFailedRiskAlertFixture(t, sessionDir)
 
 	restoreAgent := func() *MainAgent {
 		a := newTestMainAgentForRestore(t, projectRoot, sessionDir)

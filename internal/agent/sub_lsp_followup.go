@@ -28,25 +28,20 @@ func (s *SubAgent) buildLSPFollowupOverlay() (message.Message, bool) {
 	if s.lspFollowupSource == nil || s.ctxMgr == nil {
 		return message.Message{}, false
 	}
-	paths := recentWrittenPaths(s.ctxMgr.ScanBackward)
-	if len(paths) == 0 {
-		return message.Message{}, false
-	}
-	items := s.lspFollowupSource.Pending(paths, s.effectiveToolBaseDir(), s.instanceID)
-	text := formatLSPFollowup(items)
-	if text == "" {
+	followup := pendingLSPFollowup(s.lspFollowupSource, s.ctxMgr.ScanBackward, s.effectiveToolBaseDir(), s.instanceID)
+	if followup == nil {
 		return message.Message{}, false
 	}
 	s.stagedLSPFollowupMu.Lock()
-	s.stagedLSPFollowup = &lspFollowup{text: text, items: items}
+	s.stagedLSPFollowup = followup
 	s.stagedLSPFollowupMu.Unlock()
-	return message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: lspFollowupContent(text)}, true
+	return followup.overlay(), true
 }
 
 // emitStagedLSPFollowup persists the follow-up the dispatched request carried
 // and surfaces it as a card backed by that message. The model has already
 // received the text, so the source is acknowledged as soon as the row is
-// appended; a persistence failure only drops the live card.
+// appended; a persistence failure defers the live card until recovery.
 func (s *SubAgent) emitStagedLSPFollowup() {
 	if s == nil || s.ctxMgr == nil {
 		return
@@ -71,10 +66,52 @@ func (s *SubAgent) emitStagedLSPFollowup() {
 	messageIndex := s.ctxMgr.MessageCount()
 	s.ctxMgr.Append(msg)
 	ackLSPFollowupItems(staged.items)
-	text := staged.text
+	s.deferLSPFollowup(messageIndex)
 	s.persistMessageAsync(msg, "LSP follow-up", func() {
-		if s.parent != nil {
-			s.parent.emitToTUI(LSPFollowupEvent{Message: text, MessageIndex: messageIndex, AgentID: s.instanceID})
-		}
+		s.flushDeferredLSPFollowupsThrough(messageIndex)
 	})
+}
+
+func (s *SubAgent) deferLSPFollowup(index int) {
+	s.deferredLSPFollowupMu.Lock()
+	if !s.deferredLSPFollowup || index < s.deferredLSPFollowupFrom {
+		s.deferredLSPFollowupFrom = index
+	}
+	s.deferredLSPFollowup = true
+	s.deferredLSPFollowupMu.Unlock()
+}
+
+func (s *SubAgent) flushDeferredLSPFollowups() {
+	s.flushDeferredLSPFollowupsThrough(s.ctxMgr.MessageCount() - 1)
+}
+
+// Successful persistence of a later row does not establish that earlier rows
+// succeeded. Only a checkpoint can release the backlog after degradation.
+func (s *SubAgent) flushDeferredLSPFollowupsThrough(index int) {
+	s.deferredLSPFollowupMu.Lock()
+	defer s.deferredLSPFollowupMu.Unlock()
+	if !s.deferredLSPFollowup || index < s.deferredLSPFollowupFrom {
+		return
+	}
+	if s.parent == nil || s.recoveryManager() == nil {
+		return
+	}
+	if s.PersistenceHealth().State == PersistenceDegraded {
+		return
+	}
+	from := s.deferredLSPFollowupFrom
+	for offset, msg := range s.ctxMgr.SnapshotFrom(from) {
+		messageIndex := from + offset
+		if messageIndex > index {
+			break
+		}
+		if msg.Kind == message.KindLSPFollowup {
+			s.parent.emitToTUI(LSPFollowupEvent{Message: message.StripSystemReminderOverlay(msg.Content), MessageIndex: messageIndex, AgentID: s.instanceID})
+		}
+	}
+	if index >= s.ctxMgr.MessageCount()-1 {
+		s.deferredLSPFollowup = false
+	} else {
+		s.deferredLSPFollowupFrom = index + 1
+	}
 }

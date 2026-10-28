@@ -16,6 +16,7 @@ type afterWriteSync struct {
 	// Only servers whose entire notification sequence succeeded may verify
 	// this write. Failed servers are removed even if didChange succeeded.
 	serverVersions map[string]int32
+	generations    map[clientKey]uint64
 	// serverErrors holds the first failed notification of every server whose
 	// share of the sync failed. Together with serverVersions' keys it covers
 	// every server the sync reached, so a server absent from both maps was
@@ -41,8 +42,9 @@ func (m *Manager) syncAfterWrite(ctx context.Context, absPath, content string, c
 	}
 	sync.after = time.Now()
 	sync.token = m.beginDiagnosticsSync(absPath)
-	versions, errs := afterWriteDidChange(m, ctx, absPath, content)
+	versions, generations, errs := afterWriteDidChange(m, ctx, absPath, content)
 	sync.serverVersions = versions
+	sync.generations = generations
 	if len(errs) > 0 {
 		mergeServerErrors(sync.serverErrors, errs)
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+formatServerErrors(errs))

@@ -326,7 +326,7 @@ var todoSubgroupIDLineRe = regexp.MustCompile(`^\s*(?:-\s*)?\[[^\]]*\]\s*([^:\n]
 // empty todo list.
 func TodoSubgroupIDs(section string) []string {
 	var ids []string
-	for _, line := range strings.Split(section, "\n") {
+	for line := range strings.SplitSeq(section, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "#") {
 			break
 		}

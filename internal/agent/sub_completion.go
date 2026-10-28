@@ -36,8 +36,21 @@ func (s *SubAgent) finishCompletion(callID string, result *AgentResult) {
 	}
 	s.clearPendingCompleteIntent()
 	result = s.enrichCompletionResult(result)
+	if result.Envelope != nil && result.Envelope.BlockedReason != "" {
+		s.appendCompleteToolResult(callID, "Task ended as blocked: "+result.Envelope.BlockedReason, message.ToolStatusError)
+		s.sendEvent(Event{Type: EventAgentError, Payload: &blockedCompletionError{result: result}})
+		return
+	}
 	s.appendCompleteToolResult(callID, result.Summary, message.ToolStatusSuccess)
 	s.sendEvent(Event{Type: EventAgentDone, Payload: result})
+}
+
+type blockedCompletionError struct {
+	result *AgentResult
+}
+
+func (e *blockedCompletionError) Error() string {
+	return "task blocked: " + e.result.Envelope.BlockedReason
 }
 
 // completionRecoveryBudgetAvailable consumes the single bounded follow-up for a

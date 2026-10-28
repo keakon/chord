@@ -297,7 +297,7 @@ func TestValidateCommittedEvidenceRejectsEscalateEvidence(t *testing.T) {
 // while a record that only proves ID existence (an older pack format without a
 // classification) cannot support the committed upgrade either.
 func TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind(t *testing.T) {
-	newAgentWithCheckpoint := func(item evidenceItem, content string) (*MainAgent, string) {
+	newAgentWithCheckpoint := func(item evidenceItem) (*MainAgent, string) {
 		t.Helper()
 		checkpoint := buildCompactionCheckpointMessage("## Current User Request\n- continue", nil, compactionSummaryModeModelDriven, []evidenceItem{item})
 		a := &MainAgent{tools: tools.NewRegistry(), ctxMgr: ctxmgr.NewManager(10000, 1000)}
@@ -308,7 +308,7 @@ func TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind(t *te
 	// Archived negative records stay rejected for committed and for observed
 	// claims alike.
 	escalate := buildEvidenceItem(evidenceEscalate, "subagent intervention open", "needed", "tool", "requests intervention")
-	a, checkpoint := newAgentWithCheckpoint(escalate, "")
+	a, checkpoint := newAgentWithCheckpoint(escalate)
 	if !strings.Contains(checkpoint, "Evidence Kind: escalate") {
 		t.Fatalf("checkpoint pack must render the machine category:\n%s", checkpoint)
 	}
@@ -324,7 +324,7 @@ func TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind(t *te
 	}
 
 	toolError := buildEvidenceItem(evidenceToolError, "Go build failure", "blocker", "tool", "undefined: foo")
-	b, _ := newAgentWithCheckpoint(toolError, "")
+	b, _ := newAgentWithCheckpoint(toolError)
 	toolErrorID := evidenceItemID(toolError)
 	if err := b.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{toolErrorID}}); err == nil {
 		t.Fatal("committed checkpoint over an archived tool_error record must be rejected")
@@ -333,13 +333,13 @@ func TestValidateCommittedEvidenceJudgesArchivedPackEvidenceByRenderedKind(t *te
 	// A positive archived record with a rendered kind still supports the
 	// committed upgrade: that is the primary cross-generation use case.
 	diff := buildEvidenceItem(evidenceToolDiff, "Recent code diff", "needed", "tool", "diff content")
-	c, _ := newAgentWithCheckpoint(diff, "")
+	c, _ := newAgentWithCheckpoint(diff)
 	diffID := evidenceItemID(diff)
 	if err := c.validateCommittedEvidence(tools.CompactContextArgs{CheckpointKind: "committed", EvidenceRefs: []string{diffID}}); err != nil {
 		t.Fatalf("committed checkpoint over an archived positive record must validate: %v", err)
 	}
 
-	_, diffCheckpoint := newAgentWithCheckpoint(diff, "")
+	_, diffCheckpoint := newAgentWithCheckpoint(diff)
 	var legacyLines []string
 	for line := range strings.SplitSeq(diffCheckpoint, "\n") {
 		if !strings.HasPrefix(line, "Evidence Kind: ") {

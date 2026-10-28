@@ -134,7 +134,7 @@ func TestSubAgentCtxAppendDuringPendingToolBatchDeferredToBatchClosure(t *testin
 			mustJSONToolCall(t, "call-2", toolNames[1], map[string]any{}),
 		}),
 	}}
-	if !waitForSubAgentCondition(t, sub, 5*time.Second, "pending tool batch with assistant tool_calls message", func() bool {
+	if !waitForSubAgentCondition(t, 5*time.Second, "pending tool batch with assistant tool_calls message", func() bool {
 		return sub.turn != nil && sub.turn.PendingToolCalls.Load() > 0 &&
 			hasAssistantMessageWithToolCalls(sub.ctxMgr.Snapshot())
 	}) {
@@ -165,7 +165,7 @@ func TestSubAgentCtxAppendDuringPendingToolBatchDeferredToBatchClosure(t *testin
 	// still outstanding: the batch stays open, so this is exactly the window in
 	// which an unconditional drain would have interleaved the appends.
 	closeGate(0)
-	if !waitForSubAgentCondition(t, sub, 5*time.Second, "tool result for call-1 with batch still open", func() bool {
+	if !waitForSubAgentCondition(t, 5*time.Second, "tool result for call-1 with batch still open", func() bool {
 		return hasToolResultFor(sub.ctxMgr.Snapshot(), "call-1") && sub.turn.PendingToolCalls.Load() == 1
 	}) {
 		t.Fatal("tool result for call-1 never backfilled while call-2 stayed pending")
@@ -175,7 +175,7 @@ func TestSubAgentCtxAppendDuringPendingToolBatchDeferredToBatchClosure(t *testin
 	// appends must stay undrained (and unacked) while a tool result is still
 	// outstanding. This wait only observes the absence of the old buggy drain;
 	// it passes once the loop defers the appends to the batch-closure boundary.
-	if waitForSubAgentCondition(t, sub, 500*time.Millisecond, "deferred ctx append drained during pending batch", func() bool {
+	if waitForSubAgentCondition(t, 500*time.Millisecond, "deferred ctx append drained during pending batch", func() bool {
 		msgs := sub.ctxMgr.Snapshot()
 		return containsMessageContent(msgs, firstText) || containsMessageContent(msgs, secondText)
 	}) {
@@ -204,7 +204,7 @@ func TestSubAgentCtxAppendDuringPendingToolBatchDeferredToBatchClosure(t *testin
 	// appends drain at the closure boundary: they land after every tool result,
 	// in the exact order the producers enqueued them.
 	closeGate(1)
-	if !waitForSubAgentCondition(t, sub, 5*time.Second, "deferred ctx appends drained after batch closure", func() bool {
+	if !waitForSubAgentCondition(t, 5*time.Second, "deferred ctx appends drained after batch closure", func() bool {
 		msgs := sub.ctxMgr.Snapshot()
 		return containsMessageContent(msgs, firstText) && containsMessageContent(msgs, secondText)
 	}) {
@@ -237,7 +237,7 @@ func TestSubAgentCtxAppendDuringPendingToolBatchDeferredToBatchClosure(t *testin
 	// 7. Ack timing: neither append was acked during the deferral window, and
 	// after the closure drain each mailbox ack fires only once its append has
 	// been applied and persisted.
-	if !waitForSubAgentCondition(t, sub, 5*time.Second, "mailbox acks for both ctx appends", func() bool {
+	if !waitForSubAgentCondition(t, 5*time.Second, "mailbox acks for both ctx appends", func() bool {
 		return hasConsumedAckID(parent, firstAckID) && hasConsumedAckID(parent, secondAckID)
 	}) {
 		t.Fatalf("ctx append mailbox acks never recorded after the appends were applied; consumed=%v", consumedAckIDs(parent))
@@ -272,7 +272,7 @@ func TestSubAgentCtxAppendWithoutPendingToolCallsAppendsAsTrailingUserMessage(t 
 		t.Fatal("context append enqueue rejected")
 	}
 
-	if !waitForSubAgentCondition(t, sub, 2*time.Second, "trailing context-append user message", func() bool {
+	if !waitForSubAgentCondition(t, 2*time.Second, "trailing context-append user message", func() bool {
 		msgs := sub.ctxMgr.Snapshot()
 		return len(msgs) > 0 && msgs[len(msgs)-1].Role == message.RoleUser && msgs[len(msgs)-1].Content == appendText
 	}) {
@@ -283,7 +283,7 @@ func TestSubAgentCtxAppendWithoutPendingToolCallsAppendsAsTrailingUserMessage(t 
 // waitForSubAgentCondition polls a predicate on the running SubAgent until it
 // holds or the timeout expires. Polling avoids sleeps; the caller decides
 // whether a timeout is a failure or an expected negative observation.
-func waitForSubAgentCondition(t *testing.T, sub *SubAgent, timeout time.Duration, desc string, cond func() bool) bool {
+func waitForSubAgentCondition(t *testing.T, timeout time.Duration, desc string, cond func() bool) bool {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

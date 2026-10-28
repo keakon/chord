@@ -363,3 +363,46 @@ func TestBlockedEscalationClosesTaskThroughFailurePath(t *testing.T) {
 		t.Fatalf("task record = %#v, want failed", rec)
 	}
 }
+
+func TestBlockedCompletionClosesTaskThroughFailurePath(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "adhoc-blocked-completion")
+	reason := "The required input is unavailable."
+
+	a.handleAgentError(Event{
+		Type:     EventAgentError,
+		SourceID: sub.instanceID,
+		Payload: &blockedCompletionError{result: &AgentResult{
+			Summary: "Inspection could not proceed.",
+			Envelope: &CompletionEnvelope{
+				Summary:       "Inspection could not proceed.",
+				BlockedReason: reason,
+			},
+		}},
+	})
+
+	select {
+	case evt := <-a.eventCh:
+		if evt.Type != EventSubAgentMailbox {
+			t.Fatalf("event = %#v, want the risk alert mailbox", evt)
+		}
+		msg, ok := evt.Payload.(*SubAgentMailboxMessage)
+		if !ok || msg.Kind != SubAgentMailboxKindRiskAlert {
+			t.Fatalf("mailbox = %#v, want a risk alert", evt.Payload)
+		}
+		if msg.Completion == nil || msg.Completion.BlockedReason != reason {
+			t.Fatalf("mailbox completion = %#v, want blocked reason %q", msg.Completion, reason)
+		}
+		if msg.Payload != blockedCompletionNotice+reason {
+			t.Fatalf("mailbox payload = %q, want blocked reason notice", msg.Payload)
+		}
+		a.dispatch(evt)
+	case <-time.After(time.Second):
+		t.Fatal("blocked completion did not queue a risk alert")
+	}
+
+	if rec := a.taskRecordByTaskID(sub.taskID); rec == nil || rec.State != string(SubAgentStateFailed) {
+		t.Fatalf("task record = %#v, want failed", rec)
+	}
+}

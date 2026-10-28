@@ -170,6 +170,10 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 			b.WriteString("\n- result_type: ")
 			b.WriteString(msg.Completion.ResultType)
 		}
+		if msg.Completion.BlockedReason != "" {
+			b.WriteString("\n- blocked_reason: ")
+			b.WriteString(msg.Completion.BlockedReason)
+		}
 		if msg.Completion.ResultRef != nil {
 			label := strings.TrimSpace(msg.Completion.ResultRef.RelPath)
 			if label == "" {

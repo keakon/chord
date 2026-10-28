@@ -61,7 +61,7 @@ func (s *SubAgent) recordTaskToolChanges(result *toolResult, isError bool) (file
 	}
 
 	name := tools.NormalizeName(result.Name)
-	if isFileAttributionNeutralTool(name, json.RawMessage(result.ArgsJSON)) ||
+	if isFileAttributionNeutralTool(name) ||
 		tools.ConcurrencyClassForTool(s.tools, name, json.RawMessage(result.ArgsJSON)) == tools.ToolConcurrencyClassReadOnly {
 		return nil, false
 	}
@@ -115,7 +115,7 @@ func (s *SubAgent) restoreTaskToolChanges(msgs []message.Message) {
 // isFileAttributionNeutralTool reports whether a tool cannot change the files
 // its owner tracks, so its call must not put the completion's file list under
 // suspicion.
-func isFileAttributionNeutralTool(name string, args json.RawMessage) bool {
+func isFileAttributionNeutralTool(name string) bool {
 	switch tools.NormalizeName(name) {
 	case tools.NameComplete,
 		tools.NameDelegate,

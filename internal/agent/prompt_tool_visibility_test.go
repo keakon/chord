@@ -128,7 +128,7 @@ func TestCompleteToolDefinitionsFollowCoordinationVisibility(t *testing.T) {
 				}
 
 				prompt := s.buildSystemPrompt()
-				wantRoute := "close the task with `complete` and record the blocker in `remaining_limitations`"
+				wantRoute := "close the task with `complete` and set `blocked_reason`"
 				if escalate {
 					wantRoute = "Call `escalate` when owner-agent intervention"
 				} else if notify {

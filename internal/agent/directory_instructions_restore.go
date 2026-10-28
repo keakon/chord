@@ -15,9 +15,10 @@ func budgetRestoredDirectoryInstructions(r *directoryInstructionRuntime, facts [
 			continue
 		}
 		status := "blocked"
-		if f.Operation == message.DirectoryInstructionUpsert {
+		switch f.Operation {
+		case message.DirectoryInstructionUpsert:
 			status = "present"
-		} else if f.Operation == message.DirectoryInstructionRemove {
+		case message.DirectoryInstructionRemove:
 			status = "absent"
 		}
 		snapshot.pending[f.Scope] = directoryInstructionObservation{Status: status, SourcePath: f.SourcePath, Body: f.Body, BodyHash: f.BodyHash, Reason: f.Reason, Detail: f.Detail}

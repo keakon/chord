@@ -320,6 +320,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		if tools.NormalizeName(tc.Name) == tools.NameComplete {
 			var args struct {
 				Summary              string              `json:"summary"`
+				BlockedReason        string              `json:"blocked_reason,omitempty"`
 				FilesChanged         []string            `json:"files_changed,omitempty"`
 				RemainingLimitations []string            `json:"remaining_limitations,omitempty"`
 				KnownRisks           []string            `json:"known_risks,omitempty"`
@@ -357,7 +358,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				// same shape is a contract violation with no fallback: the
 				// missing group is the missing result, not optional metadata.
 				if _, ok := errors.AsType[typedResultPairingError](err); ok {
-					if contractErr := s.missingResultContractError(); contractErr != nil {
+					if contractErr := s.missingResultContractError(); contractErr != nil && strings.TrimSpace(args.BlockedReason) == "" {
 						completeRejection = contractErr
 						break
 					}
@@ -365,6 +366,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 						Summary: strings.TrimSpace(args.Summary),
 						Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
 							Summary:              args.Summary,
+							BlockedReason:        args.BlockedReason,
 							FilesChanged:         args.FilesChanged,
 							RemainingLimitations: append(append([]string(nil), args.RemainingLimitations...), droppedTypedResultLimitation),
 							KnownRisks:           args.KnownRisks,
@@ -376,14 +378,17 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				break
 			}
 			taskCompleteCallID = tc.ID
-			if contractErr := s.validateDeliveredResultAgainstContract(result, resultRef); contractErr != nil {
-				completeRejection = contractErr
-				break
+			if strings.TrimSpace(args.BlockedReason) == "" {
+				if contractErr := s.validateDeliveredResultAgainstContract(result, resultRef); contractErr != nil {
+					completeRejection = contractErr
+					break
+				}
 			}
 			taskComplete = &AgentResult{
 				Summary: strings.TrimSpace(args.Summary),
 				Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
 					Summary:              args.Summary,
+					BlockedReason:        args.BlockedReason,
 					FilesChanged:         args.FilesChanged,
 					RemainingLimitations: args.RemainingLimitations,
 					KnownRisks:           args.KnownRisks,

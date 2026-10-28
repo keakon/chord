@@ -74,6 +74,9 @@ func (a *MainAgent) directoryCandidateInputs(history []message.Message) director
 	if a.pendingThinkingReplayPrefix != nil {
 		in.overlays = append(in.overlays, a.pendingThinkingReplayPrefix.Clone())
 	}
+	if followup := pendingLSPFollowup(a.lspFollowupSource, a.ctxMgr.ScanBackward, a.workDir(), a.instanceID); followup != nil {
+		in.overlays = append(in.overlays, followup.overlay())
+	}
 	// The request may refresh checkpoint files immediately before dispatch.
 	// Reserve its entire existing reinjection quota without performing a second
 	// file read merely to decide candidate activation.
@@ -89,6 +92,9 @@ func (s *SubAgent) directoryCandidateInputs(_ []message.Message) directoryCandid
 	in := directoryCandidateBudgetInputs{system: s.buildSystemPrompt(), defs: llmToolDefinitionsFromVisibleTools(s.filteredVisibleTools()), budget: s.ctxMgr.GetInputBudget()}
 	if p := s.cachedSessionReminderContent.Load(); p != nil && *p != "" {
 		in.overlays = append(in.overlays, message.Message{Role: message.RoleUser, Content: *p})
+	}
+	if followup := pendingLSPFollowup(s.lspFollowupSource, s.ctxMgr.ScanBackward, s.effectiveToolBaseDir(), s.instanceID); followup != nil {
+		in.overlays = append(in.overlays, followup.overlay())
 	}
 	return in
 }

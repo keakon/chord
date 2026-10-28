@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -21,6 +22,50 @@ func (d dummyTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"value": map[string]any{"type": "string"},
 		},
+	}
+}
+
+func TestSubAgentCompleteCanReportBlockerWithoutViolatingResultContract(t *testing.T) {
+	t.Parallel()
+	parent, sub := newMixedBatchTestSubAgent(t)
+	setTestResultContract(t, sub, testResultContractSchema)
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+		mustJSONToolCall(t, "call-1", "complete", map[string]any{
+			"summary":               "Inspection could not proceed.",
+			"blocked_reason":        "The required input is unavailable.",
+			"remaining_limitations": []string{"The input is unavailable."},
+		}),
+	})}})
+
+	if got := lastToolMessage(t, sub).ToolStatus; got != message.ToolStatusError {
+		t.Fatalf("complete status = %q, want error", got)
+	}
+	events := drainLoopEvents(parent)
+	if len(events) != 1 || events[0].Type != EventAgentError {
+		t.Fatalf("events = %#v, want one failure event", events)
+	}
+	blocked, ok := errors.AsType[*blockedCompletionError](events[0].Payload.(error))
+	if !ok || blocked.result.Envelope.BlockedReason != "The required input is unavailable." {
+		t.Fatalf("blocked completion = %#v", events[0].Payload)
+	}
+}
+
+func TestSubAgentCompleteRequiresContractForSuccessfulDelivery(t *testing.T) {
+	t.Parallel()
+	parent, sub := newMixedBatchTestSubAgent(t)
+	setTestResultContract(t, sub, testResultContractSchema)
+	before := sub.turn.SubAgentResultContractRecoveryCount
+	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
+		mustJSONToolCall(t, "call-1", "complete", map[string]any{"summary": "done"}),
+	})}})
+	if got := lastToolMessage(t, sub).ToolStatus; got != message.ToolStatusError {
+		t.Fatalf("complete status = %q, want error for missing contracted result", got)
+	}
+	if events := drainLoopEvents(parent); len(events) != 0 {
+		t.Fatalf("events = %#v, want repair turn instead of success", events)
+	}
+	if sub.turn.SubAgentResultContractRecoveryCount != before+1 {
+		t.Fatal("missing contracted result did not enter contract recovery")
 	}
 }
 func (d dummyTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {

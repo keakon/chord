@@ -149,11 +149,9 @@ type Manager struct {
 	lateMu      sync.Mutex
 	lateWatches map[string]*lateWatch
 	lateSeq     uint64
-	// lateSyncSeq counts document synchronizations. A watch records the value
-	// at registration; a later sync of any document invalidates it because the
-	// server may publish a project-wide analysis pass that no longer belongs
-	// solely to the watched write.
-	lateSyncSeq uint64
+	// lateSyncSeq counts synchronizations per client workspace. A later sync
+	// invalidates only findings from that client, not independent servers.
+	lateSyncSeq map[clientKey]uint64
 	// latePublishSeq numbers every publish so a watch can tell the publish a
 	// wait already consumed from one that raced the watch registration.
 	latePublishSeq uint64
@@ -371,7 +369,7 @@ func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri, path st
 			}
 		}
 		m.diagMu.Unlock()
-		seq := m.noteLateDiagnosticsPublish(canonical, key.name, version, receivedAt, chordDiags)
+		seq := m.noteLateDiagnosticsPublish(canonical, key, version, receivedAt, chordDiags)
 		m.broadcast(TypeLSPDiagnostics, payload)
 		m.notifySidebarChanged()
 
@@ -522,7 +520,7 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 	delete(m.startFail, key)
 	m.startFailMu.Unlock()
 
-	client, err := newClient(ctx, key.name, srvCfg, key.root, m.settingsBoundary(key.root), false)
+	client, err := newClient(key.name, srvCfg, key.root, m.settingsBoundary(key.root), false)
 	if err != nil {
 		log.Errorf("lsp: create client name=%v root=%v error=%v", key.name, key.root, err)
 		// A Stop that cancelled this launch's start era is the cause, not the
@@ -1064,13 +1062,11 @@ func (m *Manager) DidOpen(ctx context.Context, path string, content string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	synced := false
-	m.forEachClientForPath(path, func(_ clientKey, c *Client) {
-		if !synced {
-			m.noteLateDocumentSync()
-			synced = true
+	m.forEachClientForPath(path, func(key clientKey, c *Client) {
+		generation := m.noteLateDocumentSync(key)
+		if _, err := c.DidOpen(ctx, path, content); err == nil {
+			m.recordLateDocumentSync(key, generation)
 		}
-		_, _ = c.DidOpen(ctx, path, content)
 	})
 }
 
@@ -1090,14 +1086,12 @@ func (m *Manager) NotifyWatchedFileChanged(ctx context.Context, path string, cha
 	}
 	path = normalizeWaiterPath(path)
 	errs := make(map[string]error)
-	synced := false
 	m.forEachClientForPath(path, func(key clientKey, c *Client) {
-		if !synced {
-			m.noteLateDocumentSync()
-			synced = true
-		}
+		generation := m.noteLateDocumentSync(key)
 		if err := c.NotifyWatchedFileChange(ctx, path, changeType); err != nil {
 			errs[key.name] = err
+		} else {
+			m.recordLateDocumentSync(key, generation)
 		}
 	})
 	return errs
@@ -1110,25 +1104,28 @@ func (m *Manager) NotifyWatchedFileChanged(ctx context.Context, path string, cha
 // versions. Keying by server name is safe because forEachClientForPathLocked
 // yields at most one instance per server for a given path.
 func (m *Manager) DidChangeVersions(ctx context.Context, path string, content string) (map[string]int32, map[string]error) {
+	versions, _, errs := m.didChangeVersions(ctx, path, content)
+	return versions, errs
+}
+
+func (m *Manager) didChangeVersions(ctx context.Context, path string, content string) (map[string]int32, map[clientKey]uint64, map[string]error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	versions := make(map[string]int32)
+	generations := make(map[clientKey]uint64)
 	errs := make(map[string]error)
-	synced := false
 	m.forEachClientForPath(path, func(key clientKey, c *Client) {
-		if !synced {
-			m.noteLateDocumentSync()
-			synced = true
-		}
+		generation := m.noteLateDocumentSync(key)
 		version, err := c.DidChange(ctx, path, content)
 		if err != nil {
 			errs[key.name] = err
 			return
 		}
 		versions[key.name] = version
+		generations[key] = m.recordLateDocumentSync(key, generation)
 	})
-	return versions, errs
+	return versions, generations, errs
 }
 
 // ResyncFile forwards content (the decoded file text, as write paths send it)
@@ -1151,12 +1148,13 @@ func (m *Manager) ResyncFile(ctx context.Context, path, content string) {
 	}
 	path = normalizeWaiterPath(path)
 	disconnected := false
-	synced := false
-	m.forEachClientForPath(path, func(_ clientKey, c *Client) {
-		sent, err := c.ResyncFileIfChanged(ctx, path, content)
-		if sent && !synced {
-			m.noteLateDocumentSync()
-			synced = true
+	m.forEachClientForPath(path, func(key clientKey, c *Client) {
+		var generation uint64
+		sent, err := c.resyncFileIfChanged(ctx, path, content, func() {
+			generation = m.noteLateDocumentSync(key)
+		})
+		if sent && err == nil {
+			m.recordLateDocumentSync(key, generation)
 		}
 		if err != nil {
 			log.Debugf("lsp: resync changed file failed path=%v name=%v error=%v", path, c.name, err)
@@ -1168,6 +1166,29 @@ func (m *Manager) ResyncFile(ctx context.Context, path, content string) {
 	if disconnected {
 		m.pruneExitedClientsForPath(ctx, path)
 	}
+}
+
+func (m *Manager) recordLateDocumentSync(key clientKey, generation uint64) uint64 {
+	m.lateMu.Lock()
+	defer m.lateMu.Unlock()
+	current := m.lateSyncSeq[key]
+	if generation != current {
+		return 0
+	}
+	for path, watch := range m.lateWatches {
+		if _, owns := watch.generations[key]; !owns {
+			continue
+		}
+		delete(watch.generations, key)
+		delete(watch.versions, key.name)
+		delete(watch.frozen, key.name)
+		watch.pending = len(watch.frozen) > 0
+		if len(watch.generations) == 0 {
+			delete(m.lateWatches, path)
+			delete(m.latePublishes, path)
+		}
+	}
+	return generation
 }
 
 // NotifyDidSave sends didSave to the clients that own path, skipping servers that

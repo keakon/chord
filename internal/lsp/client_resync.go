@@ -35,6 +35,10 @@ func (c *Client) recordSyncedContent(path, content string) {
 // Chord's own write paths. The bool reports whether a notification was sent;
 // an unchanged document is a silent no-op.
 func (c *Client) ResyncFileIfChanged(ctx context.Context, path, content string) (bool, error) {
+	return c.resyncFileIfChanged(ctx, path, content, nil)
+}
+
+func (c *Client) resyncFileIfChanged(ctx context.Context, path, content string, beforeNotify func()) (bool, error) {
 	path = normalizeWaiterPath(path)
 	if c == nil || c.client == nil {
 		return false, nil
@@ -68,6 +72,9 @@ func (c *Client) ResyncFileIfChanged(ctx context.Context, path, content string) 
 	c.openFiles[path] = version
 	c.openFilesMu.Unlock()
 
+	if beforeNotify != nil {
+		beforeNotify()
+	}
 	changes := []protocol.TextDocumentContentChangeEvent{
 		{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}},
 	}

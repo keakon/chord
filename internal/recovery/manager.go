@@ -718,14 +718,14 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 		return fmt.Errorf("rewrite log: write: %w", err)
 	}
 	if info, err := privatefs.Stat(r.sessionDir, path); err == nil {
-		f, err := privatefs.OpenFile(r.sessionDir, tmpPath, os.O_RDWR)
-		if err != nil {
-			return fmt.Errorf("rewrite log: open metadata: %w", err)
+		f, openErr := privatefs.OpenFile(r.sessionDir, tmpPath, os.O_RDWR)
+		if openErr != nil {
+			return fmt.Errorf("rewrite log: open metadata: %w", openErr)
 		}
 		modeErr := f.Chmod(info.Mode().Perm())
 		syncErr := f.Sync()
 		closeErr := f.Close()
-		if err := errors.Join(modeErr, syncErr, closeErr); err != nil {
+		if err = errors.Join(modeErr, syncErr, closeErr); err != nil {
 			return fmt.Errorf("rewrite log: preserve permissions: %w", err)
 		}
 	} else if !os.IsNotExist(err) {

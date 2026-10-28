@@ -160,7 +160,7 @@ func TestAfterFileWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *test
 		notifyErr = gotCtx.Err()
 		return nil
 	}
-	afterWriteDidChange = func(_ *Manager, gotCtx context.Context, gotPath string, content string) (map[string]int32, map[string]error) {
+	afterWriteDidChange = func(_ *Manager, gotCtx context.Context, gotPath string, content string) (map[string]int32, map[clientKey]uint64, map[string]error) {
 		if gotPath != path {
 			t.Fatalf("didChange path = %q, want %q", gotPath, path)
 		}
@@ -168,7 +168,7 @@ func TestAfterFileWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *test
 			t.Fatalf("didChange content = %q, want package main", content)
 		}
 		didChangeErr = gotCtx.Err()
-		return nil, nil
+		return nil, nil, nil
 	}
 	afterWriteAwaitWaiter = func(_ *Manager, gotCtx context.Context, gotPath string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		if gotPath != path {
@@ -216,7 +216,7 @@ func TestAfterFileWriteToolResultNotifiesWatchedFileBeforeDidChange(t *testing.T
 		order = append(order, "watched")
 		return nil
 	}
-	afterWriteDidChange = func(_ *Manager, _ context.Context, gotPath string, content string) (map[string]int32, map[string]error) {
+	afterWriteDidChange = func(_ *Manager, _ context.Context, gotPath string, content string) (map[string]int32, map[clientKey]uint64, map[string]error) {
 		if gotPath != path {
 			t.Fatalf("didChange path = %q, want %q", gotPath, path)
 		}
@@ -224,7 +224,7 @@ func TestAfterFileWriteToolResultNotifiesWatchedFileBeforeDidChange(t *testing.T
 			t.Fatalf("didChange content = %q, want package main", content)
 		}
 		order = append(order, "didChange")
-		return nil, nil
+		return nil, nil, nil
 	}
 	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		return nil, true, 0, nil
@@ -271,9 +271,9 @@ func TestAfterFileWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
 		t.Fatal("disabled gopls should not be waited on after write")
 		return nil, false
 	}
-	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, map[string]error) {
+	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, map[clientKey]uint64, map[string]error) {
 		t.Fatal("disabled gopls should not receive didChange after write")
-		return nil, nil
+		return nil, nil, nil
 	}
 	afterWriteNotifyWatchedFileChanged = func(_ *Manager, _ context.Context, _ string, _ protocol.FileChangeType) map[string]error {
 		t.Fatal("disabled gopls should not receive watched-file notifications after write")

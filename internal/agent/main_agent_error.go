@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -143,6 +144,11 @@ func (a *MainAgent) handleAgentError(evt Event) {
 	if sub2 != nil {
 		errorKind := classifyAgentError(err)
 		failureSummary := fmt.Sprintf("SubAgent failed (%s): %s", errorKind, err.Error())
+		var completion *CompletionEnvelope
+		if blocked, ok := errors.AsType[*blockedCompletionError](err); ok {
+			blocked.result = sub2.enrichCompletionResult(blocked.result)
+			completion = a.buildCompletionEnvelope(sub2.LastArtifact(), blocked.result)
+		}
 		a.releaseSubAgentSlot(sub2)
 		a.emitActivity(evt.SourceID, ActivityIdle, "")
 		mailbox := &SubAgentMailboxMessage{
@@ -155,11 +161,17 @@ func (a *MainAgent) handleAgentError(evt Event) {
 			Subtype:      agentMessageSubtypeTaskFailure,
 			Priority:     SubAgentMailboxPriorityInterrupt,
 			Summary:      failureSummary,
-			Payload: fmt.Sprintf(
-				"SubAgent task terminated without completion.\n- task_id: %s\n- agent_id: %s\n- error_kind: %s\n- error: %s\n- required_action: inspect the failure and retry, reassign, or report the blocker; do not treat the task as completed.",
-				sub2.taskID, evt.SourceID, errorKind, err.Error(),
-			),
+			Payload: func() string {
+				if completion != nil && completion.BlockedReason != "" {
+					return blockedCompletionNotice + completion.BlockedReason
+				}
+				return fmt.Sprintf(
+					"SubAgent task terminated without completion.\n- task_id: %s\n- agent_id: %s\n- error_kind: %s\n- error: %s\n- required_action: inspect the failure and retry, reassign, or report the blocker; do not treat the task as completed.",
+					sub2.taskID, evt.SourceID, errorKind, err.Error(),
+				)
+			}(),
 			RequiresAck: false,
+			Completion:  completion,
 		}
 		// Terminal-commit ordering (mirror of the completion path in
 		// handleAgentDone): persist and apply the risk_alert mailbox before the
@@ -195,9 +207,12 @@ func (a *MainAgent) handleAgentError(evt Event) {
 				Reason:       err.Error(),
 				ClosedReason: "subagent failed",
 				FinalState:   SubAgentStateFailed,
+				Completion:   completion,
 			},
 		})
 	}
 
-	a.emitToTUI(ErrorEvent{Err: fmt.Errorf("SubAgent %s error: %w", evt.SourceID, err)})
+	if _, blocked := errors.AsType[*blockedCompletionError](err); !blocked {
+		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("SubAgent %s error: %w", evt.SourceID, err)})
+	}
 }

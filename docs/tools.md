@@ -101,7 +101,7 @@ These tools control agent workflows rather than local side effects, so YOLO does
 | `handoff` | Transfer a plan/work to another role for execution. |
 | `delegate` | Start a sub-task and return its handle immediately. The worker's file and command capabilities come from its role's permission rules; an optional `result_schema` declares what the delivered result must contain. |
 | `cancel` | Cancel a delegated worker; requires `delegate` to be enabled. |
-| `complete` | SubAgent-side: mark the current delegated task as complete with a summary. |
+| `complete` | SubAgent-side: complete the current delegated task with a summary. A non-empty `blocked_reason` ends it as failed. |
 | `escalate` | SubAgent-side: ask the owner for help (`kind: needs_repair`) without ending the task, or report a dead end (`kind: blocked`), which fails it. |
 | `notify` | Send a non-blocking update to the owner or a specific delegated worker. A targeted message resumes a worker that already finished or failed, with its own transcript; a cancelled task is not resumable. See the message forms below. |
 
@@ -122,6 +122,8 @@ Which roles a delegating agent may reach is a permission decision too: `delegate
 `delegate` accepts an optional `result_schema` that declares what the worker's delivered result must contain. The accepted vocabulary is `type`, `required`, `properties`, `items`, `enum`, and `description`, with `type` limited to `object`, `array`, `string`, `integer`, `number`, and `boolean`; the top level must be `type: "object"`. A schema outside that subset is rejected at delegation time instead of being silently ignored, and undeclared fields always pass — a contract states that what you asked for is present and correct rather than enumerating everything the worker may return.
 
 `complete` delivers the result inline (`result`) or as an artifact reference (`result_ref`, typically the ResultRef from `save_artifact`). Chord validates the delivered payload against the contract before accepting the completion: a violation is handed back to the worker with the offending paths and one corrected attempt. If the next delivery still violates the contract, the task fails, the rejection text names up to 20 violations, and the task settlement keeps the machine-readable diagnostics. A `result_ref` whose content cannot be read back fails immediately, since a retry cannot repair the store. Without `result_schema`, delegation behaves as before.
+
+A worker that cannot deliver a successful result can report the blocker with a non-empty `blocked_reason`; Chord then fails the task without requiring a payload that satisfies `result_schema`. Use this route when the worker's role cannot use `escalate`.
 
 An agent that runs on an external backend has no `complete` tool, so the contract travels a different path with the same rules: it is delivered to the external process as part of its role instructions at initialization, and its final answer must be a single JSON object satisfying the schema. A final answer that is not a JSON object, or that does not satisfy the schema, fails the task with the violations named; there is no in-process correction turn, so retry the delegation if the external agent needs another attempt.
 

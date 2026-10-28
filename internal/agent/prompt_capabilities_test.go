@@ -788,7 +788,7 @@ shell: allow
 	}
 	for _, want := range []string{
 		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
-		"`escalate` and `notify` are unavailable in this role and plain assistant text does not reach the owner agent; if you cannot proceed independently, close the task with `complete` and record the blocker in `remaining_limitations`",
+		"`escalate` and `notify` are unavailable in this role and plain assistant text does not reach the owner agent; if you cannot proceed independently, close the task with `complete` and set `blocked_reason`",
 		"Call `complete` when the task is done",
 		"Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains",
 		"continue instead of presenting routine next steps as optional follow-up for the owner agent",
@@ -832,7 +832,7 @@ shell: allow
 	got := s.buildSystemPrompt()
 	for _, want := range []string{
 		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
-		"`escalate` and `notify` are unavailable in this role and plain assistant text does not reach the owner agent; if you cannot proceed independently, close the task with `complete` and record the blocker in `remaining_limitations`",
+		"`escalate` and `notify` are unavailable in this role and plain assistant text does not reach the owner agent; if you cannot proceed independently, close the task with `complete` and set `blocked_reason`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("subagent prompt missing %q in %q", want, got)
@@ -901,7 +901,7 @@ edit:
 	if !strings.Contains(subBlock, "Use `question` only for product choices the end user must make; owner-agent decisions — permissions, scope, or next steps — go through the coordination tools named in your SubAgent Coordination section instead") {
 		t.Fatalf("sub capability block missing Question guidance: %q", subBlock)
 	}
-	if !strings.Contains(subBlock, "close the task with `complete` and record the blocker in `remaining_limitations`") || !strings.Contains(subBlock, "`escalate` and `notify` are unavailable in this role") {
+	if !strings.Contains(subBlock, "close the task with `complete` and set `blocked_reason`") || !strings.Contains(subBlock, "`escalate` and `notify` are unavailable in this role") {
 		t.Fatalf("sub capability block should route blockers through complete when control tools are missing, got %q", subBlock)
 	}
 

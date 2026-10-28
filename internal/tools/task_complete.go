@@ -15,6 +15,7 @@ type CompleteTool struct{}
 
 type completeArgs struct {
 	Summary              string          `json:"summary"`
+	BlockedReason        string          `json:"blocked_reason,omitempty"`
 	FilesChanged         []string        `json:"files_changed,omitempty"`
 	RemainingLimitations []string        `json:"remaining_limitations,omitempty"`
 	KnownRisks           []string        `json:"known_risks,omitempty"`
@@ -30,7 +31,7 @@ func (CompleteTool) Name() string { return NameComplete }
 func (CompleteTool) Description() string {
 	return "Mark the current delegated task as complete. Call this only when the assigned task is finished. " +
 		"Provide a concise summary plus structured completion details when available. For generic machine-readable output, provide result_type together with exactly one of result (a small JSON object) or result_ref (an existing immutable result reference); otherwise omit all three fields. " +
-		"If a true blocker prevents completion, use the blocker route in the SubAgent Coordination section when your role provides one; otherwise close the task and record the blocker in summary and remaining_limitations. This tool is the only way to signal completion; plain assistant text does not complete the task."
+		"If a true blocker prevents completion, use the blocker route in the SubAgent Coordination section when your role provides one; otherwise call this tool with blocked_reason to end the task as failed, not completed. A blocked task need not deliver the result required for successful completion. This tool is the only way to signal completion; plain assistant text does not complete the task."
 }
 
 // Parameters states the result_type/result/result_ref pairing in the field
@@ -46,6 +47,10 @@ func (CompleteTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Summary of what was done and the result.",
 			},
+			"blocked_reason": map[string]any{
+				"type":        "string",
+				"description": "A true blocker preventing the assigned task from finishing. A non-empty value ends the task as failed instead of completed; omit for successful completion with non-blocking limitations.",
+			},
 			"files_changed": map[string]any{
 				"type":        "array",
 				"description": "Actual files changed by this task. List only files that were actually modified.",
@@ -53,7 +58,7 @@ func (CompleteTool) Parameters() map[string]any {
 			},
 			"remaining_limitations": map[string]any{
 				"type":        "array",
-				"description": "Non-blocking limitations, caveats, or unverified items. For true blockers, use the SubAgent Coordination section's blocker route when your role provides one; otherwise record the blocker here.",
+				"description": "Non-blocking limitations, caveats, or unverified items. For true blockers, use the SubAgent Coordination section's blocker route or blocked_reason.",
 				"items":       map[string]any{"type": "string"},
 			},
 			"known_risks": map[string]any{
@@ -113,6 +118,9 @@ func (CompleteTool) Execute(_ context.Context, raw json.RawMessage) (string, err
 	}
 	if len(a.Result) > 0 && a.ResultRef != nil {
 		return "", fmt.Errorf("provide exactly one of result or result_ref, not both")
+	}
+	if reason := strings.TrimSpace(a.BlockedReason); reason != "" {
+		return "Marked as blocked: " + reason, nil
 	}
 	return "Marked as complete: " + strings.TrimSpace(a.Summary), nil
 }

@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 
 	"github.com/keakon/chord/internal/atomicfile"
 )
@@ -78,8 +80,12 @@ func WriteConfigFileAtomically(path string, data []byte, mode os.FileMode) error
 	if path == "" {
 		return fmt.Errorf("config path is empty")
 	}
+	path, err := configWriteTarget(path)
+	if err != nil {
+		return err
+	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
@@ -105,13 +111,10 @@ func WriteConfigFileAtomically(path string, data []byte, mode os.FileMode) error
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close config temp file: %w", err)
 	}
-	if _, err := os.Stat(path); err == nil {
-		return os.ErrExist
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("check config path %s: %w", path, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		if _, statErr := os.Stat(path); statErr == nil {
+	// A hard link installs the complete file without replacing a destination
+	// another writer created after this write began.
+	if err := os.Link(tmpPath, path); err != nil {
+		if os.IsExist(err) {
 			return os.ErrExist
 		}
 		return fmt.Errorf("install config file: %w", err)
@@ -120,8 +123,9 @@ func WriteConfigFileAtomically(path string, data []byte, mode os.FileMode) error
 }
 
 func writeConfigFileAtomicallyReplace(path string, data []byte, mode os.FileMode) error {
-	if target, ok := configWriteTarget(path); ok {
-		path = target
+	path, err := configWriteTarget(path)
+	if err != nil {
+		return err
 	}
 	return atomicfile.Replace(path, data, mode)
 }
@@ -131,22 +135,67 @@ func writeConfigFileAtomicallyReplace(path string, data []byte, mode os.FileMode
 // link is a deliberate choice made at the location Chord reads the file from, so
 // the rewrite goes to the file it names; renaming a temp file over the link would
 // replace it with a regular file and leave the real source stale. A dangling
-// link still names the file the user meant to keep, so one hop is resolved even
-// when the target does not exist yet.
-func configWriteTarget(path string) (string, bool) {
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink == 0 {
-		return path, false
+// link still names the file the user meant to keep, even when the last target
+// of a link chain does not exist yet.
+func configWriteTarget(path string) (string, error) {
+	volume := filepath.VolumeName(path)
+	resolved := volume + string(os.PathSeparator)
+	if !filepath.IsAbs(path) {
+		var err error
+		resolved, err = filepath.Abs(volume + ".")
+		if err != nil {
+			return "", fmt.Errorf("resolve config directory: %w", err)
+		}
+		if strings.HasPrefix(filepath.ToSlash(path[len(volume):]), "/") {
+			resolved = filepath.VolumeName(resolved) + string(os.PathSeparator)
+		}
 	}
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		return real, true
+	// Walk components before cleaning "..": the preceding component may be a
+	// directory symlink. EvalSymlinks alone cannot resolve a missing target.
+	pending := strings.Split(filepath.ToSlash(path[len(volume):]), "/")
+	links := 0
+	for len(pending) > 0 {
+		part := pending[0]
+		pending = pending[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			resolved = filepath.Dir(resolved)
+			continue
+		}
+		next := filepath.Join(resolved, part)
+		info, err := os.Lstat(next)
+		if err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("inspect config target %s: %w", next, err)
+		}
+		if os.IsNotExist(err) || info.Mode()&os.ModeSymlink == 0 {
+			if err == nil && !info.IsDir() && len(pending) > 0 {
+				return "", fmt.Errorf("resolve config target: %w", &os.PathError{Op: "lstat", Path: next, Err: syscall.ENOTDIR})
+			}
+			resolved = next
+			continue
+		}
+		links++
+		if links > 255 {
+			return "", fmt.Errorf("resolve config target %s: too many symbolic links", path)
+		}
+		target, err := os.Readlink(next)
+		if err != nil {
+			return "", fmt.Errorf("read config link %s: %w", next, err)
+		}
+		volume = filepath.VolumeName(target)
+		if filepath.IsAbs(target) {
+			resolved = volume + string(os.PathSeparator)
+		} else if volume != "" {
+			resolved, err = filepath.Abs(volume + ".")
+			if err != nil {
+				return "", fmt.Errorf("resolve config directory: %w", err)
+			}
+		} else if strings.HasPrefix(filepath.ToSlash(target), "/") {
+			resolved = filepath.VolumeName(resolved) + string(os.PathSeparator)
+		}
+		pending = append(strings.Split(filepath.ToSlash(target[len(volume):]), "/"), pending...)
 	}
-	target, err := os.Readlink(path)
-	if err != nil {
-		return path, false
-	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(path), target)
-	}
-	return filepath.Clean(target), true
+	return resolved, nil
 }

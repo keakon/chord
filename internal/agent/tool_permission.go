@@ -272,9 +272,10 @@ func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName
 		}
 		decision.Action = ruleset.EvaluatePath(toolName, resolved, scope)
 		decision.MatchArgument = resolved
-		if decision.Action == permission.ActionAsk {
+		switch decision.Action {
+		case permission.ActionAsk:
 			decision.NeedsApprovalPaths = []string{resolved}
-		} else if decision.Action == permission.ActionAllow {
+		case permission.ActionAllow:
 			decision.AlreadyAllowedPaths = []string{resolved}
 		}
 		return decision

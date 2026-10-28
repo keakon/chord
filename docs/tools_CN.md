@@ -99,7 +99,7 @@ Shell 和后台输出超过 16 KiB 时，结果会显示简短预览及日志文
 | `handoff` | 把计划/工作移交给另一个角色执行。 |
 | `delegate` | 启动子任务并立即返回句柄；worker 的文件与命令能力由角色的权限规则决定，可选的 `result_schema` 声明交付结果必须包含什么。 |
 | `cancel` | 取消一个被委派的 worker；前提是 `delegate` 已启用。 |
-| `complete` | SubAgent 侧：携带摘要把当前委派任务标记为完成。 |
+| `complete` | SubAgent 侧：携带摘要完成当前委派任务；`blocked_reason` 非空时以失败收口。 |
 | `escalate` | SubAgent 侧：用 `kind: needs_repair` 向 owner 求助但不结束任务；用 `kind: blocked` 报告走不通，任务以失败收口。 |
 | `notify` | 向上级代理或指定子代理发送非阻塞通知。定向消息可唤醒已完成或已失败的子代理，并保留它自己的会话历史；已取消的任务不可恢复。具体参数见下方。 |
 
@@ -120,6 +120,8 @@ Chord 自己执行的工具，同一文件的并发写入会按调用串行执�
 `delegate` 可以带一个可选的 `result_schema`，声明 worker 交付的结果必须包含什么。可用的关键字只有 `type`、`required`、`properties`、`items`、`enum` 和 `description`，`type` 只能取 `object`、`array`、`string`、`integer`、`number`、`boolean`，顶层必须是 `type: "object"`。超出这个子集的 schema 会在委派时被拒绝，不会被静默忽略；未声明的字段一律放行，所以契约校验的是「你要的东西在不在、对不对」，而不是枚举 worker 能返回的全部内容。
 
 `complete` 用 `result` 内联交付结果，或用 `result_ref` 引用 artifact（通常是 `save_artifact` 返回的 ResultRef）。Chord 在接受完成前会拿实际载荷校验契约：不符合的结果退回给 worker，指出违规路径，并留给它一次改正机会；再次交付仍不符合时任务以失败收口，拒绝文案最多列出 20 条违规，机读诊断写进任务结算。`result_ref` 的内容读不回来时立即失败，因为重试也修不好存储侧的问题。不带 `result_schema` 时，委派行为与以前一致。
+
+worker 无法交付成功结果时，可通过非空的 `blocked_reason` 报告阻塞，让 Chord 将任务以失败收口；此路径不要求结果满足 `result_schema`。角色不能使用 `escalate` 时，可改用这条路径。
 
 运行在外部后端上的 Agent 没有 `complete` 工具，契约改走另一条路径，规则相同：它在初始化阶段随角色指令送给外部进程，最终答复必须是满足 schema 的单个 JSON 对象。答复不是 JSON 对象或不满足 schema 时，任务带着违规项失败；外部进程侧没有进程内改正轮次，需要重试时重新委派即可。
 

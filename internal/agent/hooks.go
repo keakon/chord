@@ -394,6 +394,9 @@ func classifyAgentError(err error) string {
 	if _, ok := errors.AsType[*blockedEscalationError](err); ok {
 		return agentErrorKindBlocked
 	}
+	if _, ok := errors.AsType[*blockedCompletionError](err); ok {
+		return agentErrorKindBlocked
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
 	case classifyToolError(err) != "unknown", strings.Contains(msg, "tool execution failed"):

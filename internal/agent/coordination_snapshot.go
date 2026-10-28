@@ -185,6 +185,10 @@ func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxID
 			b.WriteString(truncateCoordinationSnapshotText(rec.LastSummary, coordinationSnapshotSummaryMaxRunes))
 		}
 		if rec.LastCompletion != nil {
+			if rec.LastCompletion.BlockedReason != "" {
+				b.WriteString("\n  blocked_reason: ")
+				b.WriteString(truncateCoordinationSnapshotText(rec.LastCompletion.BlockedReason, coordinationSnapshotSummaryMaxRunes))
+			}
 			if rec.LastCompletion.ResultType != "" {
 				b.WriteString("\n  result_type: ")
 				b.WriteString(rec.LastCompletion.ResultType)

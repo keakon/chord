@@ -175,8 +175,8 @@ func TestAfterFileWriteToolResultReportsTimeoutOnce(t *testing.T) {
 	afterWriteWaitForClient = func(*Manager, context.Context, string, time.Duration) (*Client, bool) {
 		return client, true
 	}
-	afterWriteDidChange = func(*Manager, context.Context, string, string) (map[string]int32, map[string]error) {
-		return nil, nil
+	afterWriteDidChange = func(*Manager, context.Context, string, string) (map[string]int32, map[clientKey]uint64, map[string]error) {
+		return nil, nil, nil
 	}
 	afterWriteNotifyWatchedFileChanged = func(*Manager, context.Context, string, protocol.FileChangeType) map[string]error {
 		return nil
@@ -213,8 +213,8 @@ func TestAfterFileWriteToolResultCanceledContextAddsNoDegradationNote(t *testing
 		afterWriteAwaitWaiter = origAwait
 	})
 	afterWriteStart = func(*Manager, context.Context, string) {}
-	afterWriteDidChange = func(*Manager, context.Context, string, string) (map[string]int32, map[string]error) {
-		return nil, nil
+	afterWriteDidChange = func(*Manager, context.Context, string, string) (map[string]int32, map[clientKey]uint64, map[string]error) {
+		return nil, nil, nil
 	}
 	afterWriteNotifyWatchedFileChanged = func(*Manager, context.Context, string, protocol.FileChangeType) map[string]error {
 		return nil

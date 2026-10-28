@@ -19,13 +19,15 @@ import (
 // the first one, while still ending the spin.
 const maxUnansweredSubAgentEscalations = 2
 
+const blockedCompletionNotice = "This delegated task was blocked, not completed. " + "blocked_reason: "
+
 // escalationBudgetExhaustedNotice is injected back to a worker whose escalation
 // the engine refused. The refusal must leave the task running and able to close
 // out on its own: the engine cannot declare the task blocked on the worker's
 // behalf, and terminating the blocked side would not unblock the owner. This
 // notice is the only place that states the way out; the escalate tool result
 // itself carries the rejection cause only.
-const escalationBudgetExhaustedNotice = "Escalation rejected: this task has already escalated its blocker more times than the engine allows without a reply. Do not escalate it again — make progress on what you can do independently, or close the task with `" + tools.NameComplete + "` and record the unanswered blocker in `remaining_limitations`."
+const escalationBudgetExhaustedNotice = "Escalation rejected: this task has already escalated its blocker more times than the engine allows without a reply. Do not escalate it again — make progress on what you can do independently, or close the task with `" + tools.NameComplete + "` and set `blocked_reason` to the unanswered blocker."
 
 // blockedEscalationError is the terminal outcome of an escalate call that
 // declared kind=blocked: the worker judged the attempt a dead end, so it closes

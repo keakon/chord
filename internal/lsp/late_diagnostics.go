@@ -30,6 +30,7 @@ const latePublishRetention = 8
 type latePublish struct {
 	seq         uint64
 	serverID    string
+	client      clientKey
 	version     int32
 	receivedAt  time.Time
 	diagnostics []Diagnostic
@@ -46,10 +47,9 @@ type lateWatch struct {
 	// are only claimed by that agent: a worker's write may appear in the
 	// main transcript, but its late diagnostics belong to the worker.
 	writerAgentID string
-	// syncSeq is the manager-wide document synchronization counter at
-	// registration. Any later sync can make a same-version publish describe a
-	// project state this write did not produce, so the watch is dropped.
-	syncSeq uint64
+	// generations captures each client's sync before its didChange was sent,
+	// not when the wait or watch finishes. A racing sync invalidates its share.
+	generations map[clientKey]uint64
 	// baseline holds every diagnostic the path had when the wait returned
 	// plus every diagnostic already delivered as late; only identities outside
 	// it are reported.
@@ -139,7 +139,7 @@ func (m *Manager) diagnosticBaselineByServer(path string, serverVersions map[str
 // than it were already recorded and are replayed here, so a same-version
 // publish that raced this registration is not lost. baseline is the set the
 // wait itself observed; the current cache may already contain a later publish.
-func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]int32, baseline map[diagnosticIdentity]struct{}, afterSeq uint64, writerAgentID string) {
+func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]int32, generations map[clientKey]uint64, baseline map[diagnosticIdentity]struct{}, afterSeq uint64, writerAgentID string) {
 	if m == nil || len(serverVersions) == 0 {
 		return
 	}
@@ -170,17 +170,38 @@ func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]in
 		seq:           m.lateSeq,
 		versions:      versions,
 		writerAgentID: writerAgentID,
-		syncSeq:       m.lateSyncSeq,
+		generations:   maps.Clone(generations),
 		baseline:      baseline,
 		frozen:        make(map[string][]Diagnostic, len(versions)),
 		registered:    now,
 		deadline:      now.Add(lateDiagnosticsWindow),
 	}
+	m.pruneLateWatchClientsLocked(watch)
+	for server := range watch.versions {
+		owned := false
+		for key := range watch.generations {
+			if key.name == server {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			delete(watch.versions, server)
+		}
+	}
+	if len(watch.versions) == 0 {
+		delete(m.lateWatches, path)
+		delete(m.latePublishes, path)
+		return
+	}
 	for _, publish := range m.latePublishes[path] {
 		if publish.seq <= afterSeq || publish.receivedAt.After(watch.deadline) {
 			continue
 		}
-		if want, ok := versions[publish.serverID]; !ok || want != publish.version {
+		if _, owner := watch.generations[publish.client]; !owner {
+			continue
+		}
+		if want, ok := watch.versions[publish.serverID]; !ok || want != publish.version {
 			continue
 		}
 		watch.frozen[publish.serverID] = publish.diagnostics
@@ -198,17 +219,6 @@ func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]in
 // the previous version's diagnostics are known to be complete, findings that
 // left the file are released so a later reintroduction is reported again.
 func (m *Manager) dropLateDiagnostics(path string) {
-	m.dropLateDiagnosticsWithPrune(path, true)
-}
-
-// dropLateDiagnosticsUnverified forgets a watch whose synced version no longer
-// matches the file. The cache now describes a version this write never
-// produced, so it cannot prove which findings left the file.
-func (m *Manager) dropLateDiagnosticsUnverified(path string) {
-	m.dropLateDiagnosticsWithPrune(path, false)
-}
-
-func (m *Manager) dropLateDiagnosticsWithPrune(path string, prune bool) {
 	if m == nil {
 		return
 	}
@@ -219,7 +229,7 @@ func (m *Manager) dropLateDiagnosticsWithPrune(path string, prune bool) {
 	delete(m.latePublishes, path)
 	// gopls skips publishing an analysis pass identical to the type-check
 	// pass, so a quiet window also leaves the cache complete.
-	complete := prune && watch != nil && (watch.lateGen > 0 || time.Now().After(watch.deadline))
+	complete := watch != nil && (watch.lateGen > 0 || time.Now().After(watch.deadline))
 	m.lateMu.Unlock()
 	if complete {
 		m.pruneLateFindings(path)
@@ -246,16 +256,32 @@ func (m *Manager) pruneLateFindings(path string) {
 	}
 }
 
-// noteLateDocumentSync advances the synchronization generation. Callers run
-// it only when a notification was actually sent to at least one server, so a
-// path with no owning client does not invalidate unrelated watches.
-func (m *Manager) noteLateDocumentSync() {
+// noteLateDocumentSync runs before a notification is attempted: a failed send
+// may still have reached the server, so its older project state is untrusted.
+func (m *Manager) noteLateDocumentSync(key clientKey) uint64 {
 	if m == nil {
-		return
+		return 0
 	}
 	m.lateMu.Lock()
-	m.lateSyncSeq++
+	if m.lateSyncSeq == nil {
+		m.lateSyncSeq = make(map[clientKey]uint64)
+	}
+	m.lateSyncSeq[key]++
+	seq := m.lateSyncSeq[key]
 	m.lateMu.Unlock()
+	return seq
+}
+
+// pruneLateWatchClientsLocked preserves independent clients' findings when a
+// workspace sync supersedes only one server's analysis. lateMu must be held.
+func (m *Manager) pruneLateWatchClientsLocked(watch *lateWatch) {
+	for key, generation := range watch.generations {
+		if generation != m.lateSyncSeq[key] {
+			delete(watch.generations, key)
+			delete(watch.versions, key.name)
+			delete(watch.frozen, key.name)
+		}
+	}
 }
 
 // noteLateDiagnosticsPublish records a publish and freezes it for a watched
@@ -263,11 +289,15 @@ func (m *Manager) noteLateDocumentSync() {
 // window. The publish contents are not pruned here: gopls publishes the
 // type-check pass before its analysis pass for the same version, and the
 // first publish must not release findings the second one still reports.
-func (m *Manager) noteLateDiagnosticsPublish(path, serverID string, version int32, receivedAt time.Time, diagnostics []Diagnostic) uint64 {
+func (m *Manager) noteLateDiagnosticsPublish(path string, key clientKey, version int32, receivedAt time.Time, diagnostics []Diagnostic) uint64 {
 	if m == nil {
 		return 0
 	}
 	m.lateMu.Lock()
+	watch := m.lateWatches[path]
+	if watch != nil {
+		m.pruneLateWatchClientsLocked(watch)
+	}
 	m.latePublishSeq++
 	seq := m.latePublishSeq
 	if version != 0 {
@@ -276,7 +306,8 @@ func (m *Manager) noteLateDiagnosticsPublish(path, serverID string, version int3
 		}
 		publishes := append(m.latePublishes[path], latePublish{
 			seq:         seq,
-			serverID:    serverID,
+			serverID:    key.name,
+			client:      key,
 			version:     version,
 			receivedAt:  receivedAt,
 			diagnostics: diagnostics,
@@ -286,31 +317,45 @@ func (m *Manager) noteLateDiagnosticsPublish(path, serverID string, version int3
 		}
 		m.latePublishes[path] = publishes
 	}
-	watch := m.lateWatches[path]
-	drop := false
-	if watch != nil {
-		if watch.syncSeq != m.lateSyncSeq {
-			drop = true
-		} else if want, owner := watch.versions[serverID]; owner {
-			switch {
-			case version == 0:
-				drop = true
-			case version != want:
-				drop = true
-			case receivedAt.After(watch.deadline):
-				// A late analysis pass stays unclaimed; the watch expires on
-				// its own without treating the publish as fallout.
-			default:
-				watch.frozen[serverID] = diagnostics
-				watch.lateGen++
-				watch.pending = true
-			}
+	if watch == nil {
+		m.lateMu.Unlock()
+		return seq
+	}
+	if _, sameClient := watch.generations[key]; !sameClient {
+		m.lateMu.Unlock()
+		return seq
+	}
+	dropClient := false
+	if want, owner := watch.versions[key.name]; owner {
+		switch {
+		case version == 0:
+			dropClient = true
+		case version != want:
+			dropClient = true
+		case receivedAt.After(watch.deadline):
+			// A late analysis pass stays unclaimed; the watch expires on
+			// its own without treating the publish as fallout.
+		default:
+			watch.frozen[key.name] = diagnostics
+			watch.lateGen++
+			watch.pending = true
 		}
 	}
-	m.lateMu.Unlock()
-	if drop {
-		m.dropLateDiagnosticsUnverified(path)
+	if dropClient {
+		delete(watch.generations, key)
+		delete(watch.versions, key.name)
+		delete(watch.frozen, key.name)
+		watch.pending = len(watch.frozen) > 0
+		if len(watch.generations) == 0 {
+			delete(m.lateWatches, path)
+			delete(m.latePublishes, path)
+		}
 	}
+	if len(watch.versions) == 0 {
+		delete(m.lateWatches, path)
+		delete(m.latePublishes, path)
+	}
+	m.lateMu.Unlock()
 	return seq
 }
 
@@ -361,11 +406,15 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 		if watch == nil || !watch.pending {
 			continue
 		}
-		if !now.Before(watch.deadline) {
-			// A publish can set pending just before the window closes. Do not
-			// deliver it once the window has elapsed: the wait already returned
-			// and the follow-up is no longer attributable to this write.
-			watch.pending = false
+		m.pruneLateWatchClientsLocked(watch)
+		if len(watch.versions) == 0 {
+			delete(m.lateWatches, path)
+			delete(m.latePublishes, path)
+			continue
+		}
+		if now.Sub(watch.registered) > lateWatchRetention {
+			delete(m.lateWatches, path)
+			delete(m.latePublishes, path)
 			continue
 		}
 		if watch.writerAgentID != "" && agentID != "" && watch.writerAgentID != agentID {
@@ -379,10 +428,7 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 		for key := range m.lateReported[path] {
 			reported[key] = struct{}{}
 		}
-		frozen := make(map[string][]Diagnostic, len(watch.frozen))
-		for server, diags := range watch.frozen {
-			frozen[server] = diags
-		}
+		frozen := maps.Clone(watch.frozen)
 		candidates = append(candidates, candidate{path: path, seq: watch.seq, lateGen: watch.lateGen, baseline: baseline, reported: reported, frozen: frozen})
 	}
 	m.lateMu.Unlock()
@@ -395,6 +441,7 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 	for _, c := range candidates {
 		m.diagMu.Lock()
 		fresh := m.diagnosticsFreshLocked(c.path)
+		reportedIdentities := maps.Clone(m.reportedByPath[c.path])
 		m.diagMu.Unlock()
 		if !fresh {
 			m.clearLatePending(c.path, c.seq, c.lateGen)
@@ -413,6 +460,9 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 			for _, d := range deduplicateDiagnostics(c.frozen[server]) {
 				identity := diagnosticIdentityKey(d)
 				if _, known := c.baseline[identity]; known {
+					continue
+				}
+				if _, delivered := reportedIdentities[identity]; delivered {
 					continue
 				}
 				key := lateFindingKeyOf(d)
@@ -479,6 +529,19 @@ func (m *Manager) AckLateDiagnostics(delivered []LateDiagnostics) {
 	if m == nil || len(delivered) == 0 {
 		return
 	}
+	m.diagMu.Lock()
+	for _, item := range delivered {
+		if m.reportedByPath == nil {
+			m.reportedByPath = make(map[string]map[diagnosticIdentity]struct{})
+		}
+		if m.reportedByPath[item.Path] == nil {
+			m.reportedByPath[item.Path] = make(map[diagnosticIdentity]struct{})
+		}
+		for _, id := range item.identities {
+			m.reportedByPath[item.Path][id] = struct{}{}
+		}
+	}
+	m.diagMu.Unlock()
 	m.lateMu.Lock()
 	defer m.lateMu.Unlock()
 	for _, item := range delivered {

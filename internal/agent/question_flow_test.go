@@ -47,9 +47,10 @@ func runQuestionCommand(t *testing.T, a *MainAgent, c *questionCommand) Question
 		case receipt := <-c.reply:
 			return receipt
 		case evt := <-a.eventCh:
-			if evt.Type == EventQuestionCommitted {
+			switch evt.Type {
+			case EventQuestionCommitted:
 				a.handleQuestionCommitted(evt.Payload.(*questionCommit))
-			} else if evt.Type == EventQuestionCommand {
+			case EventQuestionCommand:
 				a.handleQuestionCommand(evt.Payload.(*questionCommand))
 			}
 		case <-timeout:

@@ -316,12 +316,13 @@ func TestInputDeliveryEndToEndSerialRequests(t *testing.T) {
 		case event := <-a.Events():
 			if result, ok := event.(InputResultEvent); ok {
 				receipts[result.RequestID]++
-				if result.Status == InputQueued {
+				switch result.Status {
+				case InputQueued:
 					if result.Target == nil || *result.Target != a.InputDeliveryTarget() {
 						t.Fatalf("queued receipt lost target: %+v", result)
 					}
 					queued++
-				} else if result.Status == InputRejected || result.Status == InputUnknown {
+				case InputRejected, InputUnknown:
 					t.Fatalf("receipt: %+v", result)
 				}
 			}

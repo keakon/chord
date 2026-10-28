@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -139,6 +140,166 @@ func TestWriteConfigFileAtomicallyRejectsExistingFile(t *testing.T) {
 	}
 }
 
+func TestWriteConfigFileAtomicallyPreservesDanglingSymlink(t *testing.T) {
+	for _, relative := range []bool{false, true} {
+		t.Run(map[bool]string{false: "absolute", true: "relative"}[relative], func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "shared", "config.yaml")
+			link := filepath.Join(dir, "config.yaml")
+			linkTarget := target
+			if relative {
+				linkTarget = filepath.Join("shared", "config.yaml")
+			}
+			if err := os.Symlink(linkTarget, link); err != nil {
+				t.Fatal(err)
+			}
+			data := []byte("sample: true\n")
+			if err := WriteConfigFileAtomically(link, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Lstat(link)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode()&os.ModeSymlink == 0 {
+				t.Fatal("config creation replaced the symlink")
+			}
+			got, err := os.ReadFile(target)
+			if err != nil || string(got) != string(data) {
+				t.Fatalf("target content = %q, err = %v", got, err)
+			}
+			if err := WriteConfigFileAtomically(link, []byte("changed\n"), 0o600); !errors.Is(err, os.ErrExist) {
+				t.Fatalf("second write error = %v, want ErrExist", err)
+			}
+		})
+	}
+}
+
+func TestConfigWritesPreserveSymlinkChains(t *testing.T) {
+	for name, write := range map[string]func(string, []byte) error{
+		"create": func(path string, data []byte) error {
+			return WriteConfigFileAtomically(path, data, 0o600)
+		},
+		"update": func(path string, data []byte) error {
+			return CreateOrUpdateConfigFileLocked(path, func([]byte) ([]byte, error) { return data, nil })
+		},
+	} {
+		for _, relative := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/relative=%t", name, relative), func(t *testing.T) {
+				dir := t.TempDir()
+				target := filepath.Join(dir, "nested", "config.yaml")
+				links := []string{filepath.Join(dir, "config.yaml"), filepath.Join(dir, "alias.yaml")}
+				for i, link := range links {
+					next := target
+					if i == 0 {
+						next = links[1]
+					}
+					if relative {
+						var err error
+						next, err = filepath.Rel(filepath.Dir(link), next)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := os.Symlink(next, link); err != nil {
+						t.Fatal(err)
+					}
+				}
+				data := []byte("sample: true\n")
+				if err := write(links[0], data); err != nil {
+					t.Fatal(err)
+				}
+				for _, link := range links {
+					info, err := os.Lstat(link)
+					if err != nil || info.Mode()&os.ModeSymlink == 0 {
+						t.Fatalf("link %s was replaced: %v", link, err)
+					}
+				}
+				got, err := os.ReadFile(target)
+				if err != nil || string(got) != string(data) {
+					t.Fatalf("target = %q, %v; want %q", got, err, data)
+				}
+			})
+		}
+		t.Run(name+"/cycle", func(t *testing.T) {
+			dir := t.TempDir()
+			first, second := filepath.Join(dir, "config.yaml"), filepath.Join(dir, "alias.yaml")
+			if err := os.Symlink(second, first); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(first, second); err != nil {
+				t.Fatal(err)
+			}
+			if err := write(first, []byte("sample: true\n")); err == nil {
+				t.Fatal("cyclic config chain was accepted")
+			}
+			for _, link := range []string{first, second} {
+				if _, err := os.Readlink(link); err != nil {
+					t.Fatalf("cycle link was replaced: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestConfigWriteTargetUsesResolvedParentForRelativeLink(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "nested", "rules")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(parent, filepath.Join(dir, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../config.yaml", filepath.Join(parent, "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteConfigFileAtomically(filepath.Join(dir, "alias", "config.yaml"), []byte("sample: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "nested", "config.yaml")); err != nil {
+		t.Fatalf("relative link did not use its physical parent: %v", err)
+	}
+}
+
+func TestConfigWriteTargetPreservesSymlinkTargetTraversal(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "nested", "rules")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(parent, filepath.Join(dir, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink("alias/../target.yaml", link); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteConfigFileAtomically(link, []byte("sample: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "nested", "target.yaml")); err != nil {
+		t.Fatalf("link target traversal did not preserve directory symlinks: %v", err)
+	}
+}
+
+func TestConfigWriteTargetRejectsTraversalThroughRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "regular"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink("regular/../target.yaml", link); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteConfigFileAtomically(link, []byte("sample: true\n"), 0o600); err == nil {
+		t.Fatal("traversal through a regular file was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "target.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("invalid traversal created a target: %v", err)
+	}
+}
+
 func TestLockConfigMutationClosePreservesLockFileAndAllowsReacquire(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	lockPath := path + ".lock"
@@ -147,13 +308,13 @@ func TestLockConfigMutationClosePreservesLockFileAndAllowsReacquire(t *testing.T
 	if err != nil {
 		t.Fatalf("LockConfigMutation: %v", err)
 	}
-	if _, err := os.Stat(lockPath); err != nil {
+	if _, err = os.Stat(lockPath); err != nil {
 		t.Fatalf("expected lock file to exist while held: %v", err)
 	}
-	if err := lock.Close(); err != nil {
+	if err = lock.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if _, err := os.Stat(lockPath); err != nil {
+	if _, err = os.Stat(lockPath); err != nil {
 		t.Fatalf("expected stable lock file after close, got %v", err)
 	}
 
@@ -161,7 +322,7 @@ func TestLockConfigMutationClosePreservesLockFileAndAllowsReacquire(t *testing.T
 	if err != nil {
 		t.Fatalf("LockConfigMutation reacquire: %v", err)
 	}
-	if err := lock.Close(); err != nil {
+	if err = lock.Close(); err != nil {
 		t.Fatalf("Close reacquired lock: %v", err)
 	}
 }

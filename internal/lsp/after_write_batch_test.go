@@ -71,7 +71,7 @@ func TestAfterFileWritesToolResultSyncsAllFilesBeforeWaiting(t *testing.T) {
 	synced := make(map[string]int)
 	bothSynced := make(chan struct{})
 	var bothOnce sync.Once
-	afterWriteDidChange = func(m *Manager, ctx context.Context, path, content string) (map[string]int32, map[string]error) {
+	afterWriteDidChange = func(m *Manager, ctx context.Context, path, content string) (map[string]int32, map[clientKey]uint64, map[string]error) {
 		mu.Lock()
 		synced[path]++
 		count := len(synced)
@@ -79,7 +79,7 @@ func TestAfterFileWritesToolResultSyncsAllFilesBeforeWaiting(t *testing.T) {
 		if count >= 2 {
 			bothOnce.Do(func() { close(bothSynced) })
 		}
-		return m.DidChangeVersions(ctx, path, content)
+		return m.didChangeVersions(ctx, path, content)
 	}
 	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
 		select {
@@ -118,7 +118,7 @@ func TestAfterFileWritesToolResultRegistersWaiterBeforeSync(t *testing.T) {
 
 	var mu sync.Mutex
 	checked := 0
-	afterWriteDidChange = func(m *Manager, ctx context.Context, path, content string) (map[string]int32, map[string]error) {
+	afterWriteDidChange = func(m *Manager, ctx context.Context, path, content string) (map[string]int32, map[clientKey]uint64, map[string]error) {
 		m.waitersMu.Lock()
 		waiters := len(m.waiters[normalizeWaiterPath(path)])
 		m.waitersMu.Unlock()
@@ -128,7 +128,7 @@ func TestAfterFileWritesToolResultRegistersWaiterBeforeSync(t *testing.T) {
 		mu.Lock()
 		checked++
 		mu.Unlock()
-		return m.DidChangeVersions(ctx, path, content)
+		return m.didChangeVersions(ctx, path, content)
 	}
 
 	mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{

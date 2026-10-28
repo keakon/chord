@@ -18,7 +18,7 @@
 
 会话开始时，Chord 从当前工作目录向上查找，直到项目根目录，再按从根目录到当前目录的顺序加载 `AGENTS.md`。从项目根启动时，先加载根目录的文件。之后只有**读取**会触发发现：某个子目录下的文件第一次被读取时，该目录（到会话目录之间）的 `AGENTS.md` 才补进来，注入下一次请求；写入、编辑、打补丁、删除和 shell 都不触发。目录规则只是提示词：不阻断、不取消、不延迟，也不以任何方式改变工具调用；需要强制执行的约束请写成权限规则或 hook，不要写在规则正文里。主 Agent 和子 Agent 分别维护规则快照；更深目录的规则只影响其子树，不覆盖更高优先级的指令。
 
-Shell 只检查实际工作目录，不解析命令里的路径或 `cd`。项目外目录、MCP 和模型服务端原生工具不在自动发现范围内。`AGENTS.md` 若是符号链接，会跟随到它的目标，无论目标位于哪里（例如仓库旁边一个共享规则仓库）：规则仍归属于放链接的那个目录。显式点名链接或目标的 `read` deny 会阻止规则加载；通配默认 deny 不参与判断，普通白名单不会把项目规则整体藏起来。每层目录的观察结果在当前工作目录绑定期间保持固定；恢复会话或切换工作目录时重新检查。上下文压缩会保留有效规则的完整正文。规则文件读不出来（IO 错误、超过 64 KiB、非 UTF-8）时按不存在处理：不会让会话失败，也不会影响任何工具调用。同一个 agent 的工作目录绑定下，所有已加载层级的规则正文合计最多 256 KiB；新发现的文件若会使总量超限，就不会加载。大小和编码拒绝会按路径记一次日志；I/O 错误不记录。
+项目外目录、MCP 和模型服务端原生工具不在自动发现范围内。`AGENTS.md` 若是符号链接，会跟随到它的目标，无论目标位于哪里（例如仓库旁边一个共享规则仓库）：规则仍归属于放链接的那个目录。显式点名链接或目标的 `read` deny 会阻止规则加载；通配默认 deny 不参与判断，普通白名单不会把项目规则整体藏起来。每层目录的观察结果在当前工作目录绑定期间保持固定；恢复会话或切换工作目录时重新检查。上下文压缩会保留有效规则的完整正文。规则文件读不出来（IO 错误、超过 64 KiB、非 UTF-8）时按不存在处理：不会让会话失败，也不会影响任何工具调用。同一个 agent 的工作目录绑定下，所有已加载层级的规则正文合计最多 256 KiB；新发现的文件若会使总量超限，就不会加载。大小和编码拒绝会按路径记一次日志；I/O 错误不记录。
 
 Python 项目中，Chord 会沿同一路径寻找最近的有效虚拟环境，每层依次检查 `.venv`、`venv`、`env`，并提示 Agent 优先使用其中的解释器。工作目录、平台和虚拟环境信息会在上下文压缩后继续提供，无需重复说明。
 
@@ -208,7 +208,7 @@ lsp:
     root_markers: ["Cargo.toml", "rust-project.json"]
 ```
 
-`options` 是 Chord 应答服务器 `workspace/configuration` 请求时返回的 workspace settings，键名就是 section 名：gopls 的 `staticcheck`、`analyses` 等设置要放在 `gopls` 键下，Pyright 的设置用 `python`、`python.analysis`。平铺在顶层不会送到服务器——section 找不到对应键时，Chord 返回空对象。`init_options` 只作为 LSP 初始化元数据发送，并不是 gopls settings 的正确位置。可用的 analyzer 名称及其默认值取决于本机安装的 gopls 版本。较新的 gopls 已默认启用大多数 `modernize` analyzer；显式设为 `true` 可以记录并保留项目依赖的检查，设为 `false` 则可关闭单项检查。修改 Go 文件后，Chord 会透传 gopls 的 information 和 hint 诊断，但在默认最多 10 条的输出额度内，error 和 warning 会优先展示。staticcheck 与 analyzer 的结果要比编辑结果等待的类型检查晚一秒以上。它们给编辑过的文件带来新的 error 或 warning 时，Chord 会把它们排成持久的 LSP follow-up，在后续请求里投递，并显示 `LSP DIAGNOSTICS` 卡片；同一文件已经发过的问题，要消失后再出现才会重发。错过了单次编辑等待时间的问题由 follow-up 补送，不会拖住整个回合。
+`options` 是 Chord 应答服务器 `workspace/configuration` 请求时返回的 workspace settings，键名就是 section 名：gopls 的 `staticcheck`、`analyses` 等设置要放在 `gopls` 键下，Pyright 的设置用 `python`、`python.analysis`。平铺在顶层不会送到服务器——section 找不到对应键时，Chord 返回空对象。`init_options` 只作为 LSP 初始化元数据发送，并不是 gopls settings 的正确位置。可用的 analyzer 名称及其默认值取决于本机安装的 gopls 版本。较新的 gopls 已默认启用大多数 `modernize` analyzer；显式设为 `true` 可以记录并保留项目依赖的检查，设为 `false` 则可关闭单项检查。修改 Go 文件后，Chord 会透传 gopls 的 information 和 hint 诊断，但在默认最多 10 条的输出额度内，error 和 warning 会优先展示。staticcheck 与 analyzer 的结果要比编辑结果等待的类型检查晚一秒以上。它们给编辑过的文件带来新的 error 或 warning 时，Chord 会把它们排成持久的 LSP follow-up，在后续请求里投递，并显示 `LSP DIAGNOSTICS` 卡片；同一文件已经发过的问题，要消失后再出现才会重发。编辑的诊断等待结束后 15 秒内到达的结果可以留给后续回合，最多保留到该次等待结束后十分钟，不会拖住当前回合。送达时文件须仍在近期会话中，诊断也须仍然有效；文件变化或后续文档同步可能使它们失效。
 
 gopls 的设置是一层平铺的 map。gopls 文档里的 `build`、`ui` 只是分组名，不是键：`directoryFilters` 要直接写在 `gopls` 下（也可以写成带点的 `build.directoryFilters`），嵌套的 `build:` 会被 gopls 当作未知设置拒绝。`directoryFilters` 限定 gopls 从哪些目录加载包，适合排除体积大且不含 Go 代码的子目录，例如前端的 `web/`。配置的清单会替换默认的 `["-**/node_modules"]`，需要保留这一项；以 `.` 或 `_` 开头的目录本来就会跳过。这些过滤规则不作用于 gopls 自己的文件监听（`fileWatcher`）。`fileWatcher` 保持默认的 `off` 即可：`fsnotify` 会监听工作区里的每个目录，在 macOS 上可能耗尽文件描述符。
 

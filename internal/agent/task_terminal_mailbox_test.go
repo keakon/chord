@@ -112,7 +112,7 @@ func TestRestoreStallAlertDoesNotCoverTaskFailure(t *testing.T) {
 	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "terminal-notice")
-	restoreFailedRiskAlertFixture(t, projectRoot, sessionDir)
+	restoreFailedRiskAlertFixture(t, sessionDir)
 	if err := rewriteMailboxLog(sessionDir, []SubAgentMailboxMessage{{
 		MessageID: "mail-stall", AgentID: "agent-lost-failure", TaskID: "adhoc-lost-failure", Attempt: 1,
 		Kind: SubAgentMailboxKindRiskAlert, Summary: "Waiting for activity",

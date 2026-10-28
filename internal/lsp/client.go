@@ -107,7 +107,7 @@ type typescriptVersionParams struct {
 	Source  string `json:"source"`
 }
 
-func newClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd, projectRoot string, debug bool) (*Client, error) {
+func newClient(name string, cfg config.LSPServerConfig, cwd, projectRoot string, debug bool) (*Client, error) {
 	cfg.Options = prepareWorkspaceSettingsBounded(name, cfg, cwd, projectRoot)
 	c := &Client{
 		name:         name,

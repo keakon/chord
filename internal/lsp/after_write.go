@@ -35,8 +35,8 @@ var (
 	afterWriteWaitForClient = func(m *Manager, ctx context.Context, path string, timeout time.Duration) (*Client, bool) {
 		return m.waitForClientForPath(ctx, path, timeout)
 	}
-	afterWriteDidChange = func(m *Manager, ctx context.Context, path string, content string) (map[string]int32, map[string]error) {
-		return m.DidChangeVersions(ctx, path, content)
+	afterWriteDidChange = func(m *Manager, ctx context.Context, path string, content string) (map[string]int32, map[clientKey]uint64, map[string]error) {
+		return m.didChangeVersions(ctx, path, content)
 	}
 	afterWriteDidSave = func(m *Manager, ctx context.Context, path string, content string) map[string]error {
 		return m.NotifyDidSave(ctx, path, content)
@@ -127,7 +127,7 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 		m.confirmDiagnosticsSync(prepared.sync.token)
 	}
 	if notified && ctx.Err() == nil {
-		m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, baseline, lastSeq, prepared.writerAgentID)
+		m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, prepared.sync.generations, baseline, lastSeq, prepared.writerAgentID)
 	}
 	if !notified && ctx.Err() == nil {
 		// A timeout is logged every time; the model hears about the first one

@@ -117,23 +117,26 @@ type SubAgent struct {
 	// bytes). Both are immutable after construction; resultContractMu guards
 	// only the terminal failure diagnostics, which the run loop writes and the
 	// main event loop reads when the task settles.
-	resultSchema        map[string]any
-	resultSchemaJSON    json.RawMessage
-	resultContractMu    sync.Mutex
-	resultContract      *TaskContractDiagnostics
-	ownerMu             sync.RWMutex
-	ownerAgentID        string
-	ownerTaskID         string
-	depth               int
-	joinToOwner         bool
-	delegation          config.DelegationConfig
-	color               string // optional ANSI color code from agent config for TUI display
-	llmMu               sync.RWMutex
-	llmClient           *llm.Client
-	lspFollowupSource   LSPFollowupSource
-	stagedLSPFollowup   *lspFollowup
-	stagedLSPFollowupMu sync.Mutex
-	llmRequestInFlight  atomic.Bool
+	resultSchema            map[string]any
+	resultSchemaJSON        json.RawMessage
+	resultContractMu        sync.Mutex
+	resultContract          *TaskContractDiagnostics
+	ownerMu                 sync.RWMutex
+	ownerAgentID            string
+	ownerTaskID             string
+	depth                   int
+	joinToOwner             bool
+	delegation              config.DelegationConfig
+	color                   string // optional ANSI color code from agent config for TUI display
+	llmMu                   sync.RWMutex
+	llmClient               *llm.Client
+	lspFollowupSource       LSPFollowupSource
+	stagedLSPFollowup       *lspFollowup
+	stagedLSPFollowupMu     sync.Mutex
+	deferredLSPFollowupMu   sync.Mutex
+	deferredLSPFollowupFrom int
+	deferredLSPFollowup     bool
+	llmRequestInFlight      atomic.Bool
 	// llmRequestSeq counts this agent's LLM request goroutines. It is written
 	// only by the run loop before spawning one, so the goroutine can capture a
 	// stable streaming-segment identity (see StreamSegmentEndedEvent).
@@ -545,6 +548,7 @@ func (s *SubAgent) checkpointTranscript() error {
 		s.parent.persist.clearCheckpointFailures(manager, s.instanceID)
 	}
 	s.persistenceHealth.markRecovered()
+	s.flushDeferredLSPFollowups()
 	if s.parent != nil {
 		if err := s.parent.persistSubAgentMeta(s); err != nil {
 			s.notePersistenceFailure(err)
@@ -1587,7 +1591,7 @@ func subAgentCoordinationPromptText(visible map[string]struct{}) string {
 		// assistant text never reaches the owner, and a plain-text stop is
 		// bounced back by the pure-text termination interception, so the only
 		// route that closes the task is the always-registered complete call.
-		lines = append(lines, "- "+toolPromptName(tools.NameEscalate)+" and "+toolPromptName(tools.NameNotify)+" are unavailable in this role and plain assistant text does not reach the owner agent; if you cannot proceed independently, close the task with "+toolPromptName(tools.NameComplete)+" and record the blocker in `remaining_limitations` instead of waiting after plain text")
+		lines = append(lines, "- "+toolPromptName(tools.NameEscalate)+" and "+toolPromptName(tools.NameNotify)+" are unavailable in this role and plain assistant text does not reach the owner agent; if you cannot proceed independently, close the task with "+toolPromptName(tools.NameComplete)+" and set `blocked_reason` instead of waiting after plain text")
 	}
 	// complete needs no visibility branch: isSubAgentInternalTool keeps it out
 	// of ruleset filtering and every SubAgent registers it, so a worker can
