@@ -320,14 +320,23 @@ func (p toolExecutionPipeline) toolCallNeedsSeparateBatch(tc message.ToolCall) b
 	if p.syncHookGate != nil && p.syncHookGate() {
 		return true
 	}
+	if p.yoloDowngradeAsk != nil && p.yoloDowngradeAsk(tc.Name) {
+		return false
+	}
+	// The done control tool ignores ask decisions, so no rule makes it wait.
+	if tc.Name == tools.NameDone {
+		return false
+	}
 	ruleset := permission.Ruleset(nil)
 	if p.currentRuleset != nil {
 		ruleset = p.currentRuleset()
 	}
-	// A possible ask is enough to isolate the call. Exact path evaluation can
-	// canonicalize external paths and belongs to worker permission preparation.
+	// Only an ask rule that can name this tool is a barrier. Scanning every ask
+	// rule made an unrelated rule, such as a shell command ask, isolate every
+	// read in the same response. Exact path evaluation still belongs to worker
+	// permission preparation.
 	for _, rule := range ruleset {
-		if rule.Action == permission.ActionAsk && (p.yoloDowngradeAsk == nil || !p.yoloDowngradeAsk(tc.Name)) {
+		if normalizeToolPermissionAction(tc.Name, rule.Action) == permission.ActionAsk && rule.TargetsTool(tc.Name) {
 			return true
 		}
 	}

@@ -23,6 +23,9 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 	if block := toolSelectionPromptBlock(visible); block != "" {
 		blocks = append(blocks, block)
 	}
+	if hasVisibleTool(visible, tools.NameGenerateImage) {
+		blocks = append(blocks, "## Image Generation\n"+tools.ImageGenerationUsageGuidance)
+	}
 	if block := shellExecutionBoundaryPromptBlock(visible, audience); block != "" {
 		blocks = append(blocks, block)
 	}

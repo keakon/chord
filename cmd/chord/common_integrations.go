@@ -13,9 +13,9 @@ type lspFollowupSource struct {
 
 // Pending reports the late diagnostics; each item's Ack consumes exactly that
 // item.
-func (s lspFollowupSource) Pending(paths []string, displayBaseDir string) []agent.LSPFollowupItem {
+func (s lspFollowupSource) Pending(paths []string, displayBaseDir, agentID string) []agent.LSPFollowupItem {
 	mgr := s.mgr
-	pending := mgr.PendingLateDiagnostics(paths, displayBaseDir)
+	pending := mgr.PendingLateDiagnostics(paths, displayBaseDir, agentID)
 	if len(pending) == 0 {
 		return nil
 	}

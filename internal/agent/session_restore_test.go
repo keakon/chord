@@ -1692,3 +1692,52 @@ func TestHandleResumeCommandRestoresAcceptedProposalFromSnapshot(t *testing.T) {
 		t.Fatalf("pending recovery notice = %q, want a not-applied notice", notice)
 	}
 }
+
+func TestFilterRestoredTodosDropsOnlyClassifiedStaleIDs(t *testing.T) {
+	todos := []tools.TodoItem{
+		{ID: "old", Status: "in_progress", Content: "old task"},
+		{ID: "keep", Status: "pending", Content: "current task"},
+	}
+	msgs := []message.Message{{Role: "user", IsCompactionSummary: true, Content: `[Context Summary]
+## Current User Request
+- Latest user request: keep going
+
+## Todo State
+- Active/relevant to latest request:
+  - [pending] keep: current task
+- Completed/background:
+  - (none)
+- Stale/superseded:
+  - [进行中] old: old task
+
+## SubAgent State
+- none`}}
+
+	got := filterRestoredTodosByLatestCompactionSummary(msgs, todos)
+	if len(got) != 1 || got[0].ID != "keep" {
+		t.Fatalf("restored todos = %#v, want only the non-stale ID kept", got)
+	}
+}
+
+func TestFilterRestoredTodosKeepsAllWhenStaleIDsAreUnparseable(t *testing.T) {
+	todos := []tools.TodoItem{{ID: "old", Status: "in_progress", Content: "old task"}}
+	msgs := []message.Message{{Role: "user", IsCompactionSummary: true, Content: `[Context Summary]
+## Current User Request
+- Latest user request: keep going
+
+## Todo State
+- Active/relevant to latest request:
+  - (none)
+- Completed/background:
+  - (none)
+- Stale/superseded:
+  - an old task with no stable ID
+
+## SubAgent State
+- none`}}
+
+	got := filterRestoredTodosByLatestCompactionSummary(msgs, todos)
+	if len(got) != 1 || got[0].ID != "old" {
+		t.Fatalf("restored todos = %#v, want unparseable stale entries to keep todos", got)
+	}
+}

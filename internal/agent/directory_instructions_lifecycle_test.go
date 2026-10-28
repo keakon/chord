@@ -21,7 +21,7 @@ func TestDirectoryInstructionTurnCancelRetainsBindingSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	turn, cancel := context.WithCancel(context.Background())
-	r, _, err := prepareDirectoryInstructions(turn, directoryInstructionBinding{ContentRoot: root, WorkDir: root}, nil)
+	r, _, err := prepareDirectoryInstructions(turn, directoryInstructionBinding{ContentRoot: root, WorkDir: root}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestDirectoryInstructionUnreadableRulesAreIgnored(t *testing.T) {
 	if err = os.Mkdir(filepath.Join(root, "AGENTS.md"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r, facts, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, nil)
+	r, facts, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, nil, nil)
 	if err != nil {
 		t.Fatalf("unreadable rules failed preparation: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestDirectoryInstructionActivationRetryNeedsRealImprovement(t *testing.T) {
 }
 func TestDirectoryInstructionMalformedRestoreFailsPreparation(t *testing.T) {
 	root := t.TempDir()
-	_, _, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, []message.Message{{Role: message.RoleUser, Kind: message.KindDirectoryInstructions}})
+	_, _, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, []message.Message{{Role: message.RoleUser, Kind: message.KindDirectoryInstructions}}, nil)
 	if err == nil {
 		t.Fatal("malformed durable fact allowed preparation")
 	}
@@ -103,7 +103,7 @@ func prepareSubDirectoryInstructionsForTest(t *testing.T, s *SubAgent) {
 	if s.parent != nil {
 		root = s.parent.ContentRoot()
 	}
-	r, _, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{ContentRoot: root, WorkDir: s.effectiveToolBaseDir(), AgentID: s.taskID}, s.ctxMgr.Snapshot())
+	r, _, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{ContentRoot: root, WorkDir: s.effectiveToolBaseDir(), AgentID: s.taskID}, s.ctxMgr.Snapshot(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

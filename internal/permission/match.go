@@ -98,3 +98,11 @@ func (rs Ruleset) LastExactPatternMatch(permission, pattern string) MatchResult 
 func rulePatternHasWildcards(pattern string) bool {
 	return strings.ContainsAny(pattern, "*?")
 }
+
+// TargetsTool reports whether the rule's permission pattern names toolName,
+// including the wildcard default. It ignores the argument pattern because the
+// caller only knows that a call of this tool may need review, not which
+// argument the rule will match.
+func (r Rule) TargetsTool(toolName string) bool {
+	return globMatch(toolname.Normalize(toolName), toolname.Normalize(r.Permission))
+}

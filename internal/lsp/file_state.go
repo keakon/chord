@@ -113,6 +113,7 @@ func (m *Manager) clearFileState(path string, deleted bool) {
 	}
 	delete(m.diagState, path)
 	m.diagMu.Unlock()
+	m.dropLateDiagnostics(path)
 	if deleted {
 		m.UnmarkTouched(path)
 		m.waitersMu.Lock()

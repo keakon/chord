@@ -131,7 +131,7 @@ func directoryInstructionCandidateFacts(binding directoryInstructionBinding, obs
 			}
 		}
 	}
-	blocked := inputBudget <= 0 || estimatedInput+4096 > inputBudget
+	blocked := inputBudget > 0 && estimatedInput+4096 > inputBudget
 	var facts []message.DirectoryInstructionFact
 	for scope, o := range observations {
 		f := directoryInstructionFactFromObservation(binding, scope, o)

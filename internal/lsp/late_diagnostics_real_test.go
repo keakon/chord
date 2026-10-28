@@ -48,7 +48,7 @@ func main() {
 
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		items := mgr.PendingLateDiagnostics([]string{path}, root)
+		items := mgr.PendingLateDiagnostics([]string{path}, root, "")
 		for _, item := range items {
 			t.Logf("late item after %v: %q", time.Since(start), item.Lines)
 			if strings.Contains(item.Lines, "wrong type") || strings.Contains(item.Lines, "Printf") {

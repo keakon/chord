@@ -38,6 +38,20 @@ func TestDirectoryInstructionViewInitialOwnsScopeAndRequiresExactBody(t *testing
 		t.Fatal("refs without exact body admitted")
 	}
 }
+func TestDirectoryInstructionUnknownInputBudgetDoesNotBlock(t *testing.T) {
+	binding := directoryInstructionBinding{CheckoutRoot: "/repo", ContentRoot: "/repo", WorkDir: "/repo"}
+	body := "package rules"
+	observations := map[string]directoryInstructionObservation{
+		"pkg": {Status: "present", SourcePath: "/repo/pkg/AGENTS.md", Body: body, BodyHash: message.DirectoryInstructionBodyHash(body)},
+	}
+	for _, budget := range []int{0, -1} {
+		facts := directoryInstructionCandidateFacts(binding, observations, nil, budget, 1<<30)
+		if len(facts) != 1 || facts[0].Operation != message.DirectoryInstructionUpsert || facts[0].Body != body {
+			t.Fatalf("budget %d: facts = %+v, want the rule admitted", budget, facts)
+		}
+	}
+}
+
 func TestDirectoryInstructionCompactionNewTailWinsAndRemoveSurvives(t *testing.T) {
 	old := directoryTestFact("pkg", "old")
 	newFact := directoryTestFact("pkg", "new")
@@ -79,7 +93,7 @@ func TestDirectoryInstructionPreparationRechecksRestoredAncestorChain(t *testing
 		t.Fatal(err)
 	}
 	old := message.DirectoryInstructionFact{CheckoutRoot: root, Scope: "middle/leaf", SourcePath: filepath.Join(dir, "AGENTS.md"), Operation: message.DirectoryInstructionUpsert, Body: "deleted leaf rules", BodyHash: message.DirectoryInstructionBodyHash("deleted leaf rules")}
-	r, facts, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, []message.Message{directoryInstructionFactMessage([]message.DirectoryInstructionFact{old})})
+	r, facts, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: root}, []message.Message{directoryInstructionFactMessage([]message.DirectoryInstructionFact{old})}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

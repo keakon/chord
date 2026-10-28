@@ -12,6 +12,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/tools"
@@ -124,6 +126,23 @@ func directoryBlocked(path, reason string, err error) directoryInstructionObserv
 	return directoryInstructionObservation{Status: "blocked", SourcePath: path, Reason: reason, Detail: detail}
 }
 
+// warnBlockedInstructionOnce keeps a deterministic size or encoding rejection
+// from disappearing silently while avoiding one log line per discovery pass.
+func (r *directoryInstructionRuntime) warnBlockedInstructionOnce(path, reason string) {
+	if r == nil {
+		return
+	}
+	key := path + "\x00" + reason
+	if _, ok := r.warned[key]; ok {
+		return
+	}
+	if r.warned == nil {
+		r.warned = make(map[string]struct{})
+	}
+	r.warned[key] = struct{}{}
+	log.Warnf("directory instruction file blocked from prompt path=%v reason=%v", path, reason)
+}
+
 func (r *directoryInstructionRuntime) readInstructionFile(ctx context.Context, path string) directoryInstructionObservation {
 	if err := ctx.Err(); err != nil {
 		return directoryBlocked(path, "cancelled", err)
@@ -137,13 +156,13 @@ func (r *directoryInstructionRuntime) readInstructionFile(ctx context.Context, p
 	}
 	// Following a rule-file symlink is the repository author's decision: the link
 	// lives where the rules belong, and its target is whatever that author chose,
-	// inside the checkout or beside it. The harness reads the file it points at
-	// and does not adjudicate where it lives; only a regular file within the size
-	// and encoding limits below reaches the prompt.
-	//
-	// The ruleset plays no part here. A read rule governs the read tool the model
-	// calls; assembling the prompt is the harness's own work, and letting a rule
-	// hide a project's rules would be a gate on the harness, not on a tool.
+	// inside the checkout or beside it. An explicit read deny still wins: a
+	// symlink must not turn a denied target into prompt material. The blanket
+	// default deny is not consulted, because it would hide every project's rules;
+	// only a specific read rule applies.
+	if r.readDenied != nil && (r.readDenied(path) || r.readDenied(real)) {
+		return directoryBlocked(path, message.DirectoryInstructionReasonPermission, nil)
+	}
 	f, err := pathutil.OpenCanonicalRegular(real)
 	if err != nil {
 		return directoryBlocked(real, message.DirectoryInstructionReasonIO, err)
@@ -154,6 +173,7 @@ func (r *directoryInstructionRuntime) readInstructionFile(ctx context.Context, p
 		return directoryBlocked(real, message.DirectoryInstructionReasonIO, err)
 	}
 	if opened.Size() > maxDirectoryInstructionBytes {
+		r.warnBlockedInstructionOnce(real, message.DirectoryInstructionReasonSize)
 		return directoryBlocked(real, message.DirectoryInstructionReasonSize, fmt.Errorf("rule file exceeds 64 KiB: %s", real))
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxDirectoryInstructionBytes+1))
@@ -164,9 +184,11 @@ func (r *directoryInstructionRuntime) readInstructionFile(ctx context.Context, p
 		return directoryBlocked(real, "cancelled", err)
 	}
 	if len(data) > maxDirectoryInstructionBytes {
+		r.warnBlockedInstructionOnce(real, message.DirectoryInstructionReasonSize)
 		return directoryBlocked(real, message.DirectoryInstructionReasonSize, fmt.Errorf("rule file exceeds 64 KiB: %s", real))
 	}
 	if !utf8.Valid(data) {
+		r.warnBlockedInstructionOnce(real, message.DirectoryInstructionReasonEncoding)
 		return directoryBlocked(real, message.DirectoryInstructionReasonEncoding, fmt.Errorf("rule file is not valid UTF-8: %s", real))
 	}
 	body := strings.TrimSpace(string(data))

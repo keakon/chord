@@ -96,7 +96,7 @@ func TestDirectoryInstructionRestoreRetiresChangedScopeIdentity(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			r, facts, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{CheckoutRoot: root, ContentRoot: root, WorkDir: root}, history)
+			r, facts, err := prepareDirectoryInstructions(t.Context(), directoryInstructionBinding{CheckoutRoot: root, ContentRoot: root, WorkDir: root}, history, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

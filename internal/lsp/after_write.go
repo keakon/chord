@@ -12,6 +12,7 @@ import (
 	pnprotocol "github.com/keakon/x/powernap/pkg/lsp/protocol"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 )
 
 const diagnosticsWaitTimeout = 3 * time.Second
@@ -57,11 +58,12 @@ const afterWriteClientWaitTimeout = 3 * time.Second
 // after-write pipeline: preparation (client wait, waiter registration, content
 // sync) and the diagnostics wait that follows.
 type afterWritePrepared struct {
-	path        string
-	base        string
-	sync        afterWriteSync
-	waiter      chan diagnosticsEvent
-	waitTimeout time.Duration
+	path          string
+	base          string
+	sync          afterWriteSync
+	waiter        chan diagnosticsEvent
+	waitTimeout   time.Duration
+	writerAgentID string
 	// wait reports whether the diagnostics wait should run: false when the
 	// write has no server coverage, its server start failed, or every owning
 	// server missed the content sync.
@@ -99,7 +101,7 @@ func (m *Manager) prepareAfterFileWrite(ctx context.Context, absPath, content, b
 // client waits concurrently and call this serially so all content syncs reach
 // the server as one analysis unit.
 func (m *Manager) prepareReadyAfterFileWrite(ctx context.Context, absPath, content, base string, changeType WatchedFileChangeType, coldStart bool) afterWritePrepared {
-	prepared := afterWritePrepared{path: absPath, base: base}
+	prepared := afterWritePrepared{path: absPath, base: base, writerAgentID: identity.AgentIDFromContext(ctx)}
 	prepared.waiter = m.PrepareWaiter(absPath)
 	prepared.sync = m.syncAfterWrite(ctx, absPath, content, changeType, true)
 	prepared.base, prepared.wait = m.settleAfterWriteSyncFailure(ctx, absPath, prepared.waiter, prepared.sync, prepared.base)
@@ -125,7 +127,7 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 		m.confirmDiagnosticsSync(prepared.sync.token)
 	}
 	if notified && ctx.Err() == nil {
-		m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, baseline, lastSeq)
+		m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, baseline, lastSeq, prepared.writerAgentID)
 	}
 	if !notified && ctx.Err() == nil {
 		// A timeout is logged every time; the model hears about the first one

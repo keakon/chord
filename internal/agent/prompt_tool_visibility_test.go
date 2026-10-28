@@ -217,15 +217,19 @@ func TestToolSelectionOwnsVisibilityAwareNavigation(t *testing.T) {
 	}
 }
 
-func TestImageGuidanceStaysInToolDescription(t *testing.T) {
-	// The image-generation prompt block was removed: the GenerateImage tool
-	// description carries the full usage guidance itself, so a prompt block
-	// would resend the same text on every request. The capability block must
-	// never reintroduce it.
+func TestImageGuidanceSurvivesNativeToolDefinitionRemoval(t *testing.T) {
+	// A native image-generation request drops the local GenerateImage
+	// definition, and with it the description that carries the usage rules.
+	// The capability block must still carry the guidance whenever the tool is
+	// visible, even though the local description repeats it.
 	for _, audience := range []capabilityPromptAudience{capabilityPromptAudienceMain, capabilityPromptAudienceSub} {
 		block := buildDynamicCapabilityPromptBlock(map[string]struct{}{tools.NameGenerateImage: {}}, nil, audience)
-		if strings.Contains(block, "## Image Generation") || strings.Contains(block, tools.ImageGenerationUsageGuidance) {
-			t.Fatalf("audience=%d block still duplicates image guidance: %q", audience, block)
+		if !strings.Contains(block, "## Image Generation") || !strings.Contains(block, tools.ImageGenerationUsageGuidance) {
+			t.Fatalf("audience=%d block lost image guidance: %q", audience, block)
 		}
+	}
+	block := buildDynamicCapabilityPromptBlock(map[string]struct{}{}, nil, capabilityPromptAudienceMain)
+	if strings.Contains(block, "## Image Generation") {
+		t.Fatalf("image guidance leaked without a visible tool: %q", block)
 	}
 }

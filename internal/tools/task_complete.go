@@ -30,7 +30,7 @@ func (CompleteTool) Name() string { return NameComplete }
 func (CompleteTool) Description() string {
 	return "Mark the current delegated task as complete. Call this only when the assigned task is finished. " +
 		"Provide a concise summary plus structured completion details when available. For generic machine-readable output, provide result_type together with exactly one of result (a small JSON object) or result_ref (an existing immutable result reference); otherwise omit all three fields. " +
-		"If a true blocker prevents completion, follow the SubAgent Coordination section's blocker route instead of calling this tool. This tool is the only way to signal completion; plain assistant text does not complete the task."
+		"If a true blocker prevents completion, use the blocker route in the SubAgent Coordination section when your role provides one; otherwise close the task and record the blocker in summary and remaining_limitations. This tool is the only way to signal completion; plain assistant text does not complete the task."
 }
 
 // Parameters states the result_type/result/result_ref pairing in the field
@@ -53,7 +53,7 @@ func (CompleteTool) Parameters() map[string]any {
 			},
 			"remaining_limitations": map[string]any{
 				"type":        "array",
-				"description": "Non-blocking limitations, caveats, or unverified items. For true blockers, follow the SubAgent Coordination section instead of reporting completion.",
+				"description": "Non-blocking limitations, caveats, or unverified items. For true blockers, use the SubAgent Coordination section's blocker route when your role provides one; otherwise record the blocker here.",
 				"items":       map[string]any{"type": "string"},
 			},
 			"known_risks": map[string]any{

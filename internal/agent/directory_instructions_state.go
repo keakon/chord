@@ -57,6 +57,8 @@ type directoryInstructionRequest struct {
 }
 type directoryInstructionRuntime struct {
 	inputBinding    directoryInstructionBinding
+	readDenied      func(string) bool
+	warned          map[string]struct{}
 	pending         map[string]directoryInstructionObservation
 	blockedRevision map[string]string
 	initial         directoryInstructionSnapshot

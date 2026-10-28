@@ -66,7 +66,7 @@ func (a *MainAgent) appendMailboxMessageToContext(mailbox *SubAgentMailboxMessag
 		a.ctxMgr.Append(msg)
 		a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 			if err != nil {
-				a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex, true)
+				a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex)
 				a.notePersistenceFailure(err)
 				return
 			}
@@ -90,7 +90,7 @@ func (a *MainAgent) appendMailboxMessageToContext(mailbox *SubAgentMailboxMessag
 		a.ctxMgr.Append(msg)
 		a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 			if err != nil {
-				a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex, false)
+				a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex)
 				a.notePersistenceFailure(err)
 				return
 			}
@@ -623,7 +623,6 @@ type pendingOverlayAppend struct {
 	msg          message.Message
 	targetAgent  string
 	messageIndex int
-	background   bool
 	noticeLevel  string
 	noticeText   string
 }
@@ -633,7 +632,7 @@ type pendingOverlayAppend struct {
 // already in ctxmgr and future requests dedupe on the in-memory row, so without
 // the deferred event the TUI would keep the message's waiting row until the
 // session switches.
-func (a *MainAgent) noteOverlayAppendPersistFailure(msg message.Message, targetAgentID string, messageIndex int, background bool) {
+func (a *MainAgent) noteOverlayAppendPersistFailure(msg message.Message, targetAgentID string, messageIndex int) {
 	if a == nil {
 		return
 	}
@@ -651,7 +650,6 @@ func (a *MainAgent) noteOverlayAppendPersistFailure(msg message.Message, targetA
 		msg:          msg,
 		targetAgent:  targetAgentID,
 		messageIndex: messageIndex,
-		background:   background,
 	})
 }
 
@@ -696,14 +694,17 @@ func (a *MainAgent) flushPendingOverlayAppends() {
 	a.pendingOverlayAppendsMu.Unlock()
 	if reconcile {
 		for index, msg := range a.ctxMgr.Snapshot() {
-			if msg.Mailbox == nil {
-				continue
-			}
 			switch msg.Kind {
 			case message.KindBackgroundResult:
-				a.emitToTUI(BackgroundResultAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: index})
+				if msg.Mailbox != nil {
+					a.emitToTUI(BackgroundResultAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: index})
+				}
 			case message.KindSubAgentMailbox:
-				a.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: index})
+				if msg.Mailbox != nil {
+					a.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: identity.MainAgentID, MessageIndex: index})
+				}
+			case message.KindLSPFollowup:
+				a.emitToTUI(LSPFollowupEvent{Message: message.StripSystemReminderOverlay(msg.Content), MessageIndex: index})
 			}
 		}
 		return
@@ -713,11 +714,14 @@ func (a *MainAgent) flushPendingOverlayAppends() {
 			a.emitToTUI(ContextNoticeEvent{Level: p.noticeLevel, Message: p.noticeText, MessageIndex: p.messageIndex})
 			continue
 		}
-		if p.background {
+		switch p.msg.Kind {
+		case message.KindBackgroundResult:
 			a.emitToTUI(BackgroundResultAppendedEvent{Message: p.msg, TargetAgentID: p.targetAgent, MessageIndex: p.messageIndex})
-			continue
+		case message.KindSubAgentMailbox:
+			a.emitToTUI(MailboxTranscriptAppendedEvent{Message: p.msg, TargetAgentID: p.targetAgent, MessageIndex: p.messageIndex})
+		case message.KindLSPFollowup:
+			a.emitToTUI(LSPFollowupEvent{Message: message.StripSystemReminderOverlay(p.msg.Content), MessageIndex: p.messageIndex})
 		}
-		a.emitToTUI(MailboxTranscriptAppendedEvent{Message: p.msg, TargetAgentID: p.targetAgent, MessageIndex: p.messageIndex})
 	}
 }
 

@@ -21,7 +21,7 @@ type fakeLSPFollowupSource struct {
 	asked []string
 }
 
-func (f *fakeLSPFollowupSource) Pending(paths []string, _ string) []LSPFollowupItem {
+func (f *fakeLSPFollowupSource) Pending(paths []string, _, _ string) []LSPFollowupItem {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.asked = append([]string(nil), paths...)
@@ -111,8 +111,8 @@ func TestLSPFollowupDispatchPersistsTheDeliveredTextAndAcks(t *testing.T) {
 	if message.IsUserAuthored(row) {
 		t.Fatal("a late diagnostics follow-up must not count as user-authored")
 	}
-	if acked.Load() != 0 {
-		t.Fatal("late diagnostics were consumed before the follow-up became durable")
+	if acked.Load() != 1 {
+		t.Fatalf("acked = %d, want the delivered item consumed once the dispatched request carried it", acked.Load())
 	}
 
 	a.flushPersist()
@@ -121,7 +121,7 @@ func TestLSPFollowupDispatchPersistsTheDeliveredTextAndAcks(t *testing.T) {
 		t.Fatalf("event = %+v, want index %d and the bare follow-up text", evt, before)
 	}
 	if acked.Load() != 1 {
-		t.Fatalf("acked = %d, want the delivered item consumed once after persistence", acked.Load())
+		t.Fatalf("acked = %d, want the delivered item consumed exactly once", acked.Load())
 	}
 
 	a.emitStagedLSPFollowup()
@@ -130,7 +130,7 @@ func TestLSPFollowupDispatchPersistsTheDeliveredTextAndAcks(t *testing.T) {
 	}
 }
 
-func TestLSPFollowupPersistenceFailureKeepsTheItemPending(t *testing.T) {
+func TestLSPFollowupPersistenceFailureAcksAndDefersTheCard(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	blocker := filepath.Join(t.TempDir(), "blocker")
@@ -153,12 +153,24 @@ func TestLSPFollowupPersistenceFailureKeepsTheItemPending(t *testing.T) {
 
 	before := a.ctxMgr.MessageCount()
 	a.emitStagedLSPFollowup()
+	if acked.Load() != 1 {
+		t.Fatalf("acked = %d, want the dispatched request to consume it", acked.Load())
+	}
 	a.flushPersist()
 	if got := a.ctxMgr.MessageCount(); got != before+1 {
 		t.Fatalf("message count = %d, want the in-memory row appended once", got)
 	}
-	if acked.Load() != 0 {
-		t.Fatal("a follow-up whose persistence failed was consumed anyway")
+	a.pendingOverlayAppendsMu.Lock()
+	deferred := len(a.pendingOverlayAppends)
+	a.pendingOverlayAppendsMu.Unlock()
+	if deferred != 1 {
+		t.Fatalf("deferred card events = %d, want the failed row's card", deferred)
+	}
+
+	a.flushPendingOverlayAppends()
+	evt := waitForLSPFollowupEvent(t, a)
+	if evt.MessageIndex != before || strings.Contains(evt.Message, "<system-reminder>") {
+		t.Fatalf("event = %+v, want index %d and the bare follow-up text", evt, before)
 	}
 }
 

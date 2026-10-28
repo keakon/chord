@@ -191,6 +191,7 @@ func (m *Manager) RestoreReportedDiagnostics(reported map[string][]Diagnostic) {
 	m.degradeNotes = nil
 	m.degradeMu.Unlock()
 
+	m.resetLateDiagnostics()
 	m.diagMu.Lock()
 	defer m.diagMu.Unlock()
 	m.reportedByPath = make(map[string]map[diagnosticIdentity]struct{}, len(reported))

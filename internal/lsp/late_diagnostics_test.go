@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 )
 
 type lateDiagnosticsFixture struct {
@@ -73,7 +74,7 @@ func (f *lateDiagnosticsFixture) baseline() map[diagnosticIdentity]struct{} {
 }
 
 func (f *lateDiagnosticsFixture) watch(serverVersions map[string]int32, afterSeq uint64) {
-	f.mgr.watchLateDiagnostics(f.path, serverVersions, f.baseline(), afterSeq)
+	f.mgr.watchLateDiagnostics(f.path, serverVersions, f.baseline(), afterSeq, "")
 }
 
 func lateDiag(severity protocol.DiagnosticSeverity, line uint32, msg string) protocol.Diagnostic {
@@ -86,12 +87,12 @@ func TestLateDiagnosticsReportsOnlyDiagnosticsAddedForTheSyncedVersion(t *testin
 	seq := f.publish("gopls", 2, typeErr)
 	f.watch(map[string]int32{"gopls": 2}, seq)
 
-	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
 		t.Fatalf("pending before any later publish = %+v, want none", got)
 	}
 	f.publish("gopls", 2, typeErr, lateDiag(protocol.SeverityWarning, 7, "this value is never used"))
 
-	got := f.mgr.PendingLateDiagnostics([]string{f.path}, filepath.Dir(f.path))
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, filepath.Dir(f.path), "")
 	if len(got) != 1 {
 		t.Fatalf("pending = %+v, want one entry", got)
 	}
@@ -115,9 +116,9 @@ func TestLateDiagnosticsReplaysAPublishThatRacedWatchRegistration(t *testing.T) 
 	// registered. The wait baseline is still the type-check set, so the new
 	// analyzer finding must survive the replay.
 	f.publish("gopls", 2, typeErr, lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type"))
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, baseline, seq)
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, baseline, seq, "")
 
-	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	if len(got) != 1 || !strings.Contains(got[0].Lines, "printf arg has wrong type") {
 		t.Fatalf("pending = %+v, want the publish that raced registration", got)
 	}
@@ -145,17 +146,17 @@ func TestLateDiagnosticsAckConsumesAndLaterPublishReportsOnlyNewer(t *testing.T)
 	first := lateDiag(protocol.SeverityWarning, 1, "first analyzer finding")
 	f.publish("gopls", 2, first)
 
-	peeked := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
-	if again := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(again) != 1 || len(peeked) != 1 {
+	peeked := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
+	if again := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(again) != 1 || len(peeked) != 1 {
 		t.Fatalf("peek consumed pending diagnostics: first=%+v second=%+v", peeked, again)
 	}
 	f.mgr.AckLateDiagnostics(peeked)
-	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
 		t.Fatalf("pending after ack = %+v, want none", got)
 	}
 
 	f.publish("gopls", 2, first, lateDiag(protocol.SeverityWarning, 9, "second analyzer finding"))
-	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	if len(got) != 1 || strings.Contains(got[0].Lines, "first analyzer finding") || !strings.Contains(got[0].Lines, "second analyzer finding") {
 		t.Fatalf("pending after newer publish = %+v, want only the newer finding", got)
 	}
@@ -167,11 +168,11 @@ func TestLateDiagnosticsAckKeepsPendingWhenPublishArrivedAfterPeek(t *testing.T)
 	f.watch(map[string]int32{"gopls": 2}, seq)
 	first := lateDiag(protocol.SeverityWarning, 1, "first analyzer finding")
 	f.publish("gopls", 2, first)
-	peeked := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	peeked := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	f.publish("gopls", 2, first, lateDiag(protocol.SeverityWarning, 9, "second analyzer finding"))
 
 	f.mgr.AckLateDiagnostics(peeked)
-	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	if len(got) != 1 || !strings.Contains(got[0].Lines, "second analyzer finding") || strings.Contains(got[0].Lines, "first analyzer finding") {
 		t.Fatalf("pending = %+v, want the publish that raced the ack kept", got)
 	}
@@ -182,15 +183,22 @@ func TestLateDiagnosticsIgnoresOtherVersionsAndPublishesAfterDeadline(t *testing
 	seq := f.publish("gopls", 2)
 	f.watch(map[string]int32{"gopls": 2}, seq)
 	f.publish("gopls", 3, lateDiag(protocol.SeverityWarning, 1, "newer version"))
-	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
 		t.Fatalf("pending after another version = %+v, want none", got)
 	}
+	f.mgr.lateMu.Lock()
+	_, watched := f.mgr.lateWatches[f.path]
+	f.mgr.lateMu.Unlock()
+	if watched {
+		t.Fatal("a publish for another version kept the watch")
+	}
 
+	f.watch(map[string]int32{"gopls": 2}, 0)
 	f.mgr.lateMu.Lock()
 	f.mgr.lateWatches[f.path].deadline = time.Now().Add(-time.Second)
 	f.mgr.lateMu.Unlock()
 	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "too late"))
-	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
 		t.Fatalf("pending after deadline = %+v, want none", got)
 	}
 }
@@ -201,7 +209,7 @@ func TestLateDiagnosticsSkipsPathsNotRequestedOrStale(t *testing.T) {
 	f.watch(map[string]int32{"gopls": 2}, seq)
 	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "analyzer finding"))
 
-	if got := f.mgr.PendingLateDiagnostics([]string{filepath.Join(filepath.Dir(f.path), "other.go")}, ""); len(got) != 0 {
+	if got := f.mgr.PendingLateDiagnostics([]string{filepath.Join(filepath.Dir(f.path), "other.go")}, "", ""); len(got) != 0 {
 		t.Fatalf("pending for an unwritten path = %+v, want none", got)
 	}
 	f.mgr.diagMu.Lock()
@@ -209,7 +217,7 @@ func TestLateDiagnosticsSkipsPathsNotRequestedOrStale(t *testing.T) {
 	state.stale = true
 	f.mgr.diagState[f.path] = state
 	f.mgr.diagMu.Unlock()
-	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
 		t.Fatalf("pending for a file changed on disk = %+v, want none", got)
 	}
 }
@@ -219,10 +227,10 @@ func TestLateDiagnosticsNewSyncReplacesWatchAndStaleAckIsIgnored(t *testing.T) {
 	seq := f.publish("gopls", 2)
 	f.watch(map[string]int32{"gopls": 2}, seq)
 	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 1, "old version finding"))
-	stale := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	stale := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 
 	f.mgr.dropLateDiagnostics(f.path)
-	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
 		t.Fatalf("pending after a new sync = %+v, want none", got)
 	}
 
@@ -230,7 +238,7 @@ func TestLateDiagnosticsNewSyncReplacesWatchAndStaleAckIsIgnored(t *testing.T) {
 	f.watch(map[string]int32{"gopls": 4}, seq)
 	f.publish("gopls", 4, lateDiag(protocol.SeverityWarning, 1, "old version finding"), lateDiag(protocol.SeverityWarning, 2, "new version finding"))
 	f.mgr.AckLateDiagnostics(stale)
-	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	if len(got) != 1 || !strings.Contains(got[0].Lines, "new version finding") {
 		t.Fatalf("pending = %+v, want the replacing watch untouched by the stale ack", got)
 	}
@@ -242,12 +250,12 @@ func TestLateDiagnosticsInformationOnlyDoesNotTriggerButRidesAlong(t *testing.T)
 	f.watch(map[string]int32{"gopls": 2}, seq)
 	hint := lateDiag(protocol.SeverityHint, 2, "loop can be simplified")
 	f.publish("gopls", 2, hint, lateDiag(protocol.SeverityInformation, 4, "var is unused"))
-	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, ""); len(got) != 0 {
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
 		t.Fatalf("pending with only information and hints = %+v, want none", got)
 	}
 
 	f.publish("gopls", 2, hint, lateDiag(protocol.SeverityInformation, 4, "var is unused"), lateDiag(protocol.SeverityWarning, 6, "printf arg has wrong type"))
-	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	if len(got) != 1 {
 		t.Fatalf("pending = %+v, want one entry once a warning appeared", got)
 	}
@@ -265,7 +273,7 @@ func (f *lateDiagnosticsFixture) deliverLate(version int32, late ...protocol.Dia
 	seq := f.publish("gopls", version)
 	f.watch(map[string]int32{"gopls": version}, seq)
 	f.publish("gopls", version, late...)
-	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	f.mgr.AckLateDiagnostics(got)
 	return got
 }
@@ -309,19 +317,24 @@ func TestLatePruneKeepsFindingAnotherServerStillReports(t *testing.T) {
 		findingServers: map[lateFindingKey]map[string]struct{}{key: {"gopls": {}, "other": {}}},
 	}})
 
-	// Only the other server still reports the finding.
+	// Only the other server still reports the finding. Dropping the watch may
+	// prune delivered findings, but the union of current publishes keeps it.
+	f.watch(map[string]int32{"gopls": 2}, 0)
 	f.publish("other", 2, finding)
-	f.mgr.pruneLateFindingsForServer(f.path, "gopls")
+	f.publish("gopls", 2)
+	f.mgr.dropLateDiagnostics(f.path)
 	f.mgr.lateMu.Lock()
 	_, kept := f.mgr.lateReported[f.path][key]
 	f.mgr.lateMu.Unlock()
 	if !kept {
-		t.Fatal("pruning gopls released a finding the other server still reports")
+		t.Fatal("pruning released a finding another server still reports")
 	}
 
 	// Both servers have dropped it; a later publish must be delivered again.
 	f.publish("other", 2)
-	f.mgr.pruneLateFindingsForServer(f.path, "other")
+	f.watch(map[string]int32{"gopls": 2}, 0)
+	f.publish("gopls", 2)
+	f.mgr.dropLateDiagnostics(f.path)
 	f.mgr.lateMu.Lock()
 	_, kept = f.mgr.lateReported[f.path][key]
 	f.mgr.lateMu.Unlock()
@@ -331,9 +344,9 @@ func TestLatePruneKeepsFindingAnotherServerStillReports(t *testing.T) {
 
 	f.mgr.dropLateDiagnostics(f.path)
 	seq := f.publish("gopls", 3)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 3}, nil, seq)
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 3}, nil, seq, "")
 	f.publish("gopls", 3, finding)
-	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "")
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
 	if len(got) != 1 || !strings.Contains(got[0].Lines, "printf arg") {
 		t.Fatalf("reintroduced finding = %+v, want it reported again", got)
 	}
@@ -410,6 +423,99 @@ func TestLateDiagnosticsQuietWindowCountsAsCompleteButAnOpenWindowDoesNot(t *tes
 	}
 }
 
+func TestLateDiagnosticsTypeCheckPublishDoesNotReleaseAnalysisFinding(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	warning := lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type")
+	if got := f.deliverLate(2, warning); len(got) != 1 {
+		t.Fatalf("first delivery = %+v, want one entry", got)
+	}
+
+	// The next write waits on its type-check pass; the analyzer publish arrives
+	// later. gopls also republishes the type-check set in between. That
+	// intermediate publish must not mark the already delivered analyzer
+	// finding as gone, or the analyzer publish reports it again.
+	typeErr := lateDiag(protocol.SeverityError, 3, "undefined: missing")
+	f.mgr.dropLateDiagnostics(f.path)
+	seq := f.publish("gopls", 3, typeErr)
+	f.watch(map[string]int32{"gopls": 3}, seq)
+	f.publish("gopls", 3, typeErr)
+	f.publish("gopls", 3, typeErr, warning)
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
+		t.Fatalf("already delivered finding was reported again: %+v", got)
+	}
+}
+
+func TestLateDiagnosticsWriterFiltering(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	seq := f.publish("gopls", 2)
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, f.baseline(), seq, "worker-1")
+	f.publish("gopls", 2, lateDiag(protocol.SeverityWarning, 7, "analyzer finding"))
+
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", identity.MainAgentID); len(got) != 0 {
+		t.Fatalf("main agent claimed a worker's late diagnostics: %+v", got)
+	}
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "worker-1"); len(got) != 1 {
+		t.Fatalf("worker did not get its own late diagnostics: %+v", got)
+	}
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 1 {
+		t.Fatalf("an unknown requester lost the late diagnostics: %+v", got)
+	}
+}
+
+func TestLateDiagnosticsPendingClearsWhenPublishAddsNothing(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	typeErr := lateDiag(protocol.SeverityError, 3, "undefined: missing")
+	seq := f.publish("gopls", 2, typeErr)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+	f.publish("gopls", 2, typeErr)
+	if got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", ""); len(got) != 0 {
+		t.Fatalf("pending = %+v, want none", got)
+	}
+	f.mgr.lateMu.Lock()
+	pending := f.mgr.lateWatches[f.path].pending
+	f.mgr.lateMu.Unlock()
+	if pending {
+		t.Fatal("a publish with nothing left to deliver kept the watch pending")
+	}
+}
+
+func TestLateDiagnosticsFrozenPublishIgnoresUnrelatedServers(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	f.addServer("other")
+	typeErr := lateDiag(protocol.SeverityError, 3, "undefined: missing")
+	seq := f.publish("gopls", 2, typeErr)
+	f.watch(map[string]int32{"gopls": 2}, seq)
+	warning := lateDiag(protocol.SeverityWarning, 7, "analyzer finding")
+	f.publish("gopls", 2, typeErr, warning)
+	// Another server overwrites the live cache for the same file at a version
+	// the write never synced. Late follow-ups must still describe gopls's
+	// frozen publish, not this cache.
+	f.publish("other", 99, lateDiag(protocol.SeverityError, 11, "external server error"))
+
+	got := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
+	if len(got) != 1 || !strings.Contains(got[0].Lines, "analyzer finding") || strings.Contains(got[0].Lines, "external server error") {
+		t.Fatalf("pending = %+v, want only the frozen gopls publish", got)
+	}
+}
+
+func TestRestoreReportedDiagnosticsForgetsLateState(t *testing.T) {
+	f := newLateDiagnosticsFixture(t)
+	warning := lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type")
+	if got := f.deliverLate(2, warning); len(got) != 1 {
+		t.Fatalf("first delivery = %+v, want one entry", got)
+	}
+	f.mgr.RestoreReportedDiagnostics(map[string][]Diagnostic{f.path: {{Severity: int(protocol.SeverityWarning), Message: warning.Message}}})
+	f.mgr.lateMu.Lock()
+	watches, reported := len(f.mgr.lateWatches), len(f.mgr.lateReported)
+	f.mgr.lateMu.Unlock()
+	if watches != 0 || reported != 0 {
+		t.Fatalf("after restore watches=%d reported=%d, want none", watches, reported)
+	}
+	if got := f.deliverLate(3, warning); len(got) != 1 {
+		t.Fatalf("delivery after restore = %+v, want the finding reported", got)
+	}
+}
+
 func TestResetReportedDiagnosticsForgetsLateState(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
 	finding := lateDiag(protocol.SeverityWarning, 7, "printf arg has wrong type")
@@ -428,7 +534,7 @@ func TestResetReportedDiagnosticsForgetsLateState(t *testing.T) {
 
 func TestSyncAfterWriteDropsLateDiagnosticsWatch(t *testing.T) {
 	f := newLateDiagnosticsFixture(t)
-	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, nil, 0)
+	f.mgr.watchLateDiagnostics(f.path, map[string]int32{"gopls": 2}, nil, 0, "")
 
 	restoreNotify, restoreChange, restoreSave := afterWriteNotifyWatchedFileChanged, afterWriteDidChange, afterWriteDidSave
 	t.Cleanup(func() {

@@ -55,6 +55,28 @@ func TestDirectoryInstructionsReadThenWriteStillExecutes(t *testing.T) {
 	}
 }
 
+// Speculative reads commit through the same result path as ordinary reads, so
+// a streamed read must discover the rules of the directory it actually read.
+func TestDirectoryInstructionsSpeculativeReadDiscoversRules(t *testing.T) {
+	p, root := directoryPipelineFixture(t)
+	dir := filepath.Join(root, "module")
+	writeResolverRule(t, dir, "Use the module workflow.")
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("sample"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := p.executeSpeculative(context.Background(), directoryCall("read", tools.NameRead, map[string]string{"path": path}))
+	if err != nil {
+		t.Fatalf("speculative read failed: %v", err)
+	}
+	if result.DirectoryDiscovery == nil {
+		t.Fatal("speculative read did not discover directory rules")
+	}
+	if o := result.DirectoryDiscovery.Observations["module"]; o.Status != "present" || o.Body != "Use the module workflow." {
+		t.Fatalf("module rule not discovered: %+v", result.DirectoryDiscovery.Observations)
+	}
+}
+
 // Rules reach the model only when a file inside a directory is read. A patch
 // that creates files in two directories applies unchanged and discovers nothing.
 func TestDirectoryInstructionsPatchAppliesWithoutDiscovery(t *testing.T) {

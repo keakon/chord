@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -8,6 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/logtest"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -152,8 +158,8 @@ func TestDirectoryInstructionResolverFallback(t *testing.T) {
 
 // A rule file symlinked to a shared source outside the checkout is the author's
 // own choice, so the rules load and are attributed to the scope holding the
-// link. Nothing consults the ruleset: a read rule governs the read tool the
-// model calls, not the prompt the harness assembles.
+// link. A specific read deny still blocks it: the link must not turn a denied
+// target into prompt material. The blanket default deny is not consulted.
 func TestDirectoryInstructionResolverFollowsExternalRuleSymlink(t *testing.T) {
 	r, root := newResolverFixture(t)
 	external, err := filepath.EvalSymlinks(t.TempDir())
@@ -243,5 +249,44 @@ func TestDirectoryInstructionResolverHotDiscoveryDoesNotRepublish(t *testing.T) 
 	}
 	if r.frozen.Load() != frozen {
 		t.Fatal("hot discovery unnecessarily recopied frozen observations")
+	}
+}
+
+func TestDirectoryInstructionResolverDeniedSymlinkTargetIsBlocked(t *testing.T) {
+	r, root := newResolverFixture(t)
+	external, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(external, "AGENTS.md")
+	if err := os.WriteFile(target, []byte("secret rules"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "AGENTS.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	denied := map[string]bool{link: true, target: true}
+	r.readDenied = func(path string) bool { return denied[path] }
+	d := discoverResolverDirectory(t, r, root)
+	got := d.Observations["."]
+	if got.Status != "blocked" || got.Reason != message.DirectoryInstructionReasonPermission || got.Body != "" {
+		t.Fatalf("denied symlink target produced content: %+v", got)
+	}
+}
+
+func TestDirectoryInstructionBlockedFileWarnsOnce(t *testing.T) {
+	var output bytes.Buffer
+	log.SetDefaultLogger(logtest.NewLogger(&output, golog.WarnLevel))
+	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
+
+	r, root := newResolverFixture(t)
+	writeResolverRule(t, root, strings.Repeat("a", maxDirectoryInstructionBytes+1))
+	discoverResolverDirectory(t, r, root)
+	first := strings.Count(output.String(), "directory instruction file blocked")
+	discoverResolverDirectory(t, r, root)
+	second := strings.Count(output.String(), "directory instruction file blocked")
+	if first != 1 || second != 1 {
+		t.Fatalf("blocked file warnings = %d then %d, want one per path", first, second)
 	}
 }

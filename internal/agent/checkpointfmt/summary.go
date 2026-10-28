@@ -272,3 +272,31 @@ func SectionEnd(summary string, bodyStart int) int {
 	}
 	return len(summary)
 }
+
+// todoSubgroupIDLineRe matches a classified todo bullet regardless of the
+// language or wording of its status marker: "- [status] id: text". The status
+// text is deliberately unconstrained so a translated summary still yields the
+// stable todo ID the restore path needs.
+var todoSubgroupIDLineRe = regexp.MustCompile(`^\s*(?:-\s*)?\[[^\]]*\]\s*([^:\n]+):`)
+
+// TodoSubgroupIDs returns the todo IDs listed in a Todo State subgroup body.
+// Parsing stops at the next Markdown heading so a nested runtime snapshot does
+// not contribute IDs to the enclosing subgroup. A subgroup with no parseable
+// IDs returns nil; callers must treat that as "no classified todos", not as an
+// empty todo list.
+func TodoSubgroupIDs(section string) []string {
+	var ids []string
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			break
+		}
+		match := todoSubgroupIDLineRe.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		if id := strings.TrimSpace(match[1]); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}

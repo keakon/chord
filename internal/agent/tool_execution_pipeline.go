@@ -832,6 +832,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	readObservation, _ := readObservationSink.Observation()
 	execResult.SkillActivation = p.captureSkillActivation(tc, readObservation)
 	applySpeculativeFileState(&execResult, p.registry, tc, result, p.effectiveToolBaseDir(), readObservation, hooks)
+	p.discoverAfterToolSuccess(ctx, tc, readObservation, &execResult)
 	if patchDiffCollector != nil {
 		attachApplyPatchFileChanges(execResult.FileState, patchDiffCollector.Changes())
 	}

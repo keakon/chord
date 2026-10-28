@@ -1544,8 +1544,21 @@ func filterRestoredTodosByLatestCompactionSummary(messages []message.Message, to
 		if msg.Role != "user" || !msg.IsCompactionSummary || !strings.Contains(msg.Content, "## Todo State") {
 			continue
 		}
-		if compactionSummaryMarksTodosStale(msg.Content) {
-			return nil
+		if stale := compactionSummaryStaleTodoIDs(msg.Content); len(stale) > 0 {
+			drop := make(map[string]struct{}, len(stale))
+			for _, id := range stale {
+				drop[id] = struct{}{}
+			}
+			kept := make([]tools.TodoItem, 0, len(todos))
+			for _, todo := range todos {
+				if _, stale := drop[todo.ID]; !stale {
+					kept = append(kept, todo)
+				}
+			}
+			if len(kept) == 0 {
+				return nil
+			}
+			return kept
 		}
 		break
 	}
@@ -1561,16 +1574,13 @@ func messageHasTodoWrite(msg message.Message) bool {
 	return false
 }
 
-func compactionSummaryMarksTodosStale(summary string) bool {
-	active := compactionSummarySection(summary, checkpointfmt.TodoSubgroupActiveLine, checkpointfmt.TodoSubgroupCompletedLine)
+// compactionSummaryStaleTodoIDs reads the stable todo IDs the summary placed
+// in the stale subgroup. ID matching is what makes this safe across summary
+// languages: status markers can be translated, but IDs are copied verbatim, and
+// an unparseable stale bucket keeps every todo rather than guessing.
+func compactionSummaryStaleTodoIDs(summary string) []string {
 	stale := compactionSummarySection(summary, checkpointfmt.TodoSubgroupStaleLine, "## SubAgent State")
-	if strings.TrimSpace(stale) == "" || strings.Contains(stale, "  - (none") {
-		return false
-	}
-	if strings.Contains(active, "[pending]") || strings.Contains(active, "[in_progress]") {
-		return false
-	}
-	return true
+	return checkpointfmt.TodoSubgroupIDs(stale)
 }
 
 func compactionSummarySection(summary, startMarker, endMarker string) string {

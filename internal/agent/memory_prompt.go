@@ -69,7 +69,13 @@ Memory is one of several homes for a conclusion, and the weakest of them: it hol
 
 - Must always apply, and the user stated it -> project instructions. Emit a promotion with target "project_instructions"; do not also create the memory.
 - The model found it on its own and a future session could rediscover it from code, logs, tests, or docs -> project documentation or nothing. Emit a promotion with target "project_docs" when a human should review it, otherwise drop it. Do not create a memory for rediscoverable facts.
-- The user stated it (or the transcript shows the model could not proceed without asking the user) is required for memory, not sufficient. A candidate must also stay usable in a later session without this machine's filesystem layout and must not be mandatory on every turn; only then create it.
+- The user stated it (or the transcript shows the model could not proceed without asking the user) is required for memory, not sufficient. Create memory only when every one of these holds:
+  - it is specific to this project or subsystem, not general programming knowledge;
+  - a user item states it, or the session could not proceed without asking the user;
+  - a later session on this project would still use it;
+  - it is not mandatory on every turn (that belongs in project instructions);
+  - if the assistant proposed it, the user adopted or confirmed it, rather than it being an unaccepted suggestion;
+  - it stays usable without this machine's filesystem layout and does not depend on stale task or repository state.
 - Already expressed by repository instructions, code, tests, public documentation, configuration, or git history -> nothing. Drop it.
 
 Transcript items are labeled user, assistant, or compaction_summary. Tool calls and their results are not present; working notes are not scanned. Treat "the user stated" as a claim about a user item, not about text that later appears in an assistant reply.

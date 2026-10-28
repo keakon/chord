@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 )
@@ -203,8 +204,7 @@ type RulesetAwareVisibilityTool interface {
 type contextKey int
 
 const (
-	agentIDKey contextKey = iota
-	eventSenderKey
+	eventSenderKey contextKey = iota
 	sessionDirKey
 	taskIDKey
 	imageSinkKey
@@ -216,15 +216,12 @@ const (
 
 // WithAgentID returns a new context that carries the given agent ID.
 func WithAgentID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, agentIDKey, id)
+	return identity.WithAgentID(ctx, id)
 }
 
 // AgentIDFromContext extracts the agent ID from the context, or returns "" if absent.
 func AgentIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(agentIDKey).(string); ok {
-		return v
-	}
-	return ""
+	return identity.AgentIDFromContext(ctx)
 }
 
 // JobAccess carries the extra job owners the calling agent behind a tool call

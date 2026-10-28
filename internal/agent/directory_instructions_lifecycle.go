@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -31,7 +32,21 @@ type directoryInstructionsPrepared struct {
 	committed   bool
 }
 
-func prepareDirectoryInstructions(ctx context.Context, binding directoryInstructionBinding, history []message.Message) (*directoryInstructionRuntime, []message.DirectoryInstructionFact, error) {
+// instructionReadDenied matches only a specific read rule, not the wildcard
+// default deny: directory rules are prompt material, and a blanket default must
+// not hide them. An explicit read deny is a user decision about the path and
+// also covers a rule-file symlink that points at the denied target.
+func (a *MainAgent) instructionReadDenied(path string) bool {
+	match := a.effectiveRuleset().LastSpecificToolMatchPath(tools.NameRead, path, a.effectivePathScope())
+	return match.Found && match.Rule.Action == permission.ActionDeny
+}
+
+func (s *SubAgent) instructionReadDenied(path string) bool {
+	match := s.currentRuleset().LastSpecificToolMatchPath(tools.NameRead, path, s.effectivePathScope())
+	return match.Found && match.Rule.Action == permission.ActionDeny
+}
+
+func prepareDirectoryInstructions(ctx context.Context, binding directoryInstructionBinding, history []message.Message, readDenied func(string) bool) (*directoryInstructionRuntime, []message.DirectoryInstructionFact, error) {
 	inputBinding := binding
 	binding, err := prepareDirectoryInstructionBinding(ctx, binding)
 	if err != nil {
@@ -39,6 +54,7 @@ func prepareDirectoryInstructions(ctx context.Context, binding directoryInstruct
 	}
 	r := newDirectoryInstructionRuntime(context.WithoutCancel(ctx), binding)
 	r.inputBinding = inputBinding
+	r.readDenied = readDenied
 	fail := func(err error) (*directoryInstructionRuntime, []message.DirectoryInstructionFact, error) {
 		r.cancel()
 		return nil, nil, err
@@ -146,7 +162,7 @@ func (a *MainAgent) ensureDirectoryInstructionsBeforeRequest(ctx context.Context
 	prep.activationKey = a.directoryInstructionActivationKey(history)
 	inputs := a.directoryCandidateInputs(history)
 	go func() {
-		r, facts, err := prepareDirectoryInstructions(ctx, binding, history)
+		r, facts, err := prepareDirectoryInstructions(ctx, binding, history, a.instructionReadDenied)
 		if err == nil {
 			facts, err = budgetRestoredDirectoryInstructions(r, facts, history, inputs)
 		}
@@ -275,7 +291,7 @@ func (s *SubAgent) ensureDirectoryInstructionsBeforeRequest(turn *Turn) bool {
 	inputs := s.directoryCandidateInputs(history)
 	s.llmRequestInFlight.Store(true)
 	s.llmWG.Go(func() {
-		r, facts, err := prepareDirectoryInstructions(turn.Ctx, binding, history)
+		r, facts, err := prepareDirectoryInstructions(turn.Ctx, binding, history, s.instructionReadDenied)
 		if err == nil {
 			facts, err = budgetRestoredDirectoryInstructions(r, facts, history, inputs)
 		}

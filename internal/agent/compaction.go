@@ -160,7 +160,8 @@ const compactionTodoSubgroupContractLine = `- Under "Todo State", write exactly 
 // language of the latest user request, while the markers the runtime parses and
 // the verbatim facts stay exactly as specified.
 const compactionSummaryLanguageRules = `- Write the body of every section you author (such as "Active Objective", "Background Goals", "Progress", "Key Decisions", "Open Problems", and "Next Step") in the language of the latest user request.
-- The exact Markdown section headings and the "Todo State" subgroup label lines above stay in English as written, and file paths, symbols, commands, and error strings stay verbatim regardless of the summary language.`
+- The exact Markdown section headings and the "Todo State" subgroup label lines above stay in English as written, and file paths, symbols, commands, and error strings stay verbatim regardless of the summary language.
+- Copy every "Todo State" item ID verbatim as the todo tool reported it, including the bracketed status marker (for example "[in_progress] t3: run tests"). Do not translate, renumber, or drop the ID or marker.`
 
 const compactionSystemPrompt = `You summarize earlier coding-agent conversation history so another agent can continue work without losing important context.
 

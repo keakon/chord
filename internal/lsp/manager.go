@@ -366,7 +366,7 @@ func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri, path st
 			}
 		}
 		m.diagMu.Unlock()
-		seq := m.noteLateDiagnosticsPublish(canonical, key.name, version, receivedAt)
+		seq := m.noteLateDiagnosticsPublish(canonical, key.name, version, receivedAt, chordDiags)
 		m.broadcast(TypeLSPDiagnostics, payload)
 		m.notifySidebarChanged()
 

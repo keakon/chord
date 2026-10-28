@@ -459,3 +459,42 @@ func TestApplyToolArgsAuditToContextResultSurfacesDroppedParameters(t *testing.T
 		}
 	}
 }
+
+func TestToolBatchIsolatesOnlyAsksTargetingTheCall(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	registry.Register(tools.GrepTool{})
+	calls := []message.ToolCall{
+		{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)},
+		{ID: "grep", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","paths":["docs"]}`)},
+	}
+	unrelated := permission.Ruleset{{Permission: tools.NameShell, Pattern: "git push", Action: permission.ActionAsk}}
+	pipeline := toolExecutionPipeline{registry: registry, currentRuleset: func() permission.Ruleset { return unrelated }}
+	if batches := pipeline.buildToolExecutionBatches(calls); len(batches) != 1 || len(batches[0].Calls) != 2 {
+		t.Fatalf("unrelated ask split read-only calls: %+v", batches)
+	}
+	targeted := permission.Ruleset{{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionAsk}}
+	pipeline.currentRuleset = func() permission.Ruleset { return targeted }
+	if batches := pipeline.buildToolExecutionBatches(calls); len(batches) != 2 {
+		t.Fatalf("targeted ask did not isolate the call: %+v", batches)
+	}
+	pipeline.yoloDowngradeAsk = func(string) bool { return true }
+	if batches := pipeline.buildToolExecutionBatches(calls); len(batches) != 1 {
+		t.Fatalf("yolo downgraded ask still isolated the call: %+v", batches)
+	}
+}
+
+func TestToolBatchWildcardAskIsolatesEveryCall(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	registry.Register(tools.GrepTool{})
+	calls := []message.ToolCall{
+		{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)},
+		{ID: "grep", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","paths":["docs"]}`)},
+	}
+	ruleset := permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAsk}}
+	pipeline := toolExecutionPipeline{registry: registry, currentRuleset: func() permission.Ruleset { return ruleset }}
+	if batches := pipeline.buildToolExecutionBatches(calls); len(batches) != 2 {
+		t.Fatalf("wildcard ask did not isolate each call: %+v", batches)
+	}
+}

@@ -29,9 +29,9 @@ type LSPFollowupItem struct {
 
 // LSPFollowupSource reports late LSP diagnostics for files recent turns wrote.
 type LSPFollowupSource interface {
-	// Pending returns the late diagnostics worth delivering now, without
-	// consuming them.
-	Pending(paths []string, displayBaseDir string) []LSPFollowupItem
+	// Pending returns the late diagnostics worth delivering now for the agent
+	// whose request is being assembled, without consuming them.
+	Pending(paths []string, displayBaseDir, agentID string) []LSPFollowupItem
 }
 
 // lspFollowup is the follow-up attached to the request being assembled.
@@ -61,7 +61,7 @@ func (a *MainAgent) buildLSPFollowupOverlay() (message.Message, bool) {
 	if len(paths) == 0 {
 		return message.Message{}, false
 	}
-	items := a.lspFollowupSource.Pending(paths, a.workDir())
+	items := a.lspFollowupSource.Pending(paths, a.workDir(), a.instanceID)
 	text := formatLSPFollowup(items)
 	if text == "" {
 		return message.Message{}, false
@@ -75,9 +75,9 @@ func (a *MainAgent) buildLSPFollowupOverlay() (message.Message, bool) {
 // emitStagedLSPFollowup persists the follow-up the dispatched request carried
 // and surfaces it as a card backed by that message. The durable row holds the
 // same content the request carried, so later requests replay what the model
-// already saw. An item is acknowledged only after its row is durable; on a
-// write failure the source keeps it pending for the next request instead of
-// losing it on recovery.
+// already saw. The model has already received the text with the dispatched
+// request, so the source is acknowledged as soon as the row is appended; a
+// persistence failure defers only the card until recovery, not the content.
 func (a *MainAgent) emitStagedLSPFollowup() {
 	if a == nil || a.ctxMgr == nil {
 		return
@@ -96,19 +96,20 @@ func (a *MainAgent) emitStagedLSPFollowup() {
 	msg := message.Message{Role: message.RoleUser, Kind: message.KindLSPFollowup, Content: lspFollowupContent(staged.text), LSPReviews: reviews}
 	messageIndex := a.ctxMgr.MessageCount()
 	a.ctxMgr.Append(msg)
+	ackLSPFollowupItems(staged.items)
 	text := staged.text
 	enqueued := a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 		if err != nil {
+			a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex)
 			a.notePersistenceFailure(err)
 			return
 		}
-		ackLSPFollowupItems(staged.items)
 		a.emitToTUI(LSPFollowupEvent{Message: text, MessageIndex: messageIndex})
 	})
 	if !enqueued {
-		// No persistence channel: the follow-up cannot become durable, so do
-		// not leave it pending forever and re-deliver it into every request.
-		ackLSPFollowupItems(staged.items)
+		// No persistence channel: the in-memory row remains the request's
+		// record, so emit the card now instead of leaving it pending forever.
+		a.emitToTUI(LSPFollowupEvent{Message: text, MessageIndex: messageIndex})
 	}
 }
 

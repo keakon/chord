@@ -25,7 +25,7 @@ func TestOverlayRecoveryOverflowReconcilesTranscript(t *testing.T) {
 		messageIndex := mainAgent.ctxMgr.MessageCount()
 		want[msg.Mailbox.MessageID] = messageIndex
 		mainAgent.ctxMgr.Append(msg)
-		mainAgent.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex, kind == message.KindBackgroundResult)
+		mainAgent.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex)
 	}
 	if len(mainAgent.pendingOverlayAppends) != 0 || !mainAgent.pendingOverlayReconcile {
 		t.Fatal("overflow must use transcript reconciliation without retaining queued payloads")

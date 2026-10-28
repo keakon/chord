@@ -21,6 +21,7 @@ const (
 	DirectoryInstructionReasonEncoding    = "encoding"
 	DirectoryInstructionReasonSize        = "size"
 	DirectoryInstructionReasonInputBudget = "input_budget"
+	DirectoryInstructionReasonPermission  = "permission"
 )
 
 type DirectoryInstructionFact struct {

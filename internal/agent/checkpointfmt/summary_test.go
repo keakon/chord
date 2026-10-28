@@ -3,6 +3,7 @@ package checkpointfmt
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -139,5 +140,31 @@ func TestRequiredHeadingsCannotChangeValidation(t *testing.T) {
 	}
 	if err := ValidateSummary(validCompactionSummaryForTest("history-1.md")); err != nil {
 		t.Fatalf("schema returned to a caller changed validation: %v", err)
+	}
+}
+
+func TestTodoSubgroupIDsStopsAtNestedHeading(t *testing.T) {
+	section := `
+- Stale/superseded:
+  - [in_progress] old: old task
+  - [pending] also old: another task
+### Runtime TODO snapshot
+  - [in_progress] t1: runtime task
+`
+	got := TodoSubgroupIDs(section)
+	want := []string{"old", "also old"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("TodoSubgroupIDs = %#v, want %#v", got, want)
+	}
+}
+
+func TestTodoSubgroupIDsIgnoresUnclassifiedEntries(t *testing.T) {
+	for _, section := range []string{
+		"- Stale/superseded:\n  - (none)\n",
+		"- Stale/superseded:\n  - an old task with no stable ID\n",
+	} {
+		if got := TodoSubgroupIDs(section); len(got) != 0 {
+			t.Fatalf("TodoSubgroupIDs(%q) = %#v, want nil", section, got)
+		}
 	}
 }
