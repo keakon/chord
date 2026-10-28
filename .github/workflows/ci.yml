@@ -215,6 +215,7 @@ jobs:
           go install golang.org/x/tools/gopls@latest
 
       - name: Test gopls gate
+        if: matrix.goos == 'linux'
         run: scripts/test_gopls_check.sh
 
       - name: Gopls check

@@ -7,7 +7,8 @@ set -euo pipefail
 # iterative verification stays fast. For strict CI-equivalent verification, run
 # CHORD_TEST_COUNT=1 scripts/check_ci_local.sh or set GITHUB_ACTIONS=true.
 # Optional package args limit the run, e.g. scripts/check_ci_local.sh ./cmd/chord;
-# a focused run skips the whole-program deadcode gate that full runs add.
+# a focused run skips the whole-program deadcode gate that full runs add locally.
+# CI skips it too: the workflow gates every baseline in its own job.
 
 min_coverage="${MIN_COVERAGE:-80.0}"
 go_command="${CHORD_GO:-go}"
@@ -22,6 +23,12 @@ if [[ ${#packages[@]} -eq 0 ]]; then
   packages=(./...)
 else
   # A focused package set cannot evaluate whole-program reachability.
+  run_deadcode_gate=0
+fi
+# The workflow gates all three baselines in its own job. Repeating the host
+# platform pass here adds no coverage and turns one finding into two failed
+# jobs, so CI relies on that job alone.
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
   run_deadcode_gate=0
 fi
 stdout_file="$(mktemp)"
