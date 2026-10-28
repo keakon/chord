@@ -193,7 +193,7 @@ func freezeGeminiRequest(g *GeminiProvider, model, key string, body []byte) gemi
 	headers := make(http.Header)
 	headers.Set(headerContentType, headerValueApplicationJSON)
 	headers.Set("x-goog-api-key", key)
-	setProviderLLMUserAgent(headers, g.provider)
+	setProviderLLMUserAgent(headers, g.provider, "")
 	overrides := g.provider.RequestOverrides(model)
 	applyRequestHeaderOverrides(headers, overrides)
 	return geminiFrozenRequest{overrides: overrides, model: model, url: geminiStreamURL(g.provider.APIURL(), model), headers: headers, body: body}

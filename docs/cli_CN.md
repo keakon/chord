@@ -262,7 +262,7 @@ chord config advise --keep-current
 模型的解析方式：
 
 - **wire 名已绑定 provider 的 preset**（例如 `preset: openai` 下的 `gpt-6.1-sol`）：只写入一条池引用；上下文、模态、推理档位与字段发送规则在加载时自动填充。
-- **自定义端点**：传 `--catalog <id>`，用自己的 wire 名继承目录模型的限额、模态和上下文压缩建议；同协议还会继承模型行为、compat、reasoning 变体和字段发送规则。地址、凭据和请求体压缩保持用户自己的设置。请求体压缩默认关闭，可手动设置 provider 的 `compress: gzip` 或 `compress: zstd`。
+- **自定义端点**：传 `--catalog <id>`，用自己的 wire 名继承目录模型的限额、模态和上下文压缩建议；同协议还会继承模型行为、compat、reasoning 变体和字段发送规则。地址、凭据和请求体压缩保持用户自己的设置。请求体压缩默认跟随 provider preset：`preset: codex` 发送 `zstd`，其他 preset 按原文发送；用 provider 的 `compress: gzip` / `compress: zstd` / `compress: off` 覆盖这个选择。
 - **未命中**：列出最接近的已验证模型及其目录 ID。交互终端中可按数字键立即选择目录模型，无需回车；按 `m` 可输入完整目录 ID，按 Esc 或 `0` 取消；模型的请求名称保持不变。非交互模式还会列出刷新得到的候选条目（标注 provider 作用域与来源），然后返回错误，不会自动采纳。
 
 不带参数运行时先进入目录浏览：列出托管 preset 以及这些 preset 下已配置的 provider，选定后再列出该 preset 已验证服务的 wire 模型，随后继续常规引导。非交互终端下必须显式传入 `<provider>/<model>`。
@@ -284,7 +284,7 @@ chord config advise --keep-current
 | `--pool <name>`     | 追加引用的模型池（默认 `default`）                                   |
 | `--api-key-env <v>` | provider 尚无凭据时，向 `auth.yaml` 写入 `$VAR` 凭据                 |
 | `--variant <name>` | 池引用使用模型已定义的推理档位（写入 `@variant`）                     |
-| `--compress <mode>` | provider 请求体压缩：`off`、`gzip` 或 `zstd`；省略则保留已有设置       |
+| `--compress <mode>` | provider 请求体压缩：`off`、`gzip` 或 `zstd`；省略则保留已有设置。未设置 `compress` 时按 preset 默认（`preset: codex` 用 `zstd`）       |
 | `--no-interactive` | 关闭引导和保存确认，供脚本调用                                       |
 | `--keep-current`    | 确认本模型的新鲜度提示，不做任何更改                                 |
 | `--refresh-catalog` | 先从上游仓库拉取最新 tag 的目录快照（联网）；失败时以当前生效的目录继续 |

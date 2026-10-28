@@ -201,7 +201,7 @@ func TestGuidedConfigAddDisablesExistingCompression(t *testing.T) {
 		t.Fatal(err)
 	}
 	rc, err := config.LoadResolvedConfig(path, "")
-	if err != nil || rc.Config.Providers["sample"].Compress != "" {
+	if err != nil || rc.Config.Providers["sample"].Compress != config.RequestCompressionOff {
 		t.Fatalf("explicit off did not disable compression: %+v, %v", rc, err)
 	}
 }

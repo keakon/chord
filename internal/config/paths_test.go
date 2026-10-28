@@ -142,3 +142,30 @@ func TestSanitizeProjectKeyLongPathGetsStableSuffix(t *testing.T) {
 		t.Fatalf("long key missing fingerprint suffix: %q", key)
 	}
 }
+
+func TestCodexDeviceIDPathDoesNotShareTheCodexFileName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configHome := filepath.Join(home, ".config", "chord")
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+
+	devicePath, err := CodexDeviceIDPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if devicePath != filepath.Join(configHome, CodexDeviceIDFileName) {
+		t.Fatalf("device id path = %q, want %q", devicePath, filepath.Join(configHome, CodexDeviceIDFileName))
+	}
+	codexPath, err := CodexInstallationIDPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codexPath != filepath.Join(home, ".codex", CodexInstallationIDFileName) {
+		t.Fatalf("Codex installation id path = %q, want %q", codexPath, filepath.Join(home, ".codex", CodexInstallationIDFileName))
+	}
+	// Chord persists its own id under a name no other agent writes, so a foreign
+	// installation_id can never be overwritten by Chord.
+	if CodexDeviceIDFileName == CodexInstallationIDFileName {
+		t.Fatalf("both ids share the file name %q", CodexDeviceIDFileName)
+	}
+}

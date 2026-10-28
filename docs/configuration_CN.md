@@ -766,20 +766,24 @@ HTTP，确保最终 JSON patch 生效。
 
 ## Provider 请求压缩
 
-Provider 级别的 `compress` 选择上游 HTTP 请求体的压缩编码：`gzip` 或 `zstd`（`zstd` 是 Codex 客户端发给 codex-backend 请求体用的编码）。它和上下文管理（compaction / reduction）是两回事：只影响请求传输编码，不会总结或移除对话历史。
+Provider 级别的 `compress` 选择上游 HTTP 请求体的压缩编码：`gzip`、`zstd` 或 `off`。不配置时按 provider preset 自己的选择走——`preset: codex` 像 Codex 客户端一样发送 `zstd` 压缩的请求体，其他 preset 按原文发送。它和上下文管理（compaction / reduction）是两回事：只影响请求传输编码，不会总结或移除对话历史。
 
 ```yaml
 providers:
   openai:
     compress: gzip
   codex:
+    preset: codex        # 默认发送 zstd 压缩请求体
+  codex-proxy:
     preset: codex
-    compress: zstd   # codex-backend 接受 zstd 请求体
+    compress: off        # 这个代理不接受压缩请求体
 ```
+
+`compress: off` 是把 preset 默认压缩关掉的唯一写法：省略 `compress` 现在表示“用 preset 默认值”，不再表示“不压缩”。
 
 Chord 仅在压缩能减小体积时才发送压缩请求体，否则按原文发送；压缩失败同样回退为原文并记日志。响应方向不受影响：仍然只声明并自己解压 gzip 响应。
 
-> **Note:** 除非确定 provider 或网关接受压缩请求体，否则保持不配置；官方 Codex backend 和 `api.anthropic.com` 接受（Anthropic 只收 `gzip`，不收 `zstd`），多数 OpenAI-compatible 网关不接受。
+> **Note:** 除 Codex preset 外，只在确定 provider 或网关接受压缩请求体时才设置 `compress`；`api.anthropic.com` 收 `gzip`（不收 `zstd`），多数 OpenAI-compatible 网关两者都不接受。
 
 Provider / 模型请求默认用 `User-Agent: chord/<version>` 标识客户端。只有某个 provider 或网关要求特定值，才配置 provider 级 `user_agent`：
 
@@ -799,6 +803,67 @@ providers:
     preset: codex
     user_agent: "codex-tui/0.139.0 (Mac OS 15.3.2; arm64) ghostty/1.3.1 (codex-tui; 0.139.0)"
 ```
+
+Chord 也能自己拼出这个头部，见 [客户端模拟](#客户端模拟)。
+
+## 客户端模拟
+
+Chord 可以在 wire 上以另一个 CLI 客户端的身份出现。顶层 `emulation` block 定义每个客户端的身份由什么组成，provider —— 或单个 model —— 上的 `emulate` 键选择要扮演的客户端。没有任何引用指向某个客户端之前，什么都不会模拟：继续收到 Chord 原始请求面的端点字节不变，只有指向客户端校验型中转的 provider 才会变化。
+
+```yaml
+emulation:
+  codex:
+    version: 0.50.0
+
+providers:
+  relay:
+    type: responses
+    emulate: codex
+    api_url: https://example.invalid/v1
+```
+
+`emulate` 的值是 `emulation` 下定义的客户端名（`codex` 或 `claude`）。model 级的 `emulate` 覆盖 provider 级的值，留空则继承。无法生效的选择器 —— 未知的客户端名、客户端 wire 协议与 provider 不匹配、payload 缺失或不完整 —— 会作为配置错误上报，对应的 provider 或 model 保持 Chord 自己的身份。
+
+模拟不改变请求体压缩：省略 `compress` 时仍按 provider preset 的默认走（见 [Provider 请求压缩](#provider-请求压缩)）。只有 `preset: codex` 默认发送 zstd；仅设置 `emulate: codex` 的 provider 保持不压缩，需要时显式配 `compress` —— 为模拟选的中转不一定接受压缩请求体。
+
+### Codex 客户端
+
+`emulation.codex` 只需要一个字段 `version`：要模拟的 Codex 客户端版本。Codex 不在 wire 的其他位置报告版本，Chord 也不会替你猜一个。模拟叠加在 `preset: codex` 已选好的传输之上，只有 `type: responses` 的 provider 生效。这样的 provider 会发送：
+
+- 把基础指令作为 `input` 的首项 —— 一条 developer 消息，id 由会话与指令文本推导，重试和 resume 重建出同一段前缀 —— 取代顶层 `instructions` 字段；
+- `tool_choice` 与 `parallel_tool_calls`，包括没有声明任何工具的请求（摘要、压缩）；
+- `User-Agent: codex-tui/<version> (<OS> <os version>; <arch>) <terminal> (codex-tui; <version>)`，按 Chord 所在机器生成：macOS 的产品版本号，或 Linux 从 `/etc/os-release` 读到的发行版与版本，CPU 架构，以及终端 —— 先 `TERM_PROGRAM`，再是能穿透复用器的终端标记，最后才 `TERM`；
+- `originator: codex-tui`，Codex TUI 在 wire 上报告的客户端名 —— 未选择客户端的 provider 仍发送 `originator: codex_cli_rs`。
+
+### Claude Code 客户端
+
+`emulation.claude` 需要三个字段，都没有内置默认值：取值由用户填写，这样更新 Chord 永远不会静默改写 relay 已经见过的 wire 身份。
+
+```yaml
+emulation:
+  claude:
+    version: 2.1.311
+    sdk_version: 0.128.0
+    runtime_version: v26.12.1
+```
+
+provider 或 model 设为 `emulate: claude` 后，`type: messages` 的 provider 会在自己的请求之上叠加：
+
+- `User-Agent: claude-cli/<version> (external, cli)`；
+- 官方 SDK 自带的 Stainless 请求头（`X-Stainless-Lang`、`X-Stainless-Runtime`、`X-Stainless-OS`、`X-Stainless-Arch`、`X-Stainless-Package-Version`、`X-Stainless-Runtime-Version`、`X-Stainless-Retry-Count`、`X-Stainless-Timeout`），其中 OS 和架构取自 Chord 所在机器，timeout 报告 provider 的流式总超时（未配置时为 600 秒）；
+- `X-Claude-Code-Session-Id`，由本地会话确定性派生的 UUID：重启、resume 和上下文压缩之后不变，SubAgent 各自独立，fallback 到另一个端点也保持同一身份；
+- `metadata.user_id` 升级为客户端的 JSON 形状：机器级 `device_id`（持久化在配置目录的 `claude_device_id`）配同一个派生会话 UUID。
+
+模拟是纯叠加：请求体保持 Chord 自己的形状，身份只体现在请求头和 `metadata.user_id`。
+
+三个版本字段的取值抄客户端自己报告的：
+
+```console
+claude -v
+ANTHROPIC_LOG=debug ANTHROPIC_BASE_URL=http://127.0.0.1/ ANTHROPIC_AUTH_TOKEN=1 claude -p "hi" 2>&1 | grep -m2 -iE 'stainless-(package|runtime)-version'
+```
+
+provider 显式配了 `user_agent`，它仍优先于生成的头部。
 
 ## Provider 重试延迟
 
@@ -1472,7 +1537,8 @@ chord doctor models --pool thinking
 
 | Key                     | 类型                  | 默认值                          | 适用层级                 | 简述                                                                                                                  |
 | ----------------------- | --------------------- | ------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `providers`             | `map[name]Provider`   | —                               | global / project         | 各 provider 的配置（`type`、`api_url`、`preset`、`key_rotation`、`key_order`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
+| `providers`             | `map[name]Provider`   | —                               | global / project         | 各 provider 的配置（`type`、`api_url`、`preset`、`emulate`、`key_rotation`、`key_order`、`models`、`compress`）。见 [最小 provider 配置](#最小-provider-配置)。 |
+| `emulation`             | object                | 关闭                            | global / project         | 按客户端定义 wire 身份 payload（`codex`、`claude`）。启用由 provider/model 级的 `emulate` 键单独选择。见 [客户端模拟](#客户端模拟)。 |
 | `model_templates`       | `map[name]YAML`       | 空                              | global / project         | 仅用于 YAML anchor 命名空间；条目可通过 alias 复用，不会直接作为运行时模型定义。 |
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `thinking_translation`  | object                | 关闭（`max_chars: 1000`）        | global / project         | 可选的 thinking / reasoning 卡片附加翻译预览。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
@@ -1533,7 +1599,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `key_order`   | string | `sequential`（非 Codex 默认）/ `random` / `smart`（仅 Codex）。控制在候选 key 中如何选择。                                               |
 | `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制未携带合法 `Retry-After` 提示的普通 HTTP 429 的 key 冷却。合法服务端提示、已确认的配额重置与凭据硬状态仍然优先。 |
 | `retry_delay_ms`| int   | 轮间退避和普通 429 冷却的基准值或固定值，单位毫秒，可取 `0` 到 `60000`；`0` / 省略默认 1000ms。即使省略 `retry_backoff`，只要写出该字段（包括显式 `0`）就算覆盖。`none` 模式下忽略。超出范围的值会记录日志并回退默认值，不会中断启动。 |
-| `compress`    | string | 上游请求体的压缩编码：`gzip` 或 `zstd`；不设即关闭。只在压缩能缩小体积时生效。旧的布尔写法 `compress: true` 已删除——会被忽略并由 `chord doctor config` 报告（改成 `compress: gzip` 即可）。 |
+| `compress`    | string | 上游请求体的压缩编码：`off`、`gzip` 或 `zstd`；不设即用 preset 默认值——`preset: codex` 发送 `zstd`，其他 preset 按原文发送。只在压缩能缩小体积时生效。旧的布尔写法 `compress: true` 已删除——会被忽略并由 `chord doctor config` 报告（改成 `compress: gzip` 即可）。 |
 | `response_header_timeout` | int | 从开始该 provider 的流式 HTTP 请求到收到响应头的超时，单位秒，包括连接建立与请求体上传。`0` / 省略表示使用内置默认值；健康流由 `stream_idle_timeout` 约束，而不是总请求计时器。 |
 | `stream_idle_timeout` | int | 该 provider 的流式空闲超时，单位秒。`0` / 省略表示使用内置 SSE/WebSocket idle 默认值。 |
 | `stream_total_timeout` | int | 单条流的墙钟上限，单位秒，也包括 Codex Responses WebSocket 读等待。`0` / 省略表示不设上限——持续产出数据的流不会仅因耗时被截断。 |

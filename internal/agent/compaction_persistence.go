@@ -2,7 +2,9 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -691,7 +693,15 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 
 func nextHistoryIndexMinusOne(sessionDir string) int {
 	next, err := nextCompactionIndex(sessionDir)
-	if err != nil || next <= 1 {
+	if err != nil {
+		// A missing directory just means no compaction ran yet. Anything else
+		// silently degrades the window id to 0, so leave a trace for it.
+		if !errors.Is(err, fs.ErrNotExist) {
+			log.Debugf("codex identity: cannot scan the session directory for the compaction generation, reporting window 0 dir=%v error=%v", sessionDir, err)
+		}
+		return 0
+	}
+	if next <= 1 {
 		return 0
 	}
 	return next - 1

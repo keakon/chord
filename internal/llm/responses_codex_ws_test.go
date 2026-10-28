@@ -1138,12 +1138,13 @@ func TestCodexWebSocketPreservesCacheOptionsAndTurnMetadata(t *testing.T) {
 	defer srv.Close()
 	msgs := []message.Message{{Role: message.RoleUser, Content: "request"}, {Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "hint"}}
 	input := convertMessagesToResponsesWithItemIDs("", msgs, false, false, true)
-	metadata := responsesClientMetadata("session-a", NewResponsesTurnState())
+	wire := deriveResponsesWireIdentity("session-a", 0, false)
+	metadata := responsesClientMetadata(wire, NewResponsesTurnState())
 	req := testCodexWSResponsesRequest("gpt-6.1-sol", input)
 	req.PromptCacheOptions = responsesPromptCacheOptions(msgs, input)
 	req.ClientMetadata = metadata
 	r := &ResponsesProvider{}
-	if _, _, err := r.completeStreamCodexWebSocket(context.Background(), srv.ResponsesURL(), "test-key", "gpt-6.1-sol", req, input, nil, time.Now(), codexWSCompleteOptions{SessionKey: "session-a"}); err != nil {
+	if _, _, err := r.completeStreamCodexWebSocket(context.Background(), srv.ResponsesURL(), "test-key", "gpt-6.1-sol", req, input, nil, time.Now(), codexWSCompleteOptions{SessionKey: wire.sessionID}); err != nil {
 		t.Fatal(err)
 	}
 	requests := srv.Requests()
@@ -1170,7 +1171,7 @@ func TestCodexWebSocketPreservesCacheOptionsAndTurnMetadata(t *testing.T) {
 // WebSocket dial headers must carry the caller's stable session identity.
 func TestApplyCodexWebSocketHeadersSendsCanonicalSessionID(t *testing.T) {
 	h := http.Header{}
-	applyCodexWebSocketHeaders(h, nil, "test-key", "session-ws-1")
+	applyCodexWebSocketHeaders(h, nil, "", "test-key", "session-ws-1")
 
 	for _, name := range []string{"session-id", "thread-id", "x-client-request-id"} {
 		if got := h.Get(name); got != "session-ws-1" {
@@ -1192,7 +1193,7 @@ func TestApplyCodexWebSocketHeadersSendsCanonicalSessionID(t *testing.T) {
 // half: no invented identity when the caller has none.
 func TestApplyCodexWebSocketHeadersOmitsSessionIDWithoutIdentity(t *testing.T) {
 	h := http.Header{}
-	applyCodexWebSocketHeaders(h, nil, "test-key", "")
+	applyCodexWebSocketHeaders(h, nil, "", "test-key", "")
 
 	for _, name := range []string{"session-id", "thread-id", "x-client-request-id", "session_id"} {
 		if got := h.Get(name); got != "" {

@@ -216,6 +216,11 @@ func (a *AnthropicProvider) CompleteStream(
 			if err != nil {
 				return nil, err
 			}
+			if a.provider.claudeEmulationActive(model) {
+				if userID := a.anthropicMetadataUserIDPayload(model, tuning.SessionKey); userID != "" {
+					hostedReq.Metadata = &anthropicMetadata{UserID: userID}
+				}
+			}
 			hostedBody, err := json.Marshal(hostedReq)
 			if err != nil {
 				return nil, fmt.Errorf("marshal request body: %w", err)
@@ -295,7 +300,7 @@ func (a *AnthropicProvider) CompleteStream(
 		if at.ServiceTier != "" {
 			reqBody.Speed = at.ServiceTier
 		}
-		if userIDPayload := stableAnthropicMetadataUserIDPayload(a.provider); userIDPayload != "" {
+		if userIDPayload := a.anthropicMetadataUserIDPayload(model, tuning.SessionKey); userIDPayload != "" {
 			reqBody.Metadata = &anthropicMetadata{UserID: userIDPayload}
 		}
 
@@ -346,7 +351,13 @@ func (a *AnthropicProvider) CompleteStream(
 	if betaHeader := anthropicBetaHeader(at, a.effectiveContextTokens(model)); betaHeader != "" {
 		req.Header.Set("anthropic-beta", betaHeader)
 	}
-	setProviderLLMUserAgent(req.Header, a.provider)
+	setProviderLLMUserAgent(req.Header, a.provider, model)
+	// The Claude Code client identity rides on top of Chord's own headers at
+	// this single choke point, so hosted and native-tool sub-requests inherit
+	// it the same way the baseline headers do.
+	if a.provider.claudeEmulationActive(model) {
+		applyClaudeEmulationHeaders(req.Header, a.provider, tuning.SessionKey, a.provider.StreamTotalTimeout())
+	}
 
 	log.Debugf("anthropic request model=%v max_tokens=%v thinking_type=%v thinking_budget=%v messages=%v tools=%v", model, maxTokens, at.ThinkingType, at.ThinkingBudget, len(messages), len(tools))
 

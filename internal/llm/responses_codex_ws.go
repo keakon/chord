@@ -177,11 +177,11 @@ func newResponsesWebsocketDialer(proxyURL string, handshakeTimeout time.Duration
 	}
 }
 
-func applyCodexWebSocketHeaders(h http.Header, provider *ProviderConfig, apiKey, sessionID string) {
+func applyCodexWebSocketHeaders(h http.Header, provider *ProviderConfig, model, apiKey, sessionID string) {
 	h.Set("Authorization", "Bearer "+apiKey)
 	h.Set(headerOpenAIBeta, codexResponsesWebsocketsBeta)
-	setProviderLLMUserAgent(h, provider)
-	h.Set("originator", openAICodexOriginator)
+	setProviderLLMUserAgent(h, provider, model)
+	h.Set(headerOriginator, codexOriginator(provider, model))
 	applyCodexSessionIdentity(h, sessionID)
 	if provider != nil {
 		if info := provider.oauthInfoForKey(apiKey); info != nil && info.AccountID != "" {
@@ -732,7 +732,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
 		}
 		hdr := http.Header{}
-		applyCodexWebSocketHeaders(hdr, r.provider, apiKey, sessionKey)
+		applyCodexWebSocketHeaders(hdr, r.provider, model, apiKey, sessionKey)
 		applyResponsesTurnStateHeader(hdr, opts.TurnState, opts.TurnStateIdentity)
 		dialLease, admissionErr := executiongate.Begin(ctx, executiongate.LLM)
 		if admissionErr != nil {

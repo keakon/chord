@@ -213,20 +213,26 @@ func TestDefaultHTTPClientSendsOnlyGzipAcceptEncoding(t *testing.T) {
 	}
 }
 
-// TestProviderConfig_RequestCompression pins the only way the encoding is ever
-// set: the provider configuration it was constructed from.
+// TestProviderConfig_RequestCompression pins how the encoding is resolved: the
+// provider configuration it was constructed from, with the codex preset's own
+// default applied only when the provider says nothing.
 func TestProviderConfig_RequestCompression(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
+		preset   string
 		compress string
 		want     string
 	}{
 		{name: "unset", compress: "", want: ""},
 		{name: "gzip", compress: config.RequestCompressionGzip, want: config.RequestCompressionGzip},
 		{name: "zstd", compress: config.RequestCompressionZstd, want: config.RequestCompressionZstd},
+		{name: "off", compress: config.RequestCompressionOff, want: ""},
+		{name: "codex preset defaults to zstd", preset: config.ProviderPresetCodex, compress: "", want: config.RequestCompressionZstd},
+		{name: "codex preset honors explicit gzip", preset: config.ProviderPresetCodex, compress: config.RequestCompressionGzip, want: config.RequestCompressionGzip},
+		{name: "codex preset honors explicit off", preset: config.ProviderPresetCodex, compress: config.RequestCompressionOff, want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := NewProviderConfig("test", config.ProviderConfig{Type: config.ProviderTypeChatCompletions, Compress: tc.compress}, []string{"key"})
+			p := NewProviderConfig("test", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: tc.preset, Compress: tc.compress}, []string{"key"})
 			if enc := p.RequestCompression(); enc != tc.want {
 				t.Fatalf("RequestCompression() = %q, want %q", enc, tc.want)
 			}

@@ -155,7 +155,7 @@ func (a *MainAgent) handleNewSessionCommand() {
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(newSessionDir)
 	a.recordSessionCheckoutOrWarn()
-	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
+	a.llmClient.SetSessionIdentity(a.mainSessionIdentity(newSessionDir))
 	// Freeze is complete (persist flushed, recovery closed): queue extraction
 	// for the frozen session against its captured directory.
 	a.scheduleMemoryExtraction(oldSessionDir)
@@ -405,7 +405,7 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.sessionDir = sessionDir
 	a.stateMu.Unlock()
 	a.installPausedSession(&loadedSessionState{SessionPath: sessionDir})
-	a.ensureLLMSessionID(a.llmClient)
+	a.ensureLLMSessionIdentity(a.llmClient)
 	// The target directory may have been compacted by another process while
 	// this session was not active; raise the per-directory allocator floor to
 	// the on-disk maximum so freshly allocated history indexes cannot collide
@@ -711,7 +711,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(newSessionDir)
 	a.recordSessionCheckoutOrWarn()
-	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
+	a.llmClient.SetSessionIdentity(a.mainSessionIdentity(newSessionDir))
 	a.scheduleMemoryExtraction(oldSessionDir)
 
 	if r := a.directoryInstructions.Swap(nil); r != nil {

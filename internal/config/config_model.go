@@ -101,7 +101,8 @@ type ModelConfig struct {
 	PromptCache           *PromptCacheConfig           `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
 	Compat                *ModelCompatConfig           `json:"compat,omitempty" yaml:"compat,omitempty"`
 	Cost                  *ModelCost                   `json:"cost,omitempty" yaml:"cost,omitempty"`
-	Store                 *bool                        `json:"store,omitempty" yaml:"store,omitempty"` // model-level Responses storage preference; nil inherits provider/default false
+	Store                 *bool                        `json:"store,omitempty" yaml:"store,omitempty"`     // model-level Responses storage preference; nil inherits provider/default false
+	Emulate               string                       `json:"emulate,omitempty" yaml:"emulate,omitempty"` // client this model presents as on the wire ("codex", "claude"); empty inherits the provider-level emulate value
 	Variants              map[string]ModelVariant      `json:"variants,omitempty" yaml:"variants,omitempty"`
 }
 

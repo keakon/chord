@@ -223,7 +223,7 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 		if len(msg.MCPTools) > 0 {
 			result = append(result, responsesInputItem{
 				Type:  "additional_tools",
-				Role:  responsesAdditionalToolsRole,
+				Role:  responsesDeveloperItemRole,
 				Tools: convertToolsToResponses(msg.MCPTools),
 			})
 			continue

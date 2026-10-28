@@ -33,6 +33,7 @@ type anthropicHostedRequest struct {
 	ToolChoice json.RawMessage    `json:"tool_choice,omitempty"`
 	Stream     bool               `json:"stream"`
 	Container  string             `json:"container,omitempty"`
+	Metadata   *anthropicMetadata `json:"metadata,omitempty"`
 }
 
 // newAnthropicHostedRequest builds the wire request for a hosted sub-request.

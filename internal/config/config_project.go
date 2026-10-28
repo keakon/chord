@@ -53,6 +53,9 @@ func MergeProjectConfig(base *Config, path string) (projectCfg *Config, merged *
 	if err != nil {
 		return nil, nil, err
 	}
+	for _, diag := range ApplyEmulation(merged) {
+		log.Warnf("config %s: ignoring invalid value: %s", path, diag.Message)
+	}
 	rc := &ResolvedConfig{}
 	rc.addKeymapLayer(layer)
 	var inherited KeyMapConfig
@@ -92,6 +95,7 @@ var projectScopedTopLevelKeys = map[string]bool{
 	"hosted_tools":                    true,
 	"worktree":                        true,
 	"memory":                          true,
+	"emulation":                       true,
 }
 
 // projectIgnoredTopLevelKeys are valid global config keys that are

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,23 +102,30 @@ func (r *ResponsesProvider) LastTransportUsed() string {
 }
 
 // responsesRequest is the request body for the Responses API.
+//
+// Field order follows the Codex client's declared order (model, stream,
+// service_tier, input, tools, tool_choice, parallel_tool_calls, reasoning,
+// store, include, prompt_cache_key, text, client_metadata) so the small routing
+// fields precede a potentially multi-megabyte input array for gateways that
+// inspect bodies incrementally. Fields Chord sends that Codex does not sit next
+// to the closest Codex field.
 type responsesRequest struct {
 	Model              string                 `json:"model"`
+	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
+	Stream             bool                   `json:"stream"`
+	ServiceTier        string                 `json:"service_tier,omitempty"`
 	Instructions       *string                `json:"instructions,omitempty"`
 	Input              []responsesInputItem   `json:"input"`
 	Tools              []responsesTool        `json:"tools"`
 	ToolChoice         string                 `json:"tool_choice,omitempty"`
 	ParallelToolCalls  *bool                  `json:"parallel_tool_calls,omitempty"`
-	ServiceTier        string                 `json:"service_tier,omitempty"`
 	Reasoning          *reasoningConfig       `json:"reasoning,omitempty"`
-	Text               *textConfig            `json:"text,omitempty"`
-	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
-	MaxOutputTokens    int                    `json:"max_output_tokens,omitempty"`
 	Store              bool                   `json:"store"`
-	Stream             bool                   `json:"stream"`
 	Include            []string               `json:"include"`
-	PromptCacheOptions *responsesCacheControl `json:"prompt_cache_options,omitempty"`
+	MaxOutputTokens    int                    `json:"max_output_tokens,omitempty"`
 	PromptCacheKey     string                 `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions *responsesCacheControl `json:"prompt_cache_options,omitempty"`
+	Text               *textConfig            `json:"text,omitempty"`
 	ClientMetadata     map[string]string      `json:"client_metadata,omitempty"`
 	omitStore          bool
 	omitInclude        bool
@@ -175,7 +181,10 @@ type responsesInputItem struct {
 	EncryptedContent string                              `json:"encrypted_content,omitempty"`
 }
 
-const responsesAdditionalToolsRole = "developer"
+// responsesDeveloperItemRole is the message role Codex gives the request-prefix
+// items it rebuilds every time: the base-instructions message and dynamically
+// mounted additional_tools.
+const responsesDeveloperItemRole = "developer"
 
 // responsesContentBlock is a content block within a message item.
 type responsesContentBlock struct {
@@ -291,51 +300,40 @@ type responsesTurnMetadataPayload struct {
 	ThreadSource           string `json:"thread_source,omitempty"`
 	TurnID                 string `json:"turn_id,omitempty"`
 	WindowID               string `json:"window_id,omitempty"`
+	WindowNumber           uint64 `json:"window_number"`
+	ContextWindowID        string `json:"context_window_id,omitempty"`
 	Sandbox                string `json:"sandbox,omitempty"`
 	RequestKind            string `json:"request_kind,omitempty"`
 	TurnStartedAtUnixMilli int64  `json:"turn_started_at_unix_ms,omitempty"`
 }
 
-func responsesWindowID(sessionID string) string {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return ""
-	}
-	return sessionID + ":0"
-}
-
-func responsesInstallationID(sessionID string) string {
-	sum := sha256.Sum256([]byte("chord-responses-installation:" + strings.TrimSpace(sessionID)))
-	sum[6] = (sum[6] & 0x0f) | 0x40
-	sum[8] = (sum[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
-}
-
-func responsesClientMetadata(sessionID string, state *ResponsesTurnState) map[string]string {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
+func responsesClientMetadata(wire responsesWireIdentity, state *ResponsesTurnState) map[string]string {
+	if wire.sessionID == "" {
 		return nil
 	}
-	windowID := responsesWindowID(sessionID)
 	if state == nil {
 		state = NewResponsesTurnState()
 	}
 	turnID, startedAt := state.metadataIdentity()
-	installationID := responsesInstallationID(sessionID)
+	installation := installationID()
 	metadata := map[string]string{
-		responsesClientMetadataInstallationID: installationID,
-		responsesClientMetadataSessionID:      sessionID,
-		responsesClientMetadataThreadID:       sessionID,
-		responsesClientMetadataTurnID:         turnID,
-		responsesClientMetadataWindowID:       windowID,
+		responsesClientMetadataSessionID: wire.sessionID,
+		responsesClientMetadataThreadID:  wire.sessionID,
+		responsesClientMetadataTurnID:    turnID,
+		responsesClientMetadataWindowID:  wire.windowID,
+	}
+	if installation != "" {
+		metadata[responsesClientMetadataInstallationID] = installation
 	}
 	turnMetadata := responsesTurnMetadataPayload{
-		InstallationID:         installationID,
-		SessionID:              sessionID,
-		ThreadID:               sessionID,
-		ThreadSource:           "user",
+		InstallationID:         installation,
+		SessionID:              wire.sessionID,
+		ThreadID:               wire.sessionID,
+		ThreadSource:           wire.threadSource,
 		TurnID:                 turnID,
-		WindowID:               windowID,
+		WindowID:               wire.windowID,
+		WindowNumber:           wire.windowNumber,
+		ContextWindowID:        wire.contextWindowID,
 		Sandbox:                "none",
 		RequestKind:            "turn",
 		TurnStartedAtUnixMilli: startedAt.UnixMilli(),
@@ -411,7 +409,14 @@ func (r *ResponsesProvider) CompleteStream(
 	if r.provider != nil {
 		overrides = r.provider.RequestOverrides(model)
 	}
-	sessionKey := strings.TrimSpace(tuning.SessionKey)
+	localSessionKey := strings.TrimSpace(tuning.SessionKey)
+	// The client identity the Responses wire carries is a UUID derived from
+	// Chord's local session key, not the session directory name itself. The
+	// derivation is deterministic, so resuming a session — or restarting the
+	// process — reproduces the same value and keeps the provider-side cache
+	// affinity the session-id header and prompt_cache_key are used for.
+	wire := deriveResponsesWireIdentity(localSessionKey, tuning.WindowNumber, tuning.SubAgentSession)
+	sessionKey := wire.sessionID
 	// The WebSocket transport takes the live request struct and mutates it for
 	// incremental sends, so cached bodies only serve the plain HTTP path.
 	wsEligible := useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && requestOverridesEmpty(overrides) && tuning.HostedTool == nil && tuning.nativeTool == nil
@@ -444,10 +449,11 @@ func (r *ResponsesProvider) CompleteStream(
 			return bodyBytes, responsesBuiltBody{}, nil
 		}
 
-		// Convert messages to Responses API format. System/developer instructions are
-		// sent through the top-level instructions field (matching Codex) instead of as
-		// a system-role input message; some Responses-compatible backends reject typed
-		// system messages in input. apply_patch history replays in the shape matching
+		// Convert messages to Responses API format. The system prompt is not part of the
+		// history: Codex emulation sends it as the developer item that opens the input
+		// (below), other Responses requests send it through the top-level
+		// instructions field, which keeps typed system messages out of input for backends
+		// that reject them. apply_patch history replays in the shape matching
 		// this request's tool declarations (freeform custom_tool_call or JSON
 		// function_call), so the model sees the same wire form it is asked to emit.
 		replayMessages, err := projectNativeImageReplay(ctx, messages)
@@ -463,6 +469,11 @@ func (r *ResponsesProvider) CompleteStream(
 		if r.provider != nil {
 			rc = r.provider.ResponsesCompat(model)
 		}
+		// Mimicking the Codex client's own body layout is an explicit opt-in
+		// (emulate: codex) on top of the transport the codex preset selects: base
+		// instructions ride in the input prefix and the tool fields stay in the body
+		// even when a request declares no tools.
+		codexShape := r.provider.codexShapeEmulated(model)
 		var sendStore, sendToolChoice, sendParallelToolCalls, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens, sendPromptCacheOptions *bool
 		if rc != nil {
 			sendStore = rc.SendStore
@@ -526,6 +537,28 @@ func (r *ResponsesProvider) CompleteStream(
 			fullInput = fillResponsesReasoningForReplay(fullInput)
 		}
 
+		// The Codex client sends no top-level instructions field at all: the base
+		// instructions open the input as a developer message whose id is derived from
+		// the thread and the text, so retries and a resumed thread rebuild the same
+		// prefix item and the cached prefix stays byte-identical. Other Responses
+		// backends keep the top-level field, which avoids a typed input message on
+		// relays that reject them.
+		instructionsInInput := codexShape && systemPrompt != ""
+		if instructionsInInput {
+			var itemID string
+			if sessionKey != "" {
+				itemID = baseInstructionsItemID(sessionKey, systemPrompt)
+			}
+			fullInput = append([]responsesInputItem{{
+				Type: "message",
+				ID:   itemID,
+				Role: responsesDeveloperItemRole,
+				Content: []responsesContentBlock{
+					{Type: "input_text", Text: systemPrompt},
+				},
+			}}, fullInput...)
+		}
+
 		reqBody := responsesRequest{
 			Model:   model,
 			Tools:   apiTools,
@@ -543,7 +576,10 @@ func (r *ResponsesProvider) CompleteStream(
 		// (freeform) apply_patch is no reason to forbid the emission. Gateways that
 		// reject the combination are handled by configuring parallel_tool_calls:
 		// false explicitly.
-		if len(apiTools) > 0 {
+		// The Codex client sends both fields unconditionally, so Codex emulation
+		// keeps them in the body even for a tool-less request (summarization,
+		// compaction).
+		if len(apiTools) > 0 || codexShape {
 			if compatBool(sendParallelToolCalls, true) {
 				if ot.ParallelToolCalls != nil {
 					reqBody.ParallelToolCalls = ot.ParallelToolCalls
@@ -568,7 +604,7 @@ func (r *ResponsesProvider) CompleteStream(
 		}
 		if sessionKey != "" && compatBool(sendPromptCacheKey, true) {
 			reqBody.PromptCacheKey = sessionKey
-			reqBody.ClientMetadata = responsesClientMetadata(sessionKey, ResponsesTurnStateFromContext(ctx))
+			reqBody.ClientMetadata = responsesClientMetadata(wire, ResponsesTurnStateFromContext(ctx))
 		}
 		if ot.ServiceTier != "" {
 			reqBody.ServiceTier = ot.ServiceTier
@@ -576,7 +612,8 @@ func (r *ResponsesProvider) CompleteStream(
 		log.Debugf("responses: full model=%v store=%v input_len=%v", model, reqBody.Store, len(fullInput))
 		// Set instructions separately from input messages, matching Codex's Responses
 		// request shape and avoiding system-role input items on compatible backends.
-		if systemPrompt != "" {
+		// Emulation already moved them into the input prefix above.
+		if systemPrompt != "" && !instructionsInInput {
 			instructions := systemPrompt
 			reqBody.Instructions = &instructions
 		}
@@ -631,7 +668,7 @@ func (r *ResponsesProvider) CompleteStream(
 		// plain body built from the same (system, messages, tools, maxTokens).
 		bodyBytes, builtAny, err = buildResponsesRequest()
 	} else {
-		bodyBytes, builtAny, err = r.bodyReuse.bodyWithExtra(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, sessionKey), buildResponsesRequest)
+		bodyBytes, builtAny, err = r.bodyReuse.bodyWithExtra(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, wire.cacheKey()), buildResponsesRequest)
 	}
 	if err != nil {
 		return nil, err
@@ -820,7 +857,7 @@ func (r *ResponsesProvider) sendAndParse(
 
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	if useOpenAIOAuth {
-		applyOpenAIOAuthHeaders(req, r.provider, apiKey, sessionKey)
+		applyOpenAIOAuthHeaders(req, r.provider, model, apiKey, sessionKey)
 	} else {
 		var scheme string
 		if r.provider != nil {
@@ -829,7 +866,7 @@ func (r *ResponsesProvider) sendAndParse(
 			scheme = config.EffectiveAuthScheme("", config.ProviderTypeResponses, url, "")
 		}
 		applyProviderAuthHeader(req.Header, scheme, apiKey)
-		applyResponsesStreamingHeaders(req.Header, r.provider)
+		applyResponsesStreamingHeaders(req.Header, r.provider, model)
 	}
 	applySessionIDHeaders(req.Header, sessionKey)
 	applyResponsesMetadataHeaders(req.Header, clientMetadata)

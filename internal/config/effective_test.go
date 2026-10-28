@@ -15,6 +15,21 @@ func TestConfigEffectiveHelpers(t *testing.T) {
 	if !EffectiveResponsesWebsocket("other", &truePtr) {
 		t.Fatal("provider override true should enable websocket")
 	}
+	if got := EffectiveRequestCompression(" CODEX ", ""); got != RequestCompressionZstd {
+		t.Fatalf("codex preset with unset compress = %q, want %q", got, RequestCompressionZstd)
+	}
+	if got := EffectiveRequestCompression("codex", RequestCompressionGzip); got != RequestCompressionGzip {
+		t.Fatalf("explicit gzip should survive the preset default, got %q", got)
+	}
+	if got := EffectiveRequestCompression("codex", RequestCompressionOff); got != "" {
+		t.Fatalf("explicit off should disable compression, got %q", got)
+	}
+	if got := EffectiveRequestCompression("openai", ""); got != "" {
+		t.Fatalf("non-codex preset with unset compress = %q, want uncompressed", got)
+	}
+	if got := EffectiveRequestCompression("openai", RequestCompressionZstd); got != RequestCompressionZstd {
+		t.Fatalf("explicit zstd on a non-codex preset = %q, want it honored", got)
+	}
 	if !EffectiveStore(&falsePtr, &truePtr) {
 		t.Fatal("model Store should override provider Store")
 	}

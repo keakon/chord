@@ -3,11 +3,13 @@ package llm
 import "github.com/keakon/chord/internal/config"
 
 const (
+	headerAccept               = "Accept"
 	headerAcceptEncoding       = "Accept-Encoding"
 	headerCodexTurnState       = "x-codex-turn-state"
 	headerContentEncoding      = "Content-Encoding"
 	headerContentType          = "Content-Type"
 	headerOpenAIBeta           = "OpenAI-Beta"
+	headerOriginator           = "Originator"
 	headerSessionID            = "Session-Id"
 	headerThreadID             = "Thread-Id"
 	headerClientRequestID      = "X-Client-Request-Id"

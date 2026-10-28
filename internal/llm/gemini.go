@@ -329,7 +329,7 @@ func (g *GeminiProvider) CompleteStream(
 	}
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	req.Header.Set("x-goog-api-key", apiKey)
-	setProviderLLMUserAgent(req.Header, g.provider)
+	setProviderLLMUserAgent(req.Header, g.provider, "")
 
 	req, _ = g.bodyReuse.compressBody(bodyIdentity, req, bodyBytes, g.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)

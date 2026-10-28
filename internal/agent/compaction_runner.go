@@ -674,6 +674,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	skillView := a.skillActivationView()
 	var backupPath string
 	questionHistory := a.ctxMgr.Snapshot()
+	windowNumber := a.ctxMgr.CompactionWindowNumber() + 1
 	err := a.ctxMgr.ReplacePrefixAtomic(headSplit, d.NewMessages, func(tail []message.Message) ([]message.Message, error) {
 		// Build the complete new message list: prefix (summary + evidence) + tail
 		newMessages := make([]message.Message, 0, len(d.NewMessages)+len(tail))
@@ -689,6 +690,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		activationHistory := append(append([]message.Message(nil), questionHistory...), tail...)
 		for i := range newMessages {
 			if newMessages[i].IsCompactionSummary {
+				newMessages[i].CompactionWindowNumber = windowNumber
 				newMessages[i].CompactionSkillActivation = buildSkillActivationCarry(activationHistory, skillView, skillActivationEpoch(activationHistory, skillView.TaskID)+1)
 				break
 			}
@@ -1358,5 +1360,5 @@ func (a *MainAgent) newCompactionClientFromMainModelPool() *llm.Client {
 	if len(pool) == 0 {
 		return nil
 	}
-	return a.bindAuxExecutionGate(newAuxClientFromPool(pool, selectedIdx, 0, a.ServiceTier()))
+	return a.bindAuxClientSession(newAuxClientFromPool(pool, selectedIdx, 0, a.ServiceTier()))
 }

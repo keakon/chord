@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"testing"
 
@@ -39,18 +40,26 @@ func TestMainResponsesFirstRequestPinsSessionIdentity(t *testing.T) {
 		t.Fatalf("swap session=%q", c.SessionKey())
 	}
 	// Simulate a freshly installed client whose identity was not initialized.
-	c.SetSessionID("")
+	c.SetSessionIdentity(llm.SessionIdentity{})
 	if _, err := a.callLLMForRequest(context.Background(), llmRequestInput{Messages: []message.Message{{Role: message.RoleUser, Content: "hello"}}}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if b["prompt_cache_key"] != want {
-		t.Fatalf("first body pck=%v want %s", b["prompt_cache_key"], want)
+	// The wire carries the Codex-shaped client identity derived from the local
+	// session key, never the session directory name itself.
+	pck, _ := b["prompt_cache_key"].(string)
+	if pck == "" || pck == want {
+		t.Fatalf("first body pck=%v, want a derived id instead of the local key %q", pck, want)
+	}
+	if !uuidv7Re.MatchString(pck) {
+		t.Fatalf("first body pck=%v, want a UUIDv7 client identity", pck)
 	}
 	md, ok := b["client_metadata"].(map[string]any)
-	if !ok || md["session_id"] != want {
-		t.Fatalf("first body metadata=%v", md)
+	if !ok || md["session_id"] != pck {
+		t.Fatalf("first body metadata=%v, want session_id=%q", md, pck)
 	}
 }
+
+var uuidv7Re = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 func TestLLMSessionIdentityConcurrentDirectoryChange(t *testing.T) {
 	a := &MainAgent{sessionDir: "/sessions/session-a"}
@@ -62,14 +71,14 @@ func TestLLMSessionIdentityConcurrentDirectoryChange(t *testing.T) {
 		for i := range 10000 {
 			a.stateMu.Lock()
 			a.sessionDir = []string{"/sessions/session-a", "/sessions/session-b"}[i%2]
-			c.SetSessionID(filepath.Base(a.sessionDir))
+			c.SetSessionIdentity(llm.SessionIdentity{Key: filepath.Base(a.sessionDir)})
 			a.stateMu.Unlock()
 		}
 	})
 	wg.Go(func() {
 		<-start
 		for range 10000 {
-			a.ensureLLMSessionID(c)
+			a.ensureLLMSessionIdentity(c)
 			a.stateMu.RLock()
 			if got, want := c.SessionKey(), filepath.Base(a.sessionDir); got != want {
 				t.Errorf("session key=%q, want current directory %q", got, want)

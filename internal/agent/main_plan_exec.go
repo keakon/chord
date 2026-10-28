@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -191,7 +190,7 @@ func (a *MainAgent) commitPlanExecution(staging *planExecutionStaging) error {
 	a.sessionLock = staging.newLock
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(staging.newSessionDir)
-	a.llmClient.SetSessionID(filepath.Base(staging.newSessionDir))
+	a.llmClient.SetSessionIdentity(a.mainSessionIdentity(staging.newSessionDir))
 	a.scheduleMemoryExtraction(oldSessionDir)
 
 	// The target model and resource preparation were completed before the old

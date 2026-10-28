@@ -139,13 +139,22 @@ type RequestTuning struct {
 	// Compaction continuations use this to avoid replaying provider-native
 	// reasoning items across a rewritten checkpoint boundary.
 	ReplayCompat *int
-	// SessionKey carries the per-Client session identity for provider-side
+	// SessionKey carries the per-Client local session key for provider-side
 	// prompt-cache routing (e.g. OpenAI prompt_cache_key and the Codex
 	// WebSocket session headers). It is owned by the Client, not the shared
 	// provider impl, so MainAgent and SubAgent clients that share one
 	// ResponsesProvider keep distinct cache namespaces. Empty means no
-	// session routing identity is attached.
+	// session routing identity is attached. Providers that require a client
+	// identity of a particular shape derive it from this key instead of sending
+	// the local session directory name.
 	SessionKey string
+	// WindowNumber is the count of durable context compactions already applied
+	// in this session. The Responses client identity reports it as the context
+	// window, so it advances only when the history is rewritten.
+	WindowNumber uint64
+	// SubAgentSession marks a delegated session, which the Responses client
+	// identity reports under a thread source distinct from the user's thread.
+	SubAgentSession bool
 }
 
 // Provider is the interface that all LLM provider implementations must satisfy.
@@ -320,7 +329,9 @@ type ProviderConfig struct {
 	onPolledUpdate             func() // called after polled snapshot writes a new snapshot
 	effectiveProxyURL          string
 	userAgent                  string
-	requestCompression         string // upstream request body compression encoding: "" | "gzip" | "zstd"
+	requestCompression         string                  // configured request body compression: "" (preset default) | "off" | "gzip" | "zstd"
+	emulation                  *config.EmulationConfig // top-level payload definitions attached at load; nil means nothing to imitate
+	emulate                    string                  // provider-level client selector ("codex", "claude"), lowercase; empty keeps Chord's own identity
 	authStatePath              string
 	authState                  config.AuthStateFile
 	authStateMTime             time.Time
@@ -440,6 +451,8 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		effectiveProxyURL:            "",
 		userAgent:                    strings.TrimSpace(cfg.UserAgent),
 		requestCompression:           strings.TrimSpace(cfg.Compress),
+		emulation:                    cfg.Emulation,
+		emulate:                      normalizeEmulateSelector(cfg.Emulate),
 		polledRateLimitByCredIdx:     polledRateLimitByCredIdx,
 		polledRateLimitAttemptedAt:   polledRateLimitAttemptedAt,
 		polledRateLimitSucceededAt:   polledRateLimitSucceededAt,
@@ -654,6 +667,27 @@ func (p *ProviderConfig) GetModel(modelID string) (config.ModelConfig, bool) {
 
 	m, ok := p.models[modelID]
 	return m, ok
+}
+
+// emulateFor resolves the client this provider presents as for one request: a
+// model-level emulate overrides the provider-level value, and an empty result
+// keeps Chord's own identity.
+func (p *ProviderConfig) emulateFor(model string) string {
+	if model != "" {
+		if m, ok := p.GetModel(model); ok {
+			if selector := normalizeEmulateSelector(m.Emulate); selector != "" {
+				return selector
+			}
+		}
+	}
+	return p.emulate
+}
+
+// normalizeEmulateSelector canonicalizes a configured emulate value: lowercased
+// and trimmed, so the selector comparison at request time is a plain string
+// match.
+func normalizeEmulateSelector(selector string) string {
+	return strings.ToLower(strings.TrimSpace(selector))
 }
 
 // ThinkingToolcallCompat resolves thinking-toolcall compatibility config for
@@ -935,12 +969,13 @@ func (p *ProviderConfig) UserAgent() string {
 	return p.userAgent
 }
 
-// RequestCompression returns the configured upstream request body compression
-// encoding: "" (disabled), "gzip", or "zstd".
+// RequestCompression returns the effective upstream request body compression
+// encoding: "" (disabled), "gzip", or "zstd". Unset follows the preset, so a
+// codex provider sends zstd bodies the way the Codex client does.
 func (p *ProviderConfig) RequestCompression() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.requestCompression
+	return config.EffectiveRequestCompression(p.preset, p.requestCompression)
 }
 
 func (p *ProviderConfig) Name() string {

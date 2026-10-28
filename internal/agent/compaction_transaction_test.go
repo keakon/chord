@@ -107,6 +107,27 @@ func TestApplyCompactionDraftCommitsTransactionOnReplaceSuccess(t *testing.T) {
 	if got := a.ctxMgr.Snapshot()[0].Content; got != "checkpoint content" {
 		t.Fatalf("context head = %q, want the applied checkpoint", got)
 	}
+	if got := a.mainSessionIdentity(a.sessionDir).WindowNumber; got != 1 {
+		t.Fatalf("committed window = %d, want 1", got)
+	}
+	restored, err := recovery.NewRecoveryManager(a.sessionDir).LoadMessages(identity.MainAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed := newTestMainAgent(t, t.TempDir())
+	resumed.ctxMgr.RestoreMessages(restored)
+	if got := resumed.mainSessionIdentity(a.sessionDir).WindowNumber; got != 1 {
+		t.Fatalf("restored window = %d, want 1", got)
+	}
+	draft.HeadSplit = 1
+	draft.Index = 2
+	draft.TransactionID = ""
+	if err := a.applyCompactionDraft(draft); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.mainSessionIdentity(a.sessionDir).WindowNumber; got != 2 {
+		t.Fatalf("second committed window = %d, want 2", got)
+	}
 }
 
 // TestApplyCompactionDraftLogsOnlyWhenPostCommitAuditWriteFails pins the
@@ -185,6 +206,9 @@ func TestApplyCompactionDraftLogsOnlyWhenPostCommitAuditWriteFails(t *testing.T)
 	if a.compactionWindowGeneration != windowBefore+1 {
 		t.Fatalf("compaction window generation = %d, want %d (settlement ran)", a.compactionWindowGeneration, windowBefore+1)
 	}
+	if got := a.mainSessionIdentity(a.sessionDir).WindowNumber; got != 1 {
+		t.Fatalf("audit failure lost committed window: %d", got)
+	}
 	if _, err := os.Stat(historyPath); err != nil {
 		t.Fatalf("archive must stay referenced after a log-only audit failure: %v", err)
 	}
@@ -242,6 +266,9 @@ func TestFailedApplyLeavesTransactionAborted(t *testing.T) {
 	err := a.applyCompactionDraft(draft)
 	if err == nil {
 		t.Fatal("apply must fail when the transcript rewrite cannot run")
+	}
+	if got := a.mainSessionIdentity(a.sessionDir).WindowNumber; got != 0 {
+		t.Fatalf("failed apply advanced window: %d", got)
 	}
 
 	// The failed apply records the abort and removes the terminal manifest

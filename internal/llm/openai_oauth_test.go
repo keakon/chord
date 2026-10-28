@@ -118,7 +118,7 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotHeaders = r.Header.Clone()
-		data, err := io.ReadAll(r.Body)
+		data, err := readRequestBody(r)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
@@ -166,13 +166,14 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 	if gotHeaders.Get(headerUserAgent) != defaultLLMUserAgent() {
 		t.Fatalf("unexpected User-Agent header: %q", gotHeaders.Get(headerUserAgent))
 	}
+	wire := deriveResponsesWireIdentity("session-oauth-1", 0, false)
 	for _, name := range []string{"session-id", "thread-id", "x-client-request-id"} {
-		if got := gotHeaders.Get(name); got != "session-oauth-1" {
-			t.Fatalf("%s = %q, want the stable session identity session-oauth-1", name, got)
+		if got := gotHeaders.Get(name); got != wire.sessionID {
+			t.Fatalf("%s = %q, want the derived session identity %q", name, got, wire.sessionID)
 		}
 	}
-	if gotBody["prompt_cache_key"] != "session-oauth-1" {
-		t.Fatalf("prompt_cache_key = %#v, want session-oauth-1", gotBody["prompt_cache_key"])
+	if gotBody["prompt_cache_key"] != wire.sessionID {
+		t.Fatalf("prompt_cache_key = %#v, want %q", gotBody["prompt_cache_key"], wire.sessionID)
 	}
 	if !strings.Contains(gotHeaders.Get("Accept"), "text/event-stream") {
 		t.Fatalf("unexpected Accept header: %q", gotHeaders.Get("Accept"))
@@ -257,11 +258,12 @@ func TestResponsesProvider_OpenAIOAuthSessionIdentityStableAcrossRequests(t *tes
 	if len(got) != 2 {
 		t.Fatalf("captured %d requests, want 2", len(got))
 	}
+	wire := deriveResponsesWireIdentity("session-oauth-stable", 0, false)
 	for _, name := range []string{"session-id", "thread-id", "x-client-request-id"} {
 		first := got[0].Get(name)
 		second := got[1].Get(name)
-		if first != "session-oauth-stable" || second != "session-oauth-stable" {
-			t.Fatalf("%s = %q then %q, want the stable session identity on every request", name, first, second)
+		if first != wire.sessionID || second != wire.sessionID {
+			t.Fatalf("%s = %q then %q, want the stable session identity %q on every request", name, first, second, wire.sessionID)
 		}
 	}
 }
@@ -307,7 +309,7 @@ func TestResponsesProvider_ResponsesWireOmitsMaxOutputTokens(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := io.ReadAll(r.Body)
+		data, err := readRequestBody(r)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
@@ -362,7 +364,7 @@ func TestResponsesProvider_OpenAIOAuthCompleteUsesStreamingHTTP(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := io.ReadAll(r.Body)
+		data, err := readRequestBody(r)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
@@ -407,7 +409,7 @@ func TestOpenAIProvider_OpenAIOAuthDelegatesToResponses(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := io.ReadAll(r.Body)
+		data, err := readRequestBody(r)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
@@ -452,7 +454,7 @@ func TestResponsesProvider_ToolOnlyFieldsGatedOnTools(t *testing.T) {
 	var gotBodies []map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := io.ReadAll(r.Body)
+		data, err := readRequestBody(r)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
@@ -552,7 +554,7 @@ func TestResponsesProvider_CodexPresetCompactionUsesOrdinaryResponsesRequest(t *
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotHeaders = r.Header.Clone()
-		data, err := io.ReadAll(r.Body)
+		data, err := readRequestBody(r)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
@@ -642,7 +644,7 @@ func TestResponsesProvider_NonCodexPassesThroughGLMReasoningEffortMax(t *testing
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := io.ReadAll(r.Body)
+		data, err := readRequestBody(r)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
@@ -691,7 +693,7 @@ func TestResponsesProvider_CodexPassesThroughReasoningEffortMax(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := io.ReadAll(r.Body)
+		data, err := readRequestBody(r)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}

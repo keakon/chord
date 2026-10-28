@@ -18,8 +18,8 @@ func (a *MainAgent) sessionExecutionGate() *executiongate.Gate {
 	return a.executionGate
 }
 
-func (a *MainAgent) bindAuxExecutionGate(client *llm.Client) *llm.Client {
-	client.SetExecutionGate(a.sessionExecutionGate(), "auxiliary")
+func (a *MainAgent) bindAuxClientSession(client *llm.Client) *llm.Client {
+	a.bindLLMClientSession(client, "auxiliary")
 	return client
 }
 

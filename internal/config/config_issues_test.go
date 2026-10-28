@@ -254,7 +254,7 @@ func TestResolvedConfigIssuesReportsUnknownCompressEncoding(t *testing.T) {
 }
 
 func TestResolvedConfigIssuesAllowsRequestCompressionEncodings(t *testing.T) {
-	for _, value := range []string{"gzip", "zstd"} {
+	for _, value := range []string{"off", "gzip", "zstd"} {
 		path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    compress: "+value+"\n")
 		issues, err := resolvedFileIssues(path, "")
 		if err != nil {

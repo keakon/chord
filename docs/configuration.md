@@ -846,20 +846,26 @@ Common uses include:
 
 ## Provider request compression
 
-Provider-level `compress` selects the encoding for compressed upstream request
-bodies: `gzip` or `zstd` (`zstd` is the codec the Codex client uses for
-codex-backend request bodies). It is different from context management
-(compaction / reduction): it only changes HTTP request transfer encoding and
-does not summarize or remove conversation history.
+Provider-level `compress` selects the encoding for upstream request
+bodies: `gzip`, `zstd` or `off`. Leaving it unset takes the provider preset's
+own choice — `preset: codex` sends `zstd` request bodies the way the Codex
+client does, every other preset sends them uncompressed. It is different from
+context management (compaction / reduction): it only changes HTTP request
+transfer encoding and does not summarize or remove conversation history.
 
 ```yaml
 providers:
   openai:
     compress: gzip
   codex:
+    preset: codex        # zstd request bodies by default
+  codex-proxy:
     preset: codex
-    compress: zstd   # codex-backend accepts zstd request bodies
+    compress: off        # this proxy rejects compressed bodies
 ```
+
+`compress: off` is the only way to opt a preset-defaulted provider out: an
+omitted `compress` now means "use the preset default", not "send uncompressed".
 
 Chord compresses the request body only if compression reduces the payload
 size; otherwise it sends the request uncompressed. Compression failures are
@@ -867,7 +873,7 @@ logged and the request is sent uncompressed too. The response direction is
 unaffected: Chord still advertises only `gzip` responses and decodes them
 itself.
 
-> **Note:** Leave `compress` unset unless your provider or gateway is known to accept compressed request bodies: the official Codex backend and `api.anthropic.com` do (Anthropic accepts `gzip`, not `zstd`), most OpenAI-compatible gateways do not.
+> **Note:** Outside the Codex preset, set `compress` only when your provider or gateway is known to accept compressed request bodies: `api.anthropic.com` accepts `gzip` (not `zstd`), most OpenAI-compatible gateways accept neither.
 
 Provider/model requests identify the client with `User-Agent: chord/<version>` by default. Set provider-level `user_agent` only when a provider or gateway requires a specific value:
 
@@ -887,6 +893,107 @@ providers:
     preset: codex
     user_agent: "codex-tui/0.139.0 (Mac OS 15.3.2; arm64) ghostty/1.3.1 (codex-tui; 0.139.0)"
 ```
+
+Chord can build that header itself — see [Client emulation](#client-emulation).
+
+## Client emulation
+
+Chord can present as another CLI client on the wire. The top-level `emulation`
+block defines what each client's identity is made of, and the `emulate` key on
+a provider — or on a single model — selects the client to present as. Nothing
+emulates until something references a client by name: endpoints that keep
+receiving Chord's own request face keep it byte for byte, so only the providers
+pointed at a client-expecting relay change.
+
+```yaml
+emulation:
+  codex:
+    version: 0.50.0
+
+providers:
+  relay:
+    type: responses
+    emulate: codex
+    api_url: https://example.invalid/v1
+```
+
+The `emulate` value names a client defined under `emulation` (`codex` or
+`claude`). A model-level `emulate` overrides the provider value for that model,
+and an empty one inherits it. A selector that cannot work — an unknown client
+name, a client whose wire protocol the provider does not speak, or a payload
+that is missing or incomplete — is reported as a config error, and the provider
+or model keeps Chord's own identity.
+
+Emulation does not change request-body compression: an omitted `compress`
+keeps following the provider preset (see
+[Provider request compression](#provider-request-compression)). Only
+`preset: codex` sends zstd by default; a provider that only emulates the Codex
+client stays uncompressed unless `compress` says otherwise, because a relay
+selected for the emulation does not necessarily accept compressed bodies.
+
+### Codex client
+
+`emulation.codex` needs one field, `version`: the Codex client version to
+imitate. Codex reports its version nowhere else on the wire, so there is no
+default to assume. The emulation rides on the transport `preset: codex`
+selects, and only a `type: responses` provider acts on it. Such a provider
+sends:
+
+- the base instructions as the first `input` item — a developer message whose id
+  is derived from the session and the text, so retries and resumed sessions
+  rebuild the same prefix — instead of a top-level `instructions` field;
+- `tool_choice` and `parallel_tool_calls` in every body, including requests that
+  declare no tools (summarization, compaction);
+- `User-Agent: codex-tui/<version> (<OS> <os version>; <arch>) <terminal> (codex-tui; <version>)`,
+  built from the machine Chord runs on: the macOS product version, or the Linux
+  distribution and release from `/etc/os-release`, the CPU architecture, and the
+  terminal — `TERM_PROGRAM`, then the per-terminal markers that survive a
+  multiplexer, then `TERM`;
+- `originator: codex-tui`, the client name the Codex TUI reports — providers
+  without the selector keep sending `originator: codex_cli_rs`.
+
+### Claude Code client
+
+`emulation.claude` needs three fields, and none has a built-in default: the
+values are user-supplied, so updating Chord can never silently change the wire
+identity a relay has already seen.
+
+```yaml
+emulation:
+  claude:
+    version: 2.1.311
+    sdk_version: 0.128.0
+    runtime_version: v26.12.1
+```
+
+With a provider or model set to `emulate: claude`, a `type: messages` provider
+adds on top of its own request:
+
+- `User-Agent: claude-cli/<version> (external, cli)`;
+- the Stainless headers the official SDK sends (`X-Stainless-Lang`,
+  `X-Stainless-Runtime`, `X-Stainless-OS`, `X-Stainless-Arch`,
+  `X-Stainless-Package-Version`, `X-Stainless-Runtime-Version`,
+  `X-Stainless-Retry-Count`, `X-Stainless-Timeout`), with the OS and
+  architecture taken from the machine Chord runs on and the timeout reporting
+  the provider's stream cap (600 seconds when none is set);
+- `X-Claude-Code-Session-Id`, a UUID derived from the local session: it stays
+  the same across restarts, resumes and compactions, stays distinct per
+  SubAgent, and survives a fallback to another endpoint;
+- `metadata.user_id` upgraded to the client's JSON shape, pairing a
+  machine-level `device_id` (persisted as `claude_device_id` under the config
+  home) with the same derived session UUID.
+
+The emulation is additive: the request body keeps Chord's layout, and the
+identity rides in request headers and `metadata.user_id`.
+
+To fill the three version fields, copy what the client itself reports:
+
+```console
+claude -v
+ANTHROPIC_LOG=debug ANTHROPIC_BASE_URL=http://127.0.0.1/ ANTHROPIC_AUTH_TOKEN=1 claude -p "hi" 2>&1 | grep -m2 -iE 'stainless-(package|runtime)-version'
+```
+
+An explicit provider `user_agent` still wins over a generated one.
 
 ## Provider retry delays
 
@@ -1683,7 +1790,8 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 
 | Key                     | Type                  | Default                          | Scope                    | Summary                                                                                                                  |
 | ----------------------- | --------------------- | -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `key_rotation`, `key_order`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
+| `providers`             | `map[name]Provider`   | —                                | global / project         | Per-provider config (`type`, `api_url`, `preset`, `emulate`, `key_rotation`, `key_order`, `models`, `compress`). See [Minimal provider config](#minimal-provider-config). |
+| `emulation`             | object                | disabled                         | global / project         | Per-client wire-identity payloads (`codex`, `claude`). Selecting a client is a separate provider/model-level `emulate` key. See [Client emulation](#client-emulation). |
 | `model_templates`       | `map[name]YAML`       | empty                            | global / project         | YAML-anchor namespace only; entries are reusable through aliases and are not runtime model definitions. |
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
 | `thinking_translation`  | object                | disabled (`max_chars: 1000`)     | global / project         | Optional appended translation preview for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
@@ -1752,7 +1860,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
 | `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown without valid `Retry-After` advice. Valid server advice, confirmed quota resets, and hard credential states still win. |
 | `retry_delay_ms`| int   | Base/fixed round and ordinary-429 delay in milliseconds, from `0` through `60000`; `0` / omitted defaults to 1000ms. Setting the field—including explicit `0`—is an override even when `retry_backoff` is omitted. Ignored for `none`. Out-of-range values are logged and fall back to the default instead of failing startup. |
-| `compress`     | string | Upstream request body compression encoding: `gzip` or `zstd`; unset = off. Applies only when compression shrinks the payload. The boolean `compress: true` form is gone — it is ignored and reported by `chord doctor config` (migrate to `compress: gzip`). |
+| `compress`     | string | Upstream request body compression encoding: `off`, `gzip` or `zstd`; unset = the preset default — `preset: codex` sends `zstd`, other presets send the body uncompressed. Applies only when compression shrinks the payload. The boolean `compress: true` form is gone — it is ignored and reported by `chord doctor config` (migrate to `compress: gzip`). |
 | `response_header_timeout` | int | Timeout in seconds from starting a streaming HTTP request until response headers arrive, including connection setup and request-body upload. `0` / omitted uses the built-in default; healthy streams are bounded by `stream_idle_timeout`, not a total request timer. |
 | `stream_idle_timeout` | int | Stream idle timeout in seconds for this provider. `0` / omitted uses built-in SSE/WebSocket idle defaults. |
 | `stream_total_timeout` | int | Wall-clock cap in seconds for one stream, including Codex Responses WebSocket reads. `0` / omitted applies no cap — a stream that keeps producing data is never cut off by elapsed time alone. |

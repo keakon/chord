@@ -740,7 +740,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		mcp.ClientInfo{Name: "chord", Version: Version},
 		ac.PathLocator,
 	)
-	llmClient.SetSessionID(filepath.Base(ac.SessionDir))
+	// Prime the cache identity; every request re-applies it from the live
+	// session directory, which also picks up the compaction window.
+	llmClient.SetSessionIdentity(llm.SessionIdentity{Key: filepath.Base(ac.SessionDir)})
 	ac.MainAgent.SetInitialYoloMode(flagYolo)
 	worktreeBranchPrefix := resolveWorktreeBranchPrefix(cfg)
 	pathRootsResolver, invalidatePathRoots := newPathRootsResolver(ac.Ctx, contentRoot, ac.PathLocator, cfg.Worktree.Root)

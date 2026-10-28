@@ -49,7 +49,15 @@
 - headless 客户端在送达的 `confirm_request` 进入终态时会收到 `confirm_resolved` 推送：`approved` / `denied` 是客户端作答回执，`timeout` 表示到期无人作答、已自动拒绝，`cancelled` 表示等待提前结束。turn 被取消时，它停留中的确认的回执会先于 turn 结束后的 idle 推送，提示可以在交互状态清空之前收起。没有本地倒计时的集成方不必再让一条无人应答的确认一直可操作到下一次 idle；收到该事件即收起提示——对已终结请求发送 `confirm` 只会被运行时忽略。
 - 文件编辑结果返回之后，语言服务器才报出的诊断现在也能送到模型。gopls 的 staticcheck 与 analyzer 结果要比编辑等待的类型检查晚一秒以上。其中有新的 error 或 warning 时，会连同新的 information、hint 一起附在下一次请求里，并显示为 `LSP DIAGNOSTICS` 卡片，随会话恢复；只有 information、hint 时不发送。它不会拖住回合：编辑的诊断等待结束后 15 秒内到达的结果会留在队列里，等后续回合的下一次请求再送达，最多保留到该次等待结束后十分钟。送达时文件须仍在近期会话中，诊断也须仍然有效；文件变化或后续文档同步可能使它们失效。同一文件已经发过的问题，后续编辑只是挪了位置不会重发，消失后再出现才会重新报告。headless 客户端可以订阅 `lsp_followup` 收到它们。
 
+- 通过顶层 `emulation.codex` payload 加 provider 或 model 级的 `emulate: codex` 键，让你选择的 provider 以 Codex 客户端的写法发请求。被选中的 `type: responses` provider 会把基础指令作为 `input` 首项而不是顶层字段，在没有声明工具的请求里也保留 `tool_choice` 与 `parallel_tool_calls`，并按本机 OS、架构和终端生成 Codex 客户端的 `User-Agent`，`originator` 也带上客户端名 `codex-tui`。payload 需要写明要模拟的 `version`——Codex 不在 wire 的其他位置携带版本，Chord 不会替你猜一个；未选择客户端的 provider 保持自己的请求形状和 `User-Agent: chord/<version>`，provider 配了 `user_agent` 仍优先于生成的头部。
+
+- 通过顶层 `emulation.claude` payload 加 provider 或 model 级的 `emulate: claude` 键，让你选择的 `type: messages` provider 以 Claude Code 客户端的身份出现在 wire 上。被选中的 provider 会在自己的请求体之上叠加客户端的请求身份：`claude-cli/<version> (external, cli)` 的 User-Agent，官方 SDK 自带的 Stainless 请求头，由本地会话确定性派生的会话 UUID（跨重启、resume 和上下文压缩不变，SubAgent 各自独立，跨端点 fallback 不变），同时通过 `X-Claude-Code-Session-Id` 和 `metadata.user_id` 发送，后者还带一个持久化在配置目录的机器级 `device_id`。payload 的三个版本字段都由用户填写、没有内置默认值，更新 Chord 永远不会静默改写 relay 已经见过的 wire 身份；未选择客户端的 provider 请求字节与现状一致。
+
 ### 改进
+
+- Responses 请求带上 Codex 形状的客户端标识：wire 上的会话 id 是由 Chord 自身会话 id 确定性推导出的 UUID，`x-codex-installation-id` 改为一台机器一个 id——存在 `~/.codex/installation_id` 时直接复用，否则由 Chord 在自己的配置目录持久化——window id 只在历史被 durable 压缩后推进。同机同会话在后端看来是一个 Codex 客户端，不再每个会话一个。
+
+- `preset: codex` 默认发送 zstd 压缩的请求体，与 Codex 客户端一致。`compress` 新增显式的 `off` 用于退出，省略 `compress` 现在表示「取 preset 默认」——其他 preset 仍按原文发送请求体。
 
 - model-driven 压缩默认开启：主 agent 无需配置即注册 `compact_context` 工具，会话接近压缩线时模型有机会先收口当前阶段并提交 durable checkpoint，再由运行时的摘要压缩接管。设 `context.compaction.model_driven: false` 可让压缩完全由运行时接管。
 

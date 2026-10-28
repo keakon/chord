@@ -17,7 +17,7 @@ func TestResponsesProvider_OpenAIOAuthHTTPSendsConfiguredStoreTrue(t *testing.T)
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := io.ReadAll(r.Body)
+		data, err := readRequestBody(r)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
@@ -52,12 +52,12 @@ func TestResponsesProvider_OpenAIOAuthHTTPSendsConfiguredStoreTrue(t *testing.T)
 	}
 }
 
-// TestClient_SetSessionIDIsPerClientIsolated verifies the cache-isolation
+// TestClient_SetSessionIdentityIsPerClientIsolated verifies the cache-isolation
 // contract: session identity lives on the Client (threaded per-request through
-// RequestTuning.SessionKey), never on the shared provider impl. Two clients
-// that resolve to the same provider impl must be able to set different session
-// keys without one clobbering the other.
-func TestClient_SetSessionIDIsPerClientIsolated(t *testing.T) {
+// RequestTuning), never on the shared provider impl. Two clients that resolve
+// to the same provider impl must be able to set different session keys without
+// one clobbering the other.
+func TestClient_SetSessionIdentityIsPerClientIsolated(t *testing.T) {
 	providerCfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
 		Preset: config.ProviderPresetCodex,
@@ -72,20 +72,20 @@ func TestClient_SetSessionIDIsPerClientIsolated(t *testing.T) {
 	mainClient := &Client{provider: providerCfg, providerImpl: impl, modelID: "gpt-5.5"}
 	subClient := &Client{provider: providerCfg, providerImpl: impl, modelID: "gpt-5.5"}
 
-	mainClient.SetSessionID("session-20260903")
-	subClient.SetSessionID("session-20260903:sub:builder-3")
+	mainClient.SetSessionIdentity(SessionIdentity{Key: "session-20260903"})
+	subClient.SetSessionIdentity(SessionIdentity{Key: "session-20260903:sub:builder-3", SubAgent: true})
 
-	if mainClient.sessionKey != "session-20260903" {
-		t.Fatalf("main client sessionKey = %q, want session-20260903", mainClient.sessionKey)
+	if got := mainClient.SessionKey(); got != "session-20260903" {
+		t.Fatalf("main client sessionKey = %q, want session-20260903", got)
 	}
-	if subClient.sessionKey != "session-20260903:sub:builder-3" {
-		t.Fatalf("sub client sessionKey = %q, want session-20260903:sub:builder-3", subClient.sessionKey)
+	if got := subClient.SessionKey(); got != "session-20260903:sub:builder-3" {
+		t.Fatalf("sub client sessionKey = %q, want session-20260903:sub:builder-3", got)
 	}
-	// The second SetSessionID must not have overwritten the first: identity is
-	// per-Client, so MainAgent and SubAgent caches stay distinguishable even
-	// while sharing one ResponsesProvider.
-	if mainClient.sessionKey != "session-20260903" {
-		t.Fatalf("main client sessionKey changed after sub client set its own: %q", mainClient.sessionKey)
+	// The second SetSessionIdentity must not have overwritten the first:
+	// identity is per-Client, so MainAgent and SubAgent caches stay
+	// distinguishable even while sharing one ResponsesProvider.
+	if got := mainClient.SessionKey(); got != "session-20260903" {
+		t.Fatalf("main client sessionKey changed after sub client set its own: %q", got)
 	}
 }
 

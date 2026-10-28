@@ -148,34 +148,43 @@ func TestResponsesProvider_NoTurnStateEchoAcrossDifferentKey(t *testing.T) {
 
 func TestResponsesClientMetadataStableWithinTurn(t *testing.T) {
 	state := NewResponsesTurnState()
-	first := responsesClientMetadata("session-a", state)
+	wire := deriveResponsesWireIdentity("session-a", 0, false)
+	otherWire := deriveResponsesWireIdentity("session-b", 0, false)
+	first := responsesClientMetadata(wire, state)
 	for range 3 {
-		if got := responsesClientMetadata("session-a", state); !reflect.DeepEqual(first, got) {
+		if got := responsesClientMetadata(wire, state); !reflect.DeepEqual(first, got) {
 			t.Fatalf("metadata changed within turn: %v versus %v", first, got)
 		}
 	}
-	next := responsesClientMetadata("session-a", NewResponsesTurnState())
+	if first[responsesClientMetadataSessionID] != wire.sessionID {
+		t.Fatalf("metadata session_id = %q, want the derived id %q", first[responsesClientMetadataSessionID], wire.sessionID)
+	}
+	if first[responsesClientMetadataWindowID] != wire.windowID {
+		t.Fatalf("metadata window_id = %q, want %q", first[responsesClientMetadataWindowID], wire.windowID)
+	}
+	next := responsesClientMetadata(wire, NewResponsesTurnState())
 	if first[responsesClientMetadataTurnID] == next[responsesClientMetadataTurnID] {
 		t.Fatal("new turn reused the previous identity")
 	}
-	other := responsesClientMetadata("session-b", state)
+	other := responsesClientMetadata(otherWire, state)
 	if other[responsesClientMetadataSessionID] == first[responsesClientMetadataSessionID] {
 		t.Fatal("session identity leaked")
 	}
 	if first[responsesClientMetadataTurnID] != other[responsesClientMetadataTurnID] {
 		t.Fatal("fallback changed the turn identity")
 	}
-	if got := responsesClientMetadata("", state); got != nil {
+	if got := responsesClientMetadata(responsesWireIdentity{}, state); got != nil {
 		t.Fatal("empty session received metadata")
 	}
 }
 
 func TestResponsesClientMetadataConcurrentZeroState(t *testing.T) {
 	state := &ResponsesTurnState{}
+	wire := deriveResponsesWireIdentity("session-a", 0, false)
 	results := make(chan map[string]string, 32)
 	var workers sync.WaitGroup
 	for range 32 {
-		workers.Go(func() { results <- responsesClientMetadata("session-a", state) })
+		workers.Go(func() { results <- responsesClientMetadata(wire, state) })
 	}
 	workers.Wait()
 	close(results)

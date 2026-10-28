@@ -1,12 +1,9 @@
 package llm
 
 import (
-	"crypto/rand"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -15,8 +12,12 @@ import (
 
 const (
 	openAICodexResponsesURL = "https://chatgpt.com/backend-api/codex/responses"
-	openAICodexOriginator   = "codex_cli_rs"
-	openAICodexBetaHeader   = "responses=experimental"
+	// openAICodexOriginator is Chord's baseline originator: the default client
+	// name the Codex CLI reports when nothing overrides it. A provider that
+	// emulates the Codex client reports the TUI name instead (see
+	// codexOriginator), the same value its User-Agent carries.
+	openAICodexOriginator = "codex_cli_rs"
+	openAICodexBetaHeader = "responses=experimental"
 )
 
 // normalizeReasoningEffort normalizes casing/whitespace and reports whether the
@@ -60,18 +61,28 @@ func resolveOpenAIOAuthAPIURL(apiURL string) string {
 	return apiURL
 }
 
+// codexOriginator returns the originator header value for a Codex/Responses
+// request: the TUI client name when the request presents as the Codex client —
+// the same value its User-Agent reports — otherwise Chord's baseline.
+func codexOriginator(provider *ProviderConfig, model string) string {
+	if provider != nil && provider.codexShapeEmulated(model) {
+		return codexUserAgentProduct
+	}
+	return openAICodexOriginator
+}
+
 // applyResponsesIdentityHeaders sets the shared Responses identity and beta
 // headers while keeping User-Agent configurable per provider.
-func applyResponsesIdentityHeaders(h http.Header, provider *ProviderConfig) {
+func applyResponsesIdentityHeaders(h http.Header, provider *ProviderConfig, model string) {
 	h.Set(headerOpenAIBeta, openAICodexBetaHeader)
-	setProviderLLMUserAgent(h, provider)
-	h.Set("originator", openAICodexOriginator)
+	setProviderLLMUserAgent(h, provider, model)
+	h.Set(headerOriginator, codexOriginator(provider, model))
 }
 
 // applyResponsesStreamingHeaders sets headers used by streaming Responses
 // requests, including the SSE Accept.
-func applyResponsesStreamingHeaders(h http.Header, provider *ProviderConfig) {
-	applyResponsesIdentityHeaders(h, provider)
+func applyResponsesStreamingHeaders(h http.Header, provider *ProviderConfig, model string) {
+	applyResponsesIdentityHeaders(h, provider, model)
 	h.Set("Accept", "text/event-stream")
 }
 
@@ -91,9 +102,9 @@ func applyProviderAuthHeader(h http.Header, scheme, apiKey string) {
 //
 // sessionID must be the caller's stable session identity: the Codex backend
 // derives cache affinity from it.
-func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, apiKey, sessionID string) {
+func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, model, apiKey, sessionID string) {
 	applyProviderAuthHeader(req.Header, config.AuthSchemeBearer, apiKey)
-	applyResponsesStreamingHeaders(req.Header, provider)
+	applyResponsesStreamingHeaders(req.Header, provider, model)
 	applyCodexSessionIdentity(req.Header, sessionID)
 
 	if provider == nil {
@@ -102,23 +113,4 @@ func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, apiKey
 	if info := provider.oauthInfoForKey(apiKey); info != nil && info.AccountID != "" {
 		req.Header.Set("ChatGPT-Account-ID", info.AccountID)
 	}
-}
-
-func newOpenAIOAuthSessionID() string {
-	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return fmt.Sprintf("session-%d", time.Now().UnixNano())
-	}
-
-	buf[6] = (buf[6] & 0x0f) | 0x40
-	buf[8] = (buf[8] & 0x3f) | 0x80
-
-	return fmt.Sprintf(
-		"%08x-%04x-%04x-%04x-%012x",
-		buf[0:4],
-		buf[4:6],
-		buf[6:8],
-		buf[8:10],
-		buf[10:16],
-	)
 }

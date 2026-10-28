@@ -23,7 +23,7 @@ type ResponsesTurnState struct {
 
 // NewResponsesTurnState creates empty state for one Responses turn.
 func NewResponsesTurnState() *ResponsesTurnState {
-	return &ResponsesTurnState{turnID: newOpenAIOAuthSessionID(), startedAt: time.Now()}
+	return &ResponsesTurnState{turnID: newRandomUUIDv7(), startedAt: time.Now()}
 }
 
 // WithResponsesTurnState attaches state to a request context. A nil state is
@@ -48,7 +48,7 @@ func (s *ResponsesTurnState) metadataIdentity() (string, time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.turnID == "" {
-		s.turnID = newOpenAIOAuthSessionID()
+		s.turnID = newRandomUUIDv7()
 		s.startedAt = time.Now()
 	}
 	return s.turnID, s.startedAt

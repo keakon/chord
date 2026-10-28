@@ -75,6 +75,10 @@ func TestSummarizeCompactionHeadCodexUsesOrdinaryResponses(t *testing.T) {
 	provider := llm.NewProviderConfig("sample", config.ProviderConfig{
 		Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex,
 		APIURL: server.URL + "/v1/responses", ResponsesWebsocket: new(false),
+		// This case is about the transport and the request body the compaction
+		// path builds; the codex preset's zstd default is covered where the
+		// encoding itself is implemented.
+		Compress: config.RequestCompressionOff,
 		Models: map[string]config.ModelConfig{
 			"test-model": {Limit: config.ModelLimit{Context: 16384, Output: 2048}},
 		},

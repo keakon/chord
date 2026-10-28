@@ -80,12 +80,25 @@ type ProviderConfig struct {
 	KeyOrder                  string                 `json:"key_order" yaml:"key_order"`                               // "sequential" (default, non-Codex) | "random" | "smart" (default for preset: codex)
 	RetryBackoff              string                 `json:"retry_backoff,omitempty" yaml:"retry_backoff,omitempty"`   // "exponential" (default) | "fixed" | "none"
 	RetryDelayMS              *int                   `json:"retry_delay_ms,omitempty" yaml:"retry_delay_ms,omitempty"` // millisecond delay for retry backoff; nil = omitted, 0 = explicit default
-	Compress                  string                 `json:"compress,omitempty" yaml:"compress,omitempty"`             // upstream request body compression encoding: "" (off) | "gzip" | "zstd"
+	Compress                  string                 `json:"compress,omitempty" yaml:"compress,omitempty"`             // upstream request body compression encoding: "" (endpoint default) | "off" | "gzip" | "zstd"
+	// Emulate selects the client this provider presents as on the wire, for
+	// example "codex" or "claude"; empty keeps Chord's own request identity.
+	// The value references a payload defined under the top-level emulation
+	// block, and only a provider whose wire protocol the client speaks acts on
+	// it; a model-level emulate overrides it per model.
+	Emulate string `json:"emulate,omitempty" yaml:"emulate,omitempty"`
+	// Emulation carries the top-level emulation payload definitions so a
+	// request can resolve its emulate selector without reaching back into the
+	// global config. Attached by the loader; not a provider YAML key.
+	Emulation *EmulationConfig `json:"-" yaml:"-"`
 }
 
 // Request compression encodings for ProviderConfig.Compress. An empty string
-// disables upstream request body compression.
+// leaves the choice to the provider preset (codex sends zstd, every other
+// endpoint sends the body uncompressed); "off" disables request compression
+// explicitly so a preset default cannot re-enable it.
 const (
+	RequestCompressionOff  = "off"
 	RequestCompressionGzip = "gzip"
 	RequestCompressionZstd = "zstd"
 )
@@ -97,6 +110,23 @@ func EffectiveResponsesWebsocket(preset string, providerValue *bool) bool {
 		return *providerValue
 	}
 	return strings.EqualFold(strings.TrimSpace(preset), ProviderPresetCodex)
+}
+
+// EffectiveRequestCompression resolves the request body compression encoding to
+// send: the returned value is an encoding ("gzip" | "zstd") or "" for
+// uncompressed. An explicit setting wins, "off" disables compression even where
+// a preset would otherwise enable it, and an unset value follows the preset —
+// the codex backend is the one endpoint verified to accept zstd bodies, which
+// is what the Codex client sends there.
+func EffectiveRequestCompression(preset, configured string) string {
+	configured = strings.TrimSpace(configured)
+	if configured == RequestCompressionOff {
+		return ""
+	}
+	if configured == "" && strings.EqualFold(strings.TrimSpace(preset), ProviderPresetCodex) {
+		return RequestCompressionZstd
+	}
+	return configured
 }
 
 // EffectiveStore resolves the configured Responses storage preference.

@@ -36,6 +36,9 @@ func LoadConfigFromPath(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	for _, diag := range ApplyEmulation(cfg) {
+		log.Warnf("config %s: ignoring invalid value: %s", path, diag.Message)
+	}
 	rc := &ResolvedConfig{}
 	rc.addKeymapLayer(layer)
 	logKeymapDiagnostics(keymapDiagnostics(cfg, rc.Index, []keymapLayer{layer}, nil))

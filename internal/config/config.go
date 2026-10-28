@@ -49,6 +49,8 @@ type Config struct {
 	HostedTools         map[string]HostedToolConfig `json:"hosted_tools,omitempty" yaml:"hosted_tools,omitempty"`                 // provider-side (hosted) tool catalog: local tool surface + per-family wire declarations
 	Worktree            WorktreeConfig              `json:"worktree" yaml:"worktree,omitempty"`                                   // git worktree integration options
 	ThinkingTranslation *ThinkingTranslationConfig  `json:"thinking_translation,omitempty" yaml:"thinking_translation,omitempty"` // optional thinking translation enhancement
+	// Emulation defines payloads selected by provider/model emulate keys.
+	Emulation EmulationConfig `json:"emulation,omitzero" yaml:"emulation,omitempty"`
 }
 
 // WebFetchConfig controls WebFetch runtime behavior.

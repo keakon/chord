@@ -758,6 +758,10 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 		}
 		rc.Config.Providers[providerName] = normalized
 	}
+	// Attach the emulation payload definitions and validate every emulate
+	// selector after preset normalization, so the merged view is what requests
+	// read and a selector that cannot work is reported where it was written.
+	rc.Diagnostics = append(rc.Diagnostics, ApplyEmulation(rc.Config)...)
 
 	rc.ExplainEvidence.finalize(rc.Diagnostics)
 	rc.CatalogVersion = modelcatalogVersion()

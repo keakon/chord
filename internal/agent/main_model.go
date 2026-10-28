@@ -373,7 +373,7 @@ func (a *MainAgent) swapLLMClientWithRefLocked(newClient *llm.Client, modelName 
 	a.llmMu.Lock()
 	oldClient := a.llmClient
 	oldRunningRef := a.runningModelRef
-	a.ensureLLMSessionID(newClient)
+	a.ensureLLMSessionIdentity(newClient)
 	a.llmClient = newClient
 	a.forgetHostedCaller("")
 	a.modelName = modelName
@@ -884,8 +884,11 @@ func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *
 			return fmt.Errorf("create LLM client for %q: %w", ref, err)
 		}
 		a.applyServiceTierToClient(client)
+		// switchModel below re-applies the SubAgent's own cache key, but only
+		// when it has one: prime the session this delegated thread belongs to so
+		// an instance without its own session key still carries an identity.
 		if sid := strings.TrimSpace(filepath.Base(a.sessionDir)); sid != "" && sid != "." {
-			client.SetSessionID(sid)
+			client.SetSessionIdentity(llm.SessionIdentity{Key: sid, SubAgent: true})
 		}
 		sub.switchModel(client, modelName, ctxLimit)
 		a.modelPoolPolicy.SetLastPicked(agentName, pool, client.PrimaryModelRef())

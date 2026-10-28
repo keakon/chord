@@ -517,7 +517,7 @@ func (o *OpenAIProvider) CompleteStream(
 
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	applyProviderAuthHeader(req.Header, o.provider.AuthScheme(), apiKey)
-	setProviderLLMUserAgent(req.Header, o.provider)
+	setProviderLLMUserAgent(req.Header, o.provider, "")
 	applySessionIDHeaders(req.Header, tuning.SessionKey)
 
 	// Apply request body compression if configured

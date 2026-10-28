@@ -58,9 +58,9 @@ type Client struct {
 	activeVariant          string // name of the currently applied variant (empty = none)
 
 	systemPrompt string
-	// sessionKey is the per-Client session identity for provider-side
-	// prompt-cache routing; see SetSessionID.
-	sessionKey         string
+	// sessionIdentity is the per-Client session identity for provider-side
+	// prompt-cache routing; see SetSessionIdentity.
+	sessionIdentity    SessionIdentity
 	lastInputTokens    int             // tracks last known input token count for context size checks
 	fallbackModels     []FallbackModel // ordered list of remaining model-pool entries after the current cursor head
 	poolCursor         int             // sticky cursor over the effective model pool; success pins, failure advances
@@ -1171,7 +1171,9 @@ func (c *Client) CompleteStreamWithOptions(
 	if override, ok := c.consumeRequestTuningOverrideLocked(); ok {
 		requestTuning = mergeRequestTuning(requestTuning, override)
 	}
-	requestTuning.SessionKey = c.sessionKey
+	requestTuning.SessionKey = c.sessionIdentity.Key
+	requestTuning.WindowNumber = c.sessionIdentity.WindowNumber
+	requestTuning.SubAgentSession = c.sessionIdentity.SubAgent
 	startRef := modelRefWithVariant(start)
 	c.attemptModelRef = startRef
 	startLimit := start.ContextLimit

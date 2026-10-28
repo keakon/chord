@@ -218,7 +218,7 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 	if opts.variant != "" {
 		poolRef += "@" + opts.variant
 	}
-	if opts.compress != "" && opts.compress != "off" && opts.compress != config.RequestCompressionGzip && opts.compress != config.RequestCompressionZstd {
+	if opts.compress != "" && opts.compress != config.RequestCompressionOff && opts.compress != config.RequestCompressionGzip && opts.compress != config.RequestCompressionZstd {
 		return fmt.Errorf("invalid request compression %q; choose off, gzip or zstd", opts.compress)
 	}
 
@@ -630,11 +630,10 @@ func editConfigYAMLForAdd(current []byte, e configAddEdit) ([]byte, error) {
 		}
 	}
 	if e.compress != "" {
-		value := e.compress
-		if value == "off" {
-			value = ""
-		}
-		if err := editor.scalar(providerNode, "compress", value); err != nil {
+		// "off" is written as itself: an omitted compress is the preset default
+		// now, which would re-enable zstd on a codex provider the user just
+		// turned compression off for.
+		if err := editor.scalar(providerNode, "compress", e.compress); err != nil {
 			return nil, err
 		}
 	}

@@ -120,8 +120,10 @@ func gzipCompress(data []byte) ([]byte, error) {
 // a single encoder serves every in-flight request.
 var sharedZstdEncoder = sync.OnceValue(func() *zstd.Encoder {
 	// Concurrency 1 keeps the one-time construction from spawning a goroutine
-	// per CPU that EncodeAll would never use.
-	enc, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+	// per CPU that EncodeAll would never use. The level is pinned rather than
+	// left to the library default so a dependency bump cannot silently change
+	// the compression tier the Codex backend sees.
+	enc, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderLevel(zstd.SpeedDefault))
 	if err != nil {
 		log.Errorf("zstd encoder unavailable, request bodies will be sent uncompressed error=%v", err)
 		return nil
@@ -129,9 +131,8 @@ var sharedZstdEncoder = sync.OnceValue(func() *zstd.Encoder {
 	return enc
 })
 
-// zstdCompress compresses data using zstd at the default level
-// (SpeedDefault, roughly zstd level 3) — the same codec and tier the Codex
-// client uses for codex-backend request bodies.
+// zstdCompress compresses data using zstd at level 3 (SpeedDefault) — the same
+// codec and tier the Codex client uses for codex-backend request bodies.
 func zstdCompress(data []byte) ([]byte, error) {
 	enc := sharedZstdEncoder()
 	if enc == nil {

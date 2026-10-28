@@ -123,7 +123,7 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 		}
 		return nil, fmt.Errorf("model pool has no usable refs")
 	}
-	return a.bindAuxExecutionGate(newAuxClientFromPool(pool, selectedIdx, outputMax, a.ServiceTier())), nil
+	return a.bindAuxClientSession(newAuxClientFromPool(pool, selectedIdx, outputMax, a.ServiceTier())), nil
 }
 
 func newAuxClientFromPool(pool []llm.FallbackModel, selectedIdx int, outputMax int, serviceTier config.ServiceTier) *llm.Client {

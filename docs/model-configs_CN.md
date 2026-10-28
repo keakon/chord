@@ -135,6 +135,6 @@ Chord 的 `thinking.*` 键与 wire 无关，但把 `/v1/chat/completions` 翻译
 
 compat 按字段继承，显式模型值及 provider 值优先于目录默认值。其他已有模型配置块按用户配置保留，目录只填充缺失的块；将块设为 `null` 会阻止目录重新填充。模型压缩建议只补齐未设置的字段。显式设置全局或模型 `threshold` 时，目录不再填充缺省的 `reminder`，提醒线按有效阈值派生；显式全局 reminder 也优先于目录建议。模型显式值仍优先于全局设置。
 
-请求体压缩和上下文 compaction 是两件事。自动添加的 provider 默认不启用请求体压缩，包括官方连接。目录中记录的 Codex `zstd`、Anthropic `gzip` 支持信息仅供参考。确认端点支持后，用户可手动设置 provider 的 `compress: gzip` 或 `compress: zstd`；添加模型会保留已有的显式压缩设置。
+请求体压缩和上下文 compaction 是两件事。自动添加的 provider 默认按原文发送请求体，只有 `preset: codex` 例外——它像 Codex 客户端一样发送 `zstd` 压缩的请求体。目录中记录的 Codex `zstd`、Anthropic `gzip` 支持信息仅供参考。要覆盖 preset 默认值，把 provider 的 `compress` 设为 `gzip`、`zstd` 或 `off`；添加模型会保留已有的显式压缩设置。
 
 模型文档中的推理档位可能多于某个托管端点已验证的变体。Opus 5.5 配方采用官方默认的 `medium` effort；用户的显式配置仍然优先。

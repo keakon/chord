@@ -812,7 +812,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	s.tools.Register(tools.NewToolSearchTool(s))
 	prompt := s.buildSystemPrompt()
 	cfg.LLMClient.SetSystemPrompt(prompt)
-	s.setSessionID(cfg.LLMClient)
+	s.setSessionIdentity(cfg.LLMClient)
 	ctxMgr.SetSystemPrompt(message.Message{
 		Role:    "system",
 		Content: prompt,
@@ -880,7 +880,7 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 	s.frozenToolDefs = append([]message.ToolDefinition(nil), toolDefs...)
 	s.llmMu.Unlock()
 	prompt := s.buildSystemPrompt()
-	s.setSessionID(client)
+	s.setSessionIdentity(client)
 	if oldClient != nil && oldClient != client {
 		oldClient.Close()
 	}
@@ -947,11 +947,13 @@ func (s *SubAgent) sessionCacheKey() string {
 	return base + ":sub:" + s.instanceID
 }
 
-// setSessionID applies the SubAgent's cache identity to an LLM client. It must
-// be called on every client the SubAgent installs (construction and model
+// setSessionIdentity applies the SubAgent's cache identity to an LLM client. It
+// must be called on every client the SubAgent installs (construction and model
 // switches), because the identity lives on the Client, not on the shared
-// provider impl.
-func (s *SubAgent) setSessionID(client *llm.Client) {
+// provider impl. The context window number stays at zero: a SubAgent's own
+// transcript is what its thread covers, so the MainAgent's durable compactions
+// must not move the delegated thread's cache partition.
+func (s *SubAgent) setSessionIdentity(client *llm.Client) {
 	if s.parent != nil {
 		client.SetExecutionGate(s.parent.sessionExecutionGate(), s.taskID)
 	}
@@ -959,7 +961,7 @@ func (s *SubAgent) setSessionID(client *llm.Client) {
 		return
 	}
 	if key := s.sessionCacheKey(); key != "" {
-		client.SetSessionID(key)
+		client.SetSessionIdentity(llm.SessionIdentity{Key: key, SubAgent: true})
 	}
 }
 

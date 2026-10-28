@@ -34,9 +34,25 @@ func setDefaultLLMUserAgent(headerSetter interface{ Set(string, string) }) {
 	headerSetter.Set(headerUserAgent, defaultLLMUserAgent())
 }
 
-func setProviderLLMUserAgent(headerSetter interface{ Set(string, string) }, provider *ProviderConfig) {
+// setProviderLLMUserAgent sets the User-Agent for one request: an explicit
+// provider user_agent wins, then the client identity the request's emulate
+// selector resolves to (model override first), then Chord's own agent. An empty
+// model resolves the provider-level selector only.
+func setProviderLLMUserAgent(headerSetter interface{ Set(string, string) }, provider *ProviderConfig, model string) {
 	if provider != nil {
 		if userAgent := provider.UserAgent(); userAgent != "" {
+			headerSetter.Set(headerUserAgent, userAgent)
+			return
+		}
+		// A request presenting as the Codex client gets that client's own
+		// header; an explicit provider user_agent still wins.
+		if userAgent := provider.codexEmulationUserAgent(model); userAgent != "" {
+			headerSetter.Set(headerUserAgent, userAgent)
+			return
+		}
+		// The Claude Code agent is the Messages-wire counterpart of the Codex
+		// one and mutually exclusive with it by provider type.
+		if userAgent := provider.claudeEmulationUserAgent(model); userAgent != "" {
 			headerSetter.Set(headerUserAgent, userAgent)
 			return
 		}

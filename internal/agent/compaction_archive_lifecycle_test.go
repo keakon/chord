@@ -157,6 +157,9 @@ func TestStopCompactionForSessionSwitchDiscardsReadyDraft(t *testing.T) {
 	if a.IsCompactionRunning() {
 		t.Fatal("completed compaction state should be cleared")
 	}
+	if got := a.mainSessionIdentity(a.sessionDir).WindowNumber; got != 0 {
+		t.Fatalf("discarded draft advanced window: %d", got)
+	}
 }
 
 func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
@@ -180,6 +183,9 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 	}
 	if meta.Status != compactionHistoryPending {
 		t.Fatalf("pending meta status = %q, want %q", meta.Status, compactionHistoryPending)
+	}
+	if got := a.mainSessionIdentity(a.sessionDir).WindowNumber; got != 0 {
+		t.Fatalf("pending export advanced window: %d", got)
 	}
 	exportedAt := meta.ExportedAt
 	if exportedAt.IsZero() {

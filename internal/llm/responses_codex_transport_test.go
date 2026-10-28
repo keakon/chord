@@ -145,7 +145,11 @@ func TestResponsesProvider_RequestOverridesDisableCodexWebSocket(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		httpCalls++
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+		body, err := readRequestBody(r)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &gotBody); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")

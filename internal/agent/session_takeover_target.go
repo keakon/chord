@@ -151,7 +151,7 @@ func (a *MainAgent) handleTakeoverTarget(req sessionTakeoverTarget) {
 	if notice := a.adoptResumedSessionCheckout(a.parentCtx, loaded.RecordedWorkDir); notice != "" {
 		a.emitToTUI(ToastEvent{Message: notice, Level: "warning"})
 	}
-	a.llmClient.SetSessionID(req.sessionID)
+	a.llmClient.SetSessionIdentity(a.mainSessionIdentity(a.SessionDir()))
 	// Publish restoration only after the new binding and input admission are
 	// ready, so event consumers and the caller observe the completed switch.
 	a.finishSessionSwitch()

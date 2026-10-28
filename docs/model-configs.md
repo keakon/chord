@@ -235,11 +235,12 @@ derived from the effective threshold. An explicit global reminder also takes
 priority over a catalog hint. Explicit model values take priority over the
 global settings.
 
-Request-body compression is separate from context compaction. It is disabled
-by default for all automatically added providers, including official ones.
-The catalog records known endpoint support (`zstd` for Codex, `gzip` for
-Anthropic) as reference information. To enable it, set provider `compress: gzip`
-or `compress: zstd` after confirming endpoint support. Adding a model preserves
+Request-body compression is separate from context compaction. Automatically
+added providers send uncompressed bodies, except providers using
+`preset: codex`, which send `zstd` the way the Codex client does. The catalog
+records known endpoint support (`zstd` for Codex, `gzip` for Anthropic) as
+reference information. To override the preset default, set provider
+`compress: gzip`, `compress: zstd` or `compress: off`. Adding a model preserves
 an existing explicit compression setting.
 
 Documented model reasoning options may exceed the variants verified on a

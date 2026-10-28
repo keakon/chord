@@ -627,7 +627,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	// the session directory was final (or by a path that predates it) would
 	// otherwise send its first request without the Responses prompt-cache key
 	// and client metadata some relays require.
-	a.ensureLLMSessionID(llmClient)
+	a.ensureLLMSessionIdentity(llmClient)
 	filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient)
 	messages = filtered
 	if dropped.any() {

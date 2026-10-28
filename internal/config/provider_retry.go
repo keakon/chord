@@ -34,11 +34,13 @@ func ValidateProviderRetry(providerName string, cfg ProviderConfig) error {
 }
 
 // validRequestCompression reports whether v is a supported upstream request
-// body compression encoding ("" disables compression). Shared by validation
-// and by the tolerant loader's reset so both sides agree on what is invalid.
+// body compression setting. "" leaves the choice to the provider preset and
+// RequestCompressionOff disables request compression explicitly. Shared by
+// validation and by the tolerant loader's reset so both sides agree on what is
+// invalid.
 func validRequestCompression(v string) bool {
 	switch strings.TrimSpace(v) {
-	case "", RequestCompressionGzip, RequestCompressionZstd:
+	case "", RequestCompressionOff, RequestCompressionGzip, RequestCompressionZstd:
 		return true
 	}
 	return false
@@ -54,9 +56,9 @@ func ValidateProviderCompression(providerName string, cfg ProviderConfig) error 
 		return nil
 	}
 	if v == "true" || v == "false" {
-		return fmt.Errorf("compress value %q for provider %q is the removed boolean form; set compress to %q or %q, or remove the field to disable request compression", cfg.Compress, providerName, RequestCompressionGzip, RequestCompressionZstd)
+		return fmt.Errorf("compress value %q for provider %q is the removed boolean form; set compress to %q or %q, or use %q to disable request compression", cfg.Compress, providerName, RequestCompressionGzip, RequestCompressionZstd, RequestCompressionOff)
 	}
-	return fmt.Errorf("invalid compress value %q for provider %q (allowed: %q, %q)", cfg.Compress, providerName, RequestCompressionGzip, RequestCompressionZstd)
+	return fmt.Errorf("invalid compress value %q for provider %q (allowed: %q, %q, %q)", cfg.Compress, providerName, RequestCompressionOff, RequestCompressionGzip, RequestCompressionZstd)
 }
 
 // ValidateProviderRuntime validates provider settings used during runtime setup.

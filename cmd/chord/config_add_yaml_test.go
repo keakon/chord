@@ -141,7 +141,7 @@ func TestConfigAddYAMLSharedCompression(t *testing.T) {
 	if got := configAddYAMLValue(t, edited, "providers", "peer", "compress"); got != "gzip" {
 		t.Fatalf("peer compression changed: %v", got)
 	}
-	if got := configAddYAMLValue(t, edited, "providers", "sample", "compress"); got != "" {
+	if got := configAddYAMLValue(t, edited, "providers", "sample", "compress"); got != "off" {
 		t.Fatalf("selected compression was not disabled: %v", got)
 	}
 }

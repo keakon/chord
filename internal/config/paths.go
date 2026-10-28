@@ -18,6 +18,18 @@ import (
 const (
 	DefaultConfigDirName = "chord"
 	projectMetaFileName  = "project.json"
+	// CodexDeviceIDFileName is where Chord persists its own machine-level device id,
+	// used when the Codex CLI has not written one. It is not named installation_id:
+	// that name is shared by several agents whose ids are not interchangeable.
+	CodexDeviceIDFileName = "codex_device_id"
+	// CodexInstallationIDFileName is the installation id file the Codex CLI writes
+	// under ~/.codex. Chord prefers it so both clients report the same device id.
+	CodexInstallationIDFileName = "installation_id"
+	// ClaudeDeviceIDFileName is where Chord persists its own machine-level device
+	// id for the Claude Code emulation. It is deliberately separate from
+	// codex_device_id and from Claude Code's own ~/.claude.json userID: the three
+	// are different clients' identities and are not interchangeable.
+	ClaudeDeviceIDFileName = "claude_device_id"
 )
 
 type PathsConfig struct {
@@ -108,6 +120,36 @@ func ConfigPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(h, "config.yaml"), nil
+}
+
+// CodexDeviceIDPath is Chord's own machine-level device id, the fallback used
+// when the Codex CLI has not written ~/.codex/installation_id.
+func CodexDeviceIDPath() (string, error) {
+	h, err := ConfigHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, CodexDeviceIDFileName), nil
+}
+
+// CodexInstallationIDPath is the installation id file written by the Codex CLI
+// itself. Chord reuses it when present so both clients report the same device id.
+func CodexInstallationIDPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home directory: %w", err)
+	}
+	return filepath.Join(home, ".codex", CodexInstallationIDFileName), nil
+}
+
+// ClaudeDeviceIDPath is Chord's own machine-level device id for the Claude Code
+// emulation, persisted under the config home next to codex_device_id.
+func ClaudeDeviceIDPath() (string, error) {
+	h, err := ConfigHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, ClaudeDeviceIDFileName), nil
 }
 
 // ModelCatalogCachePath is the refresh cache of the model catalog: the full

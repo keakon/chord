@@ -297,36 +297,30 @@ func TestResponsesProvider_SendsSessionHeadersAndPromptCacheKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
-	if got := gotBody["prompt_cache_key"]; got != "session-123" {
-		t.Fatalf("prompt_cache_key = %v, want session-123", got)
+	wire := deriveResponsesWireIdentity("session-123", 0, false)
+	if got := gotBody["prompt_cache_key"]; got != wire.sessionID {
+		t.Fatalf("prompt_cache_key = %v, want the derived client id %q", got, wire.sessionID)
 	}
-	if got := gotHeader.Get("X-Session-Id"); got != "session-123" {
-		t.Fatalf("X-Session-Id = %q, want session-123", got)
+	for _, name := range []string{"X-Session-Id", "session-id", "thread-id", "x-client-request-id"} {
+		if got := gotHeader.Get(name); got != wire.sessionID {
+			t.Fatalf("%s = %q, want %q", name, got, wire.sessionID)
+		}
 	}
-	if got := gotHeader.Get("session-id"); got != "session-123" {
-		t.Fatalf("session-id = %q, want session-123", got)
-	}
-	if got := gotHeader.Get("thread-id"); got != "session-123" {
-		t.Fatalf("thread-id = %q, want session-123", got)
-	}
-	if got := gotHeader.Get("x-client-request-id"); got != "session-123" {
-		t.Fatalf("x-client-request-id = %q, want session-123", got)
-	}
-	if got := gotHeader.Get(responsesClientMetadataWindowID); got != "session-123:0" {
-		t.Fatalf("x-codex-window-id = %q, want session-123:0", got)
+	if got := gotHeader.Get(responsesClientMetadataWindowID); got != wire.windowID {
+		t.Fatalf("x-codex-window-id = %q, want %q", got, wire.windowID)
 	}
 	metadata, ok := gotBody["client_metadata"].(map[string]any)
 	if !ok {
 		t.Fatalf("client_metadata = %#v, want object", gotBody["client_metadata"])
 	}
-	if got := metadata[responsesClientMetadataSessionID]; got != "session-123" {
-		t.Fatalf("client_metadata session_id = %#v, want session-123", got)
+	if got := metadata[responsesClientMetadataSessionID]; got != wire.sessionID {
+		t.Fatalf("client_metadata session_id = %#v, want %q", got, wire.sessionID)
 	}
-	if got := metadata[responsesClientMetadataThreadID]; got != "session-123" {
-		t.Fatalf("client_metadata thread_id = %#v, want session-123", got)
+	if got := metadata[responsesClientMetadataThreadID]; got != wire.sessionID {
+		t.Fatalf("client_metadata thread_id = %#v, want %q", got, wire.sessionID)
 	}
-	if got := metadata[responsesClientMetadataWindowID]; got != "session-123:0" {
-		t.Fatalf("client_metadata window_id = %#v, want session-123:0", got)
+	if got := metadata[responsesClientMetadataWindowID]; got != wire.windowID {
+		t.Fatalf("client_metadata window_id = %#v, want %q", got, wire.windowID)
 	}
 	installationID, ok := metadata[responsesClientMetadataInstallationID].(string)
 	if !ok || installationID == "" {
@@ -346,8 +340,23 @@ func TestResponsesProvider_SendsSessionHeadersAndPromptCacheKey(t *testing.T) {
 	if err := json.Unmarshal([]byte(turnMetadataRaw), &turnMetadata); err != nil {
 		t.Fatalf("turn metadata is not valid JSON: %v", err)
 	}
-	if got := turnMetadata["session_id"]; got != "session-123" {
-		t.Fatalf("turn metadata session_id = %#v, want session-123", got)
+	if got := turnMetadata["session_id"]; got != wire.sessionID {
+		t.Fatalf("turn metadata session_id = %#v, want %q", got, wire.sessionID)
+	}
+	if got := turnMetadata["thread_id"]; got != wire.sessionID {
+		t.Fatalf("turn metadata thread_id = %#v, want %q", got, wire.sessionID)
+	}
+	if got := turnMetadata["thread_source"]; got != codexThreadSourceUser {
+		t.Fatalf("turn metadata thread_source = %#v, want %q", got, codexThreadSourceUser)
+	}
+	if got := turnMetadata["window_id"]; got != wire.windowID {
+		t.Fatalf("turn metadata window_id = %#v, want %q", got, wire.windowID)
+	}
+	if got := turnMetadata["context_window_id"]; got != wire.contextWindowID {
+		t.Fatalf("turn metadata context_window_id = %#v, want %q", got, wire.contextWindowID)
+	}
+	if got := turnMetadata["window_number"]; got != float64(0) {
+		t.Fatalf("turn metadata window_number = %#v, want 0", got)
 	}
 	if got := turnMetadata["installation_id"]; got != installationID {
 		t.Fatalf("turn metadata installation_id = %#v, want %q", got, installationID)

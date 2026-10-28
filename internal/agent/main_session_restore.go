@@ -889,7 +889,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		a.delivery.restoredNextInputsBlocked = true
 		a.publishInputDelivery()
 	}
-	a.ensureLLMSessionID(a.llmClient)
+	a.ensureLLMSessionIdentity(a.llmClient)
 	if a.usageLedger != nil {
 		a.usageLedger.Close()
 	}
@@ -1644,7 +1644,7 @@ func (a *MainAgent) RestoreSessionAtStartup() error {
 	a.startupResumeLoadedAt = time.Now()
 	a.stateMu.Unlock()
 	log.Infof("session restored at startup session=%v message_count=%v todo_count=%v", result.SessionPath, result.MessageCount, result.TodoCount)
-	a.llmClient.SetSessionID(filepath.Base(result.SessionPath))
+	a.llmClient.SetSessionIdentity(a.mainSessionIdentity(result.SessionPath))
 	a.emitToTUI(ToastEvent{Message: result.infoMessage(), Level: "info"})
 	return nil
 }
@@ -1721,7 +1721,7 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 
 	log.Infof("session resumed via /resume source_session=%v message_count=%v todo_count=%v", result.SessionPath, result.MessageCount, result.TodoCount)
 
-	a.llmClient.SetSessionID(targetID)
+	a.llmClient.SetSessionIdentity(a.mainSessionIdentity(a.SessionDir()))
 	a.emitToTUI(SessionRestoredEvent{})
 	a.publishRestoredQuestions()
 	a.emitToTUI(ToastEvent{Message: result.infoMessage(), Level: "info"})

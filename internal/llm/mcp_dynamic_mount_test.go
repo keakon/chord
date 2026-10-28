@@ -113,7 +113,7 @@ func TestDynamicMCPWireItemsPreserveMessagePosition(t *testing.T) {
 	}
 
 	responses := convertMessagesToResponses("", messages)
-	if len(responses) != 4 || responses[1].Type != "additional_tools" || responses[1].Role != responsesAdditionalToolsRole || len(responses[1].Tools) != 1 {
+	if len(responses) != 4 || responses[1].Type != "additional_tools" || responses[1].Role != responsesDeveloperItemRole || len(responses[1].Tools) != 1 {
 		t.Fatalf("Responses dynamic mount = %#v", responses)
 	}
 }

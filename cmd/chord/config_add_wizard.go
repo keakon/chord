@@ -100,13 +100,14 @@ func guideConfigAdd(opts configAddOptions, providerName, wireModel string, provi
 	}
 	compression := opts.compress
 	if compression == "" {
-		compression = provider.Compress
+		// Show what the provider sends today, preset default included.
+		compression = config.EffectiveRequestCompression(provider.Preset, provider.Compress)
 	}
 	if compression == "" {
-		compression = "off"
+		compression = config.RequestCompressionOff
 	}
 	fmt.Fprintln(t.out, "Request compression applies to every model on this provider; enable it only if the endpoint supports it.")
-	value, err := configAddMenu(t, "Request compression", []string{"off", config.RequestCompressionGzip, config.RequestCompressionZstd}, compression, "")
+	value, err := configAddMenu(t, "Request compression", []string{config.RequestCompressionOff, config.RequestCompressionGzip, config.RequestCompressionZstd}, compression, "")
 	if err != nil {
 		return opts, err
 	}
@@ -227,12 +228,12 @@ func confirmConfigAdd(t *setupTerminal, providerName, wireModel string, provider
 	if edit.providerNew {
 		apiURL = edit.apiURL
 	}
-	compression := provider.Compress
+	compression := config.EffectiveRequestCompression(provider.Preset, provider.Compress)
 	if edit.compress != "" {
 		compression = edit.compress
 	}
 	if compression == "" {
-		compression = "off"
+		compression = config.RequestCompressionOff
 	}
 	fmt.Fprintf(t.out, "Configuration to save:\n  model: %s/%s\n  API URL: %s\n  pool: %s -> %s\n  request compression: %s\n", providerName, wireModel, redactConfigURL(apiURL), edit.poolName, edit.poolRef, compression)
 	if edit.borrowID != "" {

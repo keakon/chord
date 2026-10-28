@@ -1052,7 +1052,7 @@ func (a *MainAgent) newMemoryExtractionClient(rotation int) (*llm.Client, error)
 		return nil, fmt.Errorf("main model pool has no usable entries")
 	}
 	client := newAuxClientFromPool(pool, selectedIdx+rotation, 0, a.ServiceTier())
-	a.bindAuxExecutionGate(client)
+	a.bindAuxClientSession(client)
 	client.SetStreamRetryRounds(1)
 	return client, nil
 }

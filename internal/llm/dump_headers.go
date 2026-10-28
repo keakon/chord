@@ -10,12 +10,20 @@ func dumpRequestHeaders(headers http.Header) http.Header {
 		name = http.CanonicalHeaderKey(name)
 		switch name {
 		case headerContentType, headerContentEncoding, headerAcceptEncoding,
-			headerUserAgent, headerOpenAIBeta, "Accept", "Originator",
+			headerUserAgent, headerOpenAIBeta, headerAccept, headerOriginator,
 			headerXSessionID, headerSessionID, headerThreadID, headerClientRequestID,
 			http.CanonicalHeaderKey(responsesClientMetadataInstallationID),
 			http.CanonicalHeaderKey(responsesClientMetadataWindowID),
 			http.CanonicalHeaderKey(responsesClientMetadataTurnMetadata),
-			"Anthropic-Version", "Anthropic-Beta", "X-App":
+			"Anthropic-Version", "Anthropic-Beta", "X-App",
+			headerAnthropicDangerousDirectBrowserAccess,
+			headerXClaudeCodeSessionID,
+			headerXStainlessLang, headerXStainlessRuntime,
+			// "OS" is not its own canonical form: Go canonicalizes the name to
+			// X-Stainless-Os when the header is set.
+			http.CanonicalHeaderKey(headerXStainlessOS), headerXStainlessArch,
+			headerXStainlessPackageVersion, headerXStainlessRuntimeVersion,
+			headerXStainlessRetryCount, headerXStainlessTimeout:
 			if result == nil {
 				result = make(http.Header)
 			}
