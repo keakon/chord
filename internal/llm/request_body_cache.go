@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"net/http"
 	"sync"
 
 	"github.com/keakon/chord/internal/message"
@@ -78,6 +79,15 @@ type requestBodyReuse struct {
 	guard  requestBodyIdentity
 	cached []byte
 	extra  any
+
+	// Compression memo for the cached body: compressBodyBytes is
+	// deterministic in (body bytes, encoding), so a key-rotation retry burst
+	// reuses the compressed bytes instead of recompressing a large body per
+	// attempt. compBytes==nil with compValid=true caches a "send uncompressed"
+	// outcome (compression failed or did not reduce size).
+	compValid bool
+	compEnc   string
+	compBytes []byte
 }
 
 // body returns the cached body for identical inputs, or builds and caches it.
@@ -103,5 +113,44 @@ func (r *requestBodyReuse) bodyWithExtra(identity requestBodyIdentity, build fun
 		return nil, nil, err
 	}
 	r.guard, r.cached, r.extra, r.valid = identity, body, extra, true
+	r.compValid = false
+	r.compBytes = nil
 	return body, extra, nil
+}
+
+// compressBody compresses the cached body for the configured encoding,
+// memoizing the result across the target's key-attempt loop. When bodyBytes
+// is not the currently cached body (identity changed), the compression runs
+// uncached like compressRequestBody.
+func (r *requestBodyReuse) compressBody(identity requestBodyIdentity, req *http.Request, bodyBytes []byte, encoding string) (*http.Request, []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !(r.valid && r.guard == identity) {
+		return compressRequestBody(req, bodyBytes, encoding)
+	}
+	if r.compValid && r.compEnc == encoding {
+		if len(r.compBytes) == 0 {
+			return req, bodyBytes
+		}
+		newReq, err := applyCompressedBody(req, r.compBytes, r.compEnc)
+		if err != nil {
+			// Keep serving this attempt uncompressed; the cached compressed
+			// bytes stay valid for attempts that build their request cleanly.
+			return req, bodyBytes
+		}
+		return newReq, r.compBytes
+	}
+	compressed, contentEncoding, ok := compressBodyBytes(bodyBytes, encoding)
+	r.compValid = true
+	r.compEnc = encoding
+	if !ok {
+		r.compBytes = nil
+		return req, bodyBytes
+	}
+	r.compBytes = compressed
+	newReq, err := applyCompressedBody(req, compressed, contentEncoding)
+	if err != nil {
+		return req, bodyBytes
+	}
+	return newReq, compressed
 }

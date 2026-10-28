@@ -5,6 +5,7 @@ package shellanalysis
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -48,7 +49,49 @@ type Subcommand struct {
 // (GIT_EXEC_PATH), and no rule can tell a harmless name from a decisive one, so
 // a narrow allow rule that only covers the bare command text must not decide
 // the outcome on its own.
+//
+// The result is served from a bounded memo (see analyzeCache); treat the
+// returned Analysis as read-only.
 func Analyze(command string) (Analysis, error) {
+	return analyzeCached(command)
+}
+
+// analyzeCache memoizes parse results: Analyze is pure over the command
+// string, while permission evaluation, the speculative streaming policy, and
+// the request-surface reduction re-parse the same command several times per
+// call chain. Entries are shared by reference, so callers must not mutate the
+// returned Analysis or its slices. The cache is bounded so a long-lived
+// process cannot grow it without limit: once full, new commands are still
+// analyzed correctly, they just are not retained.
+const maxShellAnalysisCacheEntries = 2048
+
+type shellAnalysisResult struct {
+	analysis Analysis
+	err      error
+}
+
+var shellAnalysisCache = struct {
+	sync.Mutex
+	entries map[string]shellAnalysisResult
+}{entries: make(map[string]shellAnalysisResult)}
+
+func analyzeCached(command string) (Analysis, error) {
+	shellAnalysisCache.Lock()
+	entry, ok := shellAnalysisCache.entries[command]
+	shellAnalysisCache.Unlock()
+	if ok {
+		return entry.analysis, entry.err
+	}
+	analysis, err := analyzeUncached(command)
+	shellAnalysisCache.Lock()
+	if len(shellAnalysisCache.entries) < maxShellAnalysisCacheEntries {
+		shellAnalysisCache.entries[command] = shellAnalysisResult{analysis: analysis, err: err}
+	}
+	shellAnalysisCache.Unlock()
+	return analysis, err
+}
+
+func analyzeUncached(command string) (Analysis, error) {
 	analysis := Analysis{
 		RawCommand: command,
 		ParseMode:  "fallback",

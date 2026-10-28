@@ -204,7 +204,7 @@ func TestParseSSEStreamCapturesHostedToolCalls(t *testing.T) {
 	var streamed []message.StreamDelta
 	resp, err := parseSSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
 		streamed = append(streamed, delta)
-	}, nil, false)
+	}, nil, false, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestParseSSEStreamCapturesHostedToolErrorsAndPending(t *testing.T) {
 			`data: {"type":"message_stop"}`,
 			"",
 		}, "\n")
-		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
+		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false, false)
 		if err != nil {
 			t.Fatalf("parseSSEStream: %v", err)
 		}
@@ -305,7 +305,7 @@ func TestParseSSEStreamCapturesHostedToolErrorsAndPending(t *testing.T) {
 			`data: {"type":"message_stop"}`,
 			"",
 		}, "\n")
-		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
+		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false, false)
 		if err != nil {
 			t.Fatalf("parseSSEStream: %v", err)
 		}
@@ -330,7 +330,7 @@ func TestParseSSEStreamCapturesHostedToolErrorsAndPending(t *testing.T) {
 			`data: {"type":"message_stop"}`,
 			"",
 		}, "\n")
-		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
+		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false, false)
 		if err != nil {
 			t.Fatalf("parseSSEStream: %v", err)
 		}
@@ -352,7 +352,7 @@ func TestParseSSEStreamCapturesHostedToolErrorsAndPending(t *testing.T) {
 			`data: {"type":"message_stop"}`,
 			"",
 		}, "\n")
-		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
+		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false, false)
 		if err != nil {
 			t.Fatalf("parseSSEStream: %v", err)
 		}
@@ -378,7 +378,7 @@ func TestParseSSEStreamCapturesHostedToolErrorsAndPending(t *testing.T) {
 			`data: {"type":"message_stop"}`,
 			"",
 		}, "\n")
-		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
+		resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false, false)
 		if err != nil {
 			t.Fatalf("parseSSEStream: %v", err)
 		}

@@ -259,7 +259,8 @@ func (g *GeminiProvider) CompleteStream(
 	// tuning) plus static provider config — not on the API key. Caching it per
 	// target lets key rotation resend the identical bytes instead of
 	// re-converting and re-marshaling the full history on every attempt.
-	bodyBytes, err := g.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, strings.TrimSpace(tuning.SessionKey)), func() ([]byte, error) {
+	bodyIdentity := requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, strings.TrimSpace(tuning.SessionKey))
+	bodyBytes, err := g.bodyReuse.body(bodyIdentity, func() ([]byte, error) {
 		contents := convertMessagesToGemini(messages)
 		if geminiRequiresThoughtSignature(g.provider, model) {
 			ensureGeminiActiveLoopSignatures(contents)
@@ -330,7 +331,7 @@ func (g *GeminiProvider) CompleteStream(
 	req.Header.Set("x-goog-api-key", apiKey)
 	setProviderLLMUserAgent(req.Header, g.provider)
 
-	req, _ = compressRequestBody(req, bodyBytes, g.provider.RequestCompression())
+	req, _ = g.bodyReuse.compressBody(bodyIdentity, req, bodyBytes, g.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)
 
 	var requestHeaders http.Header
@@ -842,7 +843,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			continue
 		}
 
-		chunk, err := decodeGeminiStreamChunk(data, false)
+		chunk, err := decodeGeminiStreamChunk(data)
 		if err != nil {
 			return nil, fmt.Errorf("parse Gemini stream chunk: %w", err)
 		}

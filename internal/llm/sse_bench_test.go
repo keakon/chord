@@ -405,7 +405,7 @@ func parseSSEBenchFixture(fixture sseBenchFixture) (*message.Response, error) {
 	reader := bytes.NewReader(fixture.BodyBytes)
 	switch fixture.Provider {
 	case "anthropic":
-		return parseSSEStream(reader, nil, nil, false)
+		return parseSSEStream(reader, nil, nil, false, false)
 	case "openai":
 		return parseOpenAISSEStreamOptions(reader, nil, nil, false)
 	case "responses", "responses_ws":

@@ -255,23 +255,29 @@ func (e *CommandEngine) RunAutomation(ctx context.Context, env Envelope) ([]Auto
 	}
 
 	results := make([]AutomationJobResult, 0, len(hooks))
+	var input hookInput
+	inputReady := false
 	for _, h := range hooks {
 		if ok, reason := shouldRunHook(h, env); !ok {
 			logHook(h, env, statusSkipped, "", 0, reason, nil)
 			continue
 		}
+		if !inputReady {
+			input = marshalHookInput(env)
+			inputReady = true
+		}
 
 		if normalizeJoin(h.Join) == JoinBackground {
-			hookDef := h
+			hookDef, hookInput := h, input
 			go func() {
-				if _, err := e.runAutomationHook(ctx, env, hookDef); err != nil {
+				if _, err := e.runAutomationHook(ctx, env, hookDef, hookInput); err != nil {
 					log.Warnf("background automation hook failed point=%v hook_name=%v error=%v", env.Point, hookDef.Name, err)
 				}
 			}()
 			continue
 		}
 
-		result, err := e.runAutomationHook(ctx, env, h)
+		result, err := e.runAutomationHook(ctx, env, h, input)
 		if err != nil {
 			return results, err
 		}
@@ -284,6 +290,8 @@ func (e *CommandEngine) RunAutomation(ctx context.Context, env Envelope) ([]Auto
 func (e *CommandEngine) fireSync(ctx context.Context, env Envelope, hooks []HookDef) (*Result, error) {
 	modified := false
 	data := env.Data
+	var input hookInput
+	inputReady := false
 
 	for _, h := range hooks {
 		env.Data = data
@@ -291,8 +299,12 @@ func (e *CommandEngine) fireSync(ctx context.Context, env Envelope, hooks []Hook
 			logHook(h, env, statusSkipped, "", 0, reason, nil)
 			continue
 		}
+		if !inputReady {
+			input = marshalHookInput(env)
+			inputReady = true
+		}
 
-		output, duration, timedOut, err := executeHook(ctx, h, env)
+		output, duration, timedOut, err := executeHookWithInput(ctx, h, env, input)
 		if err != nil {
 			status := statusFailed
 			if timedOut {
@@ -316,6 +328,7 @@ func (e *CommandEngine) fireSync(ctx context.Context, env Envelope, hooks []Hook
 			if result.Data != nil {
 				data = result.Data
 				modified = true
+				inputReady = false
 			}
 		case "", ActionContinue:
 		default:
@@ -331,13 +344,19 @@ func (e *CommandEngine) fireSync(ctx context.Context, env Envelope, hooks []Hook
 }
 
 func (e *CommandEngine) fireObserver(ctx context.Context, env Envelope, hooks []HookDef) {
+	var input hookInput
+	inputReady := false
 	for _, h := range hooks {
 		if ok, reason := shouldRunHook(h, env); !ok {
 			logHook(h, env, statusSkipped, "", 0, reason, nil)
 			continue
 		}
+		if !inputReady {
+			input = marshalHookInput(env)
+			inputReady = true
+		}
 
-		output, duration, timedOut, err := executeHook(ctx, h, env)
+		output, duration, timedOut, err := executeHookWithInput(ctx, h, env, input)
 		if err != nil {
 			status := statusFailed
 			if timedOut {
@@ -352,10 +371,10 @@ func (e *CommandEngine) fireObserver(ctx context.Context, env Envelope, hooks []
 	}
 }
 
-func (e *CommandEngine) runAutomationHook(ctx context.Context, env Envelope, h HookDef) (AutomationJobResult, error) {
+func (e *CommandEngine) runAutomationHook(ctx context.Context, env Envelope, h HookDef, input hookInput) (AutomationJobResult, error) {
 	retries := h.RetryOnFailure
 	for attempt := 0; ; attempt++ {
-		output, duration, timedOut, err := executeHook(ctx, h, env)
+		output, duration, timedOut, err := executeHookWithInput(ctx, h, env, input)
 		if err != nil {
 			status := statusFailed
 			if timedOut {
@@ -507,7 +526,20 @@ func (b *hookOutputBuffer) Truncated() bool {
 	return b != nil && b.truncated
 }
 
-func executeHook(ctx context.Context, h HookDef, env Envelope) ([]byte, time.Duration, bool, error) {
+// hookInput is a marshaled envelope shared by the hooks of one event. The
+// envelope is identical for every hook at that point, so re-marshaling it per
+// hook (and per automation retry) only burns CPU.
+type hookInput struct {
+	json []byte
+	err  error
+}
+
+func marshalHookInput(env Envelope) hookInput {
+	data, err := json.Marshal(env)
+	return hookInput{json: data, err: err}
+}
+
+func executeHookWithInput(ctx context.Context, h HookDef, env Envelope, input hookInput) ([]byte, time.Duration, bool, error) {
 	timeout := h.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -525,11 +557,10 @@ func executeHook(ctx context.Context, h HookDef, env Envelope) ([]byte, time.Dur
 	}
 	cmd.Env = append(os.Environ(), buildHookEnv(env, h)...)
 
-	inputJSON, err := json.Marshal(env)
-	if err != nil {
-		return nil, 0, false, fmt.Errorf("marshal hook envelope: %w", err)
+	if input.err != nil {
+		return nil, 0, false, fmt.Errorf("marshal hook envelope: %w", input.err)
 	}
-	cmd.Stdin = bytes.NewReader(inputJSON)
+	cmd.Stdin = bytes.NewReader(input.json)
 
 	stdout := &hookOutputBuffer{maxBytes: MaxHookOutputBytes}
 	stderr := &hookOutputBuffer{maxBytes: MaxHookOutputBytes}

@@ -1084,6 +1084,18 @@ func (a *MainAgent) restoreQuestions(msgs []message.Message) {
 }
 
 func filterQuestionStateMessages(messages []message.Message) []message.Message {
+	// Copy-on-write: question state rows are rare, so probe before paying for
+	// a full request-surface copy on every request.
+	hasQuestionState := false
+	for i := range messages {
+		if messages[i].Kind == message.KindQuestionState {
+			hasQuestionState = true
+			break
+		}
+	}
+	if !hasQuestionState {
+		return messages
+	}
 	visible := make([]message.Message, 0, len(messages))
 	for _, msg := range messages {
 		if msg.Kind != message.KindQuestionState {

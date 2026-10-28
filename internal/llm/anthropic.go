@@ -310,13 +310,17 @@ func (a *AnthropicProvider) CompleteStream(
 		return addNativeToolDeclaration(bodyBytes, tuning.nativeTool)
 	}
 	var bodyBytes []byte
+	var bodyIdentity requestBodyIdentity
+	bodyCached := false
 	if tuning.HostedTool != nil || tuning.nativeTool != nil {
 		// Hosted sub-requests bypass the body-reuse cache: the cache identity
 		// deliberately ignores request tuning, and a hosted body differs from a
 		// plain body built from the same (system, messages, tools, maxTokens).
 		bodyBytes, err = buildBody()
 	} else {
-		bodyBytes, err = a.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, strings.TrimSpace(tuning.SessionKey)), buildBody)
+		bodyIdentity = requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, strings.TrimSpace(tuning.SessionKey))
+		bodyBytes, err = a.bodyReuse.body(bodyIdentity, buildBody)
+		bodyCached = true
 	}
 	if err != nil {
 		return nil, err
@@ -347,7 +351,11 @@ func (a *AnthropicProvider) CompleteStream(
 	log.Debugf("anthropic request model=%v max_tokens=%v thinking_type=%v thinking_budget=%v messages=%v tools=%v", model, maxTokens, at.ThinkingType, at.ThinkingBudget, len(messages), len(tools))
 
 	// Apply request body compression if configured
-	req, _ = compressRequestBody(req, bodyBytes, a.provider.RequestCompression())
+	if bodyCached {
+		req, _ = a.bodyReuse.compressBody(bodyIdentity, req, bodyBytes, a.provider.RequestCompression())
+	} else {
+		req, _ = compressRequestBody(req, bodyBytes, a.provider.RequestCompression())
+	}
 	applyRequestHeaderOverrides(req.Header, overrides)
 	if err := applyHostedToolHeaders(req.Header, tuning.HostedTool); err != nil {
 		return nil, err
@@ -424,7 +432,9 @@ func (a *AnthropicProvider) CompleteStream(
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, a.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, parseErr := parseSSEStream(cr, traceCB, collector, tuning.HostedTool != nil || tuning.nativeTool != nil)
+	// Event deltas are trace-only diagnostics: construct them only when a trace
+	// collector will observe them.
+	resp, parseErr := parseSSEStream(cr, traceCB, collector, tuning.HostedTool != nil || tuning.nativeTool != nil, traceCollector != nil)
 
 	// Write dump asynchronously.
 	if dumpWriter != nil {

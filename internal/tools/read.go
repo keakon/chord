@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -111,14 +110,16 @@ func (ReadTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 
 func (ReadTool) CanRenderBeforeToolUseEnd(json.RawMessage) bool { return true }
 
+var readLineEndings = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+
 func splitReadToolLines(content string) []string {
 	if content == "" {
 		return nil
 	}
 	// Normalize common newline conventions first so Read paging and formatting are
-	// independent of the source file's line endings.
-	normalized := strings.ReplaceAll(content, "\r\n", "\n")
-	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	// independent of the source file's line endings. A single Replacer pass
+	// prefers "\r\n" over "\r", replacing two full-content scans.
+	normalized := readLineEndings.Replace(content)
 	trimmed := strings.TrimSuffix(normalized, "\n")
 	if trimmed == "" {
 		return []string{""}
@@ -307,7 +308,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	activationBefore, identityBefore := activationReadIdentity(resolvedPath)
-	decoded, rawBytes, err := textfile.ReadWithBytes(resolvedPath)
+	decoded, digest, err := textfile.ReadWithHash(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", a.Path)
@@ -321,7 +322,6 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("reading file: %w", err)
 	}
 	if sink, ok := readObservationSinkFromContext(ctx); ok {
-		sum := sha256.Sum256(rawBytes)
 		observedPath := resolvedPath
 		if absPath, absErr := resolveToolPathAbsInDir(a.Path, t.BaseDir); absErr == nil {
 			observedPath = absPath
@@ -330,7 +330,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		if activationPath != activationBefore || identityBefore == nil || identityAfter == nil || !os.SameFile(identityBefore, identityAfter) {
 			activationPath = ""
 		}
-		sink.SetReadObservation(ReadObservation{Path: observedPath, SHA256: hex.EncodeToString(sum[:]), ActivationPath: activationPath})
+		sink.SetReadObservation(ReadObservation{Path: observedPath, SHA256: hex.EncodeToString(digest[:]), ActivationPath: activationPath})
 	}
 	lines := splitReadToolLines(decoded.Text)
 	totalLines := len(lines)

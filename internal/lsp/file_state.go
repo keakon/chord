@@ -26,16 +26,50 @@ func (c *Client) nextDocumentVersionLocked(previous int32) int32 {
 	return c.documentVersion
 }
 
-func (c *Client) acceptDiagnostics(path string, version int32) bool {
-	_, err := os.Stat(path)
+// acceptDiagnosticsInfo admits a publish and returns the stat taken for the
+// existence check so the manager can reuse it instead of re-stating the file
+// while holding diagMu.
+func (c *Client) acceptDiagnosticsInfo(path string, version int32) (os.FileInfo, bool) {
+	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		return false
+		return nil, false
 	}
+	return info, c.acceptsDiagnosticsVersion(path, version)
+}
+
+// acceptsDiagnosticsVersion reports whether version is still admissible for
+// path without touching the filesystem. It backs the manager's re-check after
+// the transport handler already admitted the publish.
+func (c *Client) acceptsDiagnosticsVersion(path string, version int32) bool {
 	c.openFilesMu.Lock()
 	current, open := c.openFiles[path]
 	c.openFilesMu.Unlock()
 	// Versionless workspace diagnostics are valid for closed disk documents.
 	return version <= 0 || (open && version >= current)
+}
+
+// diagPathForURILocked returns the canonical path recorded for uri, resolving
+// it on first use. m.diagMu must be held.
+func (m *Manager) diagPathForURILocked(uri string) string {
+	if path, ok := m.diagPathByURI[uri]; ok {
+		return path
+	}
+	path := normalizeWaiterPath(uriToPath(uri))
+	m.rememberDiagPathLocked(uri, path)
+	return path
+}
+
+// rememberDiagPathLocked records the canonical path for uri. m.diagMu must be held.
+func (m *Manager) rememberDiagPathLocked(uri, path string) {
+	if m.diagPathByURI == nil {
+		m.diagPathByURI = make(map[string]string)
+	}
+	m.diagPathByURI[uri] = path
+}
+
+// forgetDiagPathLocked drops the canonical path memo for uri. m.diagMu must be held.
+func (m *Manager) forgetDiagPathLocked(uri string) {
+	delete(m.diagPathByURI, uri)
 }
 
 // clearFileState removes live diagnostics without rewriting session history.
@@ -53,6 +87,7 @@ func (m *Manager) clearFileState(path string, deleted bool) {
 			delete(m.diagByServer, key)
 		}
 	}
+	m.forgetDiagPathLocked(uri)
 	for key, byPath := range m.publishedDiagByServer {
 		delete(byPath, path)
 		if len(byPath) == 0 {
@@ -111,7 +146,8 @@ func (m *Manager) clearClientFileState(c *Client, path string) {
 			delete(m.diagByServer, key)
 		}
 	}
-	m.updateDiagnosticOutputStateLocked(key, path, nil)
+	m.forgetDiagPathLocked(uri)
+	m.updateDiagnosticOutputStateLocked(key, path, nil, nil)
 	if byPath := m.reviewByServer[key.name]; byPath != nil {
 		if review, ok := byPath[path]; ok {
 			latest := m.reviewCountsForPathLocked(key.name, path)

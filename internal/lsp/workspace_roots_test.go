@@ -106,11 +106,11 @@ func TestRetiredClientCannotPublishDiagnostics(t *testing.T) {
 	current.openFiles = map[string]int32{path: 1}
 	uri := string(protocol.URIFromPath(path))
 	publish := manager.onDiagnostics(key, old)
-	publish(uri, "", []protocol.Diagnostic{{Severity: 1, Message: "stale"}}, 1)
+	publish(uri, path, nil, "", []protocol.Diagnostic{{Severity: 1, Message: "stale"}}, 1)
 	if len(manager.diagByServer) != 0 {
 		t.Fatal("retired client restored diagnostics")
 	}
-	manager.onDiagnostics(key, current)(uri, "", []protocol.Diagnostic{{Severity: 1, Message: "current"}}, 1)
+	manager.onDiagnostics(key, current)(uri, path, nil, "", []protocol.Diagnostic{{Severity: 1, Message: "current"}}, 1)
 	if manager.diagByServer[key][uri].errors != 1 {
 		t.Fatal("current client was not allowed to publish")
 	}
@@ -245,7 +245,7 @@ func TestNestedCheckoutIsNotOwnedByParentClient(t *testing.T) {
 	if got, ok := manager.clientForPathLocked(path); !ok || got != child {
 		t.Fatal("nested checkout was not routed to its own client")
 	}
-	manager.onDiagnostics(parentKey, parent)(string(protocol.URIFromPath(path)), "", []protocol.Diagnostic{{Severity: 1, Message: "parent"}}, 1)
+	manager.onDiagnostics(parentKey, parent)(string(protocol.URIFromPath(path)), path, nil, "", []protocol.Diagnostic{{Severity: 1, Message: "parent"}}, 1)
 	if len(manager.diagByServer) != 0 {
 		t.Fatal("parent server published a separate checkout diagnostic")
 	}

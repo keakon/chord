@@ -21,6 +21,7 @@ type gitIgnorePattern struct {
 	negate   bool   // pattern prefixed with !
 	dirOnly  bool   // pattern suffixed with /
 	matchDir bool   // pattern contains a slash (not just a filename)
+	literal  bool   // pattern has no glob metacharacters
 }
 
 // NewGitIgnoreMatcher reads only dir/.gitignore, without searching parent or
@@ -79,6 +80,7 @@ func parseGitIgnorePattern(line string) gitIgnorePattern {
 	// anchored to the .gitignore location.
 	p.matchDir = strings.Contains(line, "/")
 	p.pattern = line
+	p.literal = !strings.ContainsAny(line, `*?[\\`)
 
 	return p
 }
@@ -98,24 +100,29 @@ func (m *GitIgnoreMatcher) Match(relPath string, isDir bool) bool {
 		return false
 	}
 
-	// Walk through patterns in order; last matching pattern wins.
+	// Walk through patterns in order; last matching pattern wins. Segment
+	// offsets are computed once per path: splitting and re-joining the path for
+	// every rule is O(rules x depth) allocations on a full-tree Grep/Glob scan.
+	var startBuf [16]int
+	starts := appendPathSegmentStarts(startBuf[:0], relPath)
 	result := false
-	for _, p := range m.patterns {
+	for i := range m.patterns {
+		p := &m.patterns[i]
 		if p.dirOnly && !isDir {
 			// dirOnly patterns only match directories.
 			// For a non-directory path, check if any *strict* parent
 			// directory component matches the pattern. The path itself
 			// (the last component) is a file, so it cannot match a
 			// dirOnly pattern directly.
-			parts := strings.Split(relPath, "/")
-			if len(parts) < 2 {
+			if len(starts) < 2 {
 				// No parent directory to check.
 				continue
 			}
 			parentMatched := false
-			for i := 1; i < len(parts); i++ {
-				prefix := strings.Join(parts[:i], "/")
-				if matchGitIgnorePattern(p, prefix) {
+			for i := 1; i < len(starts); i++ {
+				// Prefix path relPath[:starts[i]-1] drops the trailing slash;
+				// its segments are the first i entries of starts.
+				if matchGitIgnorePattern(*p, relPath[:starts[i]-1], starts[:i]) {
 					parentMatched = true
 					break
 				}
@@ -126,33 +133,53 @@ func (m *GitIgnoreMatcher) Match(relPath string, isDir bool) bool {
 			result = !p.negate
 			continue
 		}
-		if matchGitIgnorePattern(p, relPath) {
+		if matchGitIgnorePattern(*p, relPath, starts) {
 			result = !p.negate
 		}
 	}
 	return result
 }
 
-func matchGitIgnorePattern(p gitIgnorePattern, relPath string) bool {
+// appendPathSegmentStarts appends the start offset of every slash-separated
+// segment of path. The returned slice is reused by the caller, and the segment
+// strings are zero-copy substrings of path.
+func appendPathSegmentStarts(starts []int, path string) []int {
+	starts = append(starts, 0)
+	for i := 0; i < len(path); i++ {
+		if path[i] == '/' {
+			starts = append(starts, i+1)
+		}
+	}
+	return starts
+}
+
+func matchGitIgnorePattern(p gitIgnorePattern, relPath string, starts []int) bool {
 	pattern := p.pattern
 
 	// Leading slash anchors pattern to the .gitignore directory.
 	if strings.HasPrefix(pattern, "/") {
 		pattern = pattern[1:]
+		if p.literal {
+			return pattern == relPath
+		}
 		return matchGitIgnoreSegment(pattern, relPath)
 	}
 
 	// Patterns without slashes can match at any depth.
 	if !p.matchDir {
+		base := relPath[starts[len(starts)-1]:]
+		if p.literal {
+			// A slash-free literal can only equal the basename: every other
+			// suffix contains a separator, which the pattern cannot contain.
+			return pattern == base
+		}
 		// Try matching the basename.
-		base := filepath.Base(relPath)
 		if matchGitIgnoreSegment(pattern, base) {
 			return true
 		}
 		// Also try matching at any directory level.
-		parts := strings.Split(relPath, "/")
-		for i := range parts {
-			if matchGitIgnoreSegment(pattern, strings.Join(parts[i:], "/")) {
+		for _, start := range starts {
+			if matchGitIgnoreSegment(pattern, relPath[start:]) {
 				return true
 			}
 		}
@@ -161,12 +188,22 @@ func matchGitIgnorePattern(p gitIgnorePattern, relPath string) bool {
 
 	// Patterns with slashes match relative to the .gitignore directory,
 	// but also at any subdirectory level.
+	if p.literal {
+		if pattern == relPath {
+			return true
+		}
+		for i := 1; i < len(starts); i++ {
+			if pattern == relPath[starts[i]:] {
+				return true
+			}
+		}
+		return false
+	}
 	if matchGitIgnoreSegment(pattern, relPath) {
 		return true
 	}
-	parts := strings.Split(relPath, "/")
-	for i := 1; i < len(parts); i++ {
-		if matchGitIgnoreSegment(pattern, strings.Join(parts[i:], "/")) {
+	for i := 1; i < len(starts); i++ {
+		if matchGitIgnoreSegment(pattern, relPath[starts[i]:]) {
 			return true
 		}
 	}

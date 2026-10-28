@@ -23,31 +23,53 @@ import (
 // The Accept-Encoding header keeps advertising gzip so the response direction
 // behaves exactly as without request compression.
 func compressRequestBody(req *http.Request, bodyBytes []byte, encoding string) (*http.Request, []byte) {
+	compressed, contentEncoding, ok := compressBodyBytes(bodyBytes, encoding)
+	if !ok {
+		return req, bodyBytes
+	}
+	newReq, err := applyCompressedBody(req, compressed, contentEncoding)
+	if err != nil {
+		log.Warnf("failed to create compressed request, sending uncompressed error=%v", err)
+		return req, bodyBytes
+	}
+	return newReq, compressed
+}
+
+// compressBodyBytes compresses the body for the provider's configured
+// encoding. ok=false means compression failed or did not reduce the size, and
+// the body must be sent uncompressed; the outcome is deterministic in (body
+// bytes, encoding), which is what lets requestBodyReuse cache it.
+func compressBodyBytes(bodyBytes []byte, encoding string) (compressed []byte, contentEncoding string, ok bool) {
 	var compress func([]byte) ([]byte, error)
-	var contentEncoding string
 	switch encoding {
 	case config.RequestCompressionGzip:
 		compress, contentEncoding = gzipCompress, config.RequestCompressionGzip
 	case config.RequestCompressionZstd:
 		compress, contentEncoding = zstdCompress, config.RequestCompressionZstd
 	default:
-		return req, bodyBytes
+		return nil, "", false
 	}
 
-	compressed, err := compress(bodyBytes)
+	out, err := compress(bodyBytes)
 	if err != nil {
 		log.Warnf("%s compression failed, sending uncompressed request error=%v", contentEncoding, err)
-		return req, bodyBytes
+		return nil, "", false
 	}
-	if len(compressed) >= len(bodyBytes) {
-		log.Debugf("%s did not reduce body size, sending uncompressed original=%v compressed=%v", contentEncoding, len(bodyBytes), len(compressed))
-		return req, bodyBytes
+	if len(out) >= len(bodyBytes) {
+		log.Debugf("%s did not reduce body size, sending uncompressed original=%v compressed=%v", contentEncoding, len(bodyBytes), len(out))
+		return nil, "", false
 	}
-	log.Debugf("request body compressed algorithm=%v original_bytes=%v compressed_bytes=%v ratio=%v", contentEncoding, len(bodyBytes), len(compressed), fmt.Sprintf("%.1f%%", float64(len(compressed))/float64(len(bodyBytes))*100))
+	log.Debugf("request body compressed algorithm=%v original_bytes=%v compressed_bytes=%v ratio=%v", contentEncoding, len(bodyBytes), len(out), fmt.Sprintf("%.1f%%", float64(len(out))/float64(len(bodyBytes))*100))
+	return out, contentEncoding, true
+}
+
+// applyCompressedBody rebuilds req around a compressed body and sets the
+// Content-Encoding headers. The Accept-Encoding header keeps advertising gzip
+// so the response direction behaves exactly as without request compression.
+func applyCompressedBody(req *http.Request, compressed []byte, contentEncoding string) (*http.Request, error) {
 	newReq, err := http.NewRequestWithContext(req.Context(), req.Method, req.URL.String(), bytes.NewReader(compressed))
 	if err != nil {
-		log.Warnf("failed to create compressed request, sending uncompressed error=%v", err)
-		return req, bodyBytes
+		return nil, err
 	}
 	for k, vv := range req.Header {
 		for _, v := range vv {
@@ -56,7 +78,7 @@ func compressRequestBody(req *http.Request, bodyBytes []byte, encoding string) (
 	}
 	newReq.Header.Set(headerAcceptEncoding, headerValueGzip)
 	newReq.Header.Set(headerContentEncoding, contentEncoding)
-	return newReq, compressed
+	return newReq, nil
 }
 
 // errZstdEncoderUnavailable is returned when the process-wide encoder could not

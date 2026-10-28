@@ -65,10 +65,16 @@ func (m *Manager) ServerEndpoints() []ServerEndpointStatus {
 	return result
 }
 
+// serverToolSurface is an immutable view of one published catalog. definitions
+// and hashes are the entry's slices and map, which are replaced wholesale (never
+// mutated in place) on every publication, so sharing them after the lock is
+// released is safe and avoids a JSON deep copy plus a full re-hash per
+// ToolSnapshot.
 type serverToolSurface struct {
 	name        string
 	identity    HandleIdentity
 	definitions []MCPToolDef
+	hashes      map[string]string
 }
 
 func (m *Manager) toolSurfaces() []serverToolSurface {
@@ -84,7 +90,7 @@ func (m *Manager) toolSurfacesLocked() []serverToolSurface {
 		if e.client == nil || e.retired || e.report.Catalog != CatalogReady {
 			continue
 		}
-		result = append(result, serverToolSurface{name: name, identity: HandleIdentity{ServerName: name, TargetID: e.target.TargetID, ProfileID: e.target.ProfileID, ExpectedIdentity: e.identity}, definitions: cloneToolDefinitions(e.definitions)})
+		result = append(result, serverToolSurface{name: name, identity: HandleIdentity{ServerName: name, TargetID: e.target.TargetID, ProfileID: e.target.ProfileID, ExpectedIdentity: e.identity}, definitions: e.definitions, hashes: e.hashes})
 	}
 	return result
 }
@@ -126,11 +132,7 @@ func (m *Manager) ToolSnapshot() ([]tools.Tool, RuntimeSnapshot) {
 	return all, snapshot
 }
 func (m *Manager) wrapSurface(surface serverToolSurface, catalog *Catalog) []tools.Tool {
-	hashes := map[string]string{}
-	for _, def := range surface.definitions {
-		hashes[def.Name] = toolSchemaHash(def)
-	}
 	return wrapToolDefs(surface.name, surface.definitions, func(server, remote string) *ExecutionHandle {
-		return &ExecutionHandle{mgr: m, catalog: catalog, serverName: server, remoteName: remote, identity: surface.identity, schemaHash: hashes[remote]}
+		return &ExecutionHandle{mgr: m, catalog: catalog, serverName: server, remoteName: remote, identity: surface.identity, schemaHash: surface.hashes[remote]}
 	})
 }

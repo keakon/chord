@@ -109,10 +109,16 @@ type Manager struct {
 	boundaryMu   sync.Mutex
 	boundaries   map[boundaryKey]boundaryEntry
 	defaultRoots map[string]struct{}
-	cfg          *config.Config
-	broadcast    BroadcastFunc
-	clients      map[clientKey]*Client
-	clientsMu    sync.RWMutex
+	// rootCacheMu guards rootCache, the TTL memo for ancestor marker walks.
+	// Cold start polls readiness every 50ms, and each poll asks every pending
+	// server whether it covers the path; without the memo each tick repeated
+	// the full walk and stat of the ancestor chain.
+	rootCacheMu sync.Mutex
+	rootCache   map[rootCacheKey]rootCacheEntry
+	cfg         *config.Config
+	broadcast   BroadcastFunc
+	clients     map[clientKey]*Client
+	clientsMu   sync.RWMutex
 
 	// starting marks servers whose launch goroutine is still in flight; it is
 	// a pure presence predicate (guarded by clientsMu) used for start
@@ -165,6 +171,11 @@ type Manager struct {
 	diagMu         sync.RWMutex
 	diagByServer   map[clientKey]map[string]diagCounts
 	reviewByServer map[string]map[string]reviewCounts
+	// diagPathByURI caches the canonical path for each URI held in
+	// diagByServer. Review snapshots translate every tracked URI while
+	// holding diagMu; resolving symlinks per write made that cost scale with
+	// the number of files with live diagnostics.
+	diagPathByURI map[string]string
 
 	// diagState records the on-disk freshness state for each path's published
 	// diagnostics. A stale path remains suppressed until Chord synchronizes it
@@ -223,6 +234,7 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 		startFail:             make(map[clientKey]string),
 		diagByServer:          make(map[clientKey]map[string]diagCounts),
 		reviewByServer:        make(map[string]map[string]reviewCounts),
+		diagPathByURI:         make(map[string]string),
 		diagState:             make(map[string]diagnosticPathState),
 		publishedDiagByServer: make(map[clientKey]map[string]map[diagnosticIdentity]struct{}),
 		reportedByPath:        make(map[string]map[diagnosticIdentity]struct{}),
@@ -270,25 +282,30 @@ func (m *Manager) RebindToProjectRoot(ctx context.Context, root string) error {
 	clear(m.boundaries)
 	m.projectRoot.Store(&abs)
 	m.boundaryMu.Unlock()
+	m.clearRootCache()
 	m.notifySidebarChanged()
 	return nil
 }
 
-func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri string, _ string, diags []pnprotocol.Diagnostic, version int32) {
-	return func(uri string, _ string, diags []pnprotocol.Diagnostic, version int32) {
+func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri, path string, info os.FileInfo, _ string, diags []pnprotocol.Diagnostic, version int32) {
+	return func(uri, path string, info os.FileInfo, _ string, diags []pnprotocol.Diagnostic, version int32) {
 		receivedAt := time.Now()
+		canonical := normalizeWaiterPath(path)
 		// Serialize publication with diagnostic cleanup. A retired client must
 		// not restore entries after a replacement or checkout removal.
 		m.diagMu.Lock()
 		if origin != nil {
-			if !origin.acceptDiagnostics(uriToPath(uri), version) {
-				origin.clearDiagnosticsForPath(uriToPath(uri))
+			// The transport handler already stat'ed the file and admitted the
+			// publish; re-check only the document generation, which can have
+			// advanced while the notification was queued.
+			if !origin.acceptsDiagnosticsVersion(path, version) {
+				origin.clearDiagnosticsForPath(path)
 				m.diagMu.Unlock()
 				return
 			}
 			m.clientsMu.RLock()
 			current := false
-			m.forEachClientForPathLocked(uriToPath(uri), func(owner clientKey, client *Client) {
+			m.forEachClientForCanonicalPathLocked(canonical, func(owner clientKey, client *Client) {
 				if owner == key && client == origin {
 					current = true
 				}
@@ -300,7 +317,6 @@ func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri string, 
 			}
 		}
 		chordDiags := convertDiagnostics(diags)
-		path := normalizeWaiterPath(uriToPath(uri))
 		payload := DiagnosticsPayload{
 			URI:         uri,
 			ServerID:    key.name,
@@ -330,6 +346,7 @@ func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri string, 
 					delete(m.diagByServer, key)
 				}
 			}
+			m.forgetDiagPathLocked(uri)
 		} else {
 			byURI := m.diagByServer[key]
 			if byURI == nil {
@@ -337,23 +354,24 @@ func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri string, 
 				m.diagByServer[key] = byURI
 			}
 			byURI[uri] = diagCounts{errors: errs, warnings: warns}
+			m.rememberDiagPathLocked(uri, canonical)
 		}
-		m.updateDiagnosticOutputStateLocked(key, path, chordDiags)
+		m.updateDiagnosticOutputStateLocked(key, canonical, chordDiags, info)
 		if byPath := m.reviewByServer[key.name]; byPath != nil {
-			if reviewed, ok := byPath[path]; ok {
-				latest := m.reviewCountsForPathLocked(key.name, path)
+			if reviewed, ok := byPath[canonical]; ok {
+				latest := m.reviewCountsForPathLocked(key.name, canonical)
 				reviewed.errors = latest.errors
 				reviewed.warnings = latest.warnings
-				byPath[path] = reviewed
+				byPath[canonical] = reviewed
 			}
 		}
 		m.diagMu.Unlock()
-		seq := m.noteLateDiagnosticsPublish(path, key.name, version, receivedAt)
+		seq := m.noteLateDiagnosticsPublish(canonical, key.name, version, receivedAt)
 		m.broadcast(TypeLSPDiagnostics, payload)
 		m.notifySidebarChanged()
 
 		m.waitersMu.Lock()
-		for _, ch := range m.waiters[path] {
+		for _, ch := range m.waiters[canonical] {
 			select {
 			case ch <- diagnosticsEvent{diagnostics: chordDiags, clientKey: key, serverID: key.name, version: version, receivedAt: receivedAt, seq: seq}:
 			default:
@@ -591,11 +609,21 @@ func (m *Manager) admitStartedClientLocked(key clientKey, entry *startEntry, cli
 // answered by separate functions that stat'ed the same chain twice per call.
 func (m *Manager) discoverWorkspaceRoot(name string, srvCfg config.LSPServerConfig, path string) (root string, markerMatched, ok bool) {
 	absPath := normalizeWaiterPath(path)
-	projectRoot := m.workspaceBoundary(absPath)
 	markers := effectiveRootMarkers(name, srvCfg)
 	if len(markers) == 0 {
+		projectRoot := m.workspaceBoundary(absPath)
 		return projectRoot, false, projectRoot != ""
 	}
+	cacheKey := rootCacheKey{name: name, path: absPath, markers: strings.Join(markers, "\x00")}
+	now := time.Now()
+	m.rootCacheMu.Lock()
+	if entry, hit := m.rootCache[cacheKey]; hit && now.Before(entry.expires) {
+		m.rootCacheMu.Unlock()
+		return entry.root, entry.markerMatched, entry.ok
+	}
+	m.rootCacheMu.Unlock()
+
+	projectRoot := m.workspaceBoundary(absPath)
 	// Walk canonical parents up to the workspace boundary. External projects
 	// without a boundary stop at the filesystem root.
 	dir := filepath.Dir(absPath)
@@ -608,6 +636,7 @@ func (m *Manager) discoverWorkspaceRoot(name string, srvCfg config.LSPServerConf
 	for {
 		for _, marker := range markers {
 			if pathExists(filepath.Join(dir, marker)) {
+				m.storeRootCache(cacheKey, dir, true, true)
 				return dir, true, true
 			}
 		}
@@ -617,7 +646,22 @@ func (m *Manager) discoverWorkspaceRoot(name string, srvCfg config.LSPServerConf
 		}
 		dir = parent
 	}
+	m.storeRootCache(cacheKey, projectRoot, false, projectRoot != "")
 	return projectRoot, false, projectRoot != ""
+}
+
+func (m *Manager) storeRootCache(key rootCacheKey, root string, markerMatched, ok bool) {
+	m.rootCacheMu.Lock()
+	if m.rootCache == nil || len(m.rootCache) >= 256 {
+		m.rootCache = make(map[rootCacheKey]rootCacheEntry)
+	}
+	m.rootCache[key] = rootCacheEntry{
+		root:          root,
+		markerMatched: markerMatched,
+		ok:            ok,
+		expires:       time.Now().Add(workspaceRootCacheTTL),
+	}
+	m.rootCacheMu.Unlock()
 }
 
 // serverRootForPath reports whether the server covers path and, if so, the
@@ -767,7 +811,8 @@ func (m *Manager) dropOrphanedDiagnostics(survivors map[string][]*Client) (clear
 				continue
 			}
 			for uri := range byURI {
-				affected[normalizeWaiterPath(uriToPath(uri))] = struct{}{}
+				affected[m.diagPathForURILocked(uri)] = struct{}{}
+				m.forgetDiagPathLocked(uri)
 				cleared = append(cleared, clearedDiag{server: name, uri: uri})
 			}
 			delete(m.diagByServer, key)
@@ -1163,7 +1208,8 @@ func (m *Manager) DidCloseErr(ctx context.Context, path string) error {
 				}
 			}
 		}
-		m.updateDiagnosticOutputStateLocked(e.key, path, nil)
+		m.forgetDiagPathLocked(uri)
+		m.updateDiagnosticOutputStateLocked(e.key, path, nil, nil)
 		m.diagMu.Unlock()
 		if m.broadcast != nil {
 			m.broadcast(TypeLSPDiagnostics, DiagnosticsPayload{URI: uri, ServerID: e.key.name, Diagnostics: nil})

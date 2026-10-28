@@ -21,16 +21,21 @@ func (a *MainAgent) hasDurablePressureNotice(level string) bool {
 	}
 	withdrawing := a.contextNoticesStale.Load() &&
 		pressureSlotWithdrawn(slot, a.contextNoticeWithdrawalScope.Load())
-	for _, msg := range a.ctxMgr.Snapshot() {
+	found := false
+	// A read-locked backward scan answers the existence check without the
+	// full-history Snapshot deep copy; it stops at the first durable row in
+	// the slot.
+	a.ctxMgr.ScanBackward(func(msg *message.Message) bool {
 		if msg.Kind != message.KindContextNotice || pressureNoticeSlot(msg.NoticeLevel) != slot {
-			continue
+			return false
 		}
 		if withdrawing {
-			continue
+			return false
 		}
+		found = true
 		return true
-	}
-	return false
+	})
+	return found
 }
 
 // Re-evaluate notices only across a model switch or a changed prefix before

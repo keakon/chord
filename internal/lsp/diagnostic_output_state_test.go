@@ -36,7 +36,7 @@ func publishTestDiagnostics(mgr *Manager, key clientKey, uri protocol.DocumentUR
 	client.diagnosticsMu.Lock()
 	client.diagnostics[uri] = append([]protocol.Diagnostic(nil), diags...)
 	client.diagnosticsMu.Unlock()
-	mgr.onDiagnostics(key, nil)(string(uri), "", diags, version)
+	mgr.onDiagnostics(key, nil)(string(uri), uriToPath(string(uri)), nil, "", diags, version)
 }
 
 func testProtocolDiagnostic(message string, line uint32) protocol.Diagnostic {

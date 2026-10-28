@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/recovery"
 
 	"github.com/keakon/golog/log"
@@ -671,7 +672,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	a.subAgentMailboxIDsMu.Unlock()
 	if hasActiveBatch {
 		if activeAck {
-			replySummary := latestAssistantReplySummary(a.ctxMgr.Snapshot())
+			replySummary := latestAssistantReplySummaryFromContext(a.ctxMgr)
 			ackFailed := false
 			for _, msg := range batch {
 				if msg == nil {
@@ -808,16 +809,24 @@ func (a *MainAgent) setIdleForComposerEdit() {
 	a.memoryWakeIdle()
 }
 
-func latestAssistantReplySummary(msgs []message.Message) string {
-	for _, msg := range slices.Backward(msgs) {
+// latestAssistantReplySummaryFromContext returns the trimmed content of the
+// newest assistant message with non-empty text. It scans the manager backward
+// under its read lock instead of cloning the whole history with Snapshot; the
+// scan stops at the newest reply. The returned string is an immutable value,
+// so it is safe to keep after the scan.
+func latestAssistantReplySummaryFromContext(mgr *ctxmgr.Manager) string {
+	var out string
+	mgr.ScanBackward(func(msg *message.Message) bool {
 		if msg.Role != "assistant" {
-			continue
+			return false
 		}
 		if text := strings.TrimSpace(msg.Content); text != "" {
-			return text
+			out = text
+			return true
 		}
-	}
-	return ""
+		return false
+	})
+	return out
 }
 
 // drainPendingUserMessages takes all queued user messages, clears the queue,

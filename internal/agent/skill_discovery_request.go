@@ -37,6 +37,18 @@ func validSkillDiscoveryMessage(msg message.Message, view skillActivationView) b
 	return true
 }
 func projectSkillDiscoveryMessages(history []message.Message, view skillActivationView) []message.Message {
+	// Copy-on-write: most histories carry no skill discovery rows, so probe
+	// before allocating the dedup state and the full request-surface copy.
+	hasDiscovery := false
+	for i := range history {
+		if history[i].Kind == message.KindSkillDiscovery || history[i].SkillDiscovery != nil {
+			hasDiscovery = true
+			break
+		}
+	}
+	if !hasDiscovery {
+		return history
+	}
 	out := make([]message.Message, 0, len(history))
 	seen := make(map[string]string)
 	conflicts := make(map[string]bool)

@@ -676,12 +676,12 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsAgainAfterCleanRepublis
 	client.diagnostics[uri] = nil
 	client.diagnosticsMu.Unlock()
 	publish := mgr.onDiagnostics(testKey(mgr, "gopls"), nil)
-	publish("file://"+filepath.ToSlash(other), "", nil, 2)
+	publish("file://"+filepath.ToSlash(other), normalizeWaiterPath(other), nil, "", nil, 2)
 	reappeared := []protocol.Diagnostic{{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"}}
 	client.diagnosticsMu.Lock()
 	client.diagnostics[uri] = reappeared
 	client.diagnosticsMu.Unlock()
-	publish("file://"+filepath.ToSlash(other), "", reappeared, 3)
+	publish("file://"+filepath.ToSlash(other), normalizeWaiterPath(other), nil, "", reappeared, 3)
 	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
 	if !strings.Contains(second, "cached error") {
 		t.Fatalf("second output = %q, want diagnostic reported again after clean republish", second)

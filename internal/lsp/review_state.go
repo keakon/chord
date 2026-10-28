@@ -213,7 +213,7 @@ func (m *Manager) reviewServerIDsForPathLocked(path string) []string {
 	seen := make(map[string]struct{})
 	for key, byURI := range m.diagByServer {
 		for uri := range byURI {
-			if normalizeWaiterPath(uriToPath(uri)) == path {
+			if m.diagPathForURILocked(uri) == path {
 				seen[key.name] = struct{}{}
 				break
 			}
@@ -263,7 +263,7 @@ func (m *Manager) reviewCountsForPathLocked(serverID, path string) reviewCounts 
 			}
 		}
 		for uri, counts := range byURI {
-			if normalizeWaiterPath(uriToPath(uri)) != path {
+			if m.diagPathForURILocked(uri) != path {
 				continue
 			}
 			total.errors += counts.errors

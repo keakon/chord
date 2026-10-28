@@ -564,24 +564,43 @@ func SaveFullOutput(output string, sessionDir string, artifactKey string) string
 	filename := deriveArtifactFilename(output, artifactKey)
 	p := filepath.Join(toolOutputsDir, filename)
 
-	if existing, err := os.ReadFile(p); err == nil {
-		if string(existing) == output {
-			return p
+	if info, err := os.Stat(p); err == nil {
+		if info.Size() == int64(len(output)) {
+			if existing, readErr := os.ReadFile(p); readErr == nil && string(existing) == output {
+				return p
+			}
 		}
-		prefix := strings.TrimSuffix(filename, filepath.Ext(filename))
-		suffix := filepath.Ext(filename)
-		fallbackSum := sha256.Sum256([]byte(output))
-		fallback := fmt.Sprintf("%s-%s%s", prefix, hex.EncodeToString(fallbackSum[:8]), suffix)
-		p = filepath.Join(toolOutputsDir, fallback)
+		// A stable key already names different content; keep the keyed file
+		// untouched and fall back to a content-addressed sibling.
+		p = filepath.Join(toolOutputsDir, artifactFallbackName(filename, output))
 	}
 
 	if err := writeArtifactFile(sessionDir, p, output); err != nil {
-		if existing, readErr := os.ReadFile(p); readErr == nil && string(existing) == output {
+		if artifactMatches(p, output) {
 			return p
 		}
 		return ""
 	}
 	return p
+}
+
+// artifactMatches reports whether path already holds exactly output. The stat
+// check runs first so a recycled artifact key whose new output has a different
+// size does not read the old (possibly huge) file just to find it differs.
+func artifactMatches(path, output string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() != int64(len(output)) {
+		return false
+	}
+	existing, err := os.ReadFile(path)
+	return err == nil && string(existing) == output
+}
+
+func artifactFallbackName(filename, output string) string {
+	prefix := strings.TrimSuffix(filename, filepath.Ext(filename))
+	suffix := filepath.Ext(filename)
+	sum := sha256.Sum256([]byte(output))
+	return fmt.Sprintf("%s-%s%s", prefix, hex.EncodeToString(sum[:8]), suffix)
 }
 
 func writeArtifactFile(sessionDir, path string, output string) error {

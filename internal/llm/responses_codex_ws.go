@@ -524,14 +524,20 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			}
 			gotData = true
 		}
-		var hdr struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(msg, &hdr); err != nil {
+		// Parse the envelope once: parseResponsesEvent already extracts the
+		// event type with sonic, so the old standalone type-only decode was a
+		// redundant second decode per message.
+		eventType, eventData, err := parseResponsesEvent(msg, "", streamDiag)
+		if err != nil {
 			return nil, nil, fmt.Errorf("%w: %v", errCodexWSInvalidEventJSON, err)
 		}
+		// Non-JSON frames never carried a type and were rejected before any
+		// processing; keep rejecting them instead of treating them as events.
+		if len(msg) == 0 || msg[0] != '{' {
+			return nil, nil, fmt.Errorf("%w: event is not a JSON object", errCodexWSInvalidEventJSON)
+		}
 		now := time.Now()
-		if hdr.Type == "error" {
+		if eventType == "error" {
 			if apiErr, errHdr := parseCodexWebSocketErrorJSON(msg); apiErr != nil {
 				if len(errHdr) > 0 {
 					if snap := ratelimit.ParseCodexHeaders(errHdr); snap != nil && r.provider != nil {
@@ -547,7 +553,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			}
 			return nil, nil, fmt.Errorf("codex ws api error: %s", string(msg))
 		}
-		if hdr.Type == "codex.rate_limits" {
+		if eventType == "codex.rate_limits" {
 			snap := ratelimit.ParseCodexRateLimitWebSocketEvent(msg)
 			providerName := ""
 			if r.provider != nil {
@@ -585,10 +591,6 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 				cb(message.StreamDelta{Type: message.StreamDeltaRateLimits, RateLimit: snap})
 			}
 			continue
-		}
-		eventType, eventData, err := parseResponsesEvent(msg, "", streamDiag)
-		if err != nil {
-			return nil, nil, fmt.Errorf("parse event: %w", err)
 		}
 		state := responsesEventState{
 			resp:              &resp,

@@ -71,6 +71,33 @@ func TestTruncateOutputReusesStableArtifactPathForSameKey(t *testing.T) {
 	}
 }
 
+// TestTruncateReusesKeyOnlyForIdenticalOutput verifies that a stable artifact
+// key does not overwrite an earlier result: different content lands on a
+// content-addressed sibling, while the original path keeps its bytes.
+func TestTruncateReusesKeyOnlyForIdenticalOutput(t *testing.T) {
+	sessionDir := t.TempDir()
+	firstInput := generatePaddedLines(3000, 20)
+	secondInput := generatePaddedLines(3001, 20)
+
+	first := Truncate(firstInput, sessionDir, Options{ArtifactKey: "same-key"})
+	second := Truncate(secondInput, sessionDir, Options{ArtifactKey: "same-key"})
+	if first.SavedPath == "" || second.SavedPath == "" {
+		t.Fatalf("saved paths = %q / %q, want non-empty", first.SavedPath, second.SavedPath)
+	}
+	if first.SavedPath == second.SavedPath {
+		t.Fatalf("different output reused the keyed artifact path %q", first.SavedPath)
+	}
+	for path, want := range map[string]string{first.SavedPath: firstInput, second.SavedPath: secondInput} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read artifact %q: %v", path, err)
+		}
+		if string(got) != want {
+			t.Fatalf("artifact %q holds %d bytes, want %d", path, len(got), len(want))
+		}
+	}
+}
+
 func TestExtractArtifactReferencesAcceptsGeneratedFormatsOnly(t *testing.T) {
 	path := "/session/tool-outputs/call-123.log"
 	guided := artifactReference(path)

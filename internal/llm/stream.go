@@ -2,6 +2,7 @@ package llm
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -175,9 +176,12 @@ func anthropicSSECacheWriteUsage(usage sseUsage) (cacheWrite, cacheWrite1h int) 
 
 // parseSSEStream reads an Anthropic SSE stream from reader and calls cb for
 // each incremental delta. If collector is non-nil, raw SSE data lines are
-// recorded for debug dumps. It returns the fully assembled Response when the
-// stream completes, or an error if the stream fails.
-func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector, captureHosted bool) (response *message.Response, parseErr error) {
+// recorded for debug dumps. emitEvents gates the per-chunk Event delta: Event
+// is trace-only diagnostics whose sole consumer is the trace collector, so it
+// is not constructed when no trace writer is installed. It returns the fully
+// assembled Response when the stream completes, or an error if the stream
+// fails.
+func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector, captureHosted bool, emitEvents bool) (response *message.Response, parseErr error) {
 	scanner := bufio.NewScanner(reader)
 	// Allow lines up to 1MB for large JSON payloads.
 	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
@@ -203,7 +207,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 	}
 
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := scanner.Bytes()
 
 		if !gotData && cb != nil {
 			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
@@ -211,20 +215,18 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		}
 
 		// Event type line.
-		if after, ok := strings.CutPrefix(line, "event: "); ok {
-			eventType = after
+		if after, ok := bytes.CutPrefix(line, []byte("event: ")); ok {
+			eventType = string(after)
 			continue
 		}
 
 		// Data line.
-		if after, ok := strings.CutPrefix(line, "data: "); ok {
-			data := after
-
+		if data, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
 			if cb != nil {
 				progressBytes += int64(len(line) + 1)
 				progressEvents++
 				cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
-				if eventType != "" {
+				if emitEvents && eventType != "" {
 					cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "anthropic." + eventType}})
 				}
 			}
@@ -242,7 +244,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 			switch eventType {
 			case "message_start":
 				var ev sseMessageStart
-				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
+				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse message_start: %w", err)
 				}
 				if resp.Usage == nil {
@@ -252,7 +254,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "content_block_start":
 				var ev sseContentBlockStart
-				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
+				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse content_block_start: %w", err)
 				}
 				block := &contentBlock{
@@ -330,7 +332,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "content_block_delta":
 				var ev sseContentBlockDelta
-				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
+				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse content_block_delta: %w", err)
 				}
 				block, ok := blocks[ev.Index]
@@ -378,7 +380,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "content_block_stop":
 				var ev sseContentBlockStop
-				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
+				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse content_block_stop: %w", err)
 				}
 				if p, ok := reader.(chunkPhaser); ok {
@@ -447,7 +449,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "message_delta":
 				var ev sseMessageDelta
-				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
+				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse message_delta: %w", err)
 				}
 				resp.StopReason = cloneLongLivedLLMString(ev.Delta.StopReason)
@@ -469,7 +471,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case message.StreamDeltaError:
 				var ev sseError
-				if err := sonicjson.ConfigDefault.UnmarshalFromString(data, &ev); err != nil {
+				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse error event: %w", err)
 				}
 				// A mid-stream provider error event keeps whatever text already

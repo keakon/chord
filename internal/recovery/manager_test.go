@@ -150,6 +150,43 @@ func TestFirstUserMessageFromFileSkipsSyntheticUserMessages(t *testing.T) {
 	}
 }
 
+func TestFirstUserMessageFromFileToleratesMalformedRecords(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{"leading garbage", "not json at all\n{\"role\":\"user\",\"content\":\"real first request\"}\n", "real first request"},
+		{"garbage only", "not json at all\n", ""},
+		{"truncated tail", "{\"role\":\"assistant\",\"content\":\"sample\"}\n{\"role\":\"user\",\"content\":\"trun", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mainPath := filepath.Join(t.TempDir(), "main.jsonl")
+			if err := os.WriteFile(mainPath, []byte(tc.payload), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			type result struct {
+				preview string
+				err     error
+			}
+			done := make(chan result, 1)
+			go func() {
+				preview, err := FirstUserMessageFromFile(mainPath)
+				done <- result{preview, err}
+			}()
+			// A decoder with a sticky syntax error can spin without progress.
+			select {
+			case got := <-done:
+				if got.err != nil || got.preview != tc.want {
+					t.Fatalf("preview = %q, %v; want %q, nil", got.preview, got.err, tc.want)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("preview did not finish after a malformed record")
+			}
+		})
+	}
+}
+
 func TestPersistAndLoad_Roundtrip(t *testing.T) {
 	rm, _ := newTestManager(t)
 	defer rm.Close()

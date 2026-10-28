@@ -606,3 +606,42 @@ func TestDiscoverWorkspaceRootIgnoresOtherLanguageMarkers(t *testing.T) {
 		})
 	}
 }
+
+// TestDiscoverWorkspaceRootCacheRefreshes verifies that the memo serves a
+// stable answer within its TTL and picks up a newly created marker once the
+// entry expires, so cold-start polling does not re-walk the ancestor chain on
+// every tick.
+func TestDiscoverWorkspaceRootCacheRefreshes(t *testing.T) {
+	root := resolvedTempDir(t)
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(nested, "main.ts")
+	manager := newTestManagerWithRoot(root)
+	cfg := config.LSPServerConfig{RootMarkers: []string{"tsconfig.json"}}
+
+	got, matched, ok := manager.discoverWorkspaceRoot("typescript", cfg, path)
+	if !ok || matched || got != root {
+		t.Fatalf("initial discovery = (%q, %t, %t), want project root fallback", got, matched, ok)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "tsconfig.json"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, matched, ok = manager.discoverWorkspaceRoot("typescript", cfg, path)
+	if !ok || matched || got != root {
+		t.Fatalf("memoized discovery = (%q, %t, %t), want cached project root fallback", got, matched, ok)
+	}
+
+	manager.rootCacheMu.Lock()
+	for key, entry := range manager.rootCache {
+		entry.expires = time.Time{}
+		manager.rootCache[key] = entry
+	}
+	manager.rootCacheMu.Unlock()
+
+	got, matched, ok = manager.discoverWorkspaceRoot("typescript", cfg, path)
+	if !ok || !matched || got != nested {
+		t.Fatalf("refreshed discovery = (%q, %t, %t), want nested marker root %q", got, matched, ok, nested)
+	}
+}

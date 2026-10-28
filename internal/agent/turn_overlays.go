@@ -117,14 +117,15 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	// messages this request carries, and the coordination snapshot must not
 	// repeat a terminal completion that one of them already expresses.
 	//
-	// The durable half needs a snapshot of the whole conversation, which copies
-	// every message header in the session. Nothing below reads it unless this
+	// The durable half reads the whole conversation, but only msg.Mailbox of
+	// each row, so it scans the manager under its read lock instead of paying
+	// for a full-history Snapshot copy. Nothing below reads it unless this
 	// session has SubAgents, so a session without them must not pay for it on
 	// every request.
 	pendingMailboxes := a.takePendingSubAgentMailboxes()
 	var durableMailboxIDs map[string]struct{}
 	if len(pendingMailboxes) > 0 || a.hasCoordinationTaskRecords() {
-		durableMailboxIDs = conversationMailboxIDs(a.ctxMgr.Snapshot())
+		durableMailboxIDs = a.conversationMailboxIDsFromContext()
 	}
 
 	// Stall markers feed both the relevance filter and the rendered stall lines
@@ -492,7 +493,7 @@ func (a *MainAgent) injectPendingMailboxMessagesForRequest(messages []message.Me
 	if len(pending) == 0 {
 		return messages
 	}
-	durableMailboxIDs := conversationMailboxIDs(a.ctxMgr.Snapshot())
+	durableMailboxIDs := a.conversationMailboxIDsFromContext()
 	var toInject []message.Message
 	for _, mailbox := range pending {
 		msg, ok := a.appendMailboxMessageToContext(mailbox, durableMailboxIDs)
@@ -558,6 +559,24 @@ func conversationMailboxIDs(conversation []message.Message) map[string]struct{} 
 			ids[id] = struct{}{}
 		}
 	}
+	return ids
+}
+
+// conversationMailboxIDsFromContext is the manager-backed form of
+// conversationMailboxIDs: the set only reads msg.Mailbox, so a read-locked
+// scan replaces the full-history Snapshot deep copy the caller would otherwise
+// build just for this aggregation.
+func (a *MainAgent) conversationMailboxIDsFromContext() map[string]struct{} {
+	ids := make(map[string]struct{})
+	a.ctxMgr.ScanBackward(func(msg *message.Message) bool {
+		if msg.Mailbox == nil || (msg.Kind != message.KindSubAgentMailbox && msg.Kind != message.KindBackgroundResult) {
+			return false
+		}
+		if id := strings.TrimSpace(msg.Mailbox.MessageID); id != "" {
+			ids[id] = struct{}{}
+		}
+		return false
+	})
 	return ids
 }
 

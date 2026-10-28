@@ -8,8 +8,9 @@ import (
 
 // updateDiagnosticOutputStateLocked records one server's latest diagnostics,
 // removes resolved identities from the session suppression set, and updates
-// freshness. m.diagMu must be held.
-func (m *Manager) updateDiagnosticOutputStateLocked(key clientKey, path string, diags []Diagnostic) {
+// freshness. info is the stat taken when the publish was admitted; nil means
+// the caller has none and the file must be stat'ed here. m.diagMu must be held.
+func (m *Manager) updateDiagnosticOutputStateLocked(key clientKey, path string, diags []Diagnostic, info os.FileInfo) {
 	if m.publishedDiagByServer == nil {
 		m.publishedDiagByServer = make(map[clientKey]map[string]map[diagnosticIdentity]struct{})
 	}
@@ -38,7 +39,10 @@ func (m *Manager) updateDiagnosticOutputStateLocked(key clientKey, path string, 
 	}
 
 	state, tracked := m.diagState[path]
-	info, statErr := os.Stat(path)
+	var statErr error
+	if info == nil {
+		info, statErr = os.Stat(path)
+	}
 	published := m.publishedDiagnosticIdentitiesLocked(path)
 	if len(published) == 0 {
 		delete(m.reportedByPath, path)

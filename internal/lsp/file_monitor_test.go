@@ -35,7 +35,8 @@ func monitoredTestFile(t *testing.T) (*Manager, *Client, *fakePowernapClient, st
 	m.MarkTouched(path)
 	diags := []protocol.Diagnostic{{Severity: 1, Message: "sample diagnostic"}}
 	c.diagnostics[protocol.DocumentURI(c.pathToURI(path))] = diags
-	m.onDiagnostics(key, c)(c.pathToURI(path), "gopls", diags, 1)
+	uri := c.pathToURI(path)
+	m.onDiagnostics(key, c)(uri, uriToPath(uri), nil, "gopls", diags, 1)
 	m.recordReviewSnapshot(path)
 	return m, c, fake, path
 }
@@ -77,7 +78,8 @@ func TestFileMaintenanceExternalChangeAndDelete(t *testing.T) {
 				}
 			}
 			// A versioned response from the closed overlay cannot restore state.
-			m.onDiagnostics(clientKey{name: "gopls", root: c.cwd}, c)(c.pathToURI(path), "", []protocol.Diagnostic{{Severity: 1}}, 1)
+			uri := c.pathToURI(path)
+			m.onDiagnostics(clientKey{name: "gopls", root: c.cwd}, c)(uri, uriToPath(uri), nil, "", []protocol.Diagnostic{{Severity: 1}}, 1)
 			if len(m.diagByServer) != 0 {
 				t.Fatal("late diagnostic restored old counts")
 			}
@@ -140,10 +142,11 @@ func TestDocumentVersionDoesNotRepeatAfterReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version <= old || c.acceptDiagnostics(path, old) {
+	_, oldAccepted := c.acceptDiagnosticsInfo(path, old)
+	if version <= old || oldAccepted {
 		t.Fatal("reopened document accepts an old version")
 	}
-	if !c.acceptDiagnostics(path, version) {
+	if _, ok := c.acceptDiagnosticsInfo(path, version); !ok {
 		t.Fatal("current version rejected")
 	}
 }
@@ -332,7 +335,7 @@ func TestFileMaintenanceScopesDiagnosticInvalidation(t *testing.T) {
 			diags := []protocol.Diagnostic{{Severity: 2, Message: "sample warning"}}
 			uri := active.pathToURI(path)
 			active.diagnostics[protocol.DocumentURI(uri)] = diags
-			m.onDiagnostics(key, active)(uri, key.name, diags, version)
+			m.onDiagnostics(key, active)(uri, path, nil, key.name, diags, version)
 			m.recordReviewSnapshot(path)
 			m.recordReportedLocked(path, convertDiagnostics(diags))
 			originalState := m.diagState[path]

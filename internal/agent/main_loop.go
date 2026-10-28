@@ -536,9 +536,17 @@ func (a *MainAgent) drainRunnableMailboxWork() {
 	// The owner-queue maps are shared with TUI-facing goroutines, so the owner
 	// scan runs under subAgentMailboxIDsMu; the per-owner drains claim and
 	// mutate the queues under the same lock internally.
+	//
+	// This runs on every dispatched event, so the no-work common case must not
+	// allocate scan containers.
 	a.subAgentMailboxIDsMu.Lock()
-	ownerIDs := make([]string, 0, len(a.ownedSubAgentMailboxes))
-	seenOwners := make(map[string]struct{}, len(a.ownedSubAgentMailboxes)+len(a.ownedMailboxSpool))
+	empty := len(a.ownedSubAgentMailboxes) == 0 && len(a.ownedMailboxSpool) == 0
+	var ownerIDs []string
+	var seenOwners map[string]struct{}
+	if !empty {
+		ownerIDs = make([]string, 0, len(a.ownedSubAgentMailboxes))
+		seenOwners = make(map[string]struct{}, len(a.ownedSubAgentMailboxes)+len(a.ownedMailboxSpool))
+	}
 	for ownerID, queued := range a.ownedSubAgentMailboxes {
 		if len(queued) == 0 {
 			continue

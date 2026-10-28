@@ -209,7 +209,7 @@ func (g *GeminiProvider) streamGeminiHop(ctx context.Context, frozen geminiFroze
 		if cb != nil {
 			cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: state.progressBytes, Events: state.progressEvents}})
 		}
-		chunk, err := decodeGeminiStreamChunk(data, true)
+		chunk, err := decodeGeminiStreamChunk(data)
 		if err != nil {
 			result.Err = &GeminiContinuationError{Reason: "protocol_error"}
 			break
@@ -256,16 +256,12 @@ func redactGeminiErrorMessage(value, token string) string {
 	return strings.ReplaceAll(value, token, "[redacted]")
 }
 
-// decodeGeminiStreamChunk centralizes decoding; journals require owned string storage.
-func decodeGeminiStreamChunk(data []byte, owned bool) (geminiStreamChunk, error) {
+// decodeGeminiStreamChunk centralizes decoding. Sonic's Unmarshal([]byte)
+// copies the buffer internally, so decoded strings are owned regardless of the
+// caller's buffer lifetime — journals retain chunk strings safely.
+func decodeGeminiStreamChunk(data []byte) (geminiStreamChunk, error) {
 	var chunk geminiStreamChunk
-	var err error
-	if owned {
-		err = json.Unmarshal(data, &chunk)
-	} else {
-		err = sonicjson.ConfigDefault.Unmarshal(data, &chunk)
-	}
-	if err != nil {
+	if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
 		return chunk, fmt.Errorf("invalid Gemini stream chunk")
 	}
 	return chunk, nil

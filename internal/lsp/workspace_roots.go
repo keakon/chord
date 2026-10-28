@@ -17,6 +17,34 @@ type boundaryEntry struct {
 	expires time.Time
 }
 
+// rootCacheKey identifies one ancestor marker walk. Markers are part of the
+// key because callers may pass an explicit server config that differs from
+// the manager's configuration.
+type rootCacheKey struct {
+	name    string
+	path    string
+	markers string
+}
+
+type rootCacheEntry struct {
+	root          string
+	markerMatched bool
+	ok            bool
+	expires       time.Time
+}
+
+const (
+	workspaceBoundaryTTL  = time.Second
+	workspaceRootCacheTTL = time.Second
+)
+
+// clearRootCache drops memoized marker walks. Callers must not hold rootCacheMu.
+func (m *Manager) clearRootCache() {
+	m.rootCacheMu.Lock()
+	clear(m.rootCache)
+	m.rootCacheMu.Unlock()
+}
+
 // workspaceBoundary finds the checkout containing a file. A .git file is a
 // boundary just like a .git directory, so linked worktrees and independent
 // repositories use the same routing. The default directory also bounds
@@ -56,7 +84,7 @@ func (m *Manager) workspaceBoundaryForDir(dir string) string {
 	if m.boundaries == nil || len(m.boundaries) >= 256 {
 		m.boundaries = make(map[boundaryKey]boundaryEntry)
 	}
-	m.boundaries[key] = boundaryEntry{root: root, expires: now.Add(time.Second)}
+	m.boundaries[key] = boundaryEntry{root: root, expires: now.Add(workspaceBoundaryTTL)}
 	return root
 }
 

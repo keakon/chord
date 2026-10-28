@@ -75,8 +75,10 @@ type Client struct {
 	diagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
 	diagnosticsMu sync.RWMutex
 
-	// onDiagnostics is called when diagnostics are received (manager sets it to broadcast + notify waiters).
-	onDiagnostics func(uri string, serverID string, diags []protocol.Diagnostic, version int32)
+	// onDiagnostics is called when diagnostics are received (manager sets it to
+	// broadcast + notify waiters). path and info carry the admission check's
+	// stat so the manager does not have to repeat it.
+	onDiagnostics func(uri, path string, info os.FileInfo, serverID string, diags []protocol.Diagnostic, version int32)
 
 	// saveMu guards the save capability: the static one declared during
 	// initialize (resolved once, on first use) and the textDocument/didSave
@@ -148,7 +150,7 @@ func (c *Client) createPowernapClient() error {
 }
 
 // SetOnDiagnostics sets the callback invoked when textDocument/publishDiagnostics is received.
-func (c *Client) SetOnDiagnostics(fn func(uri string, serverID string, diags []protocol.Diagnostic, version int32)) {
+func (c *Client) SetOnDiagnostics(fn func(uri, path string, info os.FileInfo, serverID string, diags []protocol.Diagnostic, version int32)) {
 	c.onDiagnostics = fn
 }
 
@@ -174,7 +176,9 @@ func (c *Client) registerHandlers() {
 		}
 		// Optional the version number of the document the diagnostics are published for.
 		version := par.Version
-		if !c.acceptDiagnostics(uriToPath(string(par.URI)), version) {
+		path := uriToPath(string(par.URI))
+		info, ok := c.acceptDiagnosticsInfo(path, version)
+		if !ok {
 			return
 		}
 		c.diagnosticsMu.Lock()
@@ -185,7 +189,7 @@ func (c *Client) registerHandlers() {
 		}
 		c.diagnosticsMu.Unlock()
 		if c.onDiagnostics != nil {
-			c.onDiagnostics(string(par.URI), c.name, par.Diagnostics, version)
+			c.onDiagnostics(string(par.URI), path, info, c.name, par.Diagnostics, version)
 		}
 	})
 	// Server notices describe the server rather than a file: which TypeScript it

@@ -435,7 +435,7 @@ func TestPublishedDiagnosticsRefreshExistingReviewedSnapshot(t *testing.T) {
 	mgr.touchedPaths = map[string]struct{}{path: {}}
 	publish := mgr.onDiagnostics(testKey(nil, "gopls"), nil)
 
-	publish("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: "warning"}}, 1)
+	publish("file:///a.go", "/a.go", nil, "", []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: "warning"}}, 1)
 	got := mgr.reviewByServer["gopls"][path]
 	if got.errors != 0 || got.warnings != 1 {
 		t.Fatalf("review snapshot after warning publish = %+v, want 0E/1W", got)
@@ -444,7 +444,7 @@ func TestPublishedDiagnosticsRefreshExistingReviewedSnapshot(t *testing.T) {
 		t.Fatalf("reviewedAt = %v, want preserved %v", got.reviewedAt, reviewedAt)
 	}
 
-	publish("file:///a.go", "", nil, 2)
+	publish("file:///a.go", "/a.go", nil, "", nil, 2)
 	got = mgr.reviewByServer["gopls"][path]
 	if got.errors != 0 || got.warnings != 0 {
 		t.Fatalf("review snapshot after clean publish = %+v, want 0E/0W", got)
@@ -497,7 +497,7 @@ func TestPublishedDiagnosticsDoNotAdmitUnreviewedPathToSidebar(t *testing.T) {
 	mgr.clients[testKey(mgr, "gopls")] = &Client{}
 	mgr.touchedPaths = map[string]struct{}{path: {}}
 
-	mgr.onDiagnostics(testKey(nil, "gopls"), nil)("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "existing project error"}}, 1)
+	mgr.onDiagnostics(testKey(nil, "gopls"), nil)("file:///a.go", "/a.go", nil, "", []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "existing project error"}}, 1)
 
 	if byPath := mgr.reviewByServer["gopls"]; len(byPath) != 0 {
 		t.Fatalf("unreviewed publish created sidebar snapshots: %+v", byPath)

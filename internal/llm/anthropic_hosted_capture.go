@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	sonicjson "github.com/bytedance/sonic"
+
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -21,7 +23,7 @@ type anthropicHostedCapture struct {
 
 // capture retains native blocks for hosted and preauthorized main requests. Complete blocks
 // can be sent back on pause_turn without rebuilding or reordering their types.
-func (c *anthropicHostedCapture) capture(resp *message.Response, eventType, data string) error {
+func (c *anthropicHostedCapture) capture(resp *message.Response, eventType string, data []byte) error {
 	var ev struct {
 		Index   int             `json:"index"`
 		Block   json.RawMessage `json:"content_block"`
@@ -45,15 +47,18 @@ func (c *anthropicHostedCapture) capture(resp *message.Response, eventType, data
 	if eventType != "content_block_start" && eventType != "content_block_delta" && eventType != "content_block_stop" && eventType != "message_start" && eventType != "message_delta" {
 		return nil
 	}
-	if err := json.Unmarshal([]byte(data), &ev); err != nil {
+	// Sonic's no-copy decoding aliases its internal per-call copy of the line;
+	// only values that outlive this line escape: container IDs and RawMessage
+	// fields, which are cloned below before they are retained.
+	if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
 		return fmt.Errorf("capture hosted native event: %w", err)
 	}
 	obs := ensureHostedObservation(resp)
 	if ev.Message.Container.ID != "" {
-		obs.Container = ev.Message.Container.ID
+		obs.Container = strings.Clone(ev.Message.Container.ID)
 	}
 	if ev.Delta.Container.ID != "" {
-		obs.Container = ev.Delta.Container.ID
+		obs.Container = strings.Clone(ev.Delta.Container.ID)
 	}
 	switch eventType {
 	case "content_block_start":
@@ -62,7 +67,7 @@ func (c *anthropicHostedCapture) capture(resp *message.Response, eventType, data
 			c.complete = make(map[int]json.RawMessage)
 		}
 		b := &anthropicNativeBlock{}
-		if err := json.Unmarshal(ev.Block, &b.fields); err != nil {
+		if err := sonicjson.ConfigDefault.Unmarshal(cloneHostedRaw(ev.Block), &b.fields); err != nil {
 			return fmt.Errorf("capture hosted native block: %w", err)
 		}
 		for field, dst := range map[string]*strings.Builder{"text": &b.text, "thinking": &b.thinking, "signature": &b.signature} {

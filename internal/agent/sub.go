@@ -1007,11 +1007,15 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 	// queued input or park it. Callers that must arm earlier — atomically with
 	// draining the input queue under inputQueueMu — still do so themselves.
 	s.llmRequestInFlight.Store(true)
-	s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr))
+	// prepareContextForLLM only compacts when the history overflows its
+	// budget; either way it returns the request input to send, so reuse it
+	// instead of taking a second full-history Snapshot below. Skill discovery
+	// that mutates the context re-enters this function through its resume
+	// continuation, so the reused input cannot miss skill-discovery rows.
+	input := s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr))
 	if s.ensureSkillDiscoveryBeforeRequest(turn, func() { s.asyncCallLLMWithFlightMarked(turn) }) != skillDiscoveryReady {
 		return
 	}
-	input := snapshotLLMRequest(s.ctxMgr)
 	observer := s.contextDiagnostics.begin(s.sessionDir, s.taskID, input.HistoryGeneration, int64(s.parent.effectiveCompactionReservedInput()))
 	messages := projectSkillDiscoveryMessages(input.Messages, s.skillActivationView())
 

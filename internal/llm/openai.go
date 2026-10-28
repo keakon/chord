@@ -351,7 +351,8 @@ func (o *OpenAIProvider) CompleteStream(
 	// tuning) plus static provider config — not on the API key. Caching it per
 	// target lets key rotation resend the identical bytes instead of
 	// re-converting and re-marshaling the full history on every attempt.
-	bodyBytes, err := o.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, strings.TrimSpace(tuning.SessionKey)), func() ([]byte, error) {
+	bodyIdentity := requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, strings.TrimSpace(tuning.SessionKey))
+	bodyBytes, err := o.bodyReuse.body(bodyIdentity, func() ([]byte, error) {
 		// Convert messages to OpenAI format.
 		wireFamily := providerWireFamily(o.provider)
 		continuityMode := reasoningContinuityCompatMode(o.provider, model)
@@ -520,7 +521,7 @@ func (o *OpenAIProvider) CompleteStream(
 	applySessionIDHeaders(req.Header, tuning.SessionKey)
 
 	// Apply request body compression if configured
-	req, _ = compressRequestBody(req, bodyBytes, o.provider.RequestCompression())
+	req, _ = o.bodyReuse.compressBody(bodyIdentity, req, bodyBytes, o.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)
 
 	var requestHeaders http.Header

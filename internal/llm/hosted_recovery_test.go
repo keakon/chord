@@ -52,7 +52,7 @@ func TestAnthropicHostedNativeContinuationCapture(t *testing.T) {
 		`event: message_delta`, `data: {"type":"message_delta","delta":{"stop_reason":"pause_turn"}}`, "",
 		`event: message_stop`, `data: {"type":"message_stop"}`, "",
 	}, "\n"))
-	resp, err := parseSSEStream(stream, nil, nil, true)
+	resp, err := parseSSEStream(stream, nil, nil, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestResponsesHostedTerminalOrderAndAuthoritativeError(t *testing.T) {
 
 func TestHostedParsersRetainEvidenceOnStreamFailure(t *testing.T) {
 	anthropic := strings.NewReader("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":17}}}\n\nevent: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"failed\"}}\n\n")
-	resp, err := parseSSEStream(anthropic, nil, nil, true)
+	resp, err := parseSSEStream(anthropic, nil, nil, true, false)
 	if err == nil || resp == nil || resp.Usage == nil || resp.Usage.InputTokens != 17 {
 		t.Fatalf("response=%+v err=%v", resp, err)
 	}

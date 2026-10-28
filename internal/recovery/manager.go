@@ -770,6 +770,11 @@ const (
 	recoveryMinReadBufferSize  = 4 * 1024
 	recoveryMaxReadBufferSize  = 64 * 1024
 	recoveryMaxJournalLineSize = 1 << 20
+	// Message JSONL records have no enforced write-side size cap (only the
+	// fail-closed output limit bounds them in practice), so the first-user
+	// preview scan allows generously oversized lines; the scan buffer only
+	// grows to the actual line length.
+	recoveryMaxMessageLineScanSize = 64 << 20
 )
 
 // ListSessions scans the sessions directory and returns SessionInfo for each
@@ -945,14 +950,19 @@ func firstUserMessageFromFile(mainPath string) (string, error) {
 	}
 	defer f.Close()
 
-	dec := json.NewDecoder(f)
-	for {
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, recoveryMaxReadBufferSize), recoveryMaxMessageLineScanSize)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
 		var msg message.Message
-		if err := dec.Decode(&msg); err != nil {
-			if err == io.EOF {
-				break
-			}
-			continue // skip malformed lines
+		// Skip malformed records (e.g. a crash-truncated tail) but keep
+		// scanning: per-line Unmarshal always makes progress, unlike a shared
+		// json.Decoder whose sticky error state would spin forever.
+		if err := json.Unmarshal(line, &msg); err != nil {
+			continue
 		}
 		// Synthetic user-role messages must not become the session's original
 		// user prompt when restoring metadata after compaction.
@@ -968,6 +978,9 @@ func firstUserMessageFromFile(mainPath string) (string, error) {
 			s = string([]rune(s)[:maxFirstUserMessagePreview]) + "…"
 		}
 		return s, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("scan message log: %w", err)
 	}
 	return "", nil
 }

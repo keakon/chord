@@ -178,24 +178,35 @@ func Warm(path string, encodedBytes []byte, decoded Decoded) {
 }
 
 // Read reads and decodes a text file, reusing the two-level cache.
-// On path+hash cache hit it returns without re-reading the file body.
+// On a path+hash cache hit it returns without re-reading the file body.
 func Read(path string) (Decoded, error) {
-	d, _, err := readDecodedTextFile(path, false)
+	d, _, _, err := readDecodedTextFile(path, false)
 	return d, err
 }
 
 // ReadWithBytes reads a text file and returns both decoded text and raw bytes.
 // Use this only when the caller truly needs the raw bytes (for example, to report byte counts).
 func ReadWithBytes(path string) (Decoded, []byte, error) {
-	return readDecodedTextFile(path, true)
+	d, b, _, err := readDecodedTextFile(path, true)
+	return d, b, err
 }
 
-// readDecodedTextFile loads and decodes path. When returnRaw is true, the raw file bytes
-// are returned (single ReadFile on cache miss; one ReadFile on cache hit when raw needed).
-func readDecodedTextFile(path string, returnRaw bool) (Decoded, []byte, error) {
+// ReadWithHash reads and decodes a text file and returns the SHA-256 of the
+// on-disk bytes backing the returned text. On a path+hash cache hit the digest
+// comes from the path cache, so a caller that only needs version identity does
+// not force a full re-read and a second hash of the same file.
+func ReadWithHash(path string) (Decoded, [32]byte, error) {
+	d, _, h, err := readDecodedTextFile(path, false)
+	return d, h, err
+}
+
+// readDecodedTextFile loads and decodes path. When returnRaw is true, the raw
+// file bytes are returned (one ReadFile on cache miss; one ReadFile on cache
+// hit when raw bytes are needed). The digest always describes those bytes.
+func readDecodedTextFile(path string, returnRaw bool) (Decoded, []byte, [32]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return Decoded{}, nil, err
+		return Decoded{}, nil, [32]byte{}, err
 	}
 	if entry, ok := getPathCache(path); ok {
 		if entry.Size == info.Size() && entry.ModTime == info.ModTime().UnixNano() {
@@ -203,40 +214,40 @@ func readDecodedTextFile(path string, returnRaw bool) (Decoded, []byte, error) {
 				if goStrictUTF8Path(path) && isRegionalEncoding(dec.Encoding) {
 					// Miss: same bytes may have been cached through a regional fallback.
 				} else if !returnRaw {
-					return dec, nil, nil
+					return dec, nil, entry.Hash, nil
 				} else {
 					data, rerr := os.ReadFile(path)
 					if rerr != nil {
-						return Decoded{}, nil, rerr
+						return Decoded{}, nil, [32]byte{}, rerr
 					}
 					hash := cacheKeyForBytes(data)
 					if hash == entry.Hash {
-						return dec, data, nil
+						return dec, data, hash, nil
 					}
 					decoded, derr := Decode(data, path)
 					if derr != nil {
-						return Decoded{}, nil, derr
+						return Decoded{}, nil, [32]byte{}, derr
 					}
 					setPathCache(path, pathCacheEntry{Size: int64(len(data)), ModTime: info.ModTime().UnixNano(), Hash: hash})
-					return decoded, data, nil
+					return decoded, data, hash, nil
 				}
 			}
 		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Decoded{}, nil, err
+		return Decoded{}, nil, [32]byte{}, err
 	}
 	decoded, err := Decode(data, path)
 	if err != nil {
-		return Decoded{}, nil, err
+		return Decoded{}, nil, [32]byte{}, err
 	}
 	hash := cacheKeyForBytes(data)
 	setPathCache(path, pathCacheEntry{Size: info.Size(), ModTime: info.ModTime().UnixNano(), Hash: hash})
 	if !returnRaw {
-		return decoded, nil, nil
+		return decoded, nil, hash, nil
 	}
-	return decoded, data, nil
+	return decoded, data, hash, nil
 }
 
 func loadDecodedFromHash(hash [32]byte) (Decoded, bool) {

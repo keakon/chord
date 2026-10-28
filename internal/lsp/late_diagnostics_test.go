@@ -52,7 +52,7 @@ func (f *lateDiagnosticsFixture) publish(server string, version int32, diags ...
 	client.diagnosticsMu.Lock()
 	client.diagnostics[f.uri] = diags
 	client.diagnosticsMu.Unlock()
-	f.mgr.onDiagnostics(clientKey{name: server, root: f.mgr.projectRootPath()}, nil)(string(f.uri), "", diags, version)
+	f.mgr.onDiagnostics(clientKey{name: server, root: f.mgr.projectRootPath()}, nil)(string(f.uri), uriToPath(string(f.uri)), nil, "", diags, version)
 	f.mgr.lateMu.Lock()
 	seq := f.mgr.latePublishSeq
 	f.mgr.lateMu.Unlock()
