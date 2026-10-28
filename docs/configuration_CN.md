@@ -1540,8 +1540,8 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `websocket_handshake_timeout` | int | Responses WebSocket 握手超时，单位秒。`0` / 省略表示使用内置默认值。 |
 | `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
 | `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_prompt_cache_options`、`send_prompt_cache_breakpoint`、`send_max_output_tokens`、`mcp_additional_tools`。 |
-| `compat.responses.send_prompt_cache_options` | bool | `true` — 在 GPT-5.6 及之后的 Responses 模型上发送顶层 `prompt_cache_options`。对拒绝该字段、但仍接受显式 `prompt_cache_breakpoint` 标记的网关设为 `false`。 |
-| `compat.responses.send_prompt_cache_breakpoint` | bool | `true` — 给合格输入内容块打 `prompt_cache_breakpoint` 标记并设置顶层策略。对拒绝显式缓存断点的网关设为 `false`：标记会被去掉，只用于选择断点策略的 `prompt_cache_options` 也随之省略。 |
+| `compat.responses.send_prompt_cache_options` | bool | `false` — 在开启 `send_prompt_cache_breakpoint` 时允许顶层 `prompt_cache_options` 策略字段。Chord 只在需要 explicit 模式的请求中发送它；implicit 请求会省略，因为 implicit 就是 API 默认值。要与断点开关一起开启才能使用显式缓存。对接受标记但拒绝顶层字段的网关保持 `false`。 |
+| `compat.responses.send_prompt_cache_breakpoint` | bool | `false` — 给 GPT-5.6 及之后 Responses 模型的合格输入内容块打 `prompt_cache_breakpoint` 标记。只为确认支持显式缓存断点的端点开启；默认与 Codex 一致，不发送任何显式缓存字段。关闭时也会省略只用于选择断点策略的 `prompt_cache_options`。 |
 | `compat.responses.mcp_additional_tools` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `input[type="additional_tools"]` item，不改写顶层 `tools`。只为已确认接受该 item 的 Responses endpoint / 模型开启。挂载形态跟随当前选中的目标；请求最终落到不接受该 item 的池成员时，Chord 会把声明并入该请求的顶层 `tools` 数组。 |
 | `compat.hosted_tools` | list | （空）— 允许该 provider 的模型提供的 hosted 工具名列表。使用 hosted 桥时，每次调用另发一条请求，在那里按 provider 类型声明工具，Chord 把 provider 返回的结果作为普通工具结果返回。主请求内的搜索需要上文所述的独立原生预授权。只为确认支持该声明的端点启用：端点拒绝声明时调用会带着端点返回的原因失败，端点静默忽略时错误会提示检查这个列表。条目形状见 [Hosted tools](#hosted-tools)。 |
 | `compat.apply_patch.enabled` | bool | 三态 — 省略时按模型名推断。`true` 保留 `apply_patch`（同时隐藏 `edit`、`write`、`delete`）；`false` 退回 `edit`，`write`/`delete` 重新可见。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6-astra` 等更高的主版本）和 `codex-auto-review` 默认 `true`；`gpt-oss-*`、gpt-3.5、gpt-4/4o、o 系列及非 OpenAI 模型默认 `false`。 |
@@ -1592,7 +1592,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `modalities.input`| array  | `text` / `image` / `pdf` 的子集。默认仅 `[text]`；支持时需显式声明 `image` / `pdf`。                              |
 | `supported_service_tiers` | 列表 | provider-level 默认值或 model-level 覆盖值，用于声明可接收的非 standard tier，例如 `[fast, slow]` 或 `[fast]`。省略时使用 preset 默认值。 |
 
-服务层和 prompt cache 是 provider-specific 的：OpenAI 支持 priority/flex 风格的 tiering 以及 `prompt_cache_key` / `prompt_cache_retention`；Anthropic 支持 `cache_control`，并提供 5 分钟和 1 小时 TTL；Gemini 则使用它自己的路由 / thinking / cached-content 机制。Chord 会把用户侧的 tier 映射到当前 provider 能支持的最接近行为，而不是强行统一成同一种 wire 格式。其中 OpenAI 的缓存字段里，Chord 会在端点接受时发送 `prompt_cache_key`（见 `compat.responses.send_prompt_cache_key`），目前不发送 `prompt_cache_retention`。在 GPT-5.6 及之后的 Responses 模型上，Chord 还会通过 `prompt_cache_options` 与 `prompt_cache_breakpoint` 设置显式缓存断点；拒绝其中任一字段的网关可用 `compat.responses.send_prompt_cache_options` / `send_prompt_cache_breakpoint` 退出。
+服务层和 prompt cache 是 provider-specific 的：OpenAI 支持 priority/flex 风格的 tiering 以及 `prompt_cache_key` / `prompt_cache_retention`；Anthropic 支持 `cache_control`，并提供 5 分钟和 1 小时 TTL；Gemini 则使用它自己的路由 / thinking / cached-content 机制。Chord 会把用户侧的 tier 映射到当前 provider 能支持的最接近行为，而不是强行统一成同一种 wire 格式。其中 OpenAI 的缓存字段里，Chord 会在端点接受时发送 `prompt_cache_key`（见 `compat.responses.send_prompt_cache_key`），目前不发送 `prompt_cache_retention`。Chord 默认不发送显式缓存字段。在 GPT-5.6 及之后的 Responses 模型上，开启 `compat.responses.send_prompt_cache_breakpoint`（需要 explicit 模式时再开启 `send_prompt_cache_options`）才会设置显式缓存断点；implicit 请求会省略顶层策略字段。
 
 若兼容网关的 usage 字段与它声明的协议不同，应显式配置语义。例如某个 Responses 兼容网关把普通 input、cache read、cache write 三个桶分开返回：
 

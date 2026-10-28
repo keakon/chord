@@ -645,31 +645,51 @@ func TestResponsesProvider_PromptCacheCompatToggles(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		compat         *config.ResponsesCompatConfig
+		transient      bool
 		wantOptions    bool
 		wantBreakpoint bool
 	}{
-		{name: "defaults send both", wantOptions: true, wantBreakpoint: true},
+		{name: "defaults send neither", transient: true},
 		{
-			name:           "options off keeps breakpoints",
-			compat:         &config.ResponsesCompatConfig{SendPromptCacheOptions: new(false)},
+			name:           "breakpoint opt-in sends markers only",
+			compat:         &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(true)},
 			wantBreakpoint: true,
 		},
 		{
-			// prompt_cache_options only selects a breakpoint policy, so dropping
-			// the markers drops the pointless top-level field with them.
-			name:   "breakpoint off sends neither",
-			compat: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(false)},
+			// Implicit is the API default, so the top-level policy field is
+			// omitted even when both switches are enabled.
+			name:           "breakpoint opt-in omits implicit options",
+			compat:         &config.ResponsesCompatConfig{SendPromptCacheOptions: new(true), SendPromptCacheBreakpoint: new(true)},
+			wantBreakpoint: true,
 		},
 		{
-			// The explicit breakpoint switch wins even when the options switch is
-			// explicitly enabled: the options field only selects a policy for
-			// markers that are no longer sent.
-			name:   "breakpoint off overrides explicit options on",
-			compat: &config.ResponsesCompatConfig{SendPromptCacheOptions: new(true), SendPromptCacheBreakpoint: new(false)},
+			name:           "explicit mode sends options",
+			compat:         &config.ResponsesCompatConfig{SendPromptCacheOptions: new(true), SendPromptCacheBreakpoint: new(true)},
+			transient:      true,
+			wantOptions:    true,
+			wantBreakpoint: true,
 		},
 		{
-			name:   "both off sends neither",
-			compat: &config.ResponsesCompatConfig{SendPromptCacheOptions: new(false), SendPromptCacheBreakpoint: new(false)},
+			name:   "options opt-in alone sends neither",
+			compat: &config.ResponsesCompatConfig{SendPromptCacheOptions: new(true)},
+		},
+		{
+			name:           "options off suppresses explicit policy",
+			compat:         &config.ResponsesCompatConfig{SendPromptCacheOptions: new(false), SendPromptCacheBreakpoint: new(true)},
+			transient:      true,
+			wantBreakpoint: true,
+		},
+		{
+			// The options field only selects a policy for markers that are no
+			// longer sent.
+			name:      "breakpoint off overrides explicit options on",
+			compat:    &config.ResponsesCompatConfig{SendPromptCacheOptions: new(true), SendPromptCacheBreakpoint: new(false)},
+			transient: true,
+		},
+		{
+			name:      "both off sends neither",
+			compat:    &config.ResponsesCompatConfig{SendPromptCacheOptions: new(false), SendPromptCacheBreakpoint: new(false)},
+			transient: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -688,17 +708,25 @@ func TestResponsesProvider_PromptCacheCompatToggles(t *testing.T) {
 				Compat: &config.ProviderCompatConfig{Responses: tc.compat},
 			}, []string{"test-key"})
 			r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+			messages := []message.Message{{Role: "user", Content: "hello"}}
+			if tc.transient {
+				messages = append(messages, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "hint"})
+			}
 			_, err := r.CompleteStream(
 				context.Background(), "test-key", "gpt-6.1-sol", "",
-				[]message.Message{{Role: "user", Content: "hello"}},
+				messages,
 				nil, 0, RequestTuning{},
 				func(message.StreamDelta) {},
 			)
 			if err != nil {
 				t.Fatalf("CompleteStream: %v", err)
 			}
-			if _, has := gotBody["prompt_cache_options"]; has != tc.wantOptions {
-				t.Fatalf("prompt_cache_options present=%v, want %v (body %#v)", has, tc.wantOptions, gotBody["prompt_cache_options"])
+			options, hasOptions := gotBody["prompt_cache_options"].(map[string]any)
+			if hasOptions != tc.wantOptions {
+				t.Fatalf("prompt_cache_options present=%v, want %v (body %#v)", hasOptions, tc.wantOptions, gotBody["prompt_cache_options"])
+			}
+			if tc.wantOptions && options["mode"] != "explicit" {
+				t.Fatalf("prompt_cache_options mode=%v, want explicit", options["mode"])
 			}
 			if got := responsesBreakpointCount(gotBody); (got > 0) != tc.wantBreakpoint {
 				t.Fatalf("prompt_cache_breakpoint markers=%d, want present %v", got, tc.wantBreakpoint)

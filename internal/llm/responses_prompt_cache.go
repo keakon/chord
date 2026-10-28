@@ -29,9 +29,8 @@ func responsesCacheTextPartEnd(msg message.Message) int {
 	return 0
 }
 
-// responsesCacheControl is shared by the request mode and explicit content
-// markers. Implicit mode keeps historical eligible message endings available
-// for lookup alongside our durable explicit boundaries.
+// responsesCacheControl is the explicit-mode policy. Chord omits the top-level
+// field for implicit mode because implicit is the API default.
 type responsesCacheControl struct {
 	Mode string `json:"mode"`
 }
@@ -58,23 +57,25 @@ func markResponsesCacheText(content any) any {
 	return blocks
 }
 
-// responsesPromptCacheOptions avoids writing a one-request suffix while keeping
-// implicit lookup available for append-only or wholly opaque input. Existing
-// durable explicit markers survive in every full-input continuation.
+// responsesPromptCacheOptions returns the explicit-mode policy when a transient
+// suffix follows durable explicit markers, avoiding a cache write for
+// one-request reminders. It returns nil for implicit mode: the API default
+// already creates one implicit breakpoint and writes the latest explicit
+// markers, so sending the field would only add a compatibility surface.
 func responsesPromptCacheOptions(messages []message.Message, input []responsesInputItem) *responsesCacheControl {
-	mode := "implicit"
-	if promptCacheDurableMessageCount(messages) < len(messages) {
-		for _, item := range input {
-			for _, content := range []any{item.Content, item.Output} {
-				if blocks, ok := content.([]responsesContentBlock); ok {
-					for _, block := range blocks {
-						if block.PromptCacheBreakpoint != nil {
-							return &responsesCacheControl{Mode: "explicit"}
-						}
+	if promptCacheDurableMessageCount(messages) >= len(messages) {
+		return nil
+	}
+	for _, item := range input {
+		for _, content := range []any{item.Content, item.Output} {
+			if blocks, ok := content.([]responsesContentBlock); ok {
+				for _, block := range blocks {
+					if block.PromptCacheBreakpoint != nil {
+						return &responsesCacheControl{Mode: "explicit"}
 					}
 				}
 			}
 		}
 	}
-	return &responsesCacheControl{Mode: mode}
+	return nil
 }

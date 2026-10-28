@@ -78,7 +78,11 @@ func TestPromptCacheSettingsPreferExactVariantPoolTarget(t *testing.T) {
 
 func TestPromptCacheMessagesUseTargetContract(t *testing.T) {
 	cfg := NewProviderConfig("primary", config.ProviderConfig{Type: config.ProviderTypeChatCompletions, Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}}}, nil)
-	fallback := NewProviderConfig("backup", config.ProviderConfig{Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}}}, nil)
+	fallback := NewProviderConfig("backup", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Compat: &config.ProviderCompatConfig{Responses: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(true)}},
+		Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}},
+	}, nil)
 	client := NewClient(cfg, nil, "gpt-6.1-sol", 4096, "")
 	client.SetFallbackModels([]FallbackModel{{ProviderConfig: fallback, ModelID: "gpt-6.1-sol"}})
 	msgs := []message.Message{{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "snapshot"}, {Role: message.RoleUser, Content: "request"}, {Role: message.RoleAssistant, Content: "response"}, {Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "hint"}}

@@ -10,7 +10,11 @@ import (
 )
 
 func TestResponsesCacheDiagnosticMatchesMultimodalWireEndpoint(t *testing.T) {
-	cfg := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}}}, nil)
+	cfg := NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Compat: &config.ProviderCompatConfig{Responses: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(true)}},
+		Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}},
+	}, nil)
 	client := NewClient(cfg, nil, "gpt-6.1-sol", 4096, "")
 	defer client.Close()
 	text := message.ContentPart{Type: message.ContentPartText, Text: "Sample text"}
@@ -100,12 +104,10 @@ func TestAnthropicCacheDiagnosticExcludesFoldedReminderResult(t *testing.T) {
 	}
 }
 
-func TestResponsesCacheDiagnosticFallsBackToFullRequestWithoutBreakpoints(t *testing.T) {
+func TestResponsesCacheDiagnosticFallsBackWithoutOptIn(t *testing.T) {
 	cfg := NewProviderConfig("sample", config.ProviderConfig{
-		Type: config.ProviderTypeResponses,
-		Models: map[string]config.ModelConfig{
-			"gpt-6.1-sol": {Compat: &config.ModelCompatConfig{Responses: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(false)}}},
-		},
+		Type:   config.ProviderTypeResponses,
+		Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}},
 	}, nil)
 	client := NewClient(cfg, nil, "gpt-6.1-sol", 4096, "")
 	defer client.Close()

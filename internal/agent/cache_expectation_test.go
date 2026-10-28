@@ -45,7 +45,11 @@ func TestActivateLoadedSessionRestoresHistoricalCacheHitRate(t *testing.T) {
 // request must read as an append, not as a chord-side prefix rewrite.
 func TestNoteCacheExpectationIgnoresTailOverlayChurn(t *testing.T) {
 	a := &MainAgent{llmClient: newTestLLMClient(), tools: tools.NewRegistry(), cacheHitTracker: promptcache.NewHitTracker()}
-	cfg := llm.NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}}}, []string{"test-key"})
+	cfg := llm.NewProviderConfig("p", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Compat: &config.ProviderCompatConfig{Responses: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(true)}},
+		Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}},
+	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(cfg, &recordingLoopTuningProvider{}, "gpt-6.1-sol", 4096, "sys")
 	hash := a.computeToolDefinitionHash()
 	durable := []message.Message{

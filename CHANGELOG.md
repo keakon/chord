@@ -27,7 +27,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - One `question` call can carry up to four questions instead of three, matching what an external Claude Code worker may ask in a single `AskUserQuestion`.
 
-- Responses providers gain two compatibility switches for gateways that reject Chord's explicit prompt-cache fields: `compat.responses.send_prompt_cache_options` omits the top-level `prompt_cache_options`, and `compat.responses.send_prompt_cache_breakpoint` omits the `prompt_cache_breakpoint` markers (and the top-level field, which only selects the breakpoint policy). Without them a GPT-5.6-or-later model alias behind such a gateway fails every request.
+- Responses providers can opt into explicit prompt caching on GPT-5.6 and later models with `compat.responses.send_prompt_cache_breakpoint` and `compat.responses.send_prompt_cache_options`. Both are off by default, matching Codex's request shape, so gateways that forward Codex requests do not fail on fields their backend does not implement. When both are enabled, Chord sends the top-level policy field only for requests that need explicit mode; implicit requests omit it and use the API default.
 
 - Added `chord sessions list --json` for recent session metadata, using the configured storage and shared repository session scope without starting an agent.
 

@@ -47,18 +47,19 @@ func (c *Client) PromptCacheMessagesForModelRef(ref string, messages []message.M
 
 // responsesCacheBreakpointsEnabled reports whether a target emits explicit
 // Responses cache breakpoints: the model generation must support them and the
-// resolved compat must not opt out. The request builder and the cache
-// projection share this so a boundary Chord no longer marks is not still
-// reported as a cache expectation.
+// resolved compat must explicitly opt in. The default matches Codex, which
+// sends neither the markers nor the top-level policy field. The request builder
+// and the cache projection share this so a boundary Chord no longer marks is
+// not still reported as a cache expectation.
 func responsesCacheBreakpointsEnabled(provider *ProviderConfig, model string) bool {
 	if !modelcompat.SupportsResponsesCacheBreakpoints(model) {
 		return false
 	}
 	if provider == nil {
-		return true
+		return false
 	}
 	rc := provider.ResponsesCompat(model)
-	return rc == nil || compatBool(rc.SendPromptCacheBreakpoint, true)
+	return rc != nil && compatBool(rc.SendPromptCacheBreakpoint, false)
 }
 
 func promptCacheMessagesForTarget(family string, tuning RequestTuning, cacheBreakpoints bool, messages []message.Message, tailOverlayCount int) []message.Message {

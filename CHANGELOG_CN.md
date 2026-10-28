@@ -27,7 +27,7 @@
 
 - `question` 工具单次可提交四个问题（此前三个），与外部 Claude Code worker 一次 `AskUserQuestion` 能提出的数量一致。
 
-- Responses provider 新增两个兼容开关，用于拒绝 Chord 显式缓存字段的网关：`compat.responses.send_prompt_cache_options` 省略顶层 `prompt_cache_options`，`compat.responses.send_prompt_cache_breakpoint` 省略 `prompt_cache_breakpoint` 标记（同时省略只用于选择断点策略的顶层字段）。否则，GPT-5.6 及之后的模型别名落在这类网关上时每个请求都会失败。
+- Responses provider 可通过 `compat.responses.send_prompt_cache_breakpoint` 与 `compat.responses.send_prompt_cache_options` 为 GPT-5.6 及之后的模型显式开启缓存。两个开关默认关闭，与 Codex 的请求形状一致，因此转发 Codex 请求、但后端未实现这些字段的网关不会因此失败。两个都开启后，Chord 只在需要 explicit 模式的请求中发送顶层策略字段；implicit 请求会省略它并使用 API 默认值。
 
 - 新增 `chord sessions list --json`，无需启动 Agent 即可按配置的存储位置及仓库共享范围查询最近会话元数据。
 

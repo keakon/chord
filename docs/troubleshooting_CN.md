@@ -105,7 +105,7 @@ HTTP LLM dump 的 `request_headers` 保存部分协议及会话请求头，内�
 
 ### `prompt_cache_options is not supported on this model`
 
-Chord 会对 GPT-5.6 及之后的 Responses 模型发送显式缓存字段。兼容网关，或模型 ID 名称是 GPT-5.6 及之后、后端却不实现这两类字段的路由，会拒绝 `prompt_cache_options` 或 `prompt_cache_breakpoint`，导致请求失败。设置 `compat.responses.send_prompt_cache_breakpoint: false` 可同时去掉显式断点和顶层字段；设置 `compat.responses.send_prompt_cache_options: false` 则只去掉顶层字段、保留断点。此时端点的自动（隐式）缓存仍然生效。参见[Provider 字段参考](./configuration_CN.md#provider-字段参考)中的 `compat.responses.*` 条目。
+Chord 默认不发送显式缓存字段。如果你在 GPT-5.6 及之后的 Responses 模型上开启了显式缓存开关，而端点不实现这些字段，它会拒绝 `prompt_cache_options` 或 `prompt_cache_breakpoint`，导致请求失败。设置 `send_prompt_cache_breakpoint: false` 可同时去掉标记和顶层字段；设置 `send_prompt_cache_options: false` 则只去掉顶层字段、保留标记。此时端点的自动（隐式）缓存仍然生效。参见[Provider 字段参考](./configuration_CN.md#provider-字段参考)中的 `compat.responses.*` 条目。
 
 ### DeepSeek / OpenAI 兼容 thinking 模式 400
 
@@ -163,7 +163,7 @@ Chord 会跳过尚未完成的写操作请求，即使已收到的参数看起�
 
 先检查这些因素：
 
-- **缓存断点**：GPT-5.6 及之后的 Responses 模型按消息边界缓存。Chord 会在可标记的持久文本消息和工具结果上设置显式断点；有临时尾部提醒且存在显式断点时，只写入这些断点，避免缓存一次性提醒。旧模型沿用其隐式缓存规则。可在 LLM dump 的 `request_body` 中检查 `prompt_cache_options` 和 `prompt_cache_breakpoint`，以及端点或请求覆盖配置是否保留了这些字段。
+- **缓存断点**：GPT-5.6 及之后的 Responses 模型按消息边界缓存。开启显式断点后，Chord 会在可标记的持久文本消息和工具结果上设置断点；有临时尾部提醒且存在显式断点时，只写入这些断点，避免缓存一次性提醒。旧模型沿用其隐式缓存规则。可在 LLM dump 的 `request_body` 中检查 `prompt_cache_options` 和 `prompt_cache_breakpoint`，以及端点或请求覆盖配置是否保留了这些字段。
 - **请求变化**：模型、工具定义与顺序、系统提示、reasoning effort、verbosity 或输出格式变化都可能改变服务端前缀。上下文剪裁或持久压缩也可能缩短可复用范围。
 - **缓存身份与有效期**：检查 `prompt_cache_key` 是否稳定，以及是否切换了端点、凭据或模型。Codex / ChatGPT 通道还使用会话请求头维持缓存亲和性；检查同一 client 的 `session-id`、`thread-id` 和 `x-client-request-id` 是否一致，并与已发送的 `prompt_cache_key` 相同。长时间空闲、服务端路由变化和缓存淘汰都可能导致未命中。同一用户 turn 内，`client_metadata` 的 turn ID 与开始时间保持一致。
 - **统计语义**：兼容网关可能使用与其端点协议不同的 usage 定义，导致同一批缓存 token 被重复计数。按下方步骤核对原始响应，而不要仅凭低百分比判断服务端异常。

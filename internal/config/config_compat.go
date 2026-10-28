@@ -79,7 +79,9 @@ type UsageCompatConfig struct {
 
 // ResponsesCompatConfig controls which optional Responses request fields Chord
 // emits for a provider. Every knob defaults to the current stable Codex-shaped
-// behavior; set one only for compatible gateways that reject a specific field.
+// behavior. Most knobs suppress a field for gateways that reject it; the
+// explicit prompt-cache knobs are opt-in because Codex does not send those
+// fields.
 type ResponsesCompatConfig struct {
 	// SendStore emits the top-level "store" field (default true). When false the
 	// field is omitted and the backend default applies — for official Responses
@@ -97,16 +99,18 @@ type ResponsesCompatConfig struct {
 	// SendPromptCacheKey emits prompt_cache_key and client_metadata session
 	// routing metadata (default true).
 	SendPromptCacheKey *bool `json:"send_prompt_cache_key,omitempty" yaml:"send_prompt_cache_key,omitempty"`
-	// SendPromptCacheOptions emits the top-level prompt_cache_options field
-	// (default true). Set false for a gateway that rejects that field but still
-	// accepts explicit prompt_cache_breakpoint markers.
+	// SendPromptCacheOptions allows the top-level prompt_cache_options policy
+	// field while explicit breakpoints are enabled (default false). Chord sends
+	// it only for requests that need explicit mode; implicit requests omit it
+	// because implicit is the API default. Set it together with
+	// SendPromptCacheBreakpoint to enable explicit caching. Leave it false for
+	// a gateway that accepts prompt_cache_breakpoint markers but rejects the
+	// top-level field.
 	SendPromptCacheOptions *bool `json:"send_prompt_cache_options,omitempty" yaml:"send_prompt_cache_options,omitempty"`
 	// SendPromptCacheBreakpoint emits prompt_cache_breakpoint markers on
-	// eligible input content blocks (default true). Set false for a gateway
-	// that rejects explicit cache breakpoints; unlike
-	// compat.request_overrides this also reaches the markers nested inside
-	// input content blocks. Disabling it also omits prompt_cache_options,
-	// which only selects the breakpoint policy.
+	// eligible input content blocks (default false). Enable it only for
+	// endpoints known to support explicit cache breakpoints. Disabling it also
+	// omits prompt_cache_options, which only selects the breakpoint policy.
 	SendPromptCacheBreakpoint *bool `json:"send_prompt_cache_breakpoint,omitempty" yaml:"send_prompt_cache_breakpoint,omitempty"`
 	// SendMaxOutputTokens emits max_output_tokens with the effective output cap
 	// (default false, preserving the stable Codex request shape). Enable for

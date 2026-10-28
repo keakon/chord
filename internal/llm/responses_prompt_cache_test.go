@@ -68,7 +68,14 @@ func TestResponsesProviderCacheCapabilityOnHTTPWire(t *testing.T) {
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
-	cfg := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, APIURL: server.URL + "/responses"}, []string{"test-key"})
+	cfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: server.URL + "/responses",
+		Compat: &config.ProviderCompatConfig{Responses: &config.ResponsesCompatConfig{
+			SendPromptCacheOptions:    new(true),
+			SendPromptCacheBreakpoint: new(true),
+		}},
+	}, []string{"test-key"})
 	provider := &ResponsesProvider{provider: cfg, client: server.Client()}
 	for _, model := range []string{"gpt-6.1-sol", "gpt-5.5", "sample/test-model"} {
 		request = responsesRequest{}
@@ -99,17 +106,22 @@ func TestResponsesCacheBreakpointsSkipPrefixAndTailOverlays(t *testing.T) {
 	}
 }
 
-func TestResponsesCacheModeAvoidsTransientWrite(t *testing.T) {
+func TestResponsesCacheOptionsOnlyForExplicitMode(t *testing.T) {
 	durable := []message.Message{{Role: message.RoleUser, Content: "request"}}
 	tail := append(append([]message.Message(nil), durable...), message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "hint"})
 	for _, tc := range []struct {
 		msgs    []message.Message
 		enabled bool
 		want    string
-	}{{durable, true, "implicit"}, {tail, true, "explicit"}, {tail, false, "implicit"}} {
+	}{{durable, true, ""}, {tail, true, "explicit"}, {tail, false, ""}} {
 		input := convertMessagesToResponsesWithItemIDs("", tc.msgs, false, false, tc.enabled)
-		if got := responsesPromptCacheOptions(tc.msgs, input).Mode; got != tc.want {
-			t.Fatalf("cache mode=%s want=%s", got, tc.want)
+		options := responsesPromptCacheOptions(tc.msgs, input)
+		got := ""
+		if options != nil {
+			got = options.Mode
+		}
+		if got != tc.want {
+			t.Fatalf("cache mode=%s want=%q", got, tc.want)
 		}
 	}
 }

@@ -561,8 +561,10 @@ func (r *ResponsesProvider) CompleteStream(
 		reqBody.omitStore = !compatBool(sendStore, true)
 		reqBody.omitInclude = !compatBool(sendReasoningInclude, true)
 		reqBody.Input = fullInput
-		if cacheBreakpoints && compatBool(sendPromptCacheOptions, true) {
-			reqBody.PromptCacheOptions = responsesPromptCacheOptions(messages, fullInput)
+		if cacheBreakpoints && compatBool(sendPromptCacheOptions, false) {
+			if options := responsesPromptCacheOptions(messages, fullInput); options != nil {
+				reqBody.PromptCacheOptions = options
+			}
 		}
 		if sessionKey != "" && compatBool(sendPromptCacheKey, true) {
 			reqBody.PromptCacheKey = sessionKey

@@ -17,10 +17,11 @@ func TestResponsesProviderWebSocketPromptCacheCompat(t *testing.T) {
 		wantOptions    bool
 		wantBreakpoint bool
 	}{
-		{name: "defaults", wantOptions: true, wantBreakpoint: true},
-		{name: "options off", compat: &config.ResponsesCompatConfig{SendPromptCacheOptions: new(false)}, wantBreakpoint: true},
-		{name: "breakpoints off", compat: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(false)}},
-		{name: "breakpoints off options on", compat: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(false), SendPromptCacheOptions: new(true)}},
+		{name: "defaults"},
+		{name: "breakpoint opt-in", compat: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(true)}, wantBreakpoint: true},
+		{name: "breakpoint and options opt-in", compat: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(true), SendPromptCacheOptions: new(true)}, wantOptions: true, wantBreakpoint: true},
+		{name: "options opt-in alone", compat: &config.ResponsesCompatConfig{SendPromptCacheOptions: new(true)}},
+		{name: "options off suppresses explicit policy", compat: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(true), SendPromptCacheOptions: new(false)}, wantBreakpoint: true},
 		{name: "both off", compat: &config.ResponsesCompatConfig{SendPromptCacheBreakpoint: new(false), SendPromptCacheOptions: new(false)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,8 +60,12 @@ func TestResponsesProviderWebSocketPromptCacheCompat(t *testing.T) {
 						t.Fatalf("want prewarm and generation, got %+v", requests)
 					}
 					for i, body := range requests {
-						if _, has := body["prompt_cache_options"]; has != tc.wantOptions {
-							t.Fatalf("options present=%v, want %v", has, tc.wantOptions)
+						options, hasOptions := body["prompt_cache_options"].(map[string]any)
+						if hasOptions != tc.wantOptions {
+							t.Fatalf("options present=%v, want %v", hasOptions, tc.wantOptions)
+						}
+						if tc.wantOptions && options["mode"] != "explicit" {
+							t.Fatalf("options mode=%v, want explicit", options["mode"])
 						}
 						wantBreakpoint := tc.wantBreakpoint && (i == 0 || !incremental)
 						if got := responsesBreakpointCount(body); (got > 0) != wantBreakpoint {
