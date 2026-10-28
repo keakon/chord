@@ -76,24 +76,52 @@ if grep -En "${leak_pattern}" "${stdout_file}" "${stderr_file}" >/tmp/chord-ci-l
   exit 1
 fi
 
-cat "${stdout_file}"
+# A successful run prints only the outcome and the coverage table below, which
+# already lists every package with statements; failing runs above still print
+# both streams in full.
+echo "go test passed"
 
-cover_output="$("${go_command}" tool cover -func="${coverage_file}")"
-printf '%s\n' "${cover_output}"
+# Aggregate the profile by package: one line per package plus the total, both
+# weighted by statement count. This matches how `go test -cover` reports a
+# package, and it avoids the per-function table (`go tool cover -func`) that
+# would add thousands of lines to the job log.
+coverage_report="$(awk '
+  NR == 1 { next }
+  {
+    file = $1
+    sub(/:[0-9]+\.[0-9]+,[0-9]+\.[0-9]+$/, "", file)
+    pkg = file
+    sub(/[\/\\][^\/\\]+$/, "", pkg)
+    stmts[pkg] += $2
+    all += $2
+    if ($3 + 0 > 0) {
+      covered[pkg] += $2
+      allCovered += $2
+    }
+  }
+  END {
+    if (all > 0) printf "total %.1f\n", 100 * allCovered / all
+    for (pkg in stmts) printf "%.1f %s\n", 100 * covered[pkg] / stmts[pkg], pkg
+  }' "${coverage_file}")"
 
-total_coverage="$(printf '%s\n' "${cover_output}" | awk '/^total:/ {gsub(/%/, "", $3); print $3}')"
+total_coverage="$(printf '%s\n' "${coverage_report}" | awk '$1 == "total" { print $2 }')"
 if [[ -z "${total_coverage}" ]]; then
   echo "failed to parse total coverage" >&2
   exit 1
 fi
 
-awk -v total="${total_coverage}" -v min="${min_coverage}" 'BEGIN {
-  if (total + 0 < min + 0) {
-    printf("coverage check failed: total %.1f%% < required %.1f%%\n", total + 0, min + 0)
-    exit 1
-  }
-  printf("coverage check passed: total %.1f%% >= required %.1f%%\n", total + 0, min + 0)
-}'
+package_coverage="$(printf '%s\n' "${coverage_report}" | grep -v '^total ' | sort -n | awk '{ printf "%6.1f%%  %s\n", $1, $2 }')"
+
+if awk -v total="${total_coverage}" -v min="${min_coverage}" 'BEGIN { exit !(total + 0 >= min + 0) }'; then
+  echo "per-package coverage (lowest first):"
+  printf '%s\n' "${package_coverage}"
+  printf 'coverage check passed: total %s%% >= required %s%%\n' "${total_coverage}" "${min_coverage}"
+else
+  echo "per-package coverage (lowest first):" >&2
+  printf '%s\n' "${package_coverage}" >&2
+  echo "coverage check failed: total ${total_coverage}% < required ${min_coverage}%" >&2
+  exit 1
+fi
 
 if [[ "${run_deadcode_gate}" -eq 1 ]]; then
   "$(dirname "${BASH_SOURCE[0]}")/check_deadcode.sh"
