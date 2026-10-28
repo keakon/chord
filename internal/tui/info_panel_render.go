@@ -165,7 +165,6 @@ func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIn
 		b.WriteByte('L')
 		b.WriteString(r.Name)
 		appendSep()
-		b.WriteString(r.Root)
 		appendBool(r.OK)
 		appendBool(r.Pending)
 		appendBool(r.Idle)

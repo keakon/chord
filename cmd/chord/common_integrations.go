@@ -39,20 +39,45 @@ func lspServerDisplayList(mgr *lsp.Manager, runtimeCtrl *runtimeResourceControll
 	if len(rows) == 0 {
 		return nil
 	}
+	return aggregateLSPRows(rows, runtimeCtrl)
+}
+
+// aggregateLSPRows merges the manager's per-root instances into one row per
+// server. The panel reports which servers are active and how many problems they
+// found, not how many checkouts this session touched: counts add up across
+// instances, and one instance that cannot start marks the whole row failed
+// because the row has no room to say which checkout broke.
+func aggregateLSPRows(rows []lsp.SidebarServerEntry, runtimeCtrl *runtimeResourceController) []agent.LSPServerDisplay {
 	lspIdle, _ := runtimeIdleStatus(runtimeCtrl)
-	out := make([]agent.LSPServerDisplay, len(rows))
-	for i, row := range rows {
-		idle := lspIdle && runtimeCtrl != nil && runtimeCtrl.WasLSPLoaded(row.Name) && !row.OK && row.Pending && row.Error == ""
-		out[i] = agent.LSPServerDisplay{
-			Name:     row.Name,
-			Root:     row.Root,
-			OK:       row.OK,
-			Pending:  row.Pending && !idle,
-			Idle:     idle,
-			Err:      row.Error,
-			Errors:   row.Errors,
-			Warnings: row.Warnings,
+	out := make([]agent.LSPServerDisplay, 0, len(rows))
+	index := make(map[string]int, len(rows))
+	for _, row := range rows {
+		i, seen := index[row.Name]
+		if !seen {
+			index[row.Name] = len(out)
+			out = append(out, agent.LSPServerDisplay{Name: row.Name})
+			i = len(out) - 1
 		}
+		merged := &out[i]
+		merged.OK = merged.OK || row.OK
+		merged.Pending = merged.Pending || row.Pending
+		merged.Errors += row.Errors
+		merged.Warnings += row.Warnings
+		if row.Error != "" && merged.Err == "" {
+			merged.Err = row.Error
+		}
+	}
+	for i := range out {
+		row := &out[i]
+		if row.Err != "" {
+			row.OK = false
+			row.Pending = false
+			row.Idle = false
+			continue
+		}
+		idle := lspIdle && runtimeCtrl != nil && runtimeCtrl.WasLSPLoaded(row.Name) && !row.OK && row.Pending
+		row.Idle = idle
+		row.Pending = row.Pending && !idle
 	}
 	return out
 }

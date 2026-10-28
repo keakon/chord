@@ -355,9 +355,9 @@ type FocusedSkillInvocationStateProvider interface {
 	FocusedSkillInvocationStates() []skill.InvocationState
 }
 
-// LSPServerDisplay is one row in the ENVIRONMENT / LSP sidebar block.
+// LSPServerDisplay is one row per server in the ENVIRONMENT / LSP sidebar
+// block. Instances of the same server across worktrees are reported as one row.
 type LSPServerDisplay struct {
-	Root     string
 	Name     string
 	OK       bool
 	Pending  bool // not connected yet (lazy start)

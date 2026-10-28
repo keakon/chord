@@ -50,6 +50,37 @@ func TestLSPServerDisplayListMarksIdleUnloadedRows(t *testing.T) {
 	}
 }
 
+func TestAggregateLSPRowsMergesInstancesOfOneServer(t *testing.T) {
+	rows := aggregateLSPRows([]lsp.SidebarServerEntry{
+		{Name: "gopls", Root: "/repo", OK: true, Errors: 2, Warnings: 1},
+		{Name: "gopls", Root: "/repo-worktree", OK: true, Errors: 3},
+		{Name: "typescript", Root: "/repo", Pending: true},
+	}, nil)
+	if len(rows) != 2 {
+		t.Fatalf("aggregateLSPRows len = %d, want 2", len(rows))
+	}
+	if rows[0].Name != "gopls" || !rows[0].OK || rows[0].Pending || rows[0].Errors != 5 || rows[0].Warnings != 1 {
+		t.Fatalf("gopls row = %+v, want merged 5E/1W", rows[0])
+	}
+	if rows[1].Name != "typescript" || rows[1].OK || !rows[1].Pending {
+		t.Fatalf("typescript row = %+v, want pending", rows[1])
+	}
+}
+
+func TestAggregateLSPRowsFailsWholeServerWhenOneInstanceFails(t *testing.T) {
+	rows := aggregateLSPRows([]lsp.SidebarServerEntry{
+		{Name: "gopls", Root: "/repo", OK: true, Errors: 1},
+		{Name: "gopls", Root: "/repo-worktree", Error: "initialize: server exited", Errors: 4, Warnings: 2},
+	}, nil)
+	if len(rows) != 1 {
+		t.Fatalf("aggregateLSPRows len = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.OK || row.Pending || row.Idle || row.Err == "" || row.Errors != 5 || row.Warnings != 2 {
+		t.Fatalf("row = %+v, want failed gopls with summed counts", row)
+	}
+}
+
 func TestServerDisplayListsAllowNilRuntimeController(t *testing.T) {
 	lspMgr := lsp.NewManager(&config.Config{
 		LSP: config.LSPConfig{
