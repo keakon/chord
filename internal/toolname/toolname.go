@@ -54,7 +54,7 @@ const MCPToolPrefix = "mcp_"
 // both the JSON function description (tools) and the freeform custom-tool wire
 // description (llm), which otherwise replaces the whole description with the
 // Codex text; the two packages share it here so the rule has one source.
-const ApplyPatchHunkGuidance = "Prefer the smallest hunk with distinctive context — in repeated blocks such as tests or fixtures, put the enclosing function, test, or case name on the `@@` line; after a mismatch, re-read the current target range and rebuild the hunk instead of retrying it unchanged."
+const ApplyPatchHunkGuidance = "Prefer the smallest hunk with distinctive context — in repeated blocks such as tests or fixtures, put the enclosing function, test, or case name on the `@@` line. Copy context and `-` lines verbatim from your latest read of the file, never from memory or from text you wrote earlier: long prose lines in notes and docs are easy to retype slightly wrong, and a line outside the range you last read needs a fresh read first. After a mismatch, re-read the current target range and rebuild the hunk instead of retrying it unchanged."
 
 // Normalize trims user-provided tool names and maps legacy aliases.
 func Normalize(name string) string {
