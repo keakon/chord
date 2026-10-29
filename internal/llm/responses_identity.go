@@ -64,7 +64,7 @@ func deriveResponsesWireIdentity(localKey string, windowNumber uint64, subAgent 
 		unixMs = int64(binary.BigEndian.Uint64(seed[:8]) & ((1 << 48) - 1))
 	}
 	sessionID := deterministicUUIDv7(unixMs, seed[:])
-	windowSeed := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", sessionID, windowNumber)))
+	windowSeed := sha256.Sum256(fmt.Appendf(nil, "%s:%d", sessionID, windowNumber))
 	return responsesWireIdentity{
 		sessionID:       sessionID,
 		windowID:        fmt.Sprintf("%s:%d", sessionID, windowNumber),
