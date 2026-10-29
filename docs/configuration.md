@@ -626,11 +626,18 @@ is to use the first allowed pool; switching back to that pool restores the defau
 behavior.
 
 User messages submitted while the main agent is busy remain queued until a safe
-request boundary. If the current provider/model attempt fails and Chord is about to
-send a request to the next fallback model, messages queued by that point are committed
-to the conversation and included in that fallback request. Chord never rewrites a
-provider request that is already in flight; messages arriving after the fallback
-request starts wait for the next request boundary.
+request boundary. Boundaries include a normal request start, the first attempt of a
+retry round after key cooling or backoff, and the attempt against the next fallback
+model. Messages queued by that point are committed to the conversation and included in
+that request. Chord never
+rewrites a provider request that is already in flight and never inserts messages while
+rotating keys within one round; messages arriving after an attempt starts wait for the
+next boundary.
+
+On a clean shutdown, messages still queued for the next request are written to
+conversation history, so a resumed session includes them in your next request instead
+of dropping them. Messages left by an unclean exit stay in the durable queue and appear
+as restored pending input.
 
 ## Reusing protocol templates with YAML anchors
 

@@ -131,9 +131,12 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	}
 
 	// Queued next-request inputs become durable user messages while the persist
-	// loop still admits writes, so a restart replays them in the conversation
-	// history instead of leaving an empty queue the user cannot see.
-	a.commitNextRequestInputsToTranscript()
+	// loop is still open, so a restart shows them in the conversation history
+	// instead of leaving an empty queue the user cannot see. The commit writes
+	// directly and synchronously: normal persistence admission is already
+	// closed by shuttingDown, and a queued row must not be retired before its
+	// transcript record is durable.
+	a.commitNextRequestInputsToTranscriptUntil(time.After(remaining()))
 
 	// Stop persistence admission and wait for the loop to drain.
 	// The persist loop may be started outside Run (tests), so don't gate the wait

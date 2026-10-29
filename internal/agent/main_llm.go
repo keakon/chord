@@ -821,6 +821,15 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 			}
 			return updatedMessages, err
 		},
+		BeforeRetryRound: func(retryCtx context.Context, requestMessages []message.Message) ([]message.Message, error) {
+			updatedMessages, err := a.updateMainLLMRequestBeforeRetryRound(retryCtx, turnID, requestMessages, tailOverlayCount)
+			if err == nil && updatedMessages != nil {
+				messages = updatedMessages
+				observer.SetReduction(a.diagnosticReduction())
+				tailOverlayCount -= trailingTurnOverlayCount(requestMessages) - trailingTurnOverlayCount(updatedMessages)
+			}
+			return updatedMessages, err
+		},
 	}
 	resp, err := llmClient.CompleteStreamWithOptions(llm.WithResponsesTurnState(requestCtx, a.currentTurnResponsesState()), messages, toolDefs, callback, requestOptions)
 	if err == nil {

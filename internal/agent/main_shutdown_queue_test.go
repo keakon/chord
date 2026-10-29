@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/skill"
 )
 
 // loadDurableInputDelivery reads the queue file directly. Shutdown closes the
@@ -82,11 +85,10 @@ func TestShutdownCommitsNextRequestInputToHistory(t *testing.T) {
 	}
 }
 
-// Retiring the queue row comes before the history write, so a save that fails
-// must leave the request only in the queue. The reverse order would put it in
-// both places, and restore does not drop a queued row whose input already
-// reached the transcript, so the next send would run the request twice.
-func TestShutdownSaveFailureKeepsInputOutOfHistory(t *testing.T) {
+// If queue retirement fails after the transcript write, the request is already
+// durable in history. Restore retires the stale queued row by InputID, so the
+// request is not executed twice.
+func TestShutdownQueueRetirementFailureKeepsInputRecoverable(t *testing.T) {
 	a, queued := queueAgentForTest(t, "shutdown-save-failure", "queued follow-up", recovery.InputDeliveryNextRequest)
 
 	// Move the durable revision so the compare-and-swap in SaveInputDelivery
@@ -105,10 +107,23 @@ func TestShutdownSaveFailureKeepsInputOutOfHistory(t *testing.T) {
 		t.Fatalf("Shutdown: %v", err)
 	}
 
-	for _, msg := range a.ctxMgr.Snapshot() {
+	manager := recovery.NewRecoveryManager(a.sessionDir)
+	messages, err := manager.LoadMessages(identity.MainAgentID)
+	closeErr := manager.Close()
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+	var inHistory bool
+	for _, msg := range messages {
 		if msg.Role == message.RoleUser && msg.InputID == queued {
-			t.Fatal("a rejected queue retirement still wrote the input to the transcript")
+			inHistory = true
 		}
+	}
+	if !inHistory {
+		t.Fatal("the committed input is missing from the transcript")
 	}
 	var kept bool
 	for _, input := range loadDurableInputDelivery(t, a.sessionDir).Inputs {
@@ -203,6 +218,91 @@ func TestShutdownCommitsQueuedImageToHistory(t *testing.T) {
 	}
 }
 
+// A real shutdown followed by a real restore must carry the queued
+// next-request input into the transcript. The in-memory assertion above cannot
+// catch a persistence admission failure that drops the row during shutdown.
+func TestShutdownRestoredSessionContainsNextRequestInput(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "shutdown-restore-next-request")
+	persistRestorableSession(t, sessionDir)
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	a.newTurn(a.newDeliveryWork("user"))
+	a.recordCommittedUserMessage(message.Message{Role: message.RoleUser, Content: "current request"})
+	queued := submitDeliveryForTest(t, a, "queued follow-up", recovery.InputDeliveryNextRequest)
+	finishDeliveryWrites(t, a)
+
+	if err := a.Shutdown(5 * time.Second); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	b := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := b.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup (restart): %v", err)
+	}
+	b.initializeInputDelivery()
+	finishDeliveryWrites(t, b)
+
+	for _, msg := range b.ctxMgr.Snapshot() {
+		if msg.Role == message.RoleUser && msg.InputID == queued && msg.Content == "queued follow-up" {
+			return
+		}
+	}
+	t.Fatal("restored session lost the queued next-request input")
+}
+
+// A queued `/skill` request expands into its assistant/tool pair at shutdown, so
+// the restored transcript carries the skill body the model would have seen
+// instead of a bare slash command.
+func TestShutdownRestoredSessionContainsQueuedSkillInvocation(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "shutdown-restore-queued-skill")
+	persistRestorableSession(t, sessionDir)
+	meta := writeTempSkill(t, t.TempDir(), "go-expert", "Workflow for ${CHORD_SKILL_ARGS}.", false)
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := a.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup: %v", err)
+	}
+	a.SetSkills([]*skill.Meta{meta})
+	a.newTurn(a.newDeliveryWork("user"))
+	a.recordCommittedUserMessage(message.Message{Role: message.RoleUser, Content: "current request"})
+	queued := submitDeliveryForTest(t, a, "/skill go-expert release checks", recovery.InputDeliveryNextRequest)
+	finishDeliveryWrites(t, a)
+
+	if err := a.Shutdown(5 * time.Second); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if state := loadDurableInputDelivery(t, sessionDir); len(state.Inputs) != 0 {
+		t.Fatalf("durable queue = %+v, want the committed skill request retired", state.Inputs)
+	}
+
+	b := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	if err := b.RestoreSessionAtStartup(); err != nil {
+		t.Fatalf("RestoreSessionAtStartup (restart): %v", err)
+	}
+	var user, call, result bool
+	for _, msg := range b.ctxMgr.Snapshot() {
+		if msg.InputID != queued {
+			continue
+		}
+		switch msg.Role {
+		case message.RoleUser:
+			user = true
+		case message.RoleAssistant:
+			call = len(msg.ToolCalls) == 1
+		case message.RoleTool:
+			result = strings.Contains(msg.Content, "Workflow for release checks.")
+		}
+	}
+	if !user || !call || !result {
+		t.Fatalf("restored skill request user=%v call=%v result=%v, want the full invocation", user, call, result)
+	}
+}
+
 // The restart side of the contract: a session whose next-request input was
 // committed to history by shutdown must show it in history, not replay it from
 // the queue. The shutdown half is covered above; this drives only the restart.
@@ -222,7 +322,7 @@ func TestRestoredSessionShowsCommittedNextRequestInHistoryOnly(t *testing.T) {
 
 	// The shutdown commit is what moves the row out of the queue and into
 	// history; run it directly so this test only exercises the restart side.
-	a.commitNextRequestInputsToTranscript()
+	a.commitNextRequestInputsToTranscriptUntil(nil)
 	// The commit's transcript row is written by the async persist loop; the
 	// restart below reads the session file from disk, so drain the loop first.
 	a.flushPersist()

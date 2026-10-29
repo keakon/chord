@@ -10,6 +10,70 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func TestCompleteStreamBeforeRetryRoundRunsBeforeNextRound(t *testing.T) {
+	cfg := testProviderConfigWithKeys("sample", "model-1", []string{"k1"})
+	impl := &recordingProvider{calls: []scriptedCall{
+		{resp: &message.Response{Content: "ok after cooldown"}},
+	}}
+	c := NewClient(cfg, impl, "model-1", 4096, "sys")
+	cfg.MarkCooldown("k1", 20*time.Millisecond)
+
+	initial := []message.Message{{Role: "user", Content: "first"}}
+	queued := message.Message{Role: "user", Content: "queued during cooldown"}
+	calls := 0
+	resp, err := c.CompleteStreamWithOptions(context.Background(), initial, nil, nil, CompleteStreamOptions{
+		BeforeRetryRound: func(_ context.Context, messages []message.Message) ([]message.Message, error) {
+			calls++
+			if len(messages) != 1 || messages[0].Content != "first" {
+				t.Errorf("retry boundary messages = %#v, want the original request", messages)
+			}
+			return append(messages, queued), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStreamWithOptions returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok after cooldown" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if calls != 1 {
+		t.Fatalf("retry boundary calls = %d, want 1", calls)
+	}
+	if len(impl.messages) != 1 {
+		t.Fatalf("provider messages recorded = %d, want 1", len(impl.messages))
+	}
+	got := impl.messages[0]
+	if len(got) != 2 || got[0].Content != "first" || got[1].Content != queued.Content {
+		t.Fatalf("request did not carry the retry-round input: %#v", got)
+	}
+}
+
+func TestCompleteStreamBeforeRetryRoundSkipsKeyRotation(t *testing.T) {
+	cfg := testProviderConfigWithKeys("sample", "model-1", []string{"k1", "k2"})
+	impl := &recordingProvider{calls: []scriptedCall{
+		{err: &APIError{StatusCode: 503, Message: "retry another key"}},
+		{resp: &message.Response{Content: "ok on the next key"}},
+	}}
+	c := NewClient(cfg, impl, "model-1", 4096, "sys")
+
+	calls := 0
+	resp, err := c.CompleteStreamWithOptions(context.Background(), []message.Message{{Role: "user", Content: "first"}}, nil, nil, CompleteStreamOptions{
+		BeforeRetryRound: func(_ context.Context, messages []message.Message) ([]message.Message, error) {
+			calls++
+			return messages, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompleteStreamWithOptions returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "ok on the next key" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if calls != 0 {
+		t.Fatalf("retry boundary calls = %d, want 0 for key rotation inside one round", calls)
+	}
+}
+
 func TestClientCompleteStreamCompatible400RetriesAfterAllKeysCooling(t *testing.T) {
 	cfg := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1", "k2"})
 	disableRetryDelayForTest(cfg)

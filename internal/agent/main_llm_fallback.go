@@ -152,13 +152,11 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 		primarySurface := newRequestSurfaceFingerprint(requestSurfacePrimary, payload.primaryModelRef, messages,
 			estimateMessagesTokens(a.ctxMgr, messages), payload.primaryInputLimit)
 		if rebuilt {
-			messages = projectSkillDiscoveryMessages(messages, a.skillActivationView())
-			var projectionErr error
-			messages, projectionErr = projectDirectoryInstructionHistory(messages, a.directoryInstructions.Load())
-			if projectionErr != nil {
-				return nil, projectionErr
+			var rebuildErr error
+			messages, rebuildErr = a.rebuildMainLLMRequestMessages(messages)
+			if rebuildErr != nil {
+				return nil, rebuildErr
 			}
-			messages = a.prepareMessagesForLLMWithOptions(messages, false)
 		}
 		targetSurface := newRequestSurfaceFingerprint(requestSurfaceFallback, payload.fallbackModelRef, messages,
 			estimateMessagesTokens(a.ctxMgr, messages), payload.fallbackInputLimit)
@@ -187,18 +185,7 @@ func (a *MainAgent) handleLLMFallbackBoundary(evt Event) {
 	if a.prepareInputDeliveryRequest(deliveryRequest{turnID: a.turn.ID, turnEpoch: a.turn.Epoch, fallback: payload}) {
 		return
 	}
-	messages := payload.messages
-	if len(payload.inputMessages) > 0 {
-		tail := min(max(payload.tailOverlayCount, 0), len(messages))
-		at := len(messages) - tail
-		merged := make([]message.Message, 0, len(messages)+len(payload.inputMessages))
-		merged = append(merged, messages[:at]...)
-		merged = append(merged, payload.inputMessages...)
-		messages = append(merged, messages[at:]...)
-		a.stageNextSubAgentMailboxBatch()
-	}
-	messages = a.consumePendingUserMessagesForRequest(messages, payload.tailOverlayCount)
-	messages = a.injectPendingMailboxMessagesForRequest(messages, payload.tailOverlayCount)
+	messages := a.mergeBoundaryRequestInputs(payload.messages, payload.inputMessages, payload.tailOverlayCount)
 	a.applyFallbackModelDownshift(payload)
 	// A prepared surface is only reusable when the fallback admits the request
 	// against the same effective budget; a narrower target window can require

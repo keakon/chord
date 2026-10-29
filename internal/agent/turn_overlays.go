@@ -24,7 +24,7 @@ const pendingLSPDiagnosticOverlayText = "LSP diagnostics changed after one or mo
 // appendMailboxMessageToContext persists one pending mailbox message to the
 // durable conversation and reports the request overlay carrying it. It is the
 // shared body of the initial-request path (buildTurnOverlayMessages) and the
-// fallback-retry path (injectPendingMailboxMessagesForRequest) so both attach
+// request-boundary path (injectPendingMailboxMessagesForRequest) so both attach
 // the same durable text for the same mailbox row.
 //
 // The second return value reports whether the caller must carry the message in
@@ -460,10 +460,10 @@ func containsBackgroundResultMessage(messages []message.Message, messageID strin
 	return false
 }
 
-// injectPendingMailboxMessagesForRequest attaches mailbox arrivals to a fallback
-// retry request, mirroring the queued-user-message guarantee: any mailbox row
-// waiting in the inbox when the next model request dispatches rides that
-// request. It runs on the event loop at the LLM fallback boundary, after the
+// injectPendingMailboxMessagesForRequest attaches mailbox arrivals to a retry
+// round or fallback request, mirroring the queued-user-message guarantee: any
+// mailbox row waiting in the inbox when the next model request dispatches rides
+// that request. It runs on the event loop at the LLM request boundary, after the
 // queued user messages were merged, so the durable order stays user input then
 // mailbox, and the request order matches it by inserting before the transient
 // tail overlays.
@@ -471,7 +471,7 @@ func containsBackgroundResultMessage(messages []message.Message, messageID strin
 // Only durable mailbox rows are injected here. Transient turn overlays
 // (coordination snapshot, pressure reminders) were already assembled for the
 // initial attempt and stay at the tail; rebuilding them per retry would move
-// the cacheable prefix on every fallback.
+// the cacheable prefix on every retry round or fallback.
 func (a *MainAgent) injectPendingMailboxMessagesForRequest(messages []message.Message, tailOverlayCount int) []message.Message {
 	if a == nil || a.ctxMgr == nil {
 		return messages
@@ -513,13 +513,7 @@ func (a *MainAgent) injectPendingMailboxMessagesForRequest(messages []message.Me
 	if len(toInject) == 0 {
 		return messages
 	}
-	tailOverlayCount = min(max(tailOverlayCount, 0), len(messages))
-	insertionAt := len(messages) - tailOverlayCount
-	out := make([]message.Message, 0, len(messages)+len(toInject))
-	out = append(out, messages[:insertionAt]...)
-	out = append(out, toInject...)
-	out = append(out, messages[insertionAt:]...)
-	return out
+	return insertBoundaryMessages(messages, toInject, tailOverlayCount)
 }
 
 // hasCoordinationTaskRecords reports whether this session has any SubAgent task

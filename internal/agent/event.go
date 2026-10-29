@@ -46,6 +46,7 @@ const (
 	EventHandoffResolve          = "handoff_resolve"       // user decision for a pending handoff (payload: *handoffResolvePayload)
 	EventLoopAssessment          = "loop_assessment"       // internal loop-controller decision point after a completed assistant round
 	EventLLMFallbackBoundary     = "llm_fallback_boundary" // update a pending fallback request before provider dispatch
+	EventLLMRetryBoundary        = "llm_retry_boundary"    // update a request before the first target attempt of a retry round
 
 	// Durable compaction (async worker); payloads are *compactionDraft / error.
 	EventCompactionReady           = "compaction_ready"

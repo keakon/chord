@@ -5,9 +5,11 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 )
@@ -169,19 +171,17 @@ func IsUnsupportedAfterCompletionInput(content string) bool {
 	return false
 }
 
-// commitNextRequestInputsToTranscript writes queued next-request inputs as
+// commitNextRequestInputsToTranscriptUntil writes queued next-request inputs as
 // durable user messages at shutdown. A next-request input is the one the user
 // expects to go out on the next send, so leaving it only in the queue file
 // makes it invisible after a restart: the transcript is where the user looks
 // for what they already wrote. The queue rows are then retired so the restored
 // session shows the request once, in history, instead of twice.
 //
-// The queue is retired before the messages are written, the same order
-// claimDeliveryInputs uses: the durable queue row must be gone before the
-// transcript row exists. Retiring after the write would leave a failed save
-// with the request in both places, and restore does not drop a queued row whose
-// input already reached the transcript, so the next send would run it twice.
-func (a *MainAgent) commitNextRequestInputsToTranscript() {
+// Transcript writes happen before queue retirement. A crash between the two
+// therefore leaves a queued row whose InputID is already in the transcript,
+// which restore retires, instead of losing a row whose queue record is gone.
+func (a *MainAgent) commitNextRequestInputsToTranscriptUntil(persistDeadline <-chan time.Time) {
 	state := a.delivery.committed
 	if state == nil {
 		return
@@ -208,21 +208,57 @@ func (a *MainAgent) commitNextRequestInputsToTranscript() {
 		log.Warnf("cannot commit queued next-request inputs to history: no recovery manager")
 		return
 	}
-	committed := state.Clone()
-	for _, input := range pending {
-		committed.Inputs = slices.DeleteFunc(committed.Inputs, func(candidate recovery.PendingInput) bool { return candidate.InputID == input.InputID })
+
+	// Barrier first: the direct durable appends below must land after every
+	// message the persistence pump accepted before shutdown.
+	if a.persist.ch != nil && !a.persist.flushUntil(persistDeadline) {
+		log.Warnf("cannot commit queued next-request inputs to history: persistence barrier unavailable")
+		return
 	}
-	committed.Revision++
-	saved, err := owner.manager.SaveInputDelivery(state.Revision, committed)
+
+	type committedInput struct {
+		user      message.Message
+		skillName string
+		skillPair []message.Message
+	}
+	committed := make([]committedInput, 0, len(pending))
+	for _, input := range pending {
+		userMsg := message.Message{Role: message.RoleUser, InputID: input.InputID, InputRequestID: input.RequestID, Content: input.Content, Parts: cloneContentParts(input.Parts)}
+		if err := owner.manager.PersistMessageDurable(identity.MainAgentID, userMsg); err != nil {
+			log.Warnf("failed to persist committed next-request input error=%v", err)
+			return
+		}
+		skillName, skillPair := a.buildUserSkillInvocation(userMsg)
+		for _, msg := range skillPair {
+			if err := owner.manager.PersistMessageDurable(identity.MainAgentID, msg); err != nil {
+				log.Warnf("failed to persist committed next-request skill invocation error=%v", err)
+				skillName, skillPair = "", nil
+				break
+			}
+		}
+		committed = append(committed, committedInput{user: userMsg, skillName: skillName, skillPair: skillPair})
+	}
+
+	committedState := state.Clone()
+	for _, input := range pending {
+		committedState.Inputs = slices.DeleteFunc(committedState.Inputs, func(candidate recovery.PendingInput) bool { return candidate.InputID == input.InputID })
+	}
+	committedState.Revision++
+	saved, err := owner.manager.SaveInputDelivery(state.Revision, committedState)
 	if err != nil {
+		// The transcript rows are already durable. Restore retires the queued
+		// rows by InputID, so they cannot execute a second time.
 		log.Warnf("failed to retire committed next-request inputs from the durable queue error=%v", err)
 		return
 	}
 	a.delivery.committed = saved
-	for _, input := range pending {
-		a.recordCommittedUserMessage(message.Message{Role: message.RoleUser, InputID: input.InputID, InputRequestID: input.RequestID, Content: input.Content, Parts: cloneContentParts(input.Parts)})
+	for _, input := range committed {
+		a.recordCommittedUserMessageInMemory(input.user)
+		if len(input.skillPair) > 0 {
+			a.applyUserSkillPairInMemory(input.skillName, input.skillPair)
+		}
 	}
-	log.Infof("committed %d queued next-request input(s) to session history at shutdown", len(pending))
+	log.Infof("committed %d queued next-request input(s) to session history at shutdown", len(committed))
 }
 
 // A queued request must not produce the aggregate idle that ACP uses to settle

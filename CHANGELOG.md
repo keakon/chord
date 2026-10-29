@@ -85,6 +85,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - AGENTS shows distinct waiting states and the current coordination request reason, with clickable task and reason rows.
 
+- Queued main-agent input also joins the conversation at the first attempt of a retry round after key cooling or backoff, not only before a fallback-model request, so a message sent during a long cooling or backoff wait reaches the model with the next retry instead of waiting for the request to finish. Key rotation within a round and requests already in flight are unchanged.
+
 - The **AGENTS** list marks each child task's state with icons only: `○` running, `?` awaiting its owner, `⇣` awaiting its own children, `✓` delivered, `✗` failed, `⊘` cancelled, `…` idle, and `◇` unknown. The section header shows the total child count, excluding the main agent; status words such as `delivered` and `failed` no longer take up row width.
 
 - Compaction summaries exclude independent thinking so the input budget prioritizes user requests, replies, and execution records.

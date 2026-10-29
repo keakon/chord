@@ -14,6 +14,22 @@ type deliveryRequest struct {
 	turnID, turnEpoch uint64
 	source            string
 	fallback          *llmFallbackBoundaryPayload
+	retry             *llmRetryBoundaryPayload
+}
+
+// boundaryInputMessages exposes the request-boundary payload that owns the
+// transcript rows appended while the queued input was claimed.
+func (r *deliveryRequest) boundaryInputMessages() *[]message.Message {
+	if r == nil {
+		return nil
+	}
+	if r.fallback != nil {
+		return &r.fallback.inputMessages
+	}
+	if r.retry != nil {
+		return &r.retry.inputMessages
+	}
+	return nil
 }
 
 func (a *MainAgent) prepareDeliveryRequest(_ context.Context, turnID uint64, source string) bool {
@@ -83,6 +99,10 @@ func (a *MainAgent) resumeDeliveryRequest() {
 	}
 	if pending.fallback != nil {
 		a.handleLLMFallbackBoundary(Event{Type: EventLLMFallbackBoundary, TurnID: pending.turnID, Payload: pending.fallback})
+		return
+	}
+	if pending.retry != nil {
+		a.handleLLMRetryBoundary(Event{Type: EventLLMRetryBoundary, TurnID: pending.turnID, Payload: pending.retry})
 		return
 	}
 	a.beginMainLLMAfterPreparation(a.turn.Ctx, pending.turnID, pending.source)
@@ -193,11 +213,14 @@ func (a *MainAgent) claimDeliveryInputs(ids []string, newTurn bool) {
 			}
 		}
 		// Capture only the new durable input and any skill records it adds. A
-		// fallback already owns its prepared history and transient tail overlays.
+		// boundary owner already holds the prepared history and tail overlays.
 		var before int
-		pending := a.delivery.request
-		if pending != nil && pending.fallback != nil {
-			before = a.ctxMgr.MessageCount()
+		var boundaryInputs *[]message.Message
+		if pending := a.delivery.request; pending != nil {
+			boundaryInputs = pending.boundaryInputMessages()
+			if boundaryInputs != nil {
+				before = a.ctxMgr.MessageCount()
+			}
 		}
 		for _, input := range a.delivery.committed.Inputs {
 			if !slices.Contains(ids, input.InputID) || existing[input.InputID] {
@@ -205,8 +228,8 @@ func (a *MainAgent) claimDeliveryInputs(ids []string, newTurn bool) {
 			}
 			a.recordCommittedUserMessage(message.Message{Role: message.RoleUser, InputID: input.InputID, InputRequestID: input.RequestID, Content: input.Content, Parts: cloneContentParts(input.Parts)})
 		}
-		if pending != nil && pending.fallback != nil {
-			pending.fallback.inputMessages = append(pending.fallback.inputMessages, a.ctxMgr.Snapshot()[before:]...)
+		if boundaryInputs != nil {
+			*boundaryInputs = append(*boundaryInputs, a.ctxMgr.Snapshot()[before:]...)
 		}
 		permit := a.newDeliveryPermit(ids, workID, dir, turnID, turnEpoch, cancelGeneration)
 		a.delivery.permit = permit

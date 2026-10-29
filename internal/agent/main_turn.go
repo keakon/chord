@@ -304,6 +304,18 @@ func pendingUserMessageText(p pendingUserMessage) string {
 }
 
 func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
+	a.recordCommittedUserMessageInMemory(userMsg)
+	if a.recoveryManager() != nil {
+		a.persistAsync(identity.MainAgentID, userMsg)
+	}
+	// An explicit `/skill <name> [args]` load commits the user's line and then
+	// the skill pair, so the model sees the skill instructions in the same turn.
+	a.appendUserSkillInvocation(userMsg)
+}
+
+// recordCommittedUserMessageInMemory applies the local side effects of a user
+// message whose durable write is owned by the caller.
+func (a *MainAgent) recordCommittedUserMessageInMemory(userMsg message.Message) {
 	a.ctxMgr.Append(userMsg)
 	a.trackObservedFileParts(userMsg.Parts)
 	a.recordEvidenceFromMessage(userMsg)
@@ -314,12 +326,6 @@ func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
 		}
 		a.seedSessionSummaryFirstUser(preview, userMsg.IsCompactionSummary)
 	}
-	if a.recoveryManager() != nil {
-		a.persistAsync(identity.MainAgentID, userMsg)
-	}
-	// An explicit `/skill <name> [args]` load commits the user's line and then
-	// the skill pair, so the model sees the skill instructions in the same turn.
-	a.appendUserSkillInvocation(userMsg)
 }
 
 func (a *MainAgent) pendingUserMessageToConversationMessage(p pendingUserMessage) (message.Message, bool) {

@@ -89,6 +89,7 @@ type recordingProvider struct {
 	scriptedProvider
 	apiKeys   []string
 	maxTokens []int
+	messages  [][]message.Message
 }
 
 type rejectBinaryPartsProvider struct {
@@ -238,6 +239,7 @@ func callCompleteStreamWithRetryForTest(
 		changedCh,
 		nil,
 		nil,
+		nil,
 	)
 }
 
@@ -255,6 +257,7 @@ func (p *recordingProvider) CompleteStream(
 	p.mu.Lock()
 	p.apiKeys = append(p.apiKeys, apiKey)
 	p.maxTokens = append(p.maxTokens, maxTokens)
+	p.messages = append(p.messages, cloneMessagesForTest(messages))
 	p.mu.Unlock()
 	return p.scriptedProvider.CompleteStream(ctx, apiKey, model, systemPrompt, messages, tools, maxTokens, tuning, cb)
 }

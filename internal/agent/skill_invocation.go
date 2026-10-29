@@ -164,21 +164,30 @@ func buildUserSkillInvocationPair(sk *skill.Skill, args, callID string) (message
 	return assistantMsg, toolMsg, nil
 }
 
-// appendUserSkillInvocation appends the synthesized skill pair for a user
-// message whose content is `/skill <name> [args]`. It returns the appended
-// messages (nil when the message is not a skill command or the load failed) so
-// a caller that also builds a request slice can carry them along. A failed load
+// buildUserSkillInvocation resolves the synthesized pair for a user message
+// whose content is `/skill <name> [args]` without appending it. A failed load
 // only toasts: the user's original message stays committed either way.
-func (a *MainAgent) appendUserSkillInvocation(userMsg message.Message) []message.Message {
+func (a *MainAgent) buildUserSkillInvocation(userMsg message.Message) (string, []message.Message) {
 	sk, assistantMsg, toolMsg, _, err := resolveAndBuildUserSkillPair(a.skillInvocationStates(), userMsg.Content)
 	if sk == nil || err != nil {
 		if err != nil {
 			a.emitToTUI(ToastEvent{Message: err.Error(), Level: skillLoadToastLevel(err)})
 		}
-		return nil
+		return "", nil
 	}
 	assistantMsg.InputID, toolMsg.InputID = userMsg.InputID, userMsg.InputID
-	pair := []message.Message{assistantMsg, toolMsg}
+	return sk.Name, []message.Message{assistantMsg, toolMsg}
+}
+
+// appendUserSkillInvocation appends the synthesized skill pair for a user
+// message whose content is `/skill <name> [args]`. It returns the appended
+// messages (nil when the message is not a skill command or the load failed) so
+// a caller that also builds a request slice can carry them along.
+func (a *MainAgent) appendUserSkillInvocation(userMsg message.Message) []message.Message {
+	name, pair := a.buildUserSkillInvocation(userMsg)
+	if len(pair) == 0 {
+		return nil
+	}
 	for _, m := range pair {
 		a.ctxMgr.Append(m)
 		a.recordEvidenceFromMessage(m)
@@ -186,8 +195,18 @@ func (a *MainAgent) appendUserSkillInvocation(userMsg message.Message) []message
 			a.persistAsync(identity.MainAgentID, m)
 		}
 	}
-	a.MarkSkillInvokedByName(sk.Name)
+	a.MarkSkillInvokedByName(name)
 	return pair
+}
+
+// applyUserSkillPairInMemory mirrors appendUserSkillInvocation for a pair that
+// the caller already persisted through another write path.
+func (a *MainAgent) applyUserSkillPairInMemory(name string, pair []message.Message) {
+	for _, m := range pair {
+		a.ctxMgr.Append(m)
+		a.recordEvidenceFromMessage(m)
+	}
+	a.MarkSkillInvokedByName(name)
 }
 
 // appendUserSkillInvocation is the worker counterpart of the MainAgent method:

@@ -181,12 +181,18 @@ type CallStatus struct {
 // failed and immediately before a fallback target is attempted. It receives
 // the target's model and context budgets and may return an updated message
 // snapshot for that fallback attempt.
+//
+// BeforeRetryRound, when set, is called once before the first target attempt of
+// each retry round (after the cooling/backoff wait and target skipping). It may
+// return an updated message snapshot for that round. It never runs for key
+// rotation within a round or for provider-internal continuation requests.
 type CompleteStreamOptions struct {
 	OnContinuationUsage func(ContinuationUsage)
 	Diagnostics         *RequestDiagnostics
 	PrepareAttempt      func(context.Context, RequestAttempt) (context.Context, error)
 	NativeTools         *NativeToolPolicy
 	BeforeFallback      func(context.Context, []message.Message, FallbackModel) ([]message.Message, error)
+	BeforeRetryRound    func(context.Context, []message.Message) ([]message.Message, error)
 	// MCPDeclarations is the request's currently effective incremental MCP
 	// tool set. A target that cannot accept the dynamic declaration shape
 	// inlines exactly this set into its top-level tools instead of replaying
@@ -1228,7 +1234,7 @@ func (c *Client) CompleteStreamWithOptions(
 		ctx, start.ProviderConfig, start.ProviderImpl, start.ModelID,
 		start.MaxTokens, requestTuning, start.Variant,
 		wireMessages, tools, options.MCPDeclarations, cb, true, orderedFallbacks, maxAttempts, &status,
-		routingGeneration, routingChangedCh, options.BeforeFallback, options.PrepareAttempt,
+		routingGeneration, routingChangedCh, options.BeforeFallback, options.BeforeRetryRound, options.PrepareAttempt,
 	)
 
 	c.mu.Lock()

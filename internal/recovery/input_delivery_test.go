@@ -148,6 +148,12 @@ func TestInputDeliveryReconcileCrashWindows(t *testing.T) {
 				if restored.Gate.Mode != FollowupGatePaused {
 					t.Fatal("restore granted execution")
 				}
+				if stage == PendingInputStageQueued && present {
+					if len(restored.Inputs) != 0 {
+						t.Fatal("queued input already present in the transcript was not retired")
+					}
+					return
+				}
 				wantStage := stage
 				if stage == PendingInputStageClaimed && !present {
 					wantStage = PendingInputStageQueued
