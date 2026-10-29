@@ -161,11 +161,11 @@ func todoStateLineIDs(lines []string) map[string]struct{} {
 }
 
 func todoStateLineID(line string) (string, bool) {
-	match := todoSubgroupIDLineRe.FindStringSubmatch(line)
+	match := todoSubgroupEntryLineRe.FindStringSubmatch(line)
 	if match == nil {
 		return "", false
 	}
-	id := strings.TrimSpace(match[1])
+	id := strings.TrimSpace(match[2])
 	return id, id != ""
 }
 
@@ -313,11 +313,45 @@ func SectionEnd(summary string, bodyStart int) int {
 	return len(summary)
 }
 
-// todoSubgroupIDLineRe matches a classified todo bullet regardless of the
+// todoSubgroupEntryLineRe matches a classified todo bullet regardless of the
 // language or wording of its status marker: "- [status] id: text". The status
 // text is deliberately unconstrained so a translated summary still yields the
 // stable todo ID the restore path needs.
-var todoSubgroupIDLineRe = regexp.MustCompile(`^\s*(?:-\s*)?\[[^\]]*\]\s*([^:\n]+):`)
+var todoSubgroupEntryLineRe = regexp.MustCompile(`^\s*(?:-\s*)?\[([^\]]*)\]\s*([^:\n]+):\s*(.*)$`)
+
+// TodoStateEntry is one classified todo bullet: the bracketed status marker and
+// the stable todo ID and content, all as the summary carried them.
+type TodoStateEntry struct {
+	Status  string
+	ID      string
+	Content string
+}
+
+// TodoStateEntries returns the classified todo bullets of a Todo State section
+// body in order. Parsing stops at the next Markdown heading so a nested runtime
+// snapshot does not contribute entries to the enclosing subgroup.
+func TodoStateEntries(section string) []TodoStateEntry {
+	var entries []TodoStateEntry
+	for line := range strings.SplitSeq(section, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			break
+		}
+		match := todoSubgroupEntryLineRe.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		id := strings.TrimSpace(match[2])
+		if id == "" {
+			continue
+		}
+		entries = append(entries, TodoStateEntry{
+			Status:  strings.TrimSpace(match[1]),
+			ID:      id,
+			Content: strings.TrimSpace(match[3]),
+		})
+	}
+	return entries
+}
 
 // TodoSubgroupIDs returns the todo IDs listed in a Todo State subgroup body.
 // Parsing stops at the next Markdown heading so a nested runtime snapshot does
@@ -325,18 +359,13 @@ var todoSubgroupIDLineRe = regexp.MustCompile(`^\s*(?:-\s*)?\[[^\]]*\]\s*([^:\n]
 // IDs returns nil; callers must treat that as "no classified todos", not as an
 // empty todo list.
 func TodoSubgroupIDs(section string) []string {
-	var ids []string
-	for line := range strings.SplitSeq(section, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
-			break
-		}
-		match := todoSubgroupIDLineRe.FindStringSubmatch(line)
-		if match == nil {
-			continue
-		}
-		if id := strings.TrimSpace(match[1]); id != "" {
-			ids = append(ids, id)
-		}
+	entries := TodoStateEntries(section)
+	if len(entries) == 0 {
+		return nil
+	}
+	ids := make([]string, len(entries))
+	for i, entry := range entries {
+		ids[i] = entry.ID
 	}
 	return ids
 }

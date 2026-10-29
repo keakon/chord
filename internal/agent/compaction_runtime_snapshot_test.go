@@ -285,3 +285,82 @@ func TestEnsureCompactionTodoSnapshotPreservesEveryRuntimeTodo(t *testing.T) {
 		t.Fatalf("summary with runtime todo snapshot rejected: %v", err)
 	}
 }
+
+// compactionSummaryWithTodoStateForTest replaces the canonical empty Todo State
+// body so snapshot decisions can be exercised without other sections changing.
+func compactionSummaryWithTodoStateForTest(body string) string {
+	return strings.Replace(
+		validCompactionSummaryForTest("history-1.md"),
+		"- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)",
+		body,
+		1,
+	)
+}
+
+func TestEnsureCompactionTodoSnapshotSkipsCoveredClassification(t *testing.T) {
+	todos := []tools.TodoItem{
+		{ID: "1", Content: "verify the manual compaction path", Status: tools.TodoStatusCompleted},
+		{ID: "2", Content: "persist the compaction trigger", Status: tools.TodoStatusCompleted},
+	}
+	summary := compactionSummaryWithTodoStateForTest(
+		"- Active/relevant to latest request:\n  - (none)\n" +
+			"- Completed/background:\n  - [completed] 1: verify the manual compaction path\n  - [completed] 2: persist the compaction trigger\n" +
+			"- Stale/superseded:\n  - (none)")
+	if got := ensureCompactionTodoSnapshot(summary, todos); got != summary {
+		t.Fatalf("runtime snapshot repeated an exact classification:\n%s", got)
+	}
+}
+
+func TestEnsureCompactionTodoSnapshotAppendsWhenClassificationShortensText(t *testing.T) {
+	todos := []tools.TodoItem{{ID: "1", Content: "record the expected failure case", Status: tools.TodoStatusCompleted}}
+	summary := compactionSummaryWithTodoStateForTest(
+		"- Active/relevant to latest request:\n  - (none)\n" +
+			"- Completed/background:\n  - [completed] 1: record the failure\n" +
+			"- Stale/superseded:\n  - (none)")
+	got := ensureCompactionTodoSnapshot(summary, todos)
+	if !strings.Contains(got, "### Runtime TODO snapshot") || !strings.Contains(got, "  - [completed] 1: record the expected failure case") {
+		t.Fatalf("runtime snapshot missing after the summary shortened the todo:\n%s", got)
+	}
+}
+
+func TestEnsureCompactionTodoSnapshotAppendsWhenClassificationMissesAnItem(t *testing.T) {
+	todos := []tools.TodoItem{
+		{ID: "1", Content: "verify the manual compaction path", Status: tools.TodoStatusCompleted},
+		{ID: "2", Content: "run affected tests", Status: tools.TodoStatusInProgress},
+	}
+	summary := compactionSummaryWithTodoStateForTest(
+		"- Active/relevant to latest request:\n  - [completed] 1: verify the manual compaction path\n" +
+			"- Completed/background:\n  - (none)\n" +
+			"- Stale/superseded:\n  - (none)")
+	got := ensureCompactionTodoSnapshot(summary, todos)
+	if !strings.Contains(got, "### Runtime TODO snapshot") || !strings.Contains(got, "  - [in_progress] 2: run affected tests") {
+		t.Fatalf("runtime snapshot missing the unclassified todo:\n%s", got)
+	}
+}
+
+func TestEnsureCompactionTodoSnapshotAppendsOnStatusMismatch(t *testing.T) {
+	todos := []tools.TodoItem{{ID: "1", Content: "run affected tests", Status: tools.TodoStatusInProgress}}
+	summary := compactionSummaryWithTodoStateForTest(
+		"- Active/relevant to latest request:\n  - [completed] 1: run affected tests\n" +
+			"- Completed/background:\n  - (none)\n" +
+			"- Stale/superseded:\n  - (none)")
+	got := ensureCompactionTodoSnapshot(summary, todos)
+	if !strings.Contains(got, "### Runtime TODO snapshot") || !strings.Contains(got, "  - [in_progress] 1: run affected tests") {
+		t.Fatalf("runtime snapshot missing after a status mismatch:\n%s", got)
+	}
+}
+
+func TestEnsureCompactionTodoSnapshotCountsDuplicateIDs(t *testing.T) {
+	todos := []tools.TodoItem{
+		{ID: "1", Content: "first pass", Status: tools.TodoStatusCompleted},
+		{ID: "1", Content: "second pass", Status: tools.TodoStatusCompleted},
+	}
+	summary := compactionSummaryWithTodoStateForTest(
+		"- Active/relevant to latest request:\n  - (none)\n" +
+			"- Completed/background:\n  - [completed] 1: first pass\n" +
+			"- Stale/superseded:\n  - (none)")
+	got := ensureCompactionTodoSnapshot(summary, todos)
+	if !strings.Contains(got, "### Runtime TODO snapshot") || !strings.Contains(got, "  - [completed] 1: second pass") {
+		t.Fatalf("one classified line must not cover two runtime todos sharing an ID:\n%s", got)
+	}
+}

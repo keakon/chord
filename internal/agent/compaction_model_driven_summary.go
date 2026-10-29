@@ -128,10 +128,11 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	}
 	summary := renderFallbackSummarySections(sections)
 	// The model-driven checkpoint has no model classification to fill the
-	// relevance skeleton above, so the runtime-owned snapshot carries the
-	// complete todo state — the same guarantee the summarization runner
-	// applies, and the line-escaping that keeps todo content from escaping
-	// its section. The stale bucket must stay empty: restore only drops
+	// relevance skeleton above, so the complete todo state comes from that
+	// skeleton when it lists every item (a Done rejection demotes them all to
+	// stale) and from the runtime-owned snapshot otherwise — the same
+	// guarantee and line-escaping the summarization runner applies. The stale
+	// bucket must stay empty outside a Done rejection: restore only drops
 	// runtime todos when it sees entries there.
 	summary = ensureCompactionTodoSnapshot(summary, bundle.todos)
 	// Skills loaded in the archived head are recorded by name, exactly as the

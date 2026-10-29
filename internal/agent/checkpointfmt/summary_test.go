@@ -192,3 +192,28 @@ func TestTodoSubgroupIDsIgnoresUnclassifiedEntries(t *testing.T) {
 		}
 	}
 }
+
+func TestTodoStateEntriesCapturesStatusIDAndContent(t *testing.T) {
+	section := `
+- Active/relevant to latest request:
+  - [in_progress] t1: run tests
+- Completed/background:
+  - [completed] t2: write docs
+  - (none)
+- Stale/superseded:
+  - (none)
+### Runtime TODO snapshot
+  - [pending] t3: runtime task
+`
+	got := TodoStateEntries(section)
+	want := []TodoStateEntry{
+		{Status: "in_progress", ID: "t1", Content: "run tests"},
+		{Status: "completed", ID: "t2", Content: "write docs"},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("TodoStateEntries = %#v, want %#v", got, want)
+	}
+	if ids := TodoSubgroupIDs(section); !slices.Equal(ids, []string{"t1", "t2"}) {
+		t.Fatalf("TodoSubgroupIDs = %#v, want IDs of the same entries", ids)
+	}
+}

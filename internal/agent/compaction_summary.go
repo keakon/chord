@@ -882,7 +882,7 @@ func fallbackNextStepSection(input *compactionInput) string {
 // todos into the stale bucket — the user refused the previous completion, so
 // the old targets are stale and restore drops them. Any other anchor (a plain
 // user request) or no anchor must not label runtime todos stale: the complete
-// list is carried by ensureCompactionTodoSnapshot as the `### Runtime TODO
+// list is then carried by ensureCompactionTodoSnapshot as the `### Runtime TODO
 // snapshot` block, and restore only drops todos it sees in the stale bucket.
 // The anchor text is not echoed here: Current User Request above already
 // carries it verbatim, and restore only reads the classification bullets
@@ -930,13 +930,19 @@ func escapeTodoContentLine(s string) string {
 // ensureCompactionTodoSnapshot keeps the runtime-owned todo list available
 // even when the summarizer classifies it as background or omits it. The model
 // still supplies the relevance classification above this snapshot, but the
-// complete pre-compaction state must not depend on model wording.
+// complete pre-compaction todo state must not depend on model wording. The
+// snapshot is skipped only when the classification preserves every runtime
+// todo's status, stable ID and exact content; a matching ID alone cannot recover
+// text the summary shortened or paraphrased.
 func ensureCompactionTodoSnapshot(summary string, todos []tools.TodoItem) string {
 	if strings.TrimSpace(summary) == "" || len(todos) == 0 {
 		return summary
 	}
 	sectionStart, sectionEnd, ok := checkpointfmt.SectionBounds(summary, "## Todo State")
 	if !ok || strings.Contains(summary[sectionStart:sectionEnd], "### Runtime TODO snapshot") {
+		return summary
+	}
+	if todoStateCoversRuntimeTodos(summary[sectionStart:sectionEnd], todos) {
 		return summary
 	}
 	var snapshot strings.Builder
@@ -961,6 +967,44 @@ func ensureCompactionTodoSnapshot(summary string, todos []tools.TodoItem) string
 		return out
 	}
 	return out + "\n\n" + tail
+}
+
+// todoStateCoversRuntimeTodos reports whether the Todo State classification
+// already lists every runtime todo with its exact content and status marker.
+// IDs carry no uniqueness guarantee, so repeated IDs are counted rather than
+// deduplicated.
+func todoStateCoversRuntimeTodos(section string, todos []tools.TodoItem) bool {
+	remaining := make(map[todoStateKey]int, len(todos))
+	for _, todo := range todos {
+		remaining[todoStateKeyFor(todo.Status, todo.ID, todo.Content)]++
+	}
+	for _, entry := range checkpointfmt.TodoStateEntries(section) {
+		if key := todoStateKeyFor(entry.Status, entry.ID, entry.Content); remaining[key] > 0 {
+			remaining[key]--
+		}
+	}
+	for _, count := range remaining {
+		if count > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// todoStateKey identifies a classified todo by its normalized status marker,
+// stable ID and content.
+type todoStateKey struct {
+	status  string
+	id      string
+	content string
+}
+
+func todoStateKeyFor(status, id, content string) todoStateKey {
+	return todoStateKey{
+		status:  strings.ToLower(strings.TrimSpace(status)),
+		id:      strings.TrimSpace(id),
+		content: strings.TrimSpace(content),
+	}
 }
 
 // boundedTodoSnapshotItems caps the snapshot while preferring the items that

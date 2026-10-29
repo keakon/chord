@@ -69,6 +69,8 @@
 
 - 模型驱动的压缩 checkpoint 在折叠历史时保留已验证的工作流状态——改动是否已提交、推送、进入审查或合并。新记录与旧 checkpoint 冲突时以新记录为准；checkpoint 的文件列表保持有界，递归摘要仍然精确。
 
+- 模型摘要缩短待办文本时，压缩检查点也会保留有界的运行时待办快照。
+
 - OpenCode 导入会把源会话已应用的压缩映射为 Chord 的上下文摘要 checkpoint：配对摘要成为 checkpoint，站在压缩保留的最旧一条消息之前；这些近期消息留作历史；源侧早已折叠掉的早期消息由该 checkpoint 替换——即源模型当时看到的形态。只有最新一次可用的压缩会塑造导入结果；导出未记录压缩保留了哪些消息时，保留完整历史并在报告中说明。压缩已完成却没有摘要文本时同样跳过，除非被替换的早期消息里还留有可作锚点的原始请求：此时 checkpoint 只携带该请求，报告会说明摘要文本缺失。CLI 输出与 `import-report.json` 记录映射的 checkpoint 数、被替换的消息数和被跳过的标记数。
 
 - 内嵌模型目录采用 [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2)，加入 Gemini 4 Argon，保留 1M token 共享窗口，默认流式绑定上限为 65,536 token，long decode 续传需要显式配置；记录 DeepSeek-V4.1-Flash-1017 在既有 `deepseek/deepseek-flash` 线路上的发布。
