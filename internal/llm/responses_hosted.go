@@ -14,19 +14,21 @@ import (
 
 // responsesHostedRequest is the minimal sub-request shape used by the local
 // hosted tools: one user message and one raw hosted tool declaration, with an
-// optional raw tool_choice that forces the call. The hint-only shape omits
-// tool_choice and lets the prompt ask for the tool instead.
+// optional raw tool_choice that forces the call. The hint-only shape forces
+// nothing and lets the prompt ask for the tool instead; targets emulating a
+// client that always sends a choice (Codex sends "auto") still receive it.
 type responsesHostedRequest struct {
-	Model           string               `json:"model"`
-	Instructions    *string              `json:"instructions,omitempty"`
-	Input           []responsesInputItem `json:"input"`
-	Tools           []json.RawMessage    `json:"tools"`
-	ToolChoice      json.RawMessage      `json:"tool_choice,omitempty"`
-	MaxOutputTokens int                  `json:"max_output_tokens,omitempty"`
-	Store           *bool                `json:"store,omitempty"`
-	Stream          bool                 `json:"stream"`
-	Include         []string             `json:"include,omitempty"`
-	ServiceTier     string               `json:"service_tier,omitempty"`
+	Model             string               `json:"model"`
+	Instructions      *string              `json:"instructions,omitempty"`
+	Input             []responsesInputItem `json:"input"`
+	Tools             []json.RawMessage    `json:"tools"`
+	ToolChoice        json.RawMessage      `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool                `json:"parallel_tool_calls,omitempty"`
+	MaxOutputTokens   int                  `json:"max_output_tokens,omitempty"`
+	Store             *bool                `json:"store,omitempty"`
+	Stream            bool                 `json:"stream"`
+	Include           []string             `json:"include,omitempty"`
+	ServiceTier       string               `json:"service_tier,omitempty"`
 }
 
 // newResponsesHostedRequest builds the wire request for a hosted sub-request.
@@ -75,6 +77,33 @@ func newResponsesHostedRequest(model, systemPrompt, query string, ht *HostedTool
 		req.Include = ht.Include
 	}
 	return req, nil
+}
+
+// applyResponsesHostedCodexShape applies the parts of the Codex Responses
+// request shape that are independent of the hosted declaration. The hosted
+// tool's raw declaration and forced choice stay untouched; a missing choice is
+// filled with Codex's default only when the compatibility surface allows it.
+func applyResponsesHostedCodexShape(req *responsesHostedRequest, systemPrompt, sessionKey string, parallelToolCalls *bool, rc *config.ResponsesCompatConfig) {
+	req.Instructions = nil
+	if systemPrompt != "" {
+		req.Input = append([]responsesInputItem{responsesDeveloperInstructionsItem(sessionKey, systemPrompt)}, req.Input...)
+	}
+
+	var sendToolChoice, sendParallelToolCalls *bool
+	if rc != nil {
+		sendToolChoice = rc.SendToolChoice
+		sendParallelToolCalls = rc.SendParallelToolCalls
+	}
+	if len(req.ToolChoice) == 0 && compatBool(sendToolChoice, true) {
+		req.ToolChoice = json.RawMessage(`"auto"`)
+	}
+	if compatBool(sendParallelToolCalls, true) {
+		if parallelToolCalls != nil {
+			req.ParallelToolCalls = parallelToolCalls
+		} else {
+			req.ParallelToolCalls = new(true)
+		}
+	}
 }
 
 // responsesHostedItem is the minimal shape of a hosted output item: enough to

@@ -3,10 +3,12 @@ package llm
 import (
 	"bytes"
 	gziplib "compress/gzip"
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
@@ -121,5 +123,59 @@ func TestRequestBodyReuseCompressBodyMemoizesPerAttempt(t *testing.T) {
 	}
 	if !bytes.Equal(decompressed, otherBody) {
 		t.Fatal("decompressed body does not match rebuilt body")
+	}
+}
+
+func TestResponsesHTTPReusesCompressedBody(t *testing.T) {
+	var encodings []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		encodings = append(encodings, r.Header.Get("Content-Encoding"))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"message":"forced test error"}}`)
+	}))
+	defer server.Close()
+
+	provider := NewProviderConfig("sample", config.ProviderConfig{
+		Type:     config.ProviderTypeResponses,
+		APIURL:   server.URL + "/responses",
+		Compress: config.RequestCompressionGzip,
+	}, []string{"test-key"})
+	impl := &ResponsesProvider{provider: provider, client: server.Client()}
+	messages := []message.Message{{
+		Role:    message.RoleUser,
+		Content: strings.Repeat("sample request content ", 256),
+	}}
+	call := func() {
+		t.Helper()
+		if _, err := impl.CompleteStream(
+			context.Background(), "test-key", "sample-model", "sample system",
+			messages, nil, 1024, RequestTuning{}, nil,
+		); err == nil {
+			t.Fatal("expected forced server error")
+		}
+	}
+
+	call()
+	if !impl.bodyReuse.compValid || len(impl.bodyReuse.compBytes) == 0 {
+		t.Fatal("first HTTP request did not memoize compressed body")
+	}
+	firstCompressed := &impl.bodyReuse.compBytes[0]
+	call()
+
+	if len(encodings) != 2 {
+		t.Fatalf("server received %d requests, want 2", len(encodings))
+	}
+	for i, encoding := range encodings {
+		if encoding != config.RequestCompressionGzip {
+			t.Fatalf("request %d Content-Encoding = %q, want gzip", i, encoding)
+		}
+	}
+	if &impl.bodyReuse.compBytes[0] != firstCompressed {
+		t.Fatal("second HTTP request recompressed the cached body")
 	}
 }

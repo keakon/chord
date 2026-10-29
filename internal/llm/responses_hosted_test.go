@@ -138,6 +138,91 @@ func TestResponsesHostedRequestBodyShape(t *testing.T) {
 	}
 }
 
+func TestResponsesHostedCodexEmulationUsesCodexBodyShape(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := readRequestBody(r)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"status\":\"completed\",\"output\":[]}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := codexEmulationProvider(
+		&config.EmulationConfig{Codex: &config.CodexEmulationConfig{Version: "0.50.0"}},
+		server.URL+"/responses",
+	)
+	impl := &ResponsesProvider{provider: provider, client: server.Client()}
+	sessionKey := "20260102150405123"
+	hosted := func(force json.RawMessage) {
+		t.Helper()
+		tuning := RequestTuning{
+			SessionKey: sessionKey,
+			HostedTool: &HostedToolRequest{
+				Name:        "sample_tool",
+				Declaration: json.RawMessage(sampleResponsesDeclaration),
+				Force:       force,
+				Include:     []string{"sample_tool_call.action.sources"},
+			},
+		}
+		if _, err := impl.CompleteStream(
+			context.Background(), "api-key", "test-model", "search system",
+			[]message.Message{{Role: "user", Content: "find the sample docs"}},
+			nil, 128, tuning, func(message.StreamDelta) {},
+		); err != nil {
+			t.Fatalf("CompleteStream: %v", err)
+		}
+	}
+	hosted(nil)
+	hosted(json.RawMessage(`"required"`))
+
+	if len(bodies) != 2 {
+		t.Fatalf("captured %d bodies, want 2", len(bodies))
+	}
+	wireSession := deriveResponsesWireIdentity(sessionKey, 0, false).sessionID
+	wantID := baseInstructionsItemID(wireSession, "search system")
+	for i, body := range bodies {
+		if _, ok := body["instructions"]; ok {
+			t.Fatalf("body %d still carries top-level instructions: %#v", i, body["instructions"])
+		}
+		input, ok := body["input"].([]any)
+		if !ok || len(input) != 2 {
+			t.Fatalf("body %d input = %#v, want developer prefix and user query", i, body["input"])
+		}
+		first, ok := input[0].(map[string]any)
+		if !ok {
+			t.Fatalf("body %d input[0] = %#v", i, input[0])
+		}
+		if first["type"] != "message" || first["role"] != responsesDeveloperItemRole || first["id"] != wantID {
+			t.Fatalf("body %d input[0] = %#v, want the deterministic developer prefix", i, first)
+		}
+		if got := inputItemText(first); got != "search system" {
+			t.Fatalf("body %d developer text = %q", i, got)
+		}
+		if body["parallel_tool_calls"] != true {
+			t.Fatalf("body %d parallel_tool_calls = %#v, want true", i, body["parallel_tool_calls"])
+		}
+		tools, ok := body["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("body %d tools = %#v, want one raw hosted declaration", i, body["tools"])
+		}
+		if i == 0 && body["tool_choice"] != "auto" {
+			t.Fatalf("body %d tool_choice = %#v, want auto", i, body["tool_choice"])
+		}
+		if i == 1 && body["tool_choice"] != "required" {
+			t.Fatalf("body %d tool_choice = %#v, want the raw forced choice", i, body["tool_choice"])
+		}
+	}
+}
+
 // TestResponsesHostedRequestHintOnlyOmitsToolChoice pins the degraded shape:
 // the hosted tool stays declared, but nothing forces the call.
 func TestResponsesHostedRequestHintOnlyOmitsToolChoice(t *testing.T) {

@@ -254,6 +254,21 @@ const (
 	responsesClientMetadataWindowID       = "x-codex-window-id"
 )
 
+func responsesDeveloperInstructionsItem(sessionKey, systemPrompt string) responsesInputItem {
+	var itemID string
+	if sessionKey != "" {
+		itemID = baseInstructionsItemID(sessionKey, systemPrompt)
+	}
+	return responsesInputItem{
+		Type: "message",
+		ID:   itemID,
+		Role: responsesDeveloperItemRole,
+		Content: []responsesContentBlock{
+			{Type: "input_text", Text: systemPrompt},
+		},
+	}
+}
+
 func responsesReasoningIncludes() []string {
 	return []string{responsesEncryptedReasoningInclude}
 }
@@ -437,6 +452,9 @@ func (r *ResponsesProvider) CompleteStream(
 			if err != nil {
 				return nil, nil, err
 			}
+			if r.provider.codexShapeEmulated(model) {
+				applyResponsesHostedCodexShape(&reqBody, systemPrompt, sessionKey, ot.ParallelToolCalls, rc)
+			}
 			reqBody.ServiceTier = ot.ServiceTier
 			bodyBytes, err := json.Marshal(reqBody)
 			if err != nil {
@@ -545,18 +563,7 @@ func (r *ResponsesProvider) CompleteStream(
 		// relays that reject them.
 		instructionsInInput := codexShape && systemPrompt != ""
 		if instructionsInInput {
-			var itemID string
-			if sessionKey != "" {
-				itemID = baseInstructionsItemID(sessionKey, systemPrompt)
-			}
-			fullInput = append([]responsesInputItem{{
-				Type: "message",
-				ID:   itemID,
-				Role: responsesDeveloperItemRole,
-				Content: []responsesContentBlock{
-					{Type: "input_text", Text: systemPrompt},
-				},
-			}}, fullInput...)
+			fullInput = append([]responsesInputItem{responsesDeveloperInstructionsItem(sessionKey, systemPrompt)}, fullInput...)
 		}
 
 		reqBody := responsesRequest{
@@ -662,13 +669,15 @@ func (r *ResponsesProvider) CompleteStream(
 	var bodyBytes []byte
 	var builtAny any
 	var err error
+	bodyIdentity := requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, wire.cacheKey())
+	bodyCached := !wsEligible && tuning.HostedTool == nil && tuning.nativeTool == nil
 	if wsEligible || tuning.HostedTool != nil || tuning.nativeTool != nil {
 		// Hosted sub-requests bypass the body-reuse cache: the cache identity
 		// deliberately ignores request tuning, and a hosted body differs from a
 		// plain body built from the same (system, messages, tools, maxTokens).
 		bodyBytes, builtAny, err = buildResponsesRequest()
 	} else {
-		bodyBytes, builtAny, err = r.bodyReuse.bodyWithExtra(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, wire.cacheKey()), buildResponsesRequest)
+		bodyBytes, builtAny, err = r.bodyReuse.bodyWithExtra(bodyIdentity, buildResponsesRequest)
 	}
 	if err != nil {
 		return nil, err
@@ -764,7 +773,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	r.lastTransportUsed.Store("http")
-	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, sessionKey, reqBody.ClientMetadata, overrides, tuning.HostedTool, tuning.nativeTool != nil, traceCB)
+	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, bodyIdentity, bodyCached, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, sessionKey, reqBody.ClientMetadata, overrides, tuning.HostedTool, tuning.nativeTool != nil, traceCB)
 
 	// HTTP full-input path: no previous_response_id retry/rollback handling required.
 
@@ -829,6 +838,8 @@ func (r *ResponsesProvider) sendAndParse(
 	ctx context.Context,
 	url string,
 	bodyBytes []byte,
+	bodyIdentity requestBodyIdentity,
+	bodyCached bool,
 	dumpRequestBody []byte,
 	dumpWriter *DumpWriter,
 	model string,
@@ -874,8 +885,14 @@ func (r *ResponsesProvider) sendAndParse(
 	turnStateIdentity := responsesTurnStateIdentity(r.provider, apiKey)
 	applyResponsesTurnStateHeader(req.Header, turnState, turnStateIdentity)
 
-	// Apply request body compression if configured
-	req, _ = compressRequestBody(req, bodyBytes, r.provider.RequestCompression())
+	// Apply request body compression if configured. The ordinary HTTP body is
+	// cached across key attempts, so reuse its deterministic compressed form as
+	// well; request shapes that bypass bodyReuse must not consult that cache.
+	if bodyCached {
+		req, _ = r.bodyReuse.compressBody(bodyIdentity, req, bodyBytes, r.provider.RequestCompression())
+	} else {
+		req, _ = compressRequestBody(req, bodyBytes, r.provider.RequestCompression())
+	}
 	applyRequestHeaderOverrides(req.Header, overrides)
 	if err := applyHostedToolHeaders(req.Header, hosted); err != nil {
 		return nil, 0, err
