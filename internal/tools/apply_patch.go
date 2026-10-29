@@ -259,7 +259,7 @@ func (ApplyPatchTool) Description() string {
 		"Each operation starts with one of `*** Add File: <path>`, `*** Delete File: <path>`, `*** Update File: <path>` (optionally followed by `*** Move to: <new path>`). " +
 		"Hunks are introduced by `@@` and each line's first character is its marker: `+` (added), `-` (removed), or a space (context); new file contents are `+` lines. " +
 		"One `@@` line starts exactly one hunk: put any section context on that same line (`@@ func greet():`) rather than on a line after it, since a later `@@` starts the next hunk, and never prefix it with a unified-diff range like `@@ -19,10 +19,8 @@` — Chord anchors on the header text, not on line numbers, so a range is dead weight and any useful anchor is the section name itself. " +
-		"`+` or `-` must be the first character of the line; preserve source indentation after the marker (`-old` is a deletion, while ` -old` is context text). Every hunk must contain at least one `+` or `-` line. " +
+		"`+` or `-` must be the first character of the line; preserve source indentation after the marker (`-old` is a deletion, while ` -old` is context text). A hunk that changes a file needs at least one `+` or `-` line; a context-only hunk verifies an anchor without changing the file, so use one only when you mean to assert the current content. " +
 		"Context lines are literal complete source lines, not placeholders: a blank or whitespace-only line is a real source line, and `...` never omits context. " +
 		toolname.ApplyPatchHunkGuidance
 }

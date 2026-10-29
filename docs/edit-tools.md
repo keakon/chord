@@ -95,9 +95,11 @@ Supported operations:
 
 - **`*** Add File: path`**: create a file; every body line starts with `+`.
 - **`*** Update File: path`**: modify a file with one or more `@@` hunks.
-- **`*** Move to: newpath`**: rename while updating; must appear directly after its `*** Update File:` line. A pure rename still needs one (possibly context-only) hunk.
+- **`*** Move to: newpath`**: rename while updating; must appear directly after its `*** Update File:` line. A pure rename can omit hunks.
 - **`*** Delete File: path`**: remove a file; no body.
 - **`*** End of File`**: after a hunk, pins that hunk to the file tail (useful when the same block also appears earlier).
+
+A hunk made only of context lines is a no-op: it must match the current file and changes nothing. Use one to assert an anchor before a later hunk.
 
 Hunks apply in order; each hunk is matched at the first position after the previous hunk's application point. Repeated plain `*** Update File:` sections for the same normalized path follow Codex ordering semantics: each section patches the previous section's in-memory result, and that file is committed as one mutation (so a later mismatch leaves that file unchanged rather than exposing Codex's partial-write behavior).
 

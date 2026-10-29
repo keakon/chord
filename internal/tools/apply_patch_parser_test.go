@@ -896,11 +896,10 @@ func TestApplyPatchParserErrorsNameTheHunkLine(t *testing.T) {
 	firstHunkBad := "*** Begin Patch\n" +
 		"*** Update File: unchanged.md\n" +
 		"@@\n" +
-		" ## 5. Related docs\n" +
 		"*** End Patch"
 	_, err := ParseApplyPatch(firstHunkBad)
 	if err == nil || !strings.Contains(err.Error(), "at line 3") {
-		t.Fatalf("err = %v, want the context-only hunk reported at line 3", err)
+		t.Fatalf("err = %v, want the empty first hunk reported at line 3", err)
 	}
 	secondHunkBad := "*** Begin Patch\n" +
 		"*** Update File: unchanged.md\n" +
@@ -908,11 +907,10 @@ func TestApplyPatchParserErrorsNameTheHunkLine(t *testing.T) {
 		" keep\n" +
 		"-drop\n" +
 		"@@\n" +
-		" ## 5. Related docs\n" +
 		"*** End Patch"
 	_, err = ParseApplyPatch(secondHunkBad)
 	if err == nil || !strings.Contains(err.Error(), "at line 6") {
-		t.Fatalf("err = %v, want the context-only second hunk reported at line 6", err)
+		t.Fatalf("err = %v, want the empty second hunk reported at line 6", err)
 	}
 	notAHunk := "*** Begin Patch\n" +
 		"*** Update File: unchanged.md\n" +

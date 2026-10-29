@@ -105,6 +105,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - The context summary card labels a manually triggered model summary as `MANUAL` instead of `AUTO`. Automatic model summaries keep `AUTO`, model-driven checkpoints keep `MODEL-DRIVEN`, and degraded checkpoints keep `FALLBACK` / `TRUNCATED`.
 
+- `apply_patch` accepts a context-only update hunk as a no-op anchor instead of rejecting it. Codex's grammar already allows such hunks, and models often use one to pin a section before a later change; the hunk must still match the current file, and an empty `@@` hunk is rejected with its start line.
+
 - Configuration writes preserve symbolic links, including chains whose final target does not exist yet, and write to the target file instead of replacing a link.
 
 - A usage-driven compaction no longer starts from a request whose live usage has already fallen back below the pressure-reminder line. The armed request is withdrawn instead, where previously the same request still started the compaction — with its externalization warning cleared — whenever provider usage readings fluctuated near the line.

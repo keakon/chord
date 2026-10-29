@@ -69,16 +69,26 @@ func TestApplyPatchUpdatesExistingEmptyFileWithPureInsertion(t *testing.T) {
 	}
 }
 
-func TestApplyPatchRejectsContextOnlyUpdate(t *testing.T) {
+func TestApplyPatchAcceptsContextOnlyUpdateAsNoop(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unchanged.md")
+	content := "# Docs\n\n## 5. Related docs\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	patch := "*** Begin Patch\n" +
 		"*** Update File: unchanged.md\n" +
 		"@@\n" +
 		" ## 5. Related docs\n" +
 		"*** End Patch"
-	_, err := ParseApplyPatch(patch)
-	if err == nil || !strings.Contains(err.Error(), "at least one added or removed line is required") || !strings.Contains(err.Error(), "whitespace-only lines are not omission placeholders") {
-		t.Fatalf("err = %v, want context-only hunk rejection", err)
+	result, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if result != "Applied patch:\nNo net file changes" {
+		t.Fatalf("result = %q, want a no-op patch report", result)
+	}
+	assertApplyPatchFile(t, path, content)
 }
 
 func TestApplyPatchAnchorsSplitHunkHeaderContext(t *testing.T) {
@@ -118,41 +128,123 @@ func TestApplyPatchAnchorsSplitHunkHeaderContext(t *testing.T) {
 	}
 }
 
-func TestApplyPatchRejectsContextOnlyHunkAtOperationEnd(t *testing.T) {
-	// The guardrail that survives the split-header tolerance: a context-only
-	// hunk with no following `@@` is a navigation placeholder, not an anchor,
-	// and stays an error so the model cannot believe a no-op succeeded.
-	trailing := "*** Begin Patch\n" +
-		"*** Update File: unchanged.md\n" +
-		"@@\n" +
-		" ## 5. Related docs\n" +
-		"*** End Patch"
-	if _, err := ParseApplyPatch(trailing); err == nil || !strings.Contains(err.Error(), "at least one added or removed line is required") {
-		t.Fatalf("err = %v, want the trailing context-only hunk rejected", err)
-	}
+func TestApplyPatchAppliesContextOnlyHunksAsAnchors(t *testing.T) {
+	t.Run("trailing hunk", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "notes.md")
+		if err := os.WriteFile(path, []byte("old\n\n## 5. Related docs\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: notes.md\n" +
+			"@@\n" +
+			"-old\n" +
+			"+new\n" +
+			"@@\n" +
+			" ## 5. Related docs\n" +
+			"*** End Patch"
+		result, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != "Applied patch:\nM notes.md" {
+			t.Fatalf("result = %q, want the changed file reported once", result)
+		}
+		assertApplyPatchFile(t, path, "new\n\n## 5. Related docs\n")
+	})
 
-	twoLines := "*** Begin Patch\n" +
-		"*** Update File: unchanged.md\n" +
-		"@@\n" +
-		" ## 5. Related docs\n" +
-		" ## 6. Appendix\n" +
-		"@@\n" +
-		" old\n" +
-		"+new\n" +
-		"*** End Patch"
-	if _, err := ParseApplyPatch(twoLines); err == nil || !strings.Contains(err.Error(), "at least one added or removed line is required") {
-		t.Fatalf("err = %v, want an ambiguous multi-line context block rejected", err)
-	}
+	t.Run("multi-line anchor before a change", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "notes.md")
+		if err := os.WriteFile(path, []byte("## 5. Related docs\nlink\n\n## 6. Appendix\nold\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: notes.md\n" +
+			"@@\n" +
+			" ## 5. Related docs\n" +
+			" link\n" +
+			"@@\n" +
+			" ## 6. Appendix\n" +
+			"-old\n" +
+			"+new\n" +
+			"*** End Patch"
+		result, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != "Applied patch:\nM notes.md" {
+			t.Fatalf("result = %q, want the changed file reported once", result)
+		}
+		assertApplyPatchFile(t, path, "## 5. Related docs\nlink\n\n## 6. Appendix\nnew\n")
+	})
 
-	inline := "*** Begin Patch\n" +
-		"*** Update File: unchanged.md\n" +
-		"@@ ## 5. Related docs\n" +
-		" old\n" +
-		"+new\n" +
-		"*** End Patch"
-	if _, err := ParseApplyPatch(inline); err != nil {
-		t.Fatalf("single-line @@ header rejected: %v", err)
-	}
+	t.Run("context-only hunk must still match", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "notes.md")
+		content := "## 5. Related docs\n"
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		patch := "*** Begin Patch\n" +
+			"*** Update File: notes.md\n" +
+			"@@\n" +
+			" ## 6. Appendix\n" +
+			"*** End Patch"
+		_, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+		if err == nil || !strings.Contains(err.Error(), "hunk not found") {
+			t.Fatalf("err = %v, want a missing context-only anchor to fail", err)
+		}
+		assertApplyPatchFile(t, path, content)
+	})
+
+	t.Run("empty hunk", func(t *testing.T) {
+		tests := []struct {
+			name  string
+			patch string
+			line  string
+		}{
+			{
+				name: "at operation end",
+				patch: "*** Begin Patch\n" +
+					"*** Update File: notes.md\n" +
+					"@@\n" +
+					"*** End Patch",
+				line: "line 3",
+			},
+			{
+				name: "before next hunk",
+				patch: "*** Begin Patch\n" +
+					"*** Update File: notes.md\n" +
+					"@@\n" +
+					" keep\n" +
+					"-drop\n" +
+					"@@\n" +
+					"*** End Patch",
+				line: "line 6",
+			},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				_, err := ParseApplyPatch(test.patch)
+				if err == nil || !strings.Contains(err.Error(), "empty update hunk") || !strings.Contains(err.Error(), test.line) {
+					t.Fatalf("err = %v, want an empty hunk reported at %s", err, test.line)
+				}
+			})
+		}
+	})
+
+	t.Run("inline header", func(t *testing.T) {
+		inline := "*** Begin Patch\n" +
+			"*** Update File: unchanged.md\n" +
+			"@@ ## 5. Related docs\n" +
+			" old\n" +
+			"+new\n" +
+			"*** End Patch"
+		if _, err := ParseApplyPatch(inline); err != nil {
+			t.Fatalf("single-line @@ header rejected: %v", err)
+		}
+	})
 }
 
 func TestApplyPatchErrorUsesRelativePathHint(t *testing.T) {

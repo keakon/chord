@@ -3,7 +3,6 @@ package tools
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -67,10 +66,9 @@ func skipApplyPatchSeparatorRun(lines []string, i int, allowHunk bool) (int, boo
 // line is the section the model wanted to anchor on, and it is carried onto
 // the next hunk's header instead.
 //
-// Only a single non-blank context line qualifies. A longer context-only block
-// stays an error: with two or more lines there is no way to tell the anchor
-// from context the model meant to keep, and guessing would mis-anchor the
-// following hunk.
+// Only a single non-blank context line qualifies for this header carry. A
+// longer context-only block is a valid no-op hunk: the applier matches it in
+// file order and advances without changing content, so no guessing is needed.
 func applyPatchCarriedHeader(hunk applyPatchHunk) (bool, string) {
 	if len(hunk.Lines) != 1 {
 		return false, ""
@@ -207,23 +205,16 @@ func ParseApplyPatch(text string) (applyPatchDocument, error) {
 					h.EndOfFile = true
 					i++
 				}
-				// A context-only hunk stranded directly before another `@@` is
-				// the two-line header spelling, not a navigation placeholder:
-				// carry its single line forward as the next hunk's header and
-				// drop the shell instead of failing. The rejection below only
-				// covers orphans at the end of an operation, where the model
-				// really did emit context with nothing to change.
+				// A single context line stranded directly before another `@@`
+				// is the two-line header spelling: carry it onto the next hunk
+				// as its header. Longer context-only blocks remain valid no-op
+				// hunks and are appended below.
 				if carried, text := applyPatchCarriedHeader(h); carried && i < len(lines)-1 && strings.HasPrefix(lines[i], applyPatchHunkMarker) {
 					carriedHeader = text
 					continue
 				}
 				if len(h.Lines) == 0 {
-					return applyPatchDocument{}, fmt.Errorf("invalid empty update hunk for %s", op.Path)
-				}
-				if !slices.ContainsFunc(h.Lines, func(line applyPatchLine) bool {
-					return line.Kind == '+' || line.Kind == '-'
-				}) {
-					return applyPatchDocument{}, fmt.Errorf("invalid update hunk for %s at line %d: at least one added or removed line is required; context-only or whitespace-only lines are not omission placeholders. To anchor a hunk, put its section context on the `@@` line itself (`@@ func foo():`) and rebuild the hunk from a fresh read of the target range", op.Path, hunkStartLine)
+					return applyPatchDocument{}, fmt.Errorf("invalid empty update hunk for %s at line %d: each @@ hunk needs at least one context, +, or - line", op.Path, hunkStartLine)
 				}
 				op.Hunks = append(op.Hunks, h)
 			}
