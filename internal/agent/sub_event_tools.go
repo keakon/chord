@@ -389,6 +389,27 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		result.FileState,
 	))
 
+	// Model-driven checkpoint: validate and arm the pending request BEFORE the
+	// tool-result event and message are built — an executed compact_context
+	// call whose validation fails must settle as an ordinary error result, and
+	// a success must not flash a success card that later turns into an error.
+	// Ordering mirrors the MainAgent: the background result hook saw the raw
+	// text, the event and the message carry the settled one.
+	if result.Name == tools.NameCompactContext && result.Error == nil {
+		if args, err := s.validateModelDrivenCheckpointRequest(result.CallID, result.ArgsJSON); err != nil {
+			log.Warnf("SubAgent compact_context rejected agent=%v call_id=%v error=%v", s.instanceID, result.CallID, err)
+			rawResult = fmt.Sprintf("Context checkpoint rejected: %v", err)
+			displayResult, contextResult, errorText, isError = composeToolResultTexts(rawResult, fmt.Errorf("%v", err))
+			contextResult = applyToolArgsAuditToContextResult(contextResult, result.Audit)
+		} else {
+			rawResult = requestAcceptedToolResult
+			displayResult, contextResult, errorText, isError = composeToolResultTexts(rawResult, nil)
+			contextResult = applyToolArgsAuditToContextResult(contextResult, result.Audit)
+			s.turn.PendingModelDrivenCompaction = &subModelDrivenRequest{CallID: result.CallID, Args: args}
+			s.noteSubCompactContextCalled()
+		}
+	}
+
 	parts := s.toolResultParts(contextResult, result.Images)
 
 	// Record the adopted tool walltime once per call. The speculative preview
@@ -519,6 +540,14 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		s.turn.MalformedCount = 0
 	}
 	s.turn.malformedInBatch = 0
+
+	// Batch fully complete: consume an accepted model-driven checkpoint here,
+	// before the early exits below. Continue paths (including entering the
+	// join wait and a paused return) apply the compaction; an aborting turn
+	// drops it. Applying before drainContextAppendsBeforeTurn keeps deferred
+	// owner/mailbox messages behind the checkpoint instead of compacting them
+	// away.
+	s.consumePendingModelDrivenCompaction()
 
 	if s.sessionExecutionPaused() {
 		return

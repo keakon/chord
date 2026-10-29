@@ -826,22 +826,35 @@ type MailboxTranscriptAppendedEvent struct {
 func (MailboxTranscriptAppendedEvent) agentEvent() {}
 
 // ContextNoticeEvent tells the TUI that a context-pressure notice became
-// durable: the dispatch confirmation point appends the notice text to the main
-// transcript before emitting this event, so the card is backed by a real
-// message and a restored session rebuilds the same card from
+// durable: the dispatch confirmation point appends the notice text to the
+// agent's transcript before emitting this event, so the card is backed by a
+// real message and a restored session rebuilds the same card from
 // message.KindContextNotice instead of losing a live-only notice. MessageIndex
 // is the transcript index of that persisted message.
 //
-// Level separates the three runtime states so the card can badge them apart;
-// it is one of contextNoticePressure, contextNoticeImminent or
-// contextNoticeWarning.
+// Level separates the runtime states so the card can badge them apart; it is
+// one of contextNoticePressure, contextNoticeImminent or
+// contextNoticeWarning. AgentID attributes the notice to the SubAgent that
+// emitted it; the empty string is the main session.
 type ContextNoticeEvent struct {
 	Level        string
 	Message      string
 	MessageIndex int
+	AgentID      string
 }
 
 func (ContextNoticeEvent) agentEvent() {}
+
+// AgentTranscriptRebuiltEvent tells the TUI that an agent's durable transcript
+// was rewritten in place (a SubAgent context compaction) and every block's
+// MessageIndex in a view of that transcript may have shifted. The TUI rebuilds
+// the focused view from the rewritten transcript when it is focused on
+// AgentID; views of other agents are unaffected.
+type AgentTranscriptRebuiltEvent struct {
+	AgentID string
+}
+
+func (AgentTranscriptRebuiltEvent) agentEvent() {}
 
 // LSPFollowupEvent tells the TUI that late LSP diagnostics became durable: the
 // dispatch confirmation point appended them to the main transcript as a

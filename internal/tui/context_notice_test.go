@@ -148,3 +148,73 @@ func TestContextNoticePartialWithdrawalKeepsSurvivorPosition(t *testing.T) {
 		}
 	}
 }
+
+func TestContextNoticeEventAttributesSubAgentCard(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, Content: "hello", MsgIndex: 0})
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ContextNoticeEvent{
+		Level:        "imminent",
+		Message:      "Compaction is imminent.",
+		MessageIndex: 2,
+		AgentID:      "worker-1",
+	}})
+
+	var card *Block
+	for _, block := range m.viewport.blocks {
+		if block != nil && block.NoticeLevel != "" {
+			card = block
+		}
+	}
+	if card == nil {
+		t.Fatal("expected a context notice card")
+	}
+	if card.AgentID != "worker-1" {
+		t.Fatalf("card agent = %q, want the emitting SubAgent", card.AgentID)
+	}
+}
+
+func TestAgentTranscriptRebuiltEventRebuildsFocusedSubAgentView(t *testing.T) {
+	fa := &focusedMessagesAgent{messagesByFocus: map[string][]message.Message{
+		"worker-1": {
+			{Role: message.RoleUser, Content: "task"},
+			{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "Compaction is imminent.", NoticeLevel: "imminent"},
+		},
+		"": {{Role: message.RoleUser, Content: "main"}},
+	}}
+	m := NewModelWithSize(fa, 120, 30)
+	m.setFocusedAgent("worker-1")
+	m.viewport.AppendBlock(&Block{ID: 999, Type: BlockUser, Content: "stale pre-rewrite block", MsgIndex: 42, AgentID: "worker-1"})
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentTranscriptRebuiltEvent{AgentID: "worker-1"}})
+
+	var notice *Block
+	stale := false
+	for _, block := range m.viewport.blocks {
+		if block == nil {
+			continue
+		}
+		if block.ID == 999 {
+			stale = true
+		}
+		if block.NoticeLevel != "" {
+			notice = block
+		}
+	}
+	if stale {
+		t.Fatal("stale pre-rewrite block survived the rebuild")
+	}
+	if notice == nil {
+		t.Fatal("rebuilt view must carry the restored notice card")
+	}
+	if notice.MsgIndex != 1 || notice.AgentID != "worker-1" {
+		t.Fatalf("rebuilt notice = index:%d agent:%q, want index 1 attributed to worker-1", notice.MsgIndex, notice.AgentID)
+	}
+
+	// An event for another agent leaves this view untouched.
+	countBefore := len(m.viewport.blocks)
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentTranscriptRebuiltEvent{AgentID: "worker-2"}})
+	if len(m.viewport.blocks) != countBefore {
+		t.Fatal("a rebuild for another agent must not touch the focused view")
+	}
+}

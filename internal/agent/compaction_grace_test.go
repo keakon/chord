@@ -135,7 +135,7 @@ func TestCheckpointPressureUrgencyEscalates(t *testing.T) {
 		if !strings.Contains(notice, "can be completed immediately") {
 			t.Fatalf("pressure notice must keep the immediate-completion exception, got %q", notice)
 		}
-		if strings.Count(notice, contextPressureFinalResponseException) != 1 {
+		if strings.Count(notice, contextPressureFinalResponseExceptionFor(contextPressureAudienceMain)) != 1 {
 			t.Fatalf("pressure notice must limit the no-checkpoint exit to a fully answered request, got %q", notice)
 		}
 		if strings.Contains(notice, "If only the final response remains") {

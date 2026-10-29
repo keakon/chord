@@ -755,7 +755,8 @@ func TestHeadlessLSPFollowupPush(t *testing.T) {
 }
 
 // Context-pressure warnings are durable user-facing alerts with no other
-// headless channel, so they must be pushed explicitly.
+// headless channel, so they must be pushed explicitly. target_agent_id
+// attributes the notice to the emitting SubAgent; the main session uses "main".
 func TestHeadlessContextNoticePush(t *testing.T) {
 	state := &headlessState{subscriptions: map[string]bool{"context_notice": true}, sessionID: "sess-1"}
 
@@ -781,6 +782,24 @@ func TestHeadlessContextNoticePush(t *testing.T) {
 	}
 	if payload["session_id"] != "sess-1" {
 		t.Errorf("session_id = %v, want the tracked session", payload["session_id"])
+	}
+	if payload["target_agent_id"] != "main" {
+		t.Errorf("target_agent_id = %v, want main for the main session", payload["target_agent_id"])
+	}
+
+	workerEnvs := filterHeadlessEvent(agent.ContextNoticeEvent{
+		Level:        "imminent",
+		Message:      "Compaction is imminent.",
+		MessageIndex: 4,
+		AgentID:      "worker-1",
+	}, state)
+	workerEnv := findHeadlessEnvelope(workerEnvs, "context_notice")
+	if workerEnv == nil {
+		t.Fatal("worker context_notice envelope not emitted")
+	}
+	workerPayload := headlessPayloadMap(t, workerEnv.Payload)
+	if workerPayload["target_agent_id"] != "worker-1" {
+		t.Errorf("target_agent_id = %v, want the emitting SubAgent", workerPayload["target_agent_id"])
 	}
 }
 

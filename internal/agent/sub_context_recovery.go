@@ -18,7 +18,9 @@ const subAgentContextRecoveryHeadroom = 4096
 // applyModelCompactionConfig resolves the next request's model through the same
 // configuration path as the main agent. Read it at each request boundary so
 // model switches and fallback pool cursors do not retain another model's line.
-func (s *SubAgent) applyModelCompactionConfig() float64 {
+// It returns the resolved model ref (for the reminder-line lookup) and the
+// compaction threshold ratio.
+func (s *SubAgent) applyModelCompactionConfig() (string, float64) {
 	client, _ := s.llmSnapshot()
 	modelRef := ""
 	if client != nil {
@@ -29,7 +31,7 @@ func (s *SubAgent) applyModelCompactionConfig() float64 {
 		}
 	}
 	threshold := s.parent.effectiveCompactionThreshold(modelRef)
-	return threshold
+	return modelRef, threshold
 }
 
 func (s *SubAgent) recoverFromContextLength(err error) bool {
@@ -67,8 +69,8 @@ func (s *SubAgent) prepareContextForLLM(input llmRequestInput) (prepared llmRequ
 	if s == nil || len(messages) <= 2 {
 		return input
 	}
-	usage := s.applyModelCompactionConfig()
-	if usage <= 0 {
+	modelRef, threshold := s.applyModelCompactionConfig()
+	if threshold <= 0 {
 		return input
 	}
 	budget := s.ctxMgr.GetUsableCompactionBudget()
@@ -80,10 +82,16 @@ func (s *SubAgent) prepareContextForLLM(input llmRequestInput) (prepared llmRequ
 	}
 	estimated := estimateMessagesTokens(s.ctxMgr, projectGeneratedImagePreviews(messages))
 	requestBudget := s.ctxMgr.GetUsableInputBudget()
-	if estimated < int(float64(budget)*usage) && (requestBudget <= 0 || estimated < requestBudget) {
+	// Pressure observation stages this request's overlay and grants the
+	// model-driven grace; a deferred request goes out without the
+	// deterministic compaction so the model can checkpoint first.
+	if s.observeSubContextPressure(modelRef, estimated, budget, threshold, requestBudget) {
 		return input
 	}
-	target := int(float64(budget) * usage * 0.85)
+	if estimated < int(float64(budget)*threshold) && (requestBudget <= 0 || estimated < requestBudget) {
+		return input
+	}
+	target := int(float64(budget) * threshold * 0.85)
 	if requestBudget > 0 {
 		target = min(target, int(float64(requestBudget)*0.85))
 	}
@@ -95,15 +103,26 @@ func (s *SubAgent) prepareContextForLLM(input llmRequestInput) (prepared llmRequ
 }
 
 func (s *SubAgent) compactContextForTarget(messages []message.Message, target int, reason string) ([]message.Message, bool) {
+	compressed, ok, _ := s.compactContextForTargetWithCheckpoint(messages, target, reason, nil)
+	return compressed, ok
+}
+
+// compactContextForTargetWithCheckpoint compresses the history to target and
+// replaces the removed prefix with a checkpoint whose body comes from
+// buildContent — the deterministic structured checkpoint when nil, the
+// model-authored continuation state for a model-driven request. It returns the
+// compressed list, whether the compaction applied, and the skip reason for a
+// not-applied result.
+func (s *SubAgent) compactContextForTargetWithCheckpoint(messages []message.Message, target int, reason string, buildContent subCheckpointContentBuilder) ([]message.Message, bool, string) {
 	beforeReconcile := s.ctxMgr.MessageCount()
 	if s.parent != nil {
 		s.parent.flushPersist()
 		if err := s.skillPublisher.reconcileAfterFlush(s.parent.persist, s.ctxMgr.Snapshot(), s.ctxMgr.Append); err != nil {
-			return nil, false
+			return nil, false, subModelDrivenSkipRewriteFailed
 		}
 	}
 	if err := s.reconcileDirectoryInstructionsAfterFlush(); err != nil {
-		return nil, false
+		return nil, false, subModelDrivenSkipRewriteFailed
 	}
 	if s.ctxMgr.MessageCount() != beforeReconcile {
 		messages = s.ctxMgr.Snapshot()
@@ -111,15 +130,25 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 	skillView := s.skillActivationView()
 	compressed := s.ctxMgr.CompressForTarget(messages, target)
 	if s.compactionDropsPendingPauseInputs(messages, compressed) {
-		return nil, false
+		return nil, false, subModelDrivenSkipDropsPauseInput
 	}
 	if len(compressed) == 0 || len(compressed) >= len(messages) {
-		return nil, false
+		return nil, false, subModelDrivenSkipCompression
 	}
+	// A successful compaction ends the pressure window that wrote them, so
+	// the compacted context must not keep replaying pre-apply notices.
+	compressed = dropContextNoticeMessages(compressed)
 	archiveRef, archiveErr := s.archiveContextRecoveryHistory(messages)
 	if archiveErr != nil {
 		log.Warnf("SubAgent context compression could not archive durable history agent=%v error=%v", s.instanceID, archiveErr)
-		return nil, false
+		return nil, false, subModelDrivenSkipArchiveFailed
+	}
+	removed := len(messages) - len(compressed)
+	var content string
+	if buildContent != nil {
+		content = buildContent(removed, archiveRef)
+	} else {
+		content = buildSubAgentStructuredCheckpoint(s, messages, removed, reason, archiveRef)
 	}
 	checkpoint := message.Message{
 		Role: message.RoleUser,
@@ -129,13 +158,12 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 		// checkpoint carries the same marker.
 		IsCompactionSummary:       true,
 		CompactionSkillActivation: buildSkillActivationCarry(messages, skillView, skillActivationEpoch(messages, skillView.TaskID)+1),
-		Content: buildSubAgentStructuredCheckpoint(
-			s,
-			messages,
-			len(messages)-len(compressed),
-			reason,
-			archiveRef,
-		),
+		Content:                   content,
+	}
+	if buildContent != nil {
+		// A model-authored body labels the row so display and diagnostics can
+		// tell it apart from the deterministic checkpoint.
+		checkpoint.CompactionSummaryMode = compactionSummaryModeModelDriven
 	}
 	if len(compressed) > 1 && strings.HasPrefix(compressed[1].Content, "[system] Context was compressed") {
 		compressed[1] = checkpoint
@@ -144,7 +172,7 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 	}
 	compressed = retainDirectoryInstructionFacts(messages, compressed)
 	if estimateMessagesTokens(s.ctxMgr, compressed) >= estimateMessagesTokens(s.ctxMgr, messages) {
-		return nil, false
+		return nil, false, subModelDrivenSkipCompression
 	}
 	if manager := s.recoveryManager(); manager != nil {
 		if s.parent != nil {
@@ -152,13 +180,17 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 		}
 		if rewriteErr := manager.RewriteLog(s.instanceID, compressed); rewriteErr != nil {
 			log.Warnf("SubAgent context compression could not rewrite durable history agent=%v error=%v", s.instanceID, rewriteErr)
-			return nil, false
+			return nil, false, subModelDrivenSkipRewriteFailed
 		}
 		if s.parent != nil {
 			s.parent.persist.clearCheckpointFailures(manager, s.instanceID)
 		}
 	}
 	s.ctxMgr.RestoreMessages(compressed)
+	// A deterministic rewrite supersedes any checkpoint outcome that was
+	// waiting for the next request. The model-driven caller sets its own
+	// applied notice after this method returns.
+	s.setCompactionTransient("")
 	// The dropped messages carried whatever skill instructions this subagent
 	// had loaded, so its invoked-skill state is recomputed from what remains —
 	// the same rebuild restore performs, for the same reason.
@@ -173,7 +205,15 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 			s.parent.orchestrationMetrics.subAgentTokensSaved.Add(uint64(stats.TokensSaved))
 		}
 	}
-	return compressed, true
+	// The rewrite is the new durable truth: end the notice window (fresh
+	// delivery claims, grace, and compact_context mark) and tell the TUI to
+	// rebuild a focused view — every surviving block's transcript index
+	// shifted with the rewrite.
+	s.advanceSubNoticeWindow()
+	if s.parent != nil {
+		s.parent.emitToTUI(AgentTranscriptRebuiltEvent{AgentID: s.instanceID})
+	}
+	return compressed, true, ""
 }
 
 func (s *SubAgent) archiveContextRecoveryHistory(messages []message.Message) (string, error) {

@@ -73,12 +73,12 @@ context:
 | `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从固定压缩预算中扣除，再应用 `threshold`。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 | `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；等于或高于 threshold 的 reminder 不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本就携带上阈值通知。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
-| `model_driven` | 布尔 | `true` | 给主 agent 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求，随后在同一 turn 的压缩上下文上继续。工具仅 MainAgent 可见、必须单独调用、`state_files` 与 `planned_state_files` 只作路径引用，工具自身不读取也不校验存在性；reset 后 runtime 会重新载入登记文件与 checkpoint 关键文件的一小段头部，且仅当当前 read 权限规则允许该路径。低收益请求会被自动跳过。设为 `false` 可让压缩完全由运行时接管。 |
+| `model_driven` | 布尔 | `true` | 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，随后在同一 turn 的压缩上下文上继续：主 agent 在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求；SubAgent 在工具批次收口时同步应用。工具同样以 worker 变体对 SubAgent 可用——schema 收缩（去掉证据字段、跨代 carry、planned 文件），必须单独调用，`state_files` 只作路径引用，工具自身不读取也不校验存在性。主 agent 上 reset 后 runtime 会重新载入登记文件与 checkpoint 关键文件的一小段头部（且仅当当前 read 权限规则允许该路径）；SubAgent 的 checkpoint 只列出路径，由模型自己读取。低收益请求会被自动跳过。设为 `false` 可让压缩完全由运行时接管。 |
 | `retain_recent_tokens` | 整数 | `4096`（内置） | 每个压缩 checkpoint 内嵌的最近真实用户消息的估计 token 预算（见上文的「保留最近消息」）；`0` 或缺省使用内置默认值，只算消息正文。需要跨压缩保住更多最近轮次就调大，想让压缩多回收上下文就调小；保留段不替代摘要，只把最新指令边界原样钉住（与当前请求完全相同的重复消息会改写为一条去重说明）。 |
 
 按模型覆盖写在**模型定义**上（`ModelConfig.compaction`，含 `threshold` 与 `reminder` 两个子字段），可经 `model_templates` 用 `<<:` 共享；**没有** `context.compaction.models` 这张表。
 
-主代理和子代理共用有效压缩阈值：显式模型配置优先，其次是显式全局配置、目录建议和内置默认值。子代理在每次请求前按模型池当前游标重新解析阈值和预算，使用本地 token 估算与轻量 checkpoint；`threshold: 0` 关闭两类代理的主动压缩；子代理仍可在超长请求错误后恢复，主代理会停止超长请求并提示使用 `/compact`。`reminder` 只控制主代理的压力提醒。Haiku 5.5 目录建议 `threshold: 0.10`、`reminder: 0.08`，约在 87K token 压缩、主代理约在 70K 提醒，面向小任务和子任务的成本控制；这不是保证低于 100K 的计费上限。
+主代理和子代理共用有效压缩阈值：显式模型配置优先，其次是显式全局配置、目录建议和内置默认值。子代理在每次请求前按模型池当前游标重新解析阈值和预算，使用本地 token 估算与轻量 checkpoint；`threshold: 0` 关闭两类代理的主动压缩；子代理仍可在超长请求错误后恢复，主代理会停止超长请求并提示使用 `/compact`。启用 `model_driven` 时，`reminder` 对两类代理都驱动压力提醒——SubAgent 用本地 token 估算（而非 provider usage）测量用量，同样收到接近/达到两级通知。Haiku 5.5 目录建议 `threshold: 0.10`、`reminder: 0.08`，约在 87K token 压缩、主代理约在 70K 提醒，面向小任务和子任务的成本控制；这不是保证低于 100K 的计费上限。
 
 `threshold` / `reminder`（全局或按模型）驱动 usage-driven 压缩路径和上下文配色，对**所有**用户生效，与 `model_driven` 无关：后者只注册 `compact_context` 工具。TUI 的上下文用量显示（侧边栏 Context 数值与进度条、状态栏百分比 pill）用这两条线取色：reminder 以下为绿色，reminder 到 threshold 之间为橙/黄色，达到 threshold 为红色。请求面的 reminder / warning overlay 则只在启用 `model_driven` 时注入（见下文）。
 
@@ -110,7 +110,7 @@ providers:
 
 自动压缩阈值越线时，Chord 默认**立即启动** usage-driven 压缩：它在后台异步运行，在下一个 continuation barrier 应用，越线之后的那次请求与它并行继续执行；provider 拒绝（oversize）仍然立即强制压缩。
 
-启用 `model_driven`（`compact_context` 可见）时，同一压缩窗口内的首次越线会把启动推迟两个主模型请求：第一次观察到越线的请求和其后一个请求照常发出，模型借此收口当前阶段、提交 model-driven checkpoint 或把状态外化到文件，然后再启动基于摘要的压缩。推迟的前提是模型收到过早期预警：用量在窗口内未曾送达压力提醒就直接越过阈值（包括提醒被禁用、或提醒线不低于阈值的配置）时，按突变处理，立即启动压缩并只注入一条 warning。usage 达到可用输入预算的 95% 时宽限直接跳过或提前结束（单次请求拉入大量工具输出不能借宽限一路顶到 provider oversize 拒绝）；越线后 model-driven 请求收口但未应用（skip / failure / cancel）时宽限立即结束：模型已经出手过，安全网从下一个 gate 接管；越线之前收口的请求不消耗宽限。宽限每个窗口只花一次；任何 durable apply、会话切换、恢复或模型变化都会开启新窗口。
+启用 `model_driven`（`compact_context` 可见）时，同一压缩窗口内的首次越线会把启动推迟两个主模型请求：第一次观察到越线的请求和其后一个请求照常发出，模型借此收口当前阶段、提交 model-driven checkpoint 或把状态外化到文件，然后再启动基于摘要的压缩。推迟的前提是模型收到过早期预警：用量在窗口内未曾送达压力提醒就直接越过阈值（包括提醒被禁用、或提醒线不低于阈值的配置）时，按突变处理，立即启动压缩并只注入一条 warning。SubAgent 只有在同一窗口内已经送达接近提醒后越线，才获得同样的两个请求宽限；突然越线时会发出警告并立即开始确定性压缩。它的确定性压缩本就同步执行，宽限期只是让请求前的压缩先不发生。usage 达到可用输入预算的 95% 时宽限直接跳过或提前结束（单次请求拉入大量工具输出不能借宽限一路顶到 provider oversize 拒绝）；越线后 model-driven 请求收口但未应用（skip / failure / cancel）时宽限立即结束：模型已经出手过，安全网从下一个 gate 接管；越线之前收口的请求不消耗宽限。宽限每个窗口只花一次；任何 durable apply、会话切换、恢复或模型变化都会开启新窗口。
 
 请求面的 reminder / warning overlay 只在启用 `model_driven` 时注入；关闭时自动压缩完全由运行时接管，会话继续运行，直到压缩在 barrier 应用。提醒只在会话继续发出主请求时生效：越线后若 turn 正好收尾，usage-driven 压缩走既有的 end-of-turn 路径。
 
@@ -122,7 +122,7 @@ providers:
 
 ### 模型驱动上下文 checkpoint
 
-启用 `context.compaction.model_driven`（默认）后，主 agent 获得 `compact_context` 工具。注册该工具是启用功能的一部分：仅含通配符的权限规则（例如 allowlist 式的 `"*": deny` 加少量显式放行的工具）不会隐藏或拦截它：只有匹配 `compact_context` 的非全局工具规则仍然生效（`deny` 会移除工具并给出一次性诊断，`ask` 保留工具但每次调用需确认，`allow` 与默认一致）。像 `compact_*` 这样的窄匹配也算匹配规则。即使角色的 allowlist 没有放行任何文件工具，模型仍可把状态完整写进结构化参数来完成 checkpoint。
+启用 `context.compaction.model_driven`（默认）后，主 agent 获得 `compact_context` 工具，SubAgent 获得它的 worker 变体（见「SubAgent 上下文 checkpoint」）。注册该工具是启用功能的一部分：仅含通配符的权限规则（例如 allowlist 式的 `"*": deny` 加少量显式放行的工具）不会隐藏或拦截它：只有匹配 `compact_context` 的非全局工具规则仍然生效（`deny` 会移除工具并给出一次性诊断，`ask` 保留工具但每次调用需确认，`allow` 与默认一致）。像 `compact_*` 这样的窄匹配也算匹配规则。即使角色的 allowlist 没有放行任何文件工具，模型仍可把状态完整写进结构化参数来完成 checkpoint。
 
 模型应在「用 checkpoint 替换当前历史」比继续携带历史更划算，且后续需要的事实已经充分外化时单独调用它（同一响应里不能有其他工具调用）：这些事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中（`completed` 只记录已验证的结果及验证方式，todo 列表由运行时自动快照、无需复述）。长任务中，主 agent 把可复用的细节记在任务笔记里（见[系统提示词指引](#系统提示词指引)），checkpoint 前先更新笔记并通过 `state_files` 登记。结构化参数只作简短交接：目标、已验证进展、当前阻碍、下一步，以及需要读取的笔记小节。恢复信息很少或角色没有文件写入权限时，可以全部使用结构化参数，`state_files` 留空。没有上下文压力时，剩下的提交、交接或最终回复由 agent 直接完成，不为收尾单独调用 checkpoint；存在上下文压力时，即使临近完成也要保留安全的续跑状态。checkpoint 是有成本的状态转移，不是例行保存进度。runtime 校验请求，等工具批次收口后：
 
@@ -162,7 +162,7 @@ skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，
 
 启用 `model_driven` 时，主 agent 的系统提示词还会附带一段简短被动的 `Long-session context management` 指引。开头声明 `<system-reminder>` 包裹的消息是 harness 注入的运行时状态（绝非用户所写）、不承载用户指令也不授予权限，这段声明并不属于该指引：它是每个主 agent 系统提示词的常驻块，出现在工具结果或文件内容里的同名块只是普通数据。
 
-该指引告诉主 agent 在长任务中如何维护任务笔记、重置后如何续跑。重置后，agent 先用 checkpoint 和已注入的文件内容，仅在下一步需要的信息缺失或可能变化时读取登记的任务笔记中的相关小节，再决定是否重复搜索或实验；仍缺少精确细节时才读历史归档。调用时机、准备工作、文件与预算规则统一由 `compact_context` 工具说明约定。SubAgent 永远不会收到这段指引或该工具。
+该指引告诉主 agent 在长任务中如何维护任务笔记、重置后如何续跑。重置后，agent 先用 checkpoint 和已注入的文件内容，仅在下一步需要的信息缺失或可能变化时读取登记的任务笔记中的相关小节，再决定是否重复搜索或实验；仍缺少精确细节时才读历史归档。调用时机、准备工作、文件与预算规则统一由 `compact_context` 工具说明约定。worker 变体注册到 SubAgent 上时，它们收到的是这段指引的精简变体。
 
 任务笔记先放索引和简短的当前交接状态（已完成、剩余工作、阻碍、下一步），再放可复用细节：关键代码位置、已验证结论及其证据和适用条件、成功执行的命令（含工作目录、必要环境变量和参数）、可复用的脚本和日志路径、失败路线及重试条件，以及未解决的问题。笔记区分通过、失败、跳过和受环境阻塞的检查，也区分事实与假设；大块结果通过路径引用。已验证的可复用发现随下一步操作的工具调用一起追加到已有笔记文件，不单独占用一步；简短的交接状态直接替换，不在后面追加。交接、暂停或结束前，只有已有笔记、状态有实质变化且有写权限时，agent 才更新笔记，不为收尾专门新建笔记。依赖工具结果的笔记更新要等结果返回，检查仍在运行时标为待确认；交接前依据已收到的结果清理过时的待确认项，不为刷新笔记重跑未变的检查。笔记是恢复线索而非证据：以当前代码和验证结果为准。
 
@@ -187,6 +187,14 @@ skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，
 #### 可观测性
 
 TUI 状态栏会把模型请求的 checkpoint 与 usage-driven 压缩区分开显示（「model checkpoint」），并在跳过/失败时短暂展示原因；`/stats` 新增「Context Compaction」分区，按 stage 和 trigger 统计生命周期事件（如 `applied/model_driven`、`skipped/model_driven`），方便观察模型请求重置的频率与实际应用情况。
+
+### SubAgent 上下文 checkpoint
+
+启用 `model_driven` 且角色的权限规则不拒绝 `compact_context` 时，SubAgent 获得主 agent 同款能力的 worker 变体。变体面向委派任务：去掉证据字段（`evidence_refs`、`claim_evidence`、`claim_kinds`）、跨代 carry 字段（`retired_items`、`open_issues_complete`、`checkpoint_kind`、`stage_id`、`stage_status`）和 `planned_state_files`，描述里的「最新用户请求 / 最终回复」换成「委派任务 / 最终报告」。给已删除字段传非空值会被直接拒绝。worker 变体只改变该 SubAgent 的工具面；主 agent 的冻结 prompt 前缀与 prompt cache 不受影响。
+
+worker checkpoint 由模型的结构化参数加上确定性 checkpoint 同款的 runtime 事实（任务、Owner、最新 owner 指示、触及文件、近期失败、未决阻塞）和 skills carry 行组成，归档后在 worker 自己的事件循环上随工具批次收口同步应用——没有后台 worker，也没有 barrier。目标长度按 checkpoint 自身的估算加一小段保留尾部推导，不用固定比例；预计收益低于低收益门槛时跳过 reset，跳过原因会以一次性请求通知加 toast 告知模型。下一次 checkpoint 不合并上一次的模型字段：每轮重新声明它认为仍然成立的目标、进度与决策，更早的内容留在归档里。
+
+压力通知与主 agent 同构：提醒线和阈值线各在每个压缩窗口投递一条持久通知。只有提醒已经送达后越线，SubAgent 才获得同样的两个请求宽限（请求预算 95% 上限或已应答的 `compact_context` 调用会提前结束宽限）；突然越线时会发出警告并立即开始确定性压缩。每条通知都保存为持久上下文通知，并由归属发出通知的 SubAgent 的卡片展示；集成方收到的 `context_notice` 事件也通过 `target_agent_id` 标识该 SubAgent。用量用 worker 的本地 token 估算，而非 provider usage。任何压缩都会结束窗口、删除旧通知行并重建 worker 视图；`model_driven` 关闭或工具被拒绝时，SubAgent 压缩完全由运行时接管。
 
 ### 触发阈值如何计算
 

@@ -94,7 +94,7 @@ Verbatim retention is bounded, and summaries can miss details. Put important req
 | `reserved` | int | `0` | Fixed token headroom added on top of the proportional headroom left by `threshold`, for tokenizer drift, tool schema overhead, and compaction/recovery safety. Usually omit it (leave it at `0`); a non-zero value is subtracted from the fixed compaction budget before applying `threshold`. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
 | `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` (the default) derives the line as `min(0.60, threshold × 0.90)`; a fraction in `(0,1]` sets it explicitly; `-1` disables the pressure reminder while keeping automatic compaction on (per model as well). A reminder below the threshold fires when usage reaches it (`min(reminder, threshold)` — whichever line comes first); one at or above the threshold does not fire separately, because usage only reaches it on requests that already crossed the threshold, which carry the upper-threshold notice instead. `threshold: 0` disables both. Any other value (negative, above `1`, or NaN/±Inf) is rejected with a warning and falls back to the derived default. |
-| `model_driven` | bool | `true` | Expose the `compact_context` tool to the main agent so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call, applies at a tool-batch barrier that pauses the next main-model request, and continues the same turn on the compacted context. The tool is MainAgent-only, must be called alone, and references `state_files` paths without reading or verifying them: after the reset the runtime re-loads a bounded head of the registered files and of the checkpoint's key files, and only when the current read permission rule allows the path. Low-gain requests are skipped automatically. Set `false` to keep compaction fully runtime-owned. |
+| `model_driven` | bool | `true` | Expose the `compact_context` tool so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call and continues the same turn on the compacted context: on the main agent it applies at a tool-batch barrier that pauses the next main-model request, on a SubAgent it applies synchronously when the tool batch closes. The tool is also available to SubAgents as a worker variant with a reduced schema (no evidence fields, no cross-generation carry, no planned files), must be called alone, and references `state_files` paths without reading or verifying them. On the main agent, after the reset the runtime re-loads a bounded head of the registered files and of the checkpoint's key files, and only when the current read permission rule allows the path; a SubAgent's checkpoint lists the paths for the model to read itself. Low-gain requests are skipped automatically. Set `false` to keep compaction fully runtime-owned. |
 | `retain_recent_tokens` | int | `4096` (built-in) | Estimated-token budget for the newest real user messages kept verbatim inside every compaction checkpoint (see [Retained recent messages](#retained-recent-messages)); `0` or omitted uses the built-in default. Only the message text counts toward the budget. Set it higher to keep more of the latest turns across a compaction, or lower to reclaim more context; the retained section never replaces the summary — it pins the newest instruction boundary verbatim (an exact repeat of the current request is summarized as a duplicate). |
 
 Per-model overrides live on the model definition (`ModelConfig.compaction`,
@@ -106,9 +106,12 @@ model settings take precedence over explicit global settings, catalog
 recommendations and the built-in default. SubAgents resolve the threshold and
 budgets from the current model-pool cursor before each request, using local
 token estimates and a lightweight checkpoint. A threshold of `0` disables
-proactive compaction for both agent types. SubAgents retain recovery from
+proactive compaction for both agent types. SubAgents also recover from
 provider context-length errors; the main agent stops oversized requests and
-suggests `/compact`. `reminder` controls only the main agent's pressure reminders. The
+suggests `/compact`. `reminder` drives the pressure reminders for both agent
+types when `model_driven` is enabled — a SubAgent measures usage with local
+token estimates instead of provider usage and receives the same approaching
+and reached notices. The
 Haiku 5.5 profile recommends `threshold: 0.10` and `reminder: 0.08`: compaction
 near 87K tokens and main-agent reminders near 70K for small tasks and subtasks.
 This is not a hard billing cap that guarantees prompts below 100K.
@@ -170,7 +173,7 @@ and applies at the next continuation barrier, so the request that crosses the
 line keeps running in parallel with it. Provider rejections (oversize) still
 force compaction immediately.
 
-While model-driven compaction is enabled (`compact_context` visible), the first crossing in a compaction window instead defers the start across two main-model requests: the first request after the crossing and one more run before the summary-based compaction takes over, giving the model room to wrap up the phase and request a model-driven checkpoint or externalize state. The deferral assumes the model had an early warning: when usage jumps past the threshold without the pressure reminder ever being delivered in the window (including when the reminder is disabled or its line sits at or above the threshold), the crossing counts as abrupt and compaction starts immediately with a single warning.
+While model-driven compaction is enabled (`compact_context` visible), the first crossing in a compaction window instead defers the start across two main-model requests: the first request after the crossing and one more run before the summary-based compaction takes over, giving the model room to wrap up the phase and request a model-driven checkpoint or externalize state. The deferral assumes the model had an early warning: when usage jumps past the threshold without the pressure reminder ever being delivered in the window (including when the reminder is disabled or its line sits at or above the threshold), the crossing counts as abrupt and compaction starts immediately with a single warning. A SubAgent grants the same two-request grace only after delivering the approaching notice in that window; an abrupt crossing warns and starts deterministic compaction immediately. Its deterministic compaction is synchronous, so the deferral skips pre-request compaction while the grace lasts.
 
 Pressure notifications have two thresholds: the reminder line and the automatic-compaction line. Each threshold adds one persistent notice, retained in the conversation and displayed as a card. Grace and compaction startup share the upper-threshold notice; later requests reuse the history without adding reminders or countdowns. One request never stacks two pressure notices: the highest applicable level is injected (manual `/compact` instruction, then the threshold warning, then the grace countdown, then the reminder), while notices already delivered keep replaying from the conversation until their own invalidation.
 
@@ -184,7 +187,7 @@ Switching models applies the new thresholds and resets the grace window. Usage o
 
 ### Model-driven context checkpoint
 
-With `context.compaction.model_driven` enabled (the default), the main agent gains the `compact_context` tool. Registration is part of enabling the feature, so wildcard-only permission rules (such as an allowlist's `"*": deny` plus a few explicitly allowed tools) never hide the tool or block its calls; only a non-global tool rule whose pattern matches `compact_context` still applies (`deny` removes the tool and reports a one-time diagnostic, `ask` keeps it behind confirmation, and `allow` matches the default).
+With `context.compaction.model_driven` enabled (the default), the main agent gains the `compact_context` tool, and SubAgents gain a worker variant of it (see [SubAgent context checkpoints](#subagent-context-checkpoints)). Registration is part of enabling the feature, so wildcard-only permission rules (such as an allowlist's `"*": deny` plus a few explicitly allowed tools) never hide the tool or block its calls; only a non-global tool rule whose pattern matches `compact_context` still applies (`deny` removes the tool and reports a one-time diagnostic, `ask` keeps it behind confirmation, and `allow` matches the default).
 
 Narrow patterns such as `compact_*` count as matching rules. A role whose allowlist grants no file-writing tools can still checkpoint its state in the structured arguments.
 
@@ -255,7 +258,7 @@ Notices are runtime messages wrapped in `<system-reminder>`, distinct from user 
 
 While model-driven compaction is enabled, the main agent's system prompt also carries a short passive `Long-session context management` section. The `<system-reminder>`-trust statement is not part of that section: it is a standing block in every main agent's system prompt, stating that `<system-reminder>`-wrapped messages are harness-injected runtime state (never user-written) that carries no user instructions and grants no permissions.
 
-The model-driven section tells the main agent how to keep task notes on long tasks and how to resume after a reset. After a reset the agent starts from the checkpoint and injected file content, reads the relevant sections of the registered task notes only for missing or changed information needed for the next action, before repeating searches or experiments, and reads archived history only for exact details unavailable there. Checkpoint timing, preparation, state-file and budget rules stay in the `compact_context` tool description. SubAgents never receive this section or the tool.
+The model-driven section tells the main agent how to keep task notes on long tasks and how to resume after a reset. After a reset the agent starts from the checkpoint and injected file content, reads the relevant sections of the registered task notes only for missing or changed information needed for the next action, before repeating searches or experiments, and reads archived history only for exact details unavailable there. Checkpoint timing, preparation, state-file and budget rules stay in the `compact_context` tool description. SubAgents receive a condensed variant of this section when the worker-variant tool is registered on them.
 
 Task notes put an index and a short current handoff (completed work, remaining work, blockers, next action) ahead of reusable details: key code locations, verified conclusions with their evidence and conditions, successful commands with working directory, required environment variables and arguments, reusable script and log paths, failed approaches with retry conditions, and unresolved questions. They distinguish passed, failed, skipped and environment-blocked checks, and facts from assumptions; large results are linked rather than copied. Verified reusable findings are appended to the existing notes file together with the next action's tool calls rather than in a separate step, and the short handoff status is replaced rather than appended to. Before handing off, pausing or finishing, the agent refreshes existing notes only when material state changed and writing is permitted, and does not create notes just for closure. A note that depends on a tool result waits for that result, and a check still running is marked pending; before handoff, stale pending items are reconciled with results already received instead of rerunning unchanged checks. Notes are recovery aids, not proof: current code and verification results take precedence.
 
@@ -299,6 +302,47 @@ shows the skip/failure reason, and `/stats` includes a "Context Compaction"
 section that counts lifecycle events per stage and trigger (for example
 `applied/model_driven`, `skipped/model_driven`) so you can gauge how often the
 model requests resets and how many are accepted.
+
+### SubAgent context checkpoints
+
+SubAgents get the same model-driven checkpoint capability as a worker variant
+while `model_driven` is enabled and the role's permission rules do not deny
+`compact_context`. The variant is
+task-scoped: it drops the evidence fields (`evidence_refs`, `claim_evidence`,
+`claim_kinds`), the cross-generation carry fields (`retired_items`,
+`open_issues_complete`, `checkpoint_kind`, `stage_id`, `stage_status`) and
+`planned_state_files`, and its description speaks of the delegated task and
+the final report instead of the user request and final response. A non-empty
+value for a dropped field is rejected outright. Sending the worker variant
+changes only that SubAgent's tool surface; the main agent's frozen prompt
+prefix and prompt cache are untouched.
+
+A worker checkpoint is built from the model's structured arguments plus the
+same runtime facts the deterministic checkpoint records (task, owner, latest
+owner instruction, touched files, recent failures, open blocker) and the
+skills-carry line, then archived and applied synchronously on the worker's own
+event loop when the tool batch closes — no background worker, no barrier. The
+target size follows the checkpoint's own estimate plus a small retained tail,
+never a fixed ratio; a projected saving below the low-gain gate skips the
+reset, and the skip reason reaches the model as a one-shot request notice plus
+a toast. A second checkpoint does not merge the previous checkpoint's
+model-authored fields: each round re-states the objective, progress and
+decisions it considers current, and everything earlier stays recoverable in
+the archived history files.
+
+Pressure notices work the same way as on the main agent: the reminder line
+and the threshold line each deliver one persistent notice per compaction
+window. A crossing after the reminder was delivered grants the same
+two-request grace, cut short by the 95%-of-request-budget ceiling or an
+answered `compact_context` call; an abrupt crossing warns and starts
+deterministic compaction immediately. Each notice is stored as a durable
+context notice and shown as a card attributed to the emitting SubAgent. The
+headless `context_notice` event carries the same worker ID in
+`target_agent_id`. Usage is measured with the worker's local token estimates
+rather than provider usage. Proactive, oversize-recovery, and model-driven
+compaction all end the window, remove old notice rows, and rebuild the
+worker's view. With `model_driven` disabled or the tool denied, SubAgent
+compaction stays fully runtime-owned.
 
 ### How the threshold is calculated
 

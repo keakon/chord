@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -516,14 +517,21 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		// toast/info accompanies it). Gateway notifications are
 		// fire-and-forget, so there is no card state for
 		// ContextNoticeClearedEvent to retract; the cleared event stays
-		// TUI-only by design.
+		// TUI-only by design. target_agent_id attributes the notice to the
+		// SubAgent that emitted it; the main session uses "main", matching
+		// the background_result envelope.
 		touch()
 		if state.isSubscribed("context_notice") {
+			targetAgentID := strings.TrimSpace(e.AgentID)
+			if targetAgentID == "" {
+				targetAgentID = identity.MainAgentID
+			}
 			out = append(out, &headlessEnvelope{Type: "context_notice", Payload: map[string]any{
-				"session_id":    state.sessionID,
-				"level":         e.Level,
-				"message":       e.Message,
-				"message_index": e.MessageIndex,
+				"session_id":      state.sessionID,
+				"target_agent_id": targetAgentID,
+				"level":           e.Level,
+				"message":         e.Message,
+				"message_index":   e.MessageIndex,
 			}})
 		}
 	case agent.LSPFollowupEvent:

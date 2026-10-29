@@ -869,3 +869,131 @@ func TestCompactContextEvidenceParamsStateVisibleIDContract(t *testing.T) {
 		t.Errorf("claim_evidence description must point at the single evidence rule, got: %q", claimEvidence)
 	}
 }
+
+func TestCompactContextWorkerSchemaDropsMainAgentOnlyProperties(t *testing.T) {
+	worker := NewCompactContextTool(CompactContextValidator{WorkerSurface: true, ContinuationStateMaxTokens: 2048})
+	properties := worker.Parameters()["properties"].(map[string]any)
+	for _, name := range compactContextWorkerRemovedProperties {
+		if _, ok := properties[name]; ok {
+			t.Errorf("worker schema must not declare %q", name)
+		}
+	}
+	for _, name := range []string{"active_objective", "completed", "decisions", "open_issues", "next_step", "state_files"} {
+		if _, ok := properties[name]; !ok {
+			t.Errorf("worker schema must keep %q", name)
+		}
+	}
+	for name, want := range map[string][]string{
+		"active_objective": {"delegated task", "owner has changed the task"},
+		"completed":        {"delegated task", "committed"},
+		"next_step":        {"subordinate to the delegated task"},
+	} {
+		desc, _ := properties[name].(map[string]any)["description"].(string)
+		for _, text := range want {
+			if !strings.Contains(desc, text) {
+				t.Errorf("worker %s description must mention %q, got %q", name, text, desc)
+			}
+		}
+	}
+	stateFiles, _ := properties["state_files"].(map[string]any)
+	desc, _ := stateFiles["description"].(string)
+	if !strings.Contains(desc, "read them before relying on their contents") {
+		t.Errorf("worker state_files description must ask the model to read the paths, got: %q", desc)
+	}
+	if strings.Contains(desc, "may be injected") {
+		t.Errorf("worker state_files description must not promise a post-reset injection, got: %q", desc)
+	}
+	mainProperties := NewCompactContextTool(testCompactValidator()).Parameters()["properties"].(map[string]any)
+	if _, ok := mainProperties["planned_state_files"]; !ok {
+		t.Error("main schema must keep planned_state_files")
+	}
+}
+
+func TestCompactContextWorkerDescriptionIsTaskScoped(t *testing.T) {
+	description := NewCompactContextTool(CompactContextValidator{WorkerSurface: true, ContinuationStateMaxTokens: 2048}).Description()
+	for _, want := range []string{
+		"delegated task",
+		"the final report",
+		"Call it alone",
+		"the notice sets the stopping point",
+		"about 2048 estimated tokens",
+		"report to the owner and wait",
+	} {
+		if !strings.Contains(description, want) {
+			t.Errorf("worker description must mention %q, got:\n%s", want, description)
+		}
+	}
+	for _, banned := range []string{"todo_write", "the final response", "may be injected", "Long-session"} {
+		if strings.Contains(description, banned) {
+			t.Errorf("worker description must not carry the MainAgent-only concept %q", banned)
+		}
+	}
+}
+
+func TestCompactContextWorkerStrictArgumentsRejectsRemovedFields(t *testing.T) {
+	worker := NewCompactContextTool(CompactContextValidator{WorkerSurface: true})
+	if !worker.StrictArguments() {
+		t.Fatal("worker compact_context must reject values removed by its schema")
+	}
+	for _, name := range compactContextWorkerRemovedProperties {
+		t.Run(name, func(t *testing.T) {
+			raw := json.RawMessage(`{"active_objective":"a","next_step":"b","` + name + `":true}`)
+			_, ignored, _, err := SanitizeUnknownArgsWithDiagnostics(worker, raw)
+			if err == nil {
+				t.Fatalf("worker schema field %q must be rejected before execution", name)
+			}
+			if !strings.Contains(err.Error(), "compact_context rejects unsupported, duplicate or null parameters") ||
+				!strings.Contains(err.Error(), "args."+name) {
+				t.Fatalf("error = %q, want worker rejection naming args.%s", err, name)
+			}
+			if len(ignored) != 1 || ignored[0].Path != "args."+name {
+				t.Fatalf("ignored = %#v, want only args.%s", ignored, name)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		raw  string
+		path string
+	}{
+		{
+			name: "duplicate",
+			raw:  `{"active_objective":"old","active_objective":"new","next_step":"b"}`,
+			path: "args.active_objective",
+		},
+		{
+			name: "null",
+			raw:  `{"active_objective":"a","next_step":"b","completed":null}`,
+			path: "args.completed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ignored, _, err := SanitizeUnknownArgsWithDiagnostics(worker, json.RawMessage(tc.raw))
+			if err == nil {
+				t.Fatal("worker compact_context must reject ignored argument values")
+			}
+			if !strings.Contains(err.Error(), tc.path) || len(ignored) != 1 || ignored[0].Path != tc.path {
+				t.Fatalf("ignored=%#v err=%v, want rejection naming %s", ignored, err, tc.path)
+			}
+		})
+	}
+}
+
+func TestCompactContextWorkerParserAcceptsCoreFields(t *testing.T) {
+	validator := CompactContextValidator{WorkerSurface: true, ContinuationStateMaxTokens: 2048}
+	raw := `{
+		"active_objective": "finish the delegated refactor",
+		"completed": ["moved the parser"],
+		"decisions": ["keep one shared parser"],
+		"open_issues": ["flaky retry test"],
+		"state_files": ["notes/20261030-refactor.md"],
+		"next_step": "run the package tests"
+	}`
+	args, err := validator.ParseCompactContextArgs(json.RawMessage(raw))
+	if err != nil {
+		t.Fatalf("worker core fields must be accepted: %v", err)
+	}
+	if len(args.StateFiles) != 1 || args.StateFiles[0] != "notes/20261030-refactor.md" {
+		t.Fatalf("state_files must round-trip, got %v", args.StateFiles)
+	}
+}

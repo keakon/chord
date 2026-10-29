@@ -403,7 +403,7 @@ Chord 收到带 request ID 的规则意图后，会在尝试写入规则后发�
 | `compaction_status`  | 压缩生命周期事件：`started` 与终态（`succeeded`、`skipped`、`failed`、`cancelled`） | `status`、`trigger`（`manual`、`usage_driven`、`length_recovery`、`oversize_driven`、`model_driven`）、`reason`、`plan_id`（有界压缩计划标识，用于把终态与产生它的具体计划关联）。进度类遥测不转发。 |
 | `session_switched`   | 当前会话换了，但进程没重启（执行 handoff plan、`/resume <id>`、`/new`） | `session_id`（换完之后的新会话） |
 | `background_result`  | 后台任务结束后的持久结果；JOB RESULT 卡片唯一的推送通道——它通常在回合 `idle` 之后才落盘，后面不会再有 `assistant_message` 总结它 | `session_id`（Chord 发出该事件时活动会话）、`target_agent_id`、`message_index`、`content` |
-| `context_notice`     | 持久的上下文压力提醒，headless 没有别的通道能收到它 | `session_id`（Chord 发出该事件时活动会话）、`level`、`message`、`message_index` |
+| `context_notice`     | 持久的上下文压力提醒，headless 没有别的通道能收到它 | `session_id`（Chord 发出该事件时活动会话）、`target_agent_id`（发出该提醒的 SubAgent；主会话为 `main`）、`level`、`message`、`message_index` |
 | `lsp_followup`       | 持久的 LSP 晚到诊断：最近写过的文件在工具结果返回之后，语言服务器又报出的诊断（例如 gopls 的 analyzer 结果），有新的 error 或 warning 时才发出；模型会在下一次请求里收到同样的文字，可能发生在后续回合 | `session_id`（Chord 发出该事件时活动会话）、`message`、`message_index` |
 | `error`              | 运行时错误                                   | `agent_id`、`message`，可选 `code` |
 

@@ -43,7 +43,7 @@ func TestSubAgentCompactionUsesCatalogAndExplicitOverrides(t *testing.T) {
 			provider := llm.NewProviderConfig("anthropic", cfg.Providers["anthropic"], []string{"key"})
 			client := llm.NewClient(provider, stubProvider{}, "claude-haiku-5-5", 1024, "")
 			sub.switchModel(client, "claude-haiku-5-5", 1000000)
-			if got := sub.applyModelCompactionConfig(); got != tc.threshold {
+			if _, got := sub.applyModelCompactionConfig(); got != tc.threshold {
 				t.Fatalf("threshold = %v, want %v", got, tc.threshold)
 			}
 		})
@@ -128,7 +128,7 @@ func TestSubAgentCompactionFollowsModelPoolCursorAndReservation(t *testing.T) {
 		budget    int
 	}{{0, 0.2, 9900}, {1, 0.6, 19900}, {0, 0.2, 9900}} {
 		client.SetModelPool(pool, tc.cursor)
-		if got := sub.applyModelCompactionConfig(); got != tc.threshold {
+		if _, got := sub.applyModelCompactionConfig(); got != tc.threshold {
 			t.Fatalf("cursor %d threshold = %v, want %v", tc.cursor, got, tc.threshold)
 		}
 		sub.prepareContextForLLM(llmRequestInput{Messages: []message.Message{

@@ -110,11 +110,26 @@ func TestPlannerModePromptMentionsStateFilesWhenCompactContextVisible(t *testing
 }
 
 func TestModelDrivenContextPromptBlockNotInSubAgentPrompt(t *testing.T) {
-	// SubAgents never see the compact_context tool, so their prompt must not
-	// carry the guidance either; the block is MainAgent-only by construction
-	// (compactContextVisible lives on MainAgent).
+	// The SubAgent long-session block is gated on the worker-variant
+	// compact_context registration: without the tool the prompt must not
+	// carry guidance that names it, and with the tool it must.
 	s := &SubAgent{}
 	if got := s.buildSystemPrompt(); strings.Contains(got, "Long-session context management") {
-		t.Fatalf("SubAgent prompt must not include model-driven context guidance")
+		t.Fatalf("SubAgent prompt without compact_context must not include model-driven context guidance")
+	}
+	registered := &SubAgent{compactContextRegistered: true}
+	block := registered.modelDrivenContextPromptBlock()
+	if !strings.Contains(block, "## Long-session context management") {
+		t.Fatalf("SubAgent prompt with compact_context must include the long-session block")
+	}
+	for _, want := range []string{
+		"compact_context",
+		"pressure notice sets the checkpoint stopping point",
+		"semantic progress, decisions and the next action",
+		"read registered state files",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("SubAgent block must mention %q, got:\n%s", want, block)
+		}
 	}
 }

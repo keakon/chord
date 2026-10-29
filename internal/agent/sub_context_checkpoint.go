@@ -28,40 +28,65 @@ func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, 
 	if s != nil {
 		messages = projectSkillDiscoveryMessages(messages, s.skillActivationView())
 	}
+	facts := buildSubAgentCheckpointRuntimeFacts(s, messages)
 	var b strings.Builder
-	toolMeta := requesttrim.BuildToolCallMeta(messages)
 	fmt.Fprintf(&b, "[system] SubAgent context checkpoint: %d earlier messages were removed for %s.\n", removed, reason)
 	b.WriteString("- Task: ")
-	b.WriteString(firstLineOrUnknown(strings.TrimSpace(s.taskDesc), 160))
+	b.WriteString(facts.task)
 	b.WriteByte('\n')
 	b.WriteString("- Owner: ")
+	b.WriteString(facts.owner)
+	b.WriteByte('\n')
+	b.WriteString("- Latest owner/user instruction: ")
+	b.WriteString(facts.latestInstruction)
+	b.WriteByte('\n')
+	b.WriteString("- Files read or changed: ")
+	b.WriteString(facts.files)
+	b.WriteByte('\n')
+	b.WriteString("- Completed actions: ")
+	b.WriteString(subAgentCheckpointActions(messages, facts.toolMeta))
+	b.WriteByte('\n')
+	b.WriteString(subAgentCheckpointSkillsPrefix)
+	b.WriteString(facts.skills)
+	b.WriteByte('\n')
+	b.WriteString("- Known failures: ")
+	b.WriteString(facts.failures)
+	b.WriteByte('\n')
+	b.WriteString("- Open blocker: ")
+	b.WriteString(facts.blocker)
+	b.WriteByte('\n')
+	fmt.Fprintf(&b, "Full pre-checkpoint history: %s.", archiveRef)
+	return b.String()
+}
+
+type subAgentCheckpointRuntimeFacts struct {
+	task              string
+	owner             string
+	latestInstruction string
+	files             string
+	skills            string
+	failures          string
+	blocker           string
+	toolMeta          map[string]requesttrim.ToolCall
+}
+
+func buildSubAgentCheckpointRuntimeFacts(s *SubAgent, messages []message.Message) subAgentCheckpointRuntimeFacts {
 	ownerAgentID, ownerTaskID, _, _ := s.ownerSnapshot()
 	ownerLabel := strings.TrimSpace(ownerAgentID) + "/" + strings.TrimSpace(ownerTaskID)
 	if ownerLabel == "/" {
 		ownerLabel = ""
 	}
-	b.WriteString(blankToUnknown(ownerLabel))
-	b.WriteByte('\n')
-	b.WriteString("- Latest owner/user instruction: ")
-	b.WriteString(latestOwnerInstructionForCheckpoint(messages))
-	b.WriteByte('\n')
-	b.WriteString("- Files read or changed: ")
-	b.WriteString(subAgentCheckpointFiles(s, messages))
-	b.WriteByte('\n')
-	b.WriteString("- Completed actions: ")
-	b.WriteString(subAgentCheckpointActions(messages, toolMeta))
-	b.WriteByte('\n')
-	b.WriteString(subAgentCheckpointSkillsPrefix)
-	b.WriteString(subAgentCheckpointSkills(s, messages))
-	b.WriteByte('\n')
-	b.WriteString("- Known failures: ")
-	b.WriteString(subAgentCheckpointFailures(messages, toolMeta))
-	b.WriteByte('\n')
-	b.WriteString("- Open blocker: ")
-	b.WriteString(subAgentCheckpointBlocker(s))
-	b.WriteByte('\n')
-	fmt.Fprintf(&b, "Full pre-checkpoint history: %s.", archiveRef)
-	return b.String()
+	toolMeta := requesttrim.BuildToolCallMeta(messages)
+	return subAgentCheckpointRuntimeFacts{
+		task:              firstLineOrUnknown(strings.TrimSpace(s.taskDesc), 160),
+		owner:             blankToUnknown(ownerLabel),
+		latestInstruction: latestOwnerInstructionForCheckpoint(messages),
+		files:             subAgentCheckpointFiles(s, messages),
+		skills:            subAgentCheckpointSkills(s, messages),
+		failures:          subAgentCheckpointFailures(messages, toolMeta),
+		blocker:           subAgentCheckpointBlocker(s),
+		toolMeta:          toolMeta,
+	}
 }
 
 func blankToUnknown(value string) string {

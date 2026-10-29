@@ -122,6 +122,12 @@ type Turn struct {
 	// second blip dropped the text the reply had already produced.
 	SubAgentStreamResumeCount    int
 	SubAgentContextRecoveryCount int
+	// PendingModelDrivenCompaction holds an accepted compact_context request
+	// waiting to be applied at the batch-close point of handleToolResult.
+	// compact_context must be the only tool call in its response, so that
+	// point is the barrier; the field is event-loop-goroutine only and dies
+	// with the turn.
+	PendingModelDrivenCompaction *subModelDrivenRequest
 	// MalformedCount tracks consecutive LLM rounds where tool calls had
 	// abnormal arguments — either the malformed sentinel (invalid JSON) or
 	// empty "{}" for tools with required parameters (output truncation).

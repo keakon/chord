@@ -137,10 +137,14 @@ func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) 
 		)
 	}
 	sub.ctxMgr.RestoreMessages(messages)
+	sub.setCompactionTransient("Context checkpoint not applied: stale outcome.")
 
 	prepared := sub.prepareContextForLLM(llmRequestInput{Messages: messages}).Messages
 	if len(prepared) >= len(messages) {
 		t.Fatalf("prepared message count = %d, want less than %d", len(prepared), len(messages))
+	}
+	if transient := sub.takeCompactionTransient(); transient != "" {
+		t.Fatalf("deterministic compaction retained stale transient %q", transient)
 	}
 	stats := sub.GetContextReductionStats()
 	if stats.Messages <= 0 || stats.TokensSaved <= 0 {

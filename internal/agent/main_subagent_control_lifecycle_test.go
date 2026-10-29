@@ -315,7 +315,7 @@ func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
 	if sub.queueMessageLimit != 7 || sub.queueByteLimit != 12345 {
 		t.Fatalf("rehydrated orchestration = messages:%d bytes:%d", sub.queueMessageLimit, sub.queueByteLimit)
 	}
-	if got := sub.applyModelCompactionConfig(); got != 0.65 {
+	if _, got := sub.applyModelCompactionConfig(); got != 0.65 {
 		t.Fatalf("rehydrated compaction threshold = %v, want shared global 0.65", got)
 	}
 	if sub.workDir != wantWorkDir {

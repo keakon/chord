@@ -228,11 +228,23 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// before emitting this event, so the card is backed by a real
 		// transcript slot (MsgIndex) that a restored session rebuilds from.
 		// Emitted once per compaction window, never per-request, so it does
-		// not spam.
-		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: contextNoticeTitle(evt.Level), Content: evt.Message, AgentID: "", MsgIndex: evt.MessageIndex, NoticeLevel: evt.Level, Collapsed: true}
+		// not spam. AgentID attributes the card to the emitting SubAgent; the
+		// empty string is the main session.
+		block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: contextNoticeTitle(evt.Level), Content: evt.Message, AgentID: evt.AgentID, MsgIndex: evt.MessageIndex, NoticeLevel: evt.Level, Collapsed: true}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
+		return true, effects
+	case agent.AgentTranscriptRebuiltEvent:
+		// A SubAgent compaction rewrote its durable transcript in place: every
+		// block's MsgIndex in a view of that transcript shifted with the
+		// rewrite. Rebuild the focused view when it shows the compacting
+		// agent; other views are untouched.
+		if evt.AgentID != "" && evt.AgentID == m.focusedAgentID && m.agent != nil && m.viewport != nil {
+			m.rebuildFocusedViewport(evt.AgentID, evt.AgentID)
+			m.viewport.ScrollToBottom()
+			m.invalidateDrawCaches()
+		}
 		return true, effects
 	case agent.ContextNoticeClearedEvent:
 		m.removeContextNoticeBlocks(evt.MessageIndices)

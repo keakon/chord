@@ -25,10 +25,6 @@ const (
 	// contextPressureReminderThresholdRatio is the reminder head start before
 	// the configured auto-compaction threshold.
 	contextPressureReminderThresholdRatio = 0.90
-	// A threshold notice remains true throughout grace and compaction startup.
-	compactionThresholdNoticeText = "The context has reached the automatic-compaction threshold, and the runtime may compact it at any moment.\n" +
-		compactionThresholdNoticeAction + "\n" +
-		"Earlier messages remain recoverable from the checkpoint's archived history files; preserve the working details needed to continue before compaction."
 	// manualCompactionNoticeText is the persistent imperative notice injected
 	// while a busy /compact's summarize worker is still running and
 	// compact_context is visible. It replays on every request until a
@@ -39,6 +35,12 @@ const (
 		"Call compact_context now, as the only tool call in this response, to commit a checkpoint instead — it replaces the runtime result. If you do not call it, the runtime result applies before the next request.\n" +
 		"Do not claim unfinished work is complete; record the next action in the checkpoint's continuation state. Reference existing notes files in state_files instead of creating new ones for this; updating notes first is not required."
 )
+
+// compactionThresholdNoticeText is the MainAgent's reached-threshold notice.
+// A threshold notice remains true throughout grace and compaction startup.
+// It is a var because the worker audience renders its own variant of the same
+// contract through compactionThresholdNoticeTextFor.
+var compactionThresholdNoticeText = compactionThresholdNoticeTextFor(contextPressureAudienceMain)
 
 // reminderOverlayClaim tracks first dispatch within a compaction window.
 // Cancelled requests leave the claim available; durable rows suppress repeats
@@ -995,21 +997,57 @@ const contextStateFileTargetHint = "a task-notes file under .chord/notes/ or a p
 // the checkpoint is requested. The urgency above it differs by stage.
 const contextCheckpointPreparation = "Update the reusable working details in " + contextStateFileTargetHint + " when permitted; register the saved file in state_files and keep structured arguments a concise handoff with the next action and relevant notes section. If the recovery state is small or file writing is unavailable, preserve it in structured arguments. Request a provisional checkpoint with compact_context alone when its preparation requirements are met; do not claim unfinished work is complete."
 
-// contextPressureFinalResponseException limits the no-checkpoint exit to a
-// fully answered latest request: treating a delivered sub-conclusion as task
-// completion let an unrecorded analysis be summarized away, so a long answer
-// must reach the notes before it is sent.
-const contextPressureFinalResponseException = "Skip the checkpoint only when every part of the latest user request is done and only the final response remains; write a long conclusion to " + contextStateFileTargetHint + " before sending it. If user input is required, use the normal question or waiting mechanism. "
+// contextPressureAudience adapts the shared pressure-notice contract to the
+// agent kind: the main agent hands off to the user and can ask questions, a
+// SubAgent checkpoints its delegated task and reports to its owner. The
+// shared fragments — the state-file target hint and the checkpoint
+// preparation contract — are audience-independent.
+type contextPressureAudience struct {
+	// scope names the request the checkpoint's objective must serve.
+	scope string
+	// deliverable names what alone remains when the work is done.
+	deliverable string
+	// inputWait states how to wait for input instead of checkpointing.
+	inputWait string
+	// handoffReminder is the approaching-threshold action core.
+	handoffReminder string
+	// handoffUrgent is the reached-threshold action core.
+	handoffUrgent string
+}
 
-// contextPressureReminderAction is the approaching-threshold instruction:
-// collapse the work in flight to its smallest unit and hand off, continuing
-// only when the remaining task can finish immediately.
-const contextPressureReminderAction = contextPressureFinalResponseException + "Otherwise finish the smallest in-flight unit of work and hand off as soon as possible; keep working on the remaining task first only if it can be completed immediately. " + contextCheckpointPreparation
+var contextPressureAudienceMain = contextPressureAudience{
+	scope:           "the latest user request",
+	deliverable:     "the final response",
+	inputWait:       "If user input is required, use the normal question or waiting mechanism. ",
+	handoffReminder: "finish the smallest in-flight unit of work and hand off as soon as possible; keep working on the remaining task first only if it can be completed immediately. ",
+	handoffUrgent:   "stop all in-flight work and hand off immediately; finish the current step first only if it can be completed immediately. ",
+}
 
-// compactionThresholdNoticeAction is the reached-threshold instruction: stop
-// all in-flight work and hand off now, finishing the current step first only
-// when it can be completed immediately.
-const compactionThresholdNoticeAction = contextPressureFinalResponseException + "Otherwise stop all in-flight work and hand off immediately; finish the current step first only if it can be completed immediately. " + contextCheckpointPreparation
+var contextPressureAudienceWorker = contextPressureAudience{
+	scope:           "the delegated task",
+	deliverable:     "the final report",
+	inputWait:       "If owner input is required, report to the owner and wait; use the question tool only when it is available in your tool list. ",
+	handoffReminder: "finish the smallest in-flight unit of work and request the checkpoint as soon as possible; keep working on the remaining task first only if it can be completed immediately. ",
+	handoffUrgent:   "stop all in-flight work and request the checkpoint immediately; finish the current step first only if it can be completed immediately. ",
+}
+
+func contextPressureFinalResponseExceptionFor(audience contextPressureAudience) string {
+	return "Skip the checkpoint only when every part of " + audience.scope + " is done and only " + audience.deliverable + " remains; write a long conclusion to " + contextStateFileTargetHint + " before sending it. " + audience.inputWait
+}
+
+func contextPressureReminderActionFor(audience contextPressureAudience) string {
+	return contextPressureFinalResponseExceptionFor(audience) + "Otherwise " + audience.handoffReminder + contextCheckpointPreparation
+}
+
+func compactionThresholdNoticeActionFor(audience contextPressureAudience) string {
+	return contextPressureFinalResponseExceptionFor(audience) + "Otherwise " + audience.handoffUrgent + contextCheckpointPreparation
+}
+
+func compactionThresholdNoticeTextFor(audience contextPressureAudience) string {
+	return "The context has reached the automatic-compaction threshold, and the runtime may compact it at any moment.\n" +
+		compactionThresholdNoticeActionFor(audience) + "\n" +
+		"Earlier messages remain recoverable from the checkpoint's archived history files; preserve the working details needed to continue before compaction."
+}
 
 // buildContextPressureReminderText renders the full reminder text. It does not
 // quote the current usage ratio or the remaining budget: the model cannot act
@@ -1021,8 +1059,12 @@ const compactionThresholdNoticeAction = contextPressureFinalResponseException + 
 // bare content; the turn-overlay injector wraps it in a <system-reminder>
 // block.
 func buildContextPressureReminderText() string {
+	return buildContextPressureReminderTextFor(contextPressureAudienceMain)
+}
+
+func buildContextPressureReminderTextFor(audience contextPressureAudience) string {
 	return "The context is approaching the configured automatic-compaction threshold.\n" +
-		contextPressureReminderAction
+		contextPressureReminderActionFor(audience)
 }
 
 // appendContextPressureVerificationGuidance appends the post-apply guidance:
@@ -1047,3 +1089,12 @@ func appendContextPressureVerificationGuidance(text string) string {
 const checkpointVerificationGuidance = "Before continuing, confirm that the preserved Current User Request and Next Step still match the actual state. " +
 	"Use registered notes as the detail source: read the sections needed for the next action unless already injected, before repeating exploration. Reuse verified results while their code and conditions remain unchanged. " +
 	"If the checkpoint conflicts with a newer source, the newer source wins, in this order: the latest user message or Done rejection, then current runtime state (todos, subagents, background tasks), then current source and configuration files, then tool results still in this conversation, then archived artifacts, then task notes, and only then the checkpoint's own text."
+
+// subCheckpointVerificationGuidance is the post-checkpoint reading rule in the
+// SubAgent's owner/task wording. It mirrors checkpointVerificationGuidance's
+// precedence contract with the worker's authority order: no todos or
+// subagents of its own, and the owner instruction instead of the user
+// request.
+const subCheckpointVerificationGuidance = "Before continuing, confirm that the preserved Active Objective and Next Step still match the actual state. " +
+	"Use registered state files as the detail source: read the sections needed for the next action before repeating exploration. Reuse verified results while their code and conditions remain unchanged. " +
+	"If the checkpoint conflicts with a newer source, the newer source wins, in this order: the latest owner instruction, then current tool results in this conversation, then current source and configuration files, then archived artifacts, then task notes, and only then the checkpoint's own text."

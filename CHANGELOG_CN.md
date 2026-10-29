@@ -21,6 +21,8 @@
 
 ### 新功能
 
+- SubAgent 参与模型驱动的上下文压缩：`context.compaction.model_driven` 启用（默认）且角色的权限规则不拒绝 `compact_context` 时，worker 获得面向委派任务的工具变体，其 checkpoint 把模型给出的目标、进度与下一步和 runtime 事实一起保留，在工具批次收口时同步应用，预计收益过低时给出明确原因并跳过。SubAgent 同样会收到主 agent 的两级上下文压力通知（接近 / 达到），每个压缩窗口投递一次、以持久消息驱动归属该 worker 的卡片；headless 的 `context_notice` 事件用 `target_agent_id` 标记发出通知的 worker，主会话则使用 `main`。提前收到提醒后越线，才会获得同样的两个请求宽限期；突然越线时会警告并立即确定性压缩。功能关闭或工具被拒绝时，SubAgent 压缩仍完全由运行时接管。
+
 - worker 可通过 `complete.blocked_reason` 报告阻塞；即使所属角色不能使用 `escalate`，Chord 也会将任务以失败收口，且不要求成功结果载荷。
 
 - 子 Agent 可以运行在外部 Claude Code 进程上，主 Agent 仍使用 Chord 内部运行时。在子 Agent 定义中设置 `backend.kind: claude-code`，Chord 保留任务记录、完成邮箱和工具授权；完成后可以发送定向消息继续外部会话；取消的任务不会恢复，取消时尚未开始执行的排队输入会被丢弃。Chord 被强制终止时，专属监督进程仍会清理 worker 的进程组并留下最小生命周期回执；监督进程先退出时，Chord 按启动前绑定的进程身份完成清理。恢复只接受能证明同一会话与工作目录已完成清理的回执；进程或输入结果未知时不自动重放。支持 Linux 和 macOS 上较新的 Claude Code 版本：受管传输面向 `stream-json` 协议本身，不锁定单一版本；`stream_event` 载荷不完整或 delta 类型未知时，对应任务带着具体原因失败。不支持外部 hooks、用户/项目/插件 MCP server 或插件；唯一的 MCP 入口是 Chord 私有的 notify 工具，外部 worker 可以通过 Claude Code 的控制通道向 owner 发送不阻塞的进展通知或决策请求。`delegate` 也接受这类 Agent 的 `result_schema`：契约在初始化阶段随角色指令送给外部进程，最终答复不是满足它的 JSON 对象时任务带着违规项失败。

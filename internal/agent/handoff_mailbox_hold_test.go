@@ -512,3 +512,9 @@ func TestReliableOutputEventLogHandoffEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentTranscriptRebuiltEventUsesReliableOutput(t *testing.T) {
+	if _, _, ok := reliableOutputEventLog(AgentTranscriptRebuiltEvent{AgentID: "worker-1"}); !ok {
+		t.Fatal("transcript rebuild must use blocking delivery so a full TUI queue cannot leave stale message indexes")
+	}
+}

@@ -327,6 +327,27 @@ type SubAgent struct {
 	semBypassed bool
 	semMu       sync.Mutex
 
+	// compactContextRegistered records that the worker-variant compact_context
+	// tool was registered on this worker: the parent's model-driven feature is
+	// enabled, the base registry carries the tool, and the role ruleset does
+	// not deny it. The worker's tool surface is fixed at construction, so this
+	// is also the model-facing visibility for the prompt block and the
+	// pressure notices.
+	compactContextRegistered      bool
+	workerCompactContextValidator tools.CompactContextValidator
+
+	// subNotices owns the context-pressure notice state (window, delivery
+	// marks, grace, staged overlays). The request goroutine and the event
+	// loop both touch it; see sub_context_notice.go for the locking.
+	subNotices subContextNoticeState
+
+	// pendingCompactionTransient is a one-shot request overlay describing a
+	// model-driven checkpoint outcome (applied / not applied). The event loop
+	// writes it at the apply point; the request goroutine consumes it at the
+	// next request assembly. Never persisted to ctxmgr.
+	pendingCompactionTransientMu sync.Mutex
+	pendingCompactionTransient   string
+
 	runtimeState subAgentRuntimeState
 }
 
@@ -800,6 +821,11 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	if cfg.WorkDirState.Path != "" || cfg.WorkDirState.WorktreeID != "" {
 		s.workDirState.store(cfg.WorkDirState)
 	}
+	// The worker-variant compact_context tool anchors state_files at this
+	// worker's own checkout and participates in the frozen tool surface, so
+	// it registers after the ruleset and workDirState are installed and
+	// before buildSystemPrompt / frozenToolDefs capture the surface.
+	s.registerWorkerCompactContextTool(cfg.Parent, cfg.BaseTools, cfg.Ruleset)
 	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {
 		s.tools.Register(tools.NewSkillTool(s))
 	}
@@ -1046,6 +1072,20 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 	if followup, ok := s.buildLSPFollowupOverlay(); ok {
 		messages = append(messages, followup)
 	}
+	// The staged pressure notice is the level this request's usage
+	// observation selected; it is appended as a transient request tail and
+	// becomes a durable KindContextNotice row at the dispatch confirmation
+	// point. The slot is consumed there, not here: a request that never
+	// dispatches leaves the notice to the next observation.
+	if notice, ok := s.stagedContextNoticeOverlay(); ok {
+		messages = append(messages, notice)
+	}
+	// The model-driven checkpoint outcome (applied / not applied) is a
+	// one-shot transient: request-scoped so it guides the continuation without
+	// becoming a durable user message.
+	if transient := s.takeCompactionTransient(); transient != "" {
+		messages = append(messages, message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: message.SystemReminderOverlayText(transient)})
+	}
 	llmClient, modelName := s.llmSnapshot()
 	if llmClient == nil {
 		select {
@@ -1181,6 +1221,8 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 		requestCtx = llm.WithRequestStarted(requestCtx, func() {
 			s.pauseRequestStarted.Store(true)
 			s.emitStagedLSPFollowup()
+			s.emitStagedContextNotice()
+			s.noteSubRequestDispatched(requestSeq)
 			if len(requestInputIDs) > 0 {
 				s.parent.NoteSessionInputsDispatched(s.taskID, requestInputIDs)
 			}
@@ -1558,7 +1600,8 @@ func (s *SubAgent) filteredVisibleToolsForModel(modelName string, client *llm.Cl
 
 func (s *SubAgent) visibleCatalogToolsForModel(modelName string, client *llm.Client) []tools.Tool {
 	// A zero context is correct for SubAgents: loop mode is a main-agent
-	// workflow, and neither done nor compact_context is ever registered here.
+	// workflow, and done is never registered here. compact_context registers
+	// as the worker variant when the parent's model-driven feature is on.
 	visibleTools := visibleLLMTools(s.tools, s.currentRuleset(), isSubAgentInternalTool, toolPermissionContext{})
 	for i, t := range visibleTools {
 		if q, ok := t.(*tools.QuestionTool); ok {
@@ -1659,7 +1702,28 @@ func (s *SubAgent) buildSystemPrompt() string {
 		parts = append(parts, block)
 	}
 
+	if block := s.modelDrivenContextPromptBlock(); block != "" {
+		parts = append(parts, block)
+	}
+
 	return strings.Join(parts, "\n\n---\n\n")
+}
+
+// modelDrivenContextPromptBlock renders the condensed long-session guidance
+// for a worker whose surface carries the worker-variant compact_context tool.
+// It is only injected when the tool is registered — no system prompt may push
+// a tool the model cannot call. The MainAgent's full block owns user-facing
+// handoff mechanics a worker does not have; this block owns notes hygiene,
+// the notice-driven stopping point, and the post-checkpoint reading order.
+// The tool description owns checkpoint timing and preparation.
+func (s *SubAgent) modelDrivenContextPromptBlock() string {
+	if s == nil || !s.compactContextRegistered {
+		return ""
+	}
+	return "## Long-session context management\n" +
+		"- For a long delegated task, maintain a concise notes file as reusable findings accumulate, within your file permissions; create it at the first verified milestone or before delivering a long analysis, not when a context-pressure notice arrives. Put a short current handoff (completed work, remaining work, blockers, next action) first, separate from reusable details. Record key code locations, verified conclusions with their evidence and conditions, working commands, failed approaches with retry conditions, and unresolved questions.\n" +
+		"- A pressure notice sets the checkpoint stopping point: finish the smallest in-flight unit, then request compact_context alone. Keep the structured fields for semantic progress, decisions and the next action; the runtime captures the mechanical facts itself.\n" +
+		"- After a checkpoint applies, start from the checkpoint text: read registered state files for the details the next action needs before repeating searches or experiments. Current tool results and runtime state take precedence over the checkpoint's own prose."
 }
 
 // capabilityPromptBlock takes the caller's visibility snapshot so every block

@@ -804,6 +804,10 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	// fresh spawn does: it is not the checkout its parent's snapshot describes.
 	sub = NewSubAgent(subCfg)
 	sub.RestoreMessages(msgs)
+	// Durable pressure-notice rows after the newest checkpoint already told
+	// the model what the runtime now would re-tell: rebuild the delivery
+	// marks from the transcript so a restored worker does not re-notice.
+	sub.restoreContextNoticeState(msgs)
 	var restoredInputs []pendingUserMessage
 	for _, input := range a.PendingSessionInputs() {
 		if input.OwnerTaskID == record.TaskID {

@@ -101,6 +101,13 @@ type TokenEstimator func(text string) int
 // against the project root), so this tool can never act as a read-permission
 // bypass, an existence probe, or a symlink-resolution oracle.
 type CompactContextValidator struct {
+	// WorkerSurface renders the worker variant used by SubAgents: a reduced
+	// schema and a task-scoped description for workers that have no evidence
+	// pack, no cross-generation carry, no todo snapshot and no planning-mode
+	// state files. The worker tool takes strict arguments, so the pipeline
+	// rejects any field the worker schema does not declare before execution
+	// instead of silently dropping it.
+	WorkerSurface bool
 	// ContinuationStateMaxTokens caps the estimated token cost of all text
 	// fields combined; zero means no cap. It is the only size limit on the
 	// state — there are no per-field or per-item caps — and it is budgeted
@@ -173,7 +180,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	if args.Decisions, err = validateCompactContextList(args.Decisions, 8, "decisions"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, 12, "open_issues"); err != nil {
+	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, MaxCompactContextOpenIssues, "open_issues"); err != nil {
 		return CompactContextArgs{}, err
 	}
 	if args.RetiredItems, err = validateCompactContextList(args.RetiredItems, 40, "retired_items"); err != nil {
@@ -317,6 +324,30 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		return CompactContextArgs{}, fmt.Errorf("continuation state exceeds the token budget (estimated_cost=%d, budget=%d)%s; shorten %s and retry, or externalize the detail instead of deleting it: write it to a file inside the workspace you would keep anyway, then retry with that path in state_files (the file must exist before the checkpoint is submitted)", cost, limit, largest, strings.Join(shorten, "/"))
 	}
 	return args, nil
+}
+
+// MaxCompactContextOpenIssues caps open_issues in the schema, the parser and
+// the carried checkpoint state.
+const MaxCompactContextOpenIssues = 12
+
+// compactContextWorkerRemovedProperties are the schema properties the worker
+// surface does not declare. They mirror the removed fields of
+// CompactContextArgs: a worker has no evidence pack (evidence_refs,
+// claim_evidence, claim_kinds), no cross-generation carry (retired_items,
+// open_issues_complete, checkpoint_kind, stage_id, stage_status) and no
+// planning-mode state (planned_state_files). Parameters() deletes exactly
+// these keys from the worker schema; the worker tool's strict arguments then
+// reject any of them a model still sends.
+var compactContextWorkerRemovedProperties = []string{
+	"open_issues_complete",
+	"retired_items",
+	"planned_state_files",
+	"evidence_refs",
+	"claim_evidence",
+	"claim_kinds",
+	"stage_id",
+	"stage_status",
+	"checkpoint_kind",
 }
 
 func removeRegisteredStateFiles(planned, registered []string) []string {
@@ -528,6 +559,9 @@ func NewCompactContextTool(validator CompactContextValidator) CompactContextTool
 func (CompactContextTool) Name() string { return NameCompactContext }
 
 func (t CompactContextTool) Description() string {
+	if t.validator.WorkerSurface {
+		return t.workerDescription()
+	}
 	// The combined continuation-state budget is the only length limit, so the
 	// model is told it up front instead of learning it from a rejection after
 	// it has already authored the whole state.
@@ -559,82 +593,149 @@ func (t CompactContextTool) Description() string {
 		"If the arguments are rejected, fix the reported problem and retry; re-submitting the same values cannot succeed, and splitting the checkpoint cannot work."
 }
 
-func (CompactContextTool) Parameters() map[string]any {
+// workerDescription renders the SubAgent variant of the tool description. It
+// is rewritten rather than trimmed from the MainAgent text: a worker has no
+// todo snapshot to sync, no user-facing final response, no planning-mode
+// state files and no post-reset file injection, and every one of those
+// concepts would read as a promise the worker surface does not keep.
+func (t CompactContextTool) workerDescription() string {
+	budget := ""
+	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
+		budget = fmt.Sprintf("All text fields together must fit about %d estimated tokens; individual strings have no character caps, but schema array item limits still apply.\n", limit)
+	}
+	return "Request a durable context checkpoint of this delegated task: the runtime rewrites this session's history from these arguments plus runtime facts and continues the same turn. It is a costed state transition, not a routine progress save. A checkpoint never completes the task and never replaces the final report.\n" +
+		"Do not call it when the task is complete and only the final report remains, or to wait for owner input (report to the owner and wait). A terminal milestone alone is not a reason to checkpoint. Without context pressure, finish a remaining unit of work or the final report directly instead of checkpointing solely for closure; under pressure, preserve a safe continuation even near completion. " +
+		"Call it alone (no sibling tool calls) at a safe stop: without context pressure, after the current atomic operation; when a pressure notice fires, the notice sets the stopping point. Under context pressure, checkpoint even if the task stage remains active.\n" +
+		"Only active_objective and next_step are required; every other field is optional. The active objective must serve the delegated task, not the owner's overall request. Report new progress and changed decisions, and keep the structured fields a concise handoff: objective, verified progress, current blockers, next action, and the relevant notes section to read. Use the schema's exact JSON types; never encode an object or array as a JSON string.\n" +
+		"The runtime records observed file mutations, tool outcomes and the latest owner instruction as the checkpoint's runtime facts, where newer tool results take precedence. Keep your fields for semantic progress, decisions, open problems and next steps rather than restating those mechanical facts.\n" +
+		"Before checkpointing a long task with reusable investigation or verification details, bring the task-notes file described in the long-session guidance up to date and register it in state_files; when recovery state is genuinely small or file writing is unavailable, carry it fully in structured arguments and leave state_files empty.\n" +
+		"Acceptance is not application: the continued context confirms the reset was applied. A skip is a normal policy result, not an error: continue the work or deliver the final report.\n" +
+		budget +
+		"If the arguments are rejected, fix the reported problem and retry; re-submitting the same values cannot succeed, and splitting the checkpoint cannot work."
+}
+
+func (t CompactContextTool) Parameters() map[string]any {
+	properties := compactContextToolProperties()
+	if t.validator.WorkerSurface {
+		for _, name := range compactContextWorkerRemovedProperties {
+			delete(properties, name)
+		}
+		// The worker serves a delegated task and has no todo snapshot, so the
+		// fields that name the user request or the todo list get worker wording.
+		properties["active_objective"] = map[string]any{
+			"type":        "string",
+			"minLength":   1,
+			"description": "The single current goal of the delegated task to keep advancing after the reset. When the owner has changed the task, replace the old goal instead of carrying it.",
+		}
+		properties["completed"] = map[string]any{
+			"type":        "array",
+			"maxItems":    12,
+			"items":       map[string]any{"type": "string", "minLength": 1},
+			"description": "Verified outcomes of the delegated task and how each was verified. Record whether verified changes were committed; do not infer it from a clean tree.",
+		}
+		properties["next_step"] = map[string]any{
+			"type":        "string",
+			"minLength":   1,
+			"description": "One concrete action executable immediately after the checkpoint applies, subordinate to the delegated task.",
+		}
+		properties["state_files"] = map[string]any{
+			"type":     "array",
+			"maxItems": 16,
+			"items":    map[string]any{"type": "string", "minLength": 1},
+			// The worker surface never re-injects file content after the
+			// reset, so the description asks the model to read the paths
+			// instead of promising an automatic head.
+			"description": "Existing files inside the project carrying recovery state. The tool never reads them and never verifies that they exist; a referenced file must be written before the checkpoint is submitted. The checkpoint lists these paths; after the reset, read them before relying on their contents. Leave empty when structured arguments carry the state.",
+		}
+	}
 	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"active_objective": map[string]any{
-				"type":        "string",
-				"minLength":   1,
-				"description": "The single current goal to keep advancing after the reset. It must serve the latest user request; when the user has changed the subject, replace the old goal instead of carrying it.",
-			},
-			"completed": map[string]any{
-				"type":        "array",
-				"maxItems":    12,
-				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Verified outcomes and how each was verified. Record whether verified changes were committed, pushed, opened for review, or merged; do not infer it from a clean tree. Do not restate the todo list; it is snapshotted automatically.",
-			},
-			"decisions": map[string]any{
-				"type":        "array",
-				"maxItems":    8,
-				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Important decisions, each one plain string with an optional one-line reason (not an object); at most 8 items.",
-			},
-			"open_issues": map[string]any{
-				"type":        "array",
-				"maxItems":    12,
-				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Unresolved blockers, risks, unfinished updates, or facts awaiting confirmation.",
-			},
-			"open_issues_complete": map[string]any{
-				"type":        "boolean",
-				"description": "When true, open_issues is the complete current issue set and omitted carried issues may move to historical status. When absent or false, earlier open issues carry forward until explicitly retired.",
-			},
-			"next_step": map[string]any{
-				"type":        "string",
-				"minLength":   1,
-				"description": "One concrete action executable immediately after the checkpoint applies, subordinate to the latest user request.",
-			},
-			"retired_items": map[string]any{
-				"type": "array", "maxItems": 40,
-				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Exact text of earlier completed, decision, open issue or claim entries that are resolved or superseded. Retiring only clears the entries it names: it never removes runtime facts or user instructions, and an entry that matches nothing is harmless. Omission alone never deletes an entry.",
-			},
-			"state_files": map[string]any{
-				"type":     "array",
-				"maxItems": 16,
-				"items":    map[string]any{"type": "string", "minLength": 1},
-				// The existence wording here is the single home for the rule:
-				// the runtime does not verify references, but every referenced
-				// file must be written before the checkpoint is submitted.
-				"description": "Existing files inside the project carrying recovery state. The tool never reads them and never verifies that they exist; a referenced file must be written before the checkpoint is submitted. Refresh the files you rely on before referencing their contents. After the reset a bounded head may be injected when the current read permission allows it, so keep the head self-contained. Leave empty when structured arguments carry the state.",
-			},
-			"planned_state_files": map[string]any{
-				"type": "array", "maxItems": 16,
-				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Project paths planned for future state; they do not externalize state and are not evidence that a file exists or that work is complete.",
-			},
-			"evidence_refs": map[string]any{
-				"type": "array", "maxItems": 24,
-				"items": map[string]any{"type": "string", "minLength": 1},
-				// The evidence rule (copy only visible ev- IDs; without one,
-				// omit evidence fields and classify as derived/assumed/
-				// proposed) is stated here once; claim_evidence and claim_kinds
-				// only point at it.
-				"description": "Evidence IDs (ev- plus 12 hex characters) copied verbatim from Evidence ID lines visible in this conversation. File paths, tool names, descriptions and claim kinds are not evidence IDs; copy only complete visible IDs, and with none visible, omit the evidence fields and classify the claims as derived, assumed or proposed. IDs in claim_evidence are automatically included in evidence_refs.",
-			},
-			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
-			"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "State of this work stage, not of the whole request."},
-			"checkpoint_kind": map[string]any{"type": "string", "enum": compactContextCheckpointKinds, "description": "provisional reduces context; committed also requires stage_status=completed and an evidence_refs entry."},
-			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps a natural-language claim to the evidence IDs visible in this conversation that support it, following the evidence rule under evidence_refs. These IDs are automatically included in evidence_refs."},
-			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies a claim; observed requires an evidence ID visible in this conversation in claim_evidence (see the evidence rule under evidence_refs), otherwise use derived, assumed or proposed; a provisional checkpoint records an observed claim without usable evidence as derived. Label unverified assumptions explicitly, including carried decisions; do not turn them into requirements or omit unfinished work on their basis."},
-		},
+		"type":                 "object",
+		"properties":           properties,
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,
 	}
 }
 
+// compactContextToolProperties builds the full MainAgent property set. The
+// worker variant prunes compactContextWorkerRemovedProperties from this same
+// map, so a property added here is automatically offered to both surfaces
+// unless it is also listed as worker-removed.
+func compactContextToolProperties() map[string]any {
+	return map[string]any{
+		"active_objective": map[string]any{
+			"type":        "string",
+			"minLength":   1,
+			"description": "The single current goal to keep advancing after the reset. It must serve the latest user request; when the user has changed the subject, replace the old goal instead of carrying it.",
+		},
+		"completed": map[string]any{
+			"type":        "array",
+			"maxItems":    12,
+			"items":       map[string]any{"type": "string", "minLength": 1},
+			"description": "Verified outcomes and how each was verified. Record whether verified changes were committed, pushed, opened for review, or merged; do not infer it from a clean tree. Do not restate the todo list; it is snapshotted automatically.",
+		},
+		"decisions": map[string]any{
+			"type":        "array",
+			"maxItems":    8,
+			"items":       map[string]any{"type": "string", "minLength": 1},
+			"description": "Important decisions, each one plain string with an optional one-line reason (not an object); at most 8 items.",
+		},
+		"open_issues": map[string]any{
+			"type":        "array",
+			"maxItems":    MaxCompactContextOpenIssues,
+			"items":       map[string]any{"type": "string", "minLength": 1},
+			"description": "Unresolved blockers, risks, unfinished updates, or facts awaiting confirmation.",
+		},
+		"open_issues_complete": map[string]any{
+			"type":        "boolean",
+			"description": "When true, open_issues is the complete current issue set and omitted carried issues may move to historical status. When absent or false, earlier open issues carry forward until explicitly retired.",
+		},
+		"next_step": map[string]any{
+			"type":        "string",
+			"minLength":   1,
+			"description": "One concrete action executable immediately after the checkpoint applies, subordinate to the latest user request.",
+		},
+		"retired_items": map[string]any{
+			"type": "array", "maxItems": 40,
+			"items":       map[string]any{"type": "string", "minLength": 1},
+			"description": "Exact text of earlier completed, decision, open issue or claim entries that are resolved or superseded. Retiring only clears the entries it names: it never removes runtime facts or user instructions, and an entry that matches nothing is harmless. Omission alone never deletes an entry.",
+		},
+		"state_files": map[string]any{
+			"type":     "array",
+			"maxItems": 16,
+			"items":    map[string]any{"type": "string", "minLength": 1},
+			// The existence wording here is the single home for the rule:
+			// the runtime does not verify references, but every referenced
+			// file must be written before the checkpoint is submitted.
+			"description": "Existing files inside the project carrying recovery state. The tool never reads them and never verifies that they exist; a referenced file must be written before the checkpoint is submitted. Refresh the files you rely on before referencing their contents. After the reset a bounded head may be injected when the current read permission allows it, so keep the head self-contained. Leave empty when structured arguments carry the state.",
+		},
+		"planned_state_files": map[string]any{
+			"type": "array", "maxItems": 16,
+			"items":       map[string]any{"type": "string", "minLength": 1},
+			"description": "Project paths planned for future state; they do not externalize state and are not evidence that a file exists or that work is complete.",
+		},
+		"evidence_refs": map[string]any{
+			"type": "array", "maxItems": 24,
+			"items": map[string]any{"type": "string", "minLength": 1},
+			// The evidence rule (copy only visible ev- IDs; without one,
+			// omit evidence fields and classify as derived/assumed/
+			// proposed) is stated here once; claim_evidence and claim_kinds
+			// only point at it.
+			"description": "Evidence IDs (ev- plus 12 hex characters) copied verbatim from Evidence ID lines visible in this conversation. File paths, tool names, descriptions and claim kinds are not evidence IDs; copy only complete visible IDs, and with none visible, omit the evidence fields and classify the claims as derived, assumed or proposed. IDs in claim_evidence are automatically included in evidence_refs.",
+		},
+		"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
+		"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "State of this work stage, not of the whole request."},
+		"checkpoint_kind": map[string]any{"type": "string", "enum": compactContextCheckpointKinds, "description": "provisional reduces context; committed also requires stage_status=completed and an evidence_refs entry."},
+		"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps a natural-language claim to the evidence IDs visible in this conversation that support it, following the evidence rule under evidence_refs. These IDs are automatically included in evidence_refs."},
+		"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies a claim; observed requires an evidence ID visible in this conversation in claim_evidence (see the evidence rule under evidence_refs), otherwise use derived, assumed or proposed; a provisional checkpoint records an observed claim without usable evidence as derived. Label unverified assumptions explicitly, including carried decisions; do not turn them into requirements or omit unfinished work on their basis."},
+	}
+}
+
 func (CompactContextTool) IsReadOnly() bool { return false }
+
+// StrictArguments makes the worker variant reject fields its schema does not
+// declare: they are MainAgent-only state a worker checkpoint cannot carry, so
+// dropping them silently would lose what the model meant to record.
+func (t CompactContextTool) StrictArguments() bool { return t.validator.WorkerSurface }
 
 // ConcurrencyPolicy declares exclusive scheduling: compact_context rewrites
 // session history and must never run alongside sibling tool calls.
