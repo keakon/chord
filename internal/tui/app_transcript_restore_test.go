@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestMessagesToBlocksRendersLoopNoticeAsStatusCard(t *testing.T) {
@@ -464,6 +465,36 @@ func TestMessagesToBlocksCompactionSummaryFullyExpandedAndNotCollapsible(t *test
 	}
 	if !strings.Contains(b.Content, "history-1.md") {
 		t.Fatalf("content should remain fully expanded after toggle, got %q", b.Content)
+	}
+}
+
+func TestMessagesToBlocksCompactionSummaryPreservesManualLabel(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	msgs := []message.Message{{
+		Role:                  "user",
+		IsCompactionSummary:   true,
+		CompactionSummaryMode: message.CompactionSummaryModeModelSummary,
+		CompactionManual:      true,
+		Content:               "[Context Summary]\nEarlier work was compacted.\n\n[Context compressed]\nArchived history files:\n- history-1.md",
+	}}
+	nextID := 1
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	b := blocks[0]
+	if b.Type != BlockCompactionSummary {
+		t.Fatalf("block type = %v, want BlockCompactionSummary", b.Type)
+	}
+	if b.CompactionSummaryMode != message.CompactionSummaryModeModelSummary {
+		t.Fatalf("CompactionSummaryMode = %q, want %q", b.CompactionSummaryMode, message.CompactionSummaryModeModelSummary)
+	}
+	if !b.CompactionManual {
+		t.Fatal("CompactionManual = false, want true")
+	}
+	joined := terminaltext.StripANSI(strings.Join(b.Render(120, ""), "\n"))
+	if !strings.Contains(joined, "CONTEXT SUMMARY #2 · MANUAL") {
+		t.Fatalf("manual compaction card should render the MANUAL label, got:\n%s", joined)
 	}
 }
 

@@ -183,12 +183,16 @@ func (b *Block) renderBoundaryMarker(width int) []string {
 // is exactly what a reader scrolling back needs in order to decide whether the
 // checkpoint can be trusted or the archives have to be re-read: a model-driven
 // checkpoint is built from runtime facts, while a truncate-only one carries no
-// summary at all.
-func compactionSummaryModeLabel(mode string) (string, bool) {
+// summary at all. A model summary requested by /compact is shown as MANUAL
+// instead of AUTO; the mode alone cannot distinguish the two triggers.
+func compactionSummaryModeLabel(mode string, manual bool) (string, bool) {
 	switch mode {
 	case message.CompactionSummaryModeModelDriven:
 		return "MODEL-DRIVEN", false
 	case message.CompactionSummaryModeModelSummary:
+		if manual {
+			return "MANUAL", false
+		}
 		return "AUTO", false
 	case message.CompactionSummaryModeStructuredFallback:
 		return "FALLBACK", true
@@ -202,7 +206,7 @@ func compactionSummaryModeLabel(mode string) (string, bool) {
 
 func renderCompactionSummaryLabel(b *Block) string {
 	label := blockLabelWithID("CONTEXT SUMMARY", b.displayLabelID())
-	mode, degraded := compactionSummaryModeLabel(b.CompactionSummaryMode)
+	mode, degraded := compactionSummaryModeLabel(b.CompactionSummaryMode, b.CompactionManual)
 	switch {
 	case mode == "":
 		return currentStyles.ThinkingLabelStyle.Render(label)

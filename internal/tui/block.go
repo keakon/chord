@@ -303,6 +303,10 @@ type Block struct {
 	// checkpoint is model-driven, model-summarized, a structured fallback or a
 	// bare truncation. Empty for sessions written before the mode was recorded.
 	CompactionSummaryMode string
+	// CompactionManual records whether the checkpoint came from a manual
+	// /compact. The summary mode alone cannot distinguish a manual model
+	// summary from an automatic one because both use the same mode.
+	CompactionManual bool
 	// richMarkdownHL caches lexer detection and rendered snippets for Chord-owned
 	// markdown cards that share assistant fenced-code rendering.
 	richMarkdownHL *syntax.Highlighter

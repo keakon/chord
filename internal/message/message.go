@@ -362,6 +362,7 @@ type Message struct {
 	Audit                     *ToolArgsAudit     `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
 	IsCompactionSummary       bool               `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
 	CompactionSummaryMode     string             `json:"compaction_summary_mode,omitempty"`     // how the archived history was preserved (see CompactionSummaryMode* constants)
+	CompactionManual          bool               `json:"compaction_manual,omitempty"`           // checkpoint came from the runtime summarizer started by a manual /compact; false for model-driven checkpoints submitted during that compaction
 	CompactionWindowNumber    uint64             `json:"compaction_window_number,omitempty"`    // committed context window carried by the checkpoint
 	CompactionFileRevisions   map[string]string  `json:"compaction_file_revisions,omitempty"`   // key-file revisions captured when this checkpoint was created
 	StopReason                string             `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"

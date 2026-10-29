@@ -129,6 +129,59 @@ func TestExportCompactionHistoryWritesSourceProvenance(t *testing.T) {
 	}
 }
 
+// TestProduceCompactionDraftRecordsManualTrigger pins that the checkpoint
+// carries the trigger separately from the summary mode, so the TUI can show a
+// manual model summary as MANUAL without mislabeling automatic summaries.
+func TestProduceCompactionDraftRecordsManualTrigger(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		name := "automatic"
+		if manual {
+			name = "manual"
+		}
+		t.Run(name, func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			a.globalConfig.Context.Compaction.Profile = config.CompactionProfileArchival
+			a.SetProviderModelRef("sample/compact-model")
+
+			providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+				Type: "stub",
+				Models: map[string]config.ModelConfig{
+					"compact-model": {Limit: config.ModelLimit{Context: 16384, Output: 2048}},
+				},
+			}, []string{"test-key"})
+			provider := &countingCompactionProvider{response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")}}
+			client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
+			a.llmClient = client
+
+			a.ctxMgr.RestoreMessages([]message.Message{
+				{Role: message.RoleUser, Content: "u1"},
+				{Role: message.RoleAssistant, Content: "a1"},
+				{Role: message.RoleUser, Content: "u2"},
+				{Role: message.RoleAssistant, Content: "a2"},
+				{Role: message.RoleUser, Content: "u3"},
+			})
+			snapshot := a.ctxMgr.Snapshot()
+			draft, err := a.produceCompactionDraftAsync(t.Context(), a.testCompactionInput(snapshot, manual, 1, compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival, "", nil, a.captureCompactionArchiveMeta()))
+			if err != nil {
+				t.Fatalf("produceCompactionDraftAsync: %v", err)
+			}
+			if draft.Skip {
+				t.Fatal("expected non-skip compaction draft")
+			}
+			if len(draft.NewMessages) == 0 {
+				t.Fatal("draft has no checkpoint message")
+			}
+			checkpoint := draft.NewMessages[0]
+			if !checkpoint.IsCompactionSummary || checkpoint.CompactionSummaryMode != message.CompactionSummaryModeModelSummary {
+				t.Fatalf("checkpoint = %#v, want a model summary", checkpoint)
+			}
+			if checkpoint.CompactionManual != manual {
+				t.Fatalf("CompactionManual = %v, want %v", checkpoint.CompactionManual, manual)
+			}
+		})
+	}
+}
+
 // TestProduceCompactionDraftRefsCoverUnfilteredPrefix pins the usage-driven
 // producer contract: the refs must describe the raw prefix the apply validates
 // against (currentMessages[:headSplit]), not the filtered archive view. A

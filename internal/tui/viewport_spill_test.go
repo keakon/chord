@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tui/terminaltext"
 	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
@@ -332,6 +333,29 @@ func TestSpilledBlockKeepsIdentityAcrossRebuild(t *testing.T) {
 
 	if fresh.ID != 7 {
 		t.Fatalf("rebuilt card ID = %d, want 7: a spilled card must keep its identity", fresh.ID)
+	}
+}
+
+func TestPreserveMutableBlockStateCopiesCompactionTrigger(t *testing.T) {
+	src := &Block{
+		CompactionSummaryRaw:  "live raw summary",
+		CompactionSummaryMode: message.CompactionSummaryModeModelSummary,
+		CompactionManual:      true,
+	}
+	dst := &Block{
+		CompactionSummaryRaw:  "spilled raw summary",
+		CompactionSummaryMode: message.CompactionSummaryModeModelDriven,
+		CompactionManual:      false,
+	}
+	preserveMutableBlockState(src, dst)
+	if dst.CompactionSummaryRaw != src.CompactionSummaryRaw {
+		t.Fatalf("CompactionSummaryRaw = %q, want %q", dst.CompactionSummaryRaw, src.CompactionSummaryRaw)
+	}
+	if dst.CompactionSummaryMode != src.CompactionSummaryMode {
+		t.Fatalf("CompactionSummaryMode = %q, want %q", dst.CompactionSummaryMode, src.CompactionSummaryMode)
+	}
+	if !dst.CompactionManual {
+		t.Fatal("CompactionManual = false, want true")
 	}
 }
 

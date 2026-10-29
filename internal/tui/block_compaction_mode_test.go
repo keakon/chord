@@ -16,13 +16,16 @@ import (
 func TestCompactionSummaryCardNamesTheMode(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	cases := []struct {
-		mode string
-		want string
+		mode   string
+		manual bool
+		want   string
 	}{
-		{message.CompactionSummaryModeModelDriven, "CONTEXT SUMMARY #2 · MODEL-DRIVEN"},
-		{message.CompactionSummaryModeModelSummary, "CONTEXT SUMMARY #2 · AUTO"},
-		{message.CompactionSummaryModeStructuredFallback, "CONTEXT SUMMARY #2 · FALLBACK"},
-		{message.CompactionSummaryModeTruncateOnly, "CONTEXT SUMMARY #2 · TRUNCATED"},
+		{message.CompactionSummaryModeModelDriven, false, "CONTEXT SUMMARY #2 · MODEL-DRIVEN"},
+		{message.CompactionSummaryModeModelDriven, true, "CONTEXT SUMMARY #2 · MODEL-DRIVEN"},
+		{message.CompactionSummaryModeModelSummary, false, "CONTEXT SUMMARY #2 · AUTO"},
+		{message.CompactionSummaryModeModelSummary, true, "CONTEXT SUMMARY #2 · MANUAL"},
+		{message.CompactionSummaryModeStructuredFallback, false, "CONTEXT SUMMARY #2 · FALLBACK"},
+		{message.CompactionSummaryModeTruncateOnly, false, "CONTEXT SUMMARY #2 · TRUNCATED"},
 	}
 	for _, c := range cases {
 		block := &Block{
@@ -31,6 +34,7 @@ func TestCompactionSummaryCardNamesTheMode(t *testing.T) {
 			Content:               "[Context Summary]\nEarlier work was compacted.",
 			CompactionSummaryRaw:  "[Context Summary]\nEarlier work was compacted.",
 			CompactionSummaryMode: c.mode,
+			CompactionManual:      c.manual,
 			MsgIndex:              -1,
 		}
 		plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))

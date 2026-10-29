@@ -236,6 +236,7 @@ func preserveMutableBlockState(src, dst *Block) {
 	copyMutableBlockViewState(dst, src)
 	dst.CompactionSummaryRaw = src.CompactionSummaryRaw
 	dst.CompactionSummaryMode = src.CompactionSummaryMode
+	dst.CompactionManual = src.CompactionManual
 }
 
 func (b *Block) estimatedHotBytes() int64 {

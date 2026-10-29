@@ -484,6 +484,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, input compa
 		Content:                  checkpointContent,
 		IsCompactionSummary:      true,
 		CompactionSummaryMode:    summaryMode,
+		CompactionManual:         manual,
 		CompactionFileRevisions:  keyFileRevisions,
 		CompactionRequestSources: buildCheckpointRequestSources(checkpointContent, headSnapshot, originalRequest, evidenceItems),
 	}

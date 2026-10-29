@@ -918,6 +918,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 						CompactionSummaryRaw:  content,
 						DeliveredFiles:        message.CloneDeliveredFiles(msg.CompactionDeliveredFiles),
 						CompactionSummaryMode: strings.TrimSpace(msg.CompactionSummaryMode),
+						CompactionManual:      msg.CompactionManual,
 						Content:               content,
 						MsgIndex:              -1,
 					}
