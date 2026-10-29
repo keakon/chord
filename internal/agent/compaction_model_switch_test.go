@@ -148,12 +148,13 @@ func TestModelSwitchEstimatesPressureNoticesFromPreviousUsage(t *testing.T) {
 	requests, _ := provider.snapshot()
 	notices := 0
 	for _, msg := range requests[0] {
-		if strings.Contains(msg.Content, contextCheckpointPressureAction) {
+		if strings.Contains(msg.Content, contextCheckpointPreparation) {
 			notices++
 		}
 	}
 	// Both lines are crossed, but the ladder stages only the higher one: the
-	// warning subsumes the reminder's action contract on the same request.
+	// warning carries its own stronger action plus the shared preparation
+	// contract on the same request.
 	if notices != 1 {
 		t.Fatalf("notice count = %d, want only the upper threshold", notices)
 	}

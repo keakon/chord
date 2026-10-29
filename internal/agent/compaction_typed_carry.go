@@ -38,7 +38,7 @@ const (
 	// fresh submission could express.
 	typedStateCarryMaxDecisions    = 8
 	typedStateCarryMaxCompleted    = 12
-	typedStateCarryMaxOpenIssues   = 8
+	typedStateCarryMaxOpenIssues   = 12
 	typedStateCarryMaxEvidenceRefs = 24
 	// typedStateCarryMaxItemRunes caps a single carried item. Items that
 	// exceed it are truncated at a rune boundary with an explicit marker, so

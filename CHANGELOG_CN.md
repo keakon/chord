@@ -101,6 +101,10 @@
 
 - Headless `models_response` 回显 `models` 命令携带的可选 `request_id`，集成方可以区分迟到回执与后续请求的结果；命令未携带 ID 时响应不含该字段。
 
+- provisional `compact_context` checkpoint 不再因为某条 observed claim 缺少可用证据而整体失败：该 claim 记为 derived，工具结果会说明。`open_issues` 上限从 8 条提到 12 条。committed checkpoint 和编造的证据 ID 仍会被拒绝。
+
+- 上下文压力提醒只在最新请求全部答完后才允许跳过 checkpoint，并要求较长的结论先写进 notes 再发送，免得之后的压缩丢掉没记下的发现。
+
 ### 修复
 
 - 上下文摘要卡片把手动触发的模型摘要标为 `MANUAL`，不再显示 `AUTO`；自动模型摘要仍显示 `AUTO`，模型驱动检查点仍显示 `MODEL-DRIVEN`，降级检查点仍显示 `FALLBACK` / `TRUNCATED`。

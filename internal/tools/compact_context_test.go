@@ -302,6 +302,15 @@ func TestCompactContextRejectsListOverMaxItems(t *testing.T) {
 	if _, err := v.ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
 		t.Fatal("expected maxItems rejection for state_files")
 	}
+	twelve := `["a","b","c","d","e","f","g","h","i","j","k","l"]`
+	raw = `{"active_objective":"a","next_step":"b","open_issues":` + twelve + `}`
+	if _, err := v.ParseCompactContextArgs(json.RawMessage(raw)); err != nil {
+		t.Fatalf("open_issues must accept 12 items: %v", err)
+	}
+	raw = `{"active_objective":"a","next_step":"b","open_issues":` + items + `}`
+	if _, err := v.ParseCompactContextArgs(json.RawMessage(raw)); err == nil {
+		t.Fatal("expected maxItems rejection for open_issues")
+	}
 }
 
 // TestCompactContextAcceptsLongItemsWithoutFieldCaps is the regression for
@@ -494,6 +503,7 @@ func TestCompactContextDescriptionExplainsPressureAwareSafeStops(t *testing.T) {
 	for _, want := range []string{
 		"costed state transition",
 		"safe stop",
+		"the notice sets the stopping point",
 		"provisional checkpoint",
 		"stage remains active or candidate",
 		"task is complete and only the final response remains",

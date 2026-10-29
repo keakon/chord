@@ -45,6 +45,7 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 		"replace the short handoff status instead of appending to it",
 		"Distinguish passed, failed, skipped and environment-blocked checks",
 		"Put an index and a short current handoff",
+		"Create it at the first verified milestone of a multi-step task or before delivering a long analysis",
 		"refresh existing task notes only when material state changed and writing is permitted",
 		"reconcile stale pending items with results already received",
 		"Notes are recovery aids, not proof",

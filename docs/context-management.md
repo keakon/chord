@@ -225,15 +225,17 @@ The stopping point is pressure-aware rather than tied to a completed phase:
 - With comfortable context, request a checkpoint only when the expected
   reduction in future context cost exceeds the checkpoint and re-read costs. A
   completed phase is a useful boundary, not a requirement.
-- With a context-pressure reminder, finish the current atomic operation,
-  externalize the minimum recovery state, and use a provisional checkpoint even
-  if the stage remains active or candidate. Do not describe unfinished work as
-  completed.
+- With a context-pressure reminder, finish the smallest in-flight unit of
+  work, externalize the minimum recovery state, and hand off as soon as
+  possible; use a provisional checkpoint even if the stage remains active or
+  candidate. Keep working on the remaining task first only if it can be
+  completed immediately. Do not describe unfinished work as completed.
 - When a compaction-imminent or threshold notice says the context is ending
-  soon, stop optional exploration, record the active objective, completed work,
-  concrete next step, and open issues, and checkpoint at the next safe stop.
-  Never interrupt an in-flight tool, file write, sibling task, or other
-  operation.
+  soon, stop all in-flight work and hand off immediately; finish the current
+  step first only if it can be completed immediately. Record the active
+  objective, completed work, concrete next step, and open issues. Do not start
+  another tool call, file write, sibling task, or other operation; a call
+  already dispatched may settle first.
 
 #### Interaction with automatic compaction
 
@@ -245,7 +247,7 @@ Automatic compaction is the fallback, not a lock: a threshold crossing never tak
 
 A skip is a normal policy result: retrying the same request immediately is cooled down briefly and does not change the outcome. The model should wait or move on.
 
-The two pressure notices described above ask the model to finish its current atomic operation and preserve the state needed to continue. Recovery state can live in structured checkpoint arguments or files the role is allowed to write; creating a file is not required.
+The two pressure notices described above ask the model to preserve the state needed to continue, but with different urgency: the reminder line asks it to finish the smallest in-flight unit of work and hand off as soon as possible; the compaction line asks it to stop all in-flight work and hand off immediately. Both let it finish the current step first only when that step can be completed immediately. Both skip the checkpoint only when every part of the latest user request is done and only the final response remains; a long conclusion is written to a notes file before it is sent, so a later compaction cannot drop it. Recovery state can live in structured checkpoint arguments or files the role is allowed to write; creating a file is not required.
 
 Notices are runtime messages wrapped in `<system-reminder>`, distinct from user input. Their persistent messages also drive the visible cards, including after session restore. A withdrawn notice is omitted from subsequent requests immediately; its historical message and card are removed together at an idle boundary, after active requests and compaction have settled.
 
@@ -281,7 +283,7 @@ Older entries beyond the bounds remain in the archive; keep extensive recovery d
 
 `evidence_refs` may reference stable IDs from the checkpoint evidence pack; Chord validates those IDs before the barrier. `claim_kinds` classifies each claim as observed, derived, assumed, or proposed. Claim keys are natural-language assertions: usually a condensed restatement of a conclusion from `completed`/`decisions`, where rewording is fine, verbatim matching is never required, and fully standalone claims are allowed.
 
-When merging with a prior checkpoint's claims, keys set identity: an earlier claim is superseded only when the fresh submission restates the same key; a reworded key leaves the old claim in place alongside the new one. Observed claims must have `claim_evidence`; Chord automatically includes these IDs in `evidence_refs`, so they do not need to be supplied twice. IDs must still resolve to valid classified evidence. A reference proves provenance, not that the model's conclusion is correct.
+When merging with a prior checkpoint's claims, keys set identity: an earlier claim is superseded only when the fresh submission restates the same key; a reworded key leaves the old claim in place alongside the new one. Observed claims must have `claim_evidence`; Chord automatically includes these IDs in `evidence_refs`, so they do not need to be supplied twice. IDs must still resolve to valid classified evidence. On a provisional checkpoint, an observed claim with no `claim_evidence`, or that cites any evidence that is negative, unclassified, or invalidated (even alongside valid evidence), is recorded as derived and the tool result lists it; invalidated IDs those claims cited are dropped. An ID that resolves to nothing, or any such claim on a committed or completed checkpoint, still rejects the request. A reference proves provenance, not that the model's conclusion is correct.
 
 `state_files` are references to current external state; `planned_state_files` is for paths that are not written yet and is not completion evidence. Chord never reads, injects, or existence-checks them while building the checkpoint, so the tool cannot bypass read permissions or be used as an existence probe. After reset, an accepted `state_files` path is revalidated against the resolved project root before bounded loading; a symlink whose target is outside the project is rejected.
 

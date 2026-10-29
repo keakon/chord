@@ -26,8 +26,8 @@ const (
 	// the configured auto-compaction threshold.
 	contextPressureReminderThresholdRatio = 0.90
 	// A threshold notice remains true throughout grace and compaction startup.
-	compactionThresholdNoticeText = "The context has reached the automatic-compaction threshold. The runtime may compact it after the current safe continuation window.\n" +
-		contextCheckpointPressureAction + "\n" +
+	compactionThresholdNoticeText = "The context has reached the automatic-compaction threshold, and the runtime may compact it at any moment.\n" +
+		compactionThresholdNoticeAction + "\n" +
 		"Earlier messages remain recoverable from the checkpoint's archived history files; preserve the working details needed to continue before compaction."
 	// manualCompactionNoticeText is the persistent imperative notice injected
 	// while a busy /compact's summarize worker is still running and
@@ -990,19 +990,39 @@ func (a *MainAgent) queueCompactionWarning() {
 // naming guidance whenever checkpoint preparation calls for a file write.
 const contextStateFileTargetHint = "a task-notes file under .chord/notes/ or a plan document under .chord/plans/, named with a YYYYMMDD date prefix such as 20260915-auth-token-refresh.md"
 
-const contextCheckpointPressureAction = "If only the final response remains, deliver it without a checkpoint; if user input is required, use the normal question or waiting mechanism. Otherwise finish the current atomic operation, stop optional exploration, and update the reusable working details in " + contextStateFileTargetHint + " when permitted; register the saved file in state_files and keep structured arguments a concise handoff with the next action and relevant notes section. If the recovery state is small or file writing is unavailable, preserve it in structured arguments. Request a provisional checkpoint with compact_context alone when its preparation requirements are met; do not claim unfinished work is complete."
+// contextCheckpointPreparation is the shared handoff contract for both
+// pressure stages: where recovery state goes, how it is registered, and how
+// the checkpoint is requested. The urgency above it differs by stage.
+const contextCheckpointPreparation = "Update the reusable working details in " + contextStateFileTargetHint + " when permitted; register the saved file in state_files and keep structured arguments a concise handoff with the next action and relevant notes section. If the recovery state is small or file writing is unavailable, preserve it in structured arguments. Request a provisional checkpoint with compact_context alone when its preparation requirements are met; do not claim unfinished work is complete."
+
+// contextPressureFinalResponseException limits the no-checkpoint exit to a
+// fully answered latest request: treating a delivered sub-conclusion as task
+// completion let an unrecorded analysis be summarized away, so a long answer
+// must reach the notes before it is sent.
+const contextPressureFinalResponseException = "Skip the checkpoint only when every part of the latest user request is done and only the final response remains; write a long conclusion to " + contextStateFileTargetHint + " before sending it. If user input is required, use the normal question or waiting mechanism. "
+
+// contextPressureReminderAction is the approaching-threshold instruction:
+// collapse the work in flight to its smallest unit and hand off, continuing
+// only when the remaining task can finish immediately.
+const contextPressureReminderAction = contextPressureFinalResponseException + "Otherwise finish the smallest in-flight unit of work and hand off as soon as possible; keep working on the remaining task first only if it can be completed immediately. " + contextCheckpointPreparation
+
+// compactionThresholdNoticeAction is the reached-threshold instruction: stop
+// all in-flight work and hand off now, finishing the current step first only
+// when it can be completed immediately.
+const compactionThresholdNoticeAction = contextPressureFinalResponseException + "Otherwise stop all in-flight work and hand off immediately; finish the current step first only if it can be completed immediately. " + contextCheckpointPreparation
 
 // buildContextPressureReminderText renders the full reminder text. It does not
 // quote the current usage ratio or the remaining budget: the model cannot act
 // on that number (compaction is already scheduled), and stating how much space
 // is left would invite it to reason about deferring instead of preparing. It
 // only ever runs while compact_context is visible, so it names the tool
-// directly and distinguishes a safe stop from a completed phase. The text is
+// directly and asks for the smallest handoff unit instead of treating the
+// reminder as a completed phase. The text is
 // bare content; the turn-overlay injector wraps it in a <system-reminder>
 // block.
 func buildContextPressureReminderText() string {
 	return "The context is approaching the configured automatic-compaction threshold.\n" +
-		contextCheckpointPressureAction
+		contextPressureReminderAction
 }
 
 // appendContextPressureVerificationGuidance appends the post-apply guidance:

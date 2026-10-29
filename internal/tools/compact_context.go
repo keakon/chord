@@ -173,7 +173,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	if args.Decisions, err = validateCompactContextList(args.Decisions, 8, "decisions"); err != nil {
 		return CompactContextArgs{}, err
 	}
-	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, 8, "open_issues"); err != nil {
+	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, 12, "open_issues"); err != nil {
 		return CompactContextArgs{}, err
 	}
 	if args.RetiredItems, err = validateCompactContextList(args.RetiredItems, 40, "retired_items"); err != nil {
@@ -549,7 +549,7 @@ func (t CompactContextTool) Description() string {
 	// contract.
 	return "Request a durable context checkpoint: the runtime rewrites session history from these arguments plus runtime facts and continues the same turn. It is a costed state transition, not a routine progress save. A checkpoint never completes the task or replaces the final response.\n" +
 		"Do not call it when the task is complete and only the final response remains, or to wait for input (deliver the question to the user and wait). A terminal TODO state alone is not a reason to checkpoint. Without context pressure, finish a remaining commit, handoff, or final response directly instead of checkpointing solely for closure; under pressure, preserve a safe continuation even near completion. " +
-		"Call it alone (no sibling tool calls) at a safe stop after the current atomic operation. Under context pressure, a provisional checkpoint is expected even if the stage remains active or candidate.\n" +
+		"Call it alone (no sibling tool calls) at a safe stop: without context pressure, after the current atomic operation; when a pressure notice fires, the notice sets the stopping point. Under context pressure, a provisional checkpoint is expected even if the stage remains active or candidate.\n" +
 		"Only active_objective and next_step are required; every other field is optional. Report new progress and changed decisions, and keep the structured fields a concise handoff: objective, verified progress, current blockers, next action, and the relevant notes section to read. Use the schema's exact JSON types; never encode an object or array as a JSON string.\n" +
 		"The runtime records observed file mutations, shell tool outcomes, the todo snapshot and build-time repository state in bounded historical sections, where newer runtime state and tool results take precedence. Keep your fields for semantic progress, decisions, open questions and next steps rather than restating those mechanical facts.\n" +
 		"Before checkpointing a long task with reusable investigation or verification details, bring the task-notes file described under Long-session context management up to date and register it in state_files; keep those details in the notes instead of duplicating them in the handoff. When recovery state is genuinely small or file writing is unavailable, carry it fully in structured arguments and leave state_files empty.\n" +
@@ -566,7 +566,7 @@ func (CompactContextTool) Parameters() map[string]any {
 			"active_objective": map[string]any{
 				"type":        "string",
 				"minLength":   1,
-				"description": "The single current goal to keep advancing after the reset. Do not restate the user request.",
+				"description": "The single current goal to keep advancing after the reset. It must serve the latest user request; when the user has changed the subject, replace the old goal instead of carrying it.",
 			},
 			"completed": map[string]any{
 				"type":        "array",
@@ -582,7 +582,7 @@ func (CompactContextTool) Parameters() map[string]any {
 			},
 			"open_issues": map[string]any{
 				"type":        "array",
-				"maxItems":    8,
+				"maxItems":    12,
 				"items":       map[string]any{"type": "string", "minLength": 1},
 				"description": "Unresolved blockers, risks, unfinished updates, or facts awaiting confirmation.",
 			},
@@ -627,7 +627,7 @@ func (CompactContextTool) Parameters() map[string]any {
 			"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "State of this work stage, not of the whole request."},
 			"checkpoint_kind": map[string]any{"type": "string", "enum": compactContextCheckpointKinds, "description": "provisional reduces context; committed also requires stage_status=completed and an evidence_refs entry."},
 			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps a natural-language claim to the evidence IDs visible in this conversation that support it, following the evidence rule under evidence_refs. These IDs are automatically included in evidence_refs."},
-			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies a claim; observed requires an evidence ID visible in this conversation in claim_evidence (see the evidence rule under evidence_refs), otherwise use derived, assumed or proposed. Label unverified assumptions explicitly, including carried decisions; do not turn them into requirements or omit unfinished work on their basis."},
+			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies a claim; observed requires an evidence ID visible in this conversation in claim_evidence (see the evidence rule under evidence_refs), otherwise use derived, assumed or proposed; a provisional checkpoint records an observed claim without usable evidence as derived. Label unverified assumptions explicitly, including carried decisions; do not turn them into requirements or omit unfinished work on their basis."},
 		},
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,

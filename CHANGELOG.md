@@ -101,6 +101,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Headless `models_response` payloads echo the optional `request_id` a `models` command carries, so integrators can tell a late reply from the result of a later request; commands without an ID omit the field.
 
+- A provisional `compact_context` checkpoint no longer fails because one observed claim lacks usable evidence: the claim is recorded as derived and the tool result says so. `open_issues` accepts up to 12 entries instead of 8. Committed checkpoints and invented evidence IDs are still rejected.
+
+- Context-pressure notices skip the checkpoint only once the whole latest request is answered, and ask for long conclusions to be written to notes before they are sent, so a later compaction cannot drop unrecorded findings.
+
 ### Fixes
 
 - The context summary card labels a manually triggered model summary as `MANUAL` instead of `AUTO`. Automatic model summaries keep `AUTO`, model-driven checkpoints keep `MODEL-DRIVEN`, and degraded checkpoints keep `FALLBACK` / `TRUNCATED`.

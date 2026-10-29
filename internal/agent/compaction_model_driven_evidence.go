@@ -311,50 +311,164 @@ func checkpointEvidenceRefMetadata(bundle modelDrivenBarrierSnapshot, headSnapsh
 	return metadata
 }
 
+// observedEvidenceResolver classifies why a resolvable reference cannot
+// support an observed claim. A reference that resolves to a checkpoint evidence pack in
+// the context has no runtime item behind it (its source messages were
+// archived); live and carried references share the same category and validity
+// checks, so a rendered negative kind or invalidation disqualifies a carried
+// reference exactly like a live one. defect is a predicate phrase that follows
+// the claim ("cannot use tool_error evidence ..."), empty when the reference
+// supports the claim; unknown reports a reference neither source resolves.
+type observedEvidenceResolver struct {
+	a       *MainAgent
+	byID    map[string]evidenceItem
+	carried map[string]evidencePackRefMeta
+}
+
+func (a *MainAgent) newObservedEvidenceResolver() *observedEvidenceResolver {
+	return &observedEvidenceResolver{a: a, byID: evidenceItemsByID(a.evidence.snapshot())}
+}
+
+func (r *observedEvidenceResolver) defect(ref string) (defect string, invalidated, unknown bool) {
+	if item, ok := r.byID[ref]; ok {
+		if !evidenceKindSupportsCompletion(item.Kind) {
+			// The negative kind supplies the reason, but the invalidation flag
+			// still has to travel with it: the downgrade path drops invalidated
+			// references (no field may carry them) while it keeps merely weak
+			// ones, so a negative item that went stale must report both.
+			return fmt.Sprintf("cannot use %s evidence %q", item.Kind, ref), item.Validity == evidenceValidityInvalidated, false
+		}
+		if item.Validity == evidenceValidityInvalidated {
+			return fmt.Sprintf("cannot use %s evidence %q", item.Validity, ref), true, false
+		}
+		return "", false, false
+	}
+	if r.carried == nil {
+		r.carried = r.a.contextEvidencePackMetadata()
+	}
+	meta, ok := r.carried[ref]
+	switch {
+	case !ok:
+		return "", false, true
+	case meta.kind == "":
+		return fmt.Sprintf("references evidence %q without classification", ref), false, false
+	case !evidenceKindSupportsCompletion(meta.kind):
+		return fmt.Sprintf("cannot use %s evidence %q", meta.kind, ref), meta.invalidated, false
+	case meta.invalidated:
+		return fmt.Sprintf("cannot use %s evidence %q", evidenceValidityInvalidated, ref), true, false
+	}
+	return "", false, false
+}
+
 func (a *MainAgent) validateObservedClaimEvidence(args tools.CompactContextArgs) error {
-	byID := evidenceItemsByID(a.evidence.snapshot())
-	var carried map[string]evidencePackRefMeta
+	resolver := a.newObservedEvidenceResolver()
 	for claim, kind := range args.ClaimKinds {
 		if kind != claimKindObserved {
 			continue
 		}
 		for _, ref := range args.ClaimEvidence[claim] {
-			item, ok := byID[ref]
-			if !ok {
-				// A reference that resolves to a checkpoint evidence pack in
-				// the context has no runtime item behind it (its source
-				// messages were archived). Live and carried references share
-				// the same category and validity checks: when the pack renders
-				// the item's classification, a negative kind rejects the
-				// observed claim exactly like a live one would, and a rendered
-				// invalidation rejects it too.
-				if carried == nil {
-					carried = a.contextEvidencePackMetadata()
-				}
-				meta, ok := carried[ref]
-				if !ok {
-					return fmt.Errorf("observed claim %q references unknown evidence %q", claim, ref)
-				}
-				if meta.kind == "" {
-					return fmt.Errorf("observed claim %q references evidence %q without classification", claim, ref)
-				}
-				if !evidenceKindSupportsCompletion(meta.kind) {
-					return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, meta.kind, ref)
-				}
-				if meta.invalidated {
-					return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, evidenceValidityInvalidated, ref)
-				}
-				continue
+			defect, _, unknown := resolver.defect(ref)
+			if unknown {
+				return fmt.Errorf("observed claim %q references unknown evidence %q", claim, ref)
 			}
-			if !evidenceKindSupportsCompletion(item.Kind) {
-				return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, item.Kind, ref)
-			}
-			if item.Validity == evidenceValidityInvalidated {
-				return fmt.Errorf("observed claim %q cannot use %s evidence %q", claim, item.Validity, ref)
+			if defect != "" {
+				return fmt.Errorf("observed claim %q %s", claim, defect)
 			}
 		}
 	}
 	return nil
+}
+
+// downgradeUnsupportedObservedClaims reclassifies an observed claim as derived
+// when it cites no evidence or any evidence that cannot support it (a
+// negative, unclassified or invalidated record), even alongside valid
+// evidence — the same per-reference verdict strict validation applies — so one
+// weak claim no longer rejects an otherwise valid provisional checkpoint. Invalidated references
+// the downgraded claims cited are dropped because no field may carry them.
+// Unknown IDs are left for the reference check to reject: an invented ID is a
+// fabrication, not weak evidence. Committed or completed checkpoints are not
+// downgraded; their acceptance semantics stay strict. The returned notes tell
+// the model what was reclassified.
+func (a *MainAgent) downgradeUnsupportedObservedClaims(args tools.CompactContextArgs) (tools.CompactContextArgs, []string) {
+	if args.CheckpointKind == checkpointKindCommitted || args.StageStatus == stageStatusCompleted {
+		return args, nil
+	}
+	claims := make([]string, 0, len(args.ClaimKinds))
+	for claim, kind := range args.ClaimKinds {
+		if kind == claimKindObserved {
+			claims = append(claims, claim)
+		}
+	}
+	if len(claims) == 0 {
+		return args, nil
+	}
+	slices.Sort(claims)
+	resolver := a.newObservedEvidenceResolver()
+	var notes []string
+	dropped := map[string]bool{}
+	for _, claim := range claims {
+		refs := args.ClaimEvidence[claim]
+		if len(refs) == 0 {
+			args.ClaimKinds[claim] = tools.CompactContextClaimDerived
+			notes = append(notes, fmt.Sprintf("%q cited no claim_evidence", claim))
+			continue
+		}
+		var reason string
+		var kept, invalid []string
+		citesUnknown := false
+		for _, ref := range refs {
+			defect, invalidated, unknown := resolver.defect(ref)
+			if unknown {
+				citesUnknown = true
+				break
+			}
+			if defect == "" {
+				kept = append(kept, ref)
+				continue
+			}
+			if reason == "" {
+				reason = defect
+			}
+			if invalidated {
+				invalid = append(invalid, ref)
+			} else {
+				kept = append(kept, ref)
+			}
+		}
+		if citesUnknown || reason == "" {
+			continue
+		}
+		args.ClaimKinds[claim] = tools.CompactContextClaimDerived
+		notes = append(notes, fmt.Sprintf("%q %s", claim, reason))
+		for _, ref := range invalid {
+			dropped[ref] = true
+		}
+		if len(kept) == 0 {
+			delete(args.ClaimEvidence, claim)
+		} else {
+			args.ClaimEvidence[claim] = kept
+		}
+	}
+	if len(dropped) > 0 {
+		stillCited := map[string]bool{}
+		for _, refs := range args.ClaimEvidence {
+			for _, ref := range refs {
+				stillCited[ref] = true
+			}
+		}
+		args.EvidenceRefs = slices.DeleteFunc(args.EvidenceRefs, func(ref string) bool {
+			return dropped[ref] && !stillCited[ref]
+		})
+	}
+	return args, notes
+}
+
+// downgradedClaimsNotice renders the reclassification for the tool result.
+func downgradedClaimsNotice(notes []string) string {
+	if len(notes) == 0 {
+		return ""
+	}
+	return "\nRecorded as derived instead of observed: " + strings.Join(notes, "; ") + ". Cite positive, valid evidence to keep a claim observed."
 }
 
 func (a *MainAgent) validateCommittedEvidence(args tools.CompactContextArgs) error {

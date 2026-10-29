@@ -169,6 +169,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	if err != nil {
 		return "", err
 	}
+	args, downgraded := a.downgradeUnsupportedObservedClaims(args)
 	// claim_evidence is validated before the merged top-level list: the tool
 	// folds claim_evidence values into evidence_refs, so a bad reference
 	// authored under a claim would otherwise be reported as an evidence_refs
@@ -219,7 +220,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 	// the claim (a durable apply advances the window; a skip/failure is
 	// surfaced by the continuation notice).
 	a.markReminderCompactContextCalled()
-	return result, nil
+	return result + downgradedClaimsNotice(downgraded), nil
 }
 
 func modelDrivenArgsFingerprint(args tools.CompactContextArgs) string {

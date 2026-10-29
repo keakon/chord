@@ -2,7 +2,9 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -206,10 +208,10 @@ func TestTryArmModelDrivenCheckpointHintsResolvableEvidence(t *testing.T) {
 	ccID := "cc-observed"
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
 
-	args := `{"active_objective":"a","next_step":"b","completed":["tests pass"],"claim_kinds":{"tests pass":"observed"}}`
+	args := `{"active_objective":"a","next_step":"b","checkpoint_kind":"committed","stage_status":"completed","completed":["tests pass"],"claim_kinds":{"tests pass":"observed"}}`
 	_, err := a.tryArmModelDrivenCheckpoint(ccID, args)
 	if err == nil {
-		t.Fatal("observed claim without claim_evidence must be rejected")
+		t.Fatal("committed observed claim without claim_evidence must be rejected")
 	}
 	if !strings.Contains(err.Error(), id) {
 		t.Fatalf("rejection %q must name the resolvable evidence ID %q", err, id)
@@ -238,6 +240,150 @@ func TestTryArmModelDrivenCheckpointUnknownEvidenceRefHintsResolvable(t *testing
 	}
 	if !strings.Contains(err.Error(), id) {
 		t.Fatalf("rejection %q must name the resolvable evidence ID %q", err, id)
+	}
+	if a.pendingModelDriven != nil {
+		t.Fatal("a rejected request must not arm a pending checkpoint")
+	}
+}
+
+// A provisional checkpoint keeps a weak observed claim as derived instead of
+// rejecting the whole request, and tells the model which claims moved.
+func TestTryArmModelDrivenCheckpointDowngradesUnsupportedObservedClaims(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn("")
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "good", Excerpt: "diff"})
+	a.evidence.add(evidenceItem{Kind: evidenceToolError, Key: "bad", Excerpt: "failed"})
+	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "stale", Excerpt: "old diff", Validity: evidenceValidityInvalidated})
+	byKey := map[string]string{}
+	for _, item := range a.evidence.snapshot() {
+		byKey[item.Key] = evidenceItemID(item)
+	}
+	ccID := "cc-downgrade"
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
+
+	args := fmt.Sprintf(`{"active_objective":"a","next_step":"b","completed":["edited","no evidence","error only","stale only","mixed"],`+
+		`"claim_kinds":{"edited":"observed","no evidence":"observed","error only":"observed","stale only":"observed","mixed":"observed"},`+
+		`"claim_evidence":{"edited":[%q],"error only":[%q],"stale only":[%q],"mixed":[%q,%q]}}`, byKey["good"], byKey["bad"], byKey["stale"], byKey["good"], byKey["stale"])
+	result, err := a.tryArmModelDrivenCheckpoint(ccID, args)
+	if err != nil {
+		t.Fatalf("provisional checkpoint with weak observed claims must be accepted: %v", err)
+	}
+	if a.pendingModelDriven == nil {
+		t.Fatal("accepted request must arm a pending checkpoint")
+	}
+	got := a.pendingModelDriven.Args
+	want := map[string]string{"edited": claimKindObserved, "no evidence": tools.CompactContextClaimDerived, "error only": tools.CompactContextClaimDerived, "stale only": tools.CompactContextClaimDerived, "mixed": tools.CompactContextClaimDerived}
+	for claim, kind := range want {
+		if got.ClaimKinds[claim] != kind {
+			t.Fatalf("claim %q kind = %q, want %q", claim, got.ClaimKinds[claim], kind)
+		}
+	}
+	if slices.Contains(got.EvidenceRefs, byKey["stale"]) || got.ClaimEvidence["stale only"] != nil {
+		t.Fatalf("invalidated evidence must be dropped from the armed request: %+v", got)
+	}
+	if !slices.Equal(got.ClaimEvidence["error only"], []string{byKey["bad"]}) {
+		t.Fatalf("negative evidence stays cited by the derived claim: %+v", got.ClaimEvidence)
+	}
+	// A valid reference does not shield a defective one cited beside it: the
+	// claim still moves to derived, keeping only the usable reference.
+	if !slices.Equal(got.ClaimEvidence["mixed"], []string{byKey["good"]}) {
+		t.Fatalf("mixed claim must keep only its valid evidence: %+v", got.ClaimEvidence)
+	}
+	for _, want := range []string{requestAcceptedToolResult, "Recorded as derived instead of observed", `"no evidence" cited no claim_evidence`, `"error only" cannot use tool_error evidence`, `"stale only" cannot use invalidated evidence`} {
+		if !strings.Contains(result, want) {
+			t.Fatalf("result %q must contain %q", result, want)
+		}
+	}
+	if strings.Contains(result, `"edited"`) {
+		t.Fatalf("a supported observed claim must not be reported as downgraded: %q", result)
+	}
+}
+
+// A negative record that later went stale (a partially applied patch whose
+// successful file changed again) must report both defects: the downgrade keeps
+// a merely weak reference but has to drop an invalidated one, otherwise the
+// armed request still carries the invalidated ID and the reference check
+// rejects the whole provisional checkpoint — the very rejection the downgrade
+// exists to avoid. Both resolution sources are covered: a live tracker item and
+// a carried checkpoint-pack row.
+func TestTryArmModelDrivenCheckpointDowngradesInvalidatedNegativeEvidence(t *testing.T) {
+	t.Parallel()
+	staleError := evidenceItem{Kind: evidenceToolError, Key: "stale error", Excerpt: "patch partially failed", Validity: evidenceValidityInvalidated}
+	staleErrorID := evidenceItemID(staleError)
+
+	// Live: the tracker still holds the invalidated tool_error item.
+	live := newTestMainAgent(t, t.TempDir())
+	live.newTurn("")
+	live.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "good", Excerpt: "diff"})
+	live.evidence.add(staleError)
+	goodID := ""
+	for _, item := range live.evidence.snapshot() {
+		if item.Key == "good" {
+			goodID = evidenceItemID(item)
+		}
+	}
+	ccID := "cc-stale-error-live"
+	live.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
+	args := fmt.Sprintf(`{"active_objective":"a","next_step":"b","completed":["edited","patch needs inspection"],`+
+		`"claim_kinds":{"edited":"observed","patch needs inspection":"observed"},`+
+		`"claim_evidence":{"edited":[%q],"patch needs inspection":[%q]}}`, goodID, staleErrorID)
+	if _, err := live.tryArmModelDrivenCheckpoint(ccID, args); err != nil {
+		t.Fatalf("provisional checkpoint over an invalidated tool_error must arm, got %v", err)
+	}
+	assertDowngradedStaleError(t, live.pendingModelDriven.Args, goodID, staleErrorID)
+
+	// Carried: the tracker was rebuilt after an apply, so the ID only survives
+	// in a checkpoint evidence pack row that renders the kind and validity.
+	carried := newTestMainAgent(t, t.TempDir())
+	carried.newTurn("")
+	checkpoint := buildCompactionCheckpointMessage("## Current User Request\n- continue", nil, compactionSummaryModeModelDriven, []evidenceItem{staleError})
+	if !strings.Contains(checkpoint, "Evidence Kind: tool_error") || !strings.Contains(checkpoint, "Validity: invalidated") {
+		t.Fatalf("fixture pack must render the negative kind and its invalidation:\n%s", checkpoint)
+	}
+	carried.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: checkpoint, IsCompactionSummary: true})
+	carried.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
+	carriedArgs := fmt.Sprintf(`{"active_objective":"a","next_step":"b","completed":["patch needs inspection"],`+
+		`"claim_kinds":{"patch needs inspection":"observed"},`+
+		`"claim_evidence":{"patch needs inspection":[%q]}}`, staleErrorID)
+	if _, err := carried.tryArmModelDrivenCheckpoint(ccID, carriedArgs); err != nil {
+		t.Fatalf("provisional checkpoint over a carried invalidated tool_error must arm, got %v", err)
+	}
+	assertDowngradedStaleError(t, carried.pendingModelDriven.Args, "", staleErrorID)
+}
+
+// assertDowngradedStaleError pins the armed request after the downgrade: the
+// claim moved to derived, the invalidated reference is gone from both fields,
+// and any valid reference cited elsewhere is kept.
+func assertDowngradedStaleError(t *testing.T, got tools.CompactContextArgs, goodID, staleID string) {
+	t.Helper()
+	if got.ClaimKinds["patch needs inspection"] != tools.CompactContextClaimDerived {
+		t.Fatalf("claim kind = %q, want derived", got.ClaimKinds["patch needs inspection"])
+	}
+	if slices.Contains(got.EvidenceRefs, staleID) {
+		t.Fatalf("invalidated evidence must be dropped from evidence_refs: %+v", got)
+	}
+	if slices.Contains(got.ClaimEvidence["patch needs inspection"], staleID) {
+		t.Fatalf("invalidated evidence must be dropped from the downgraded claim: %+v", got.ClaimEvidence)
+	}
+	if goodID != "" {
+		if got.ClaimKinds["edited"] != claimKindObserved || !slices.Contains(got.EvidenceRefs, goodID) {
+			t.Fatalf("an unrelated supported claim must stay observed with its evidence: %+v", got)
+		}
+	}
+}
+
+// An invented ID is a fabrication, not weak evidence: it stays rejected even on
+// a provisional checkpoint.
+func TestTryArmModelDrivenCheckpointKeepsRejectingUnknownClaimEvidence(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn("")
+	ccID := "cc-invented"
+	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
+	args := `{"active_objective":"a","next_step":"b","completed":["x"],"claim_kinds":{"x":"observed"},"claim_evidence":{"x":["ev-000000000000"]}}`
+	if _, err := a.tryArmModelDrivenCheckpoint(ccID, args); err == nil {
+		t.Fatal("invented claim evidence must stay rejected")
 	}
 	if a.pendingModelDriven != nil {
 		t.Fatal("a rejected request must not arm a pending checkpoint")

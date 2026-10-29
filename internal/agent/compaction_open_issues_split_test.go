@@ -154,17 +154,17 @@ func TestRetiredOpenIssueLeavesBothBuckets(t *testing.T) {
 
 func TestOpenIssueBudgetIsSharedAndDisclosed(t *testing.T) {
 	prior := checkpointTypedState{OpenIssues: []string{"old-a", "old-b", "old-c", "old-d", "old-e", "old-f"}}
-	current := checkpointTypedState{OpenIssues: []string{"new-1", "new-2", "new-3", "new-4"}, OpenIssuesComplete: true}
+	current := checkpointTypedState{OpenIssues: []string{"new-1", "new-2", "new-3", "new-4", "new-5", "new-6", "new-7", "new-8"}, OpenIssuesComplete: true}
 	merged, omitted, _, openIssuesOmitted := mergeCheckpointTypedStates(prior, current)
-	// One shared budget, not one per bucket: 4 current + 6 historical compete
-	// for the same 8 slots, so the 2 oldest historical entries drop.
+	// One shared budget, not one per bucket: 8 current + 6 historical compete
+	// for the same 12 slots, so the 2 oldest historical entries drop.
 	if len(merged.OpenIssues)+len(merged.CarriedOpenIssues) != typedStateCarryMaxOpenIssues {
 		t.Fatalf("shared budget exceeded: current=%d historical=%d", len(merged.OpenIssues), len(merged.CarriedOpenIssues))
 	}
 	if omitted != 2 || openIssuesOmitted != 2 {
 		t.Fatalf("omitted=%d openIssuesOmitted=%d, want 2 and 2", omitted, openIssuesOmitted)
 	}
-	if !slices.Equal(merged.OpenIssues, []string{"new-1", "new-2", "new-3", "new-4"}) {
+	if !slices.Equal(merged.OpenIssues, current.OpenIssues) {
 		t.Fatalf("current issues = %v", merged.OpenIssues)
 	}
 	if got := merged.CarriedOpenIssues; !slices.Equal(got, []string{"old-a", "old-b", "old-c", "old-d"}) {

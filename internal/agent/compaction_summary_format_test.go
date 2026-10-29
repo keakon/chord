@@ -25,6 +25,7 @@ func TestCompactionSystemPromptKeepsContinuationRules(t *testing.T) {
 		"list at most 15 repository files or directories",
 		"Prefer short references over restating details",
 		"only while it remains unanswered or needs action",
+		"An answer that delivered findings or recommendations does not resolve them",
 	} {
 		if !strings.Contains(compactionSystemPrompt, want) {
 			t.Errorf("compaction system prompt missing %q", want)

@@ -101,14 +101,52 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 
 func TestCheckpointPressureNoticesSharePreparationContract(t *testing.T) {
 	for _, notice := range []string{buildContextPressureReminderText(), compactionThresholdNoticeText} {
-		if strings.Count(notice, contextCheckpointPressureAction) != 1 {
-			t.Fatal("pressure notices must share one self-contained action contract")
+		if strings.Count(notice, contextCheckpointPreparation) != 1 {
+			t.Fatal("pressure notices must share one self-contained preparation contract")
 		}
 		for _, forbidden := range []string{"Otherwise write", "otherwise keep writing", "never interrupt an in-flight", "read or wrote"} {
 			if strings.Contains(notice, forbidden) {
 				t.Fatalf("pressure notice contains conflicting requirement %q", forbidden)
 			}
 		}
+	}
+}
+
+func TestCheckpointPressureUrgencyEscalates(t *testing.T) {
+	reminder := buildContextPressureReminderText()
+	warning := compactionThresholdNoticeText
+	for _, want := range []string{"smallest in-flight unit of work", "as soon as possible"} {
+		if !strings.Contains(reminder, want) {
+			t.Fatalf("approaching-threshold reminder must mention %q, got %q", want, reminder)
+		}
+	}
+	for _, want := range []string{"stop all in-flight work", "hand off immediately"} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("reached-threshold notice must mention %q, got %q", want, warning)
+		}
+	}
+	if strings.Contains(reminder, "stop all in-flight work") {
+		t.Fatalf("approaching-threshold reminder must not use the reached-threshold stop: %q", reminder)
+	}
+	if strings.Contains(warning, "smallest in-flight unit of work") {
+		t.Fatalf("reached-threshold notice must not keep wrapping up work: %q", warning)
+	}
+	for _, notice := range []string{reminder, warning} {
+		if !strings.Contains(notice, "can be completed immediately") {
+			t.Fatalf("pressure notice must keep the immediate-completion exception, got %q", notice)
+		}
+		if strings.Count(notice, contextPressureFinalResponseException) != 1 {
+			t.Fatalf("pressure notice must limit the no-checkpoint exit to a fully answered request, got %q", notice)
+		}
+		if strings.Contains(notice, "If only the final response remains") {
+			t.Fatalf("pressure notice must not let a sub-conclusion skip the checkpoint: %q", notice)
+		}
+	}
+	if !strings.Contains(reminder, "remaining task") {
+		t.Fatalf("approaching-threshold exception must refer to the remaining task, got %q", reminder)
+	}
+	if strings.Contains(warning, "safe continuation window") {
+		t.Fatalf("reached-threshold notice must not soften the handoff: %q", warning)
 	}
 }
 
