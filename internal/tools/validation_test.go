@@ -579,6 +579,61 @@ func TestValidateToolArgsStripsAdditionalPropertiesWhenDisallowed(t *testing.T) 
 	}
 }
 
+func TestValidateToolArgsNamesMultiToolWrapper(t *testing.T) {
+	tool := validationStubTool{
+		name: "shell",
+		schema: map[string]any{
+			"type":                 "object",
+			"properties":           map[string]any{"command": map[string]any{"type": "string"}},
+			"required":             []string{"command"},
+			"additionalProperties": false,
+		},
+	}
+	wrapped := json.RawMessage(`{"tool_uses":[{"recipient_name":"functions.shell","parameters":{"command":"git status"}}]}`)
+	_, _, _, err := SanitizeUnknownArgsWithDiagnostics(tool, wrapped)
+	if err == nil {
+		t.Fatal("err = nil, want the wrapper rejected")
+	}
+	for _, want := range []string{"args.command is required", "tool_uses wrapper", "its own function call"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v, want substring %q", err, want)
+		}
+	}
+	_, _, _, err = SanitizeUnknownArgsWithDiagnostics(tool, json.RawMessage(`{}`))
+	if err == nil || strings.Contains(err.Error(), "tool_uses") {
+		t.Fatalf("err = %v, want a plain missing-field error", err)
+	}
+}
+
+// TestToolsAcceptingArgsTracesUnknownNameByShape runs real built-in schemas
+// against argument shapes seen under garbled tool names. The candidates are
+// the file and shell tools whose zero values have complete schemas.
+func TestToolsAcceptingArgsTracesUnknownNameByShape(t *testing.T) {
+	candidates := []Tool{ShellTool{}, ReadTool{}, WriteTool{}, EditTool{}, ApplyPatchTool{}, DeleteTool{}, GrepTool{}, GlobTool{}, WebFetchTool{}}
+	cases := []struct {
+		name string
+		args string
+		want []string
+	}{
+		{"shell with workdir", `{"command":"git status","workdir":"/tmp","description":"Show status"}`, []string{NameShell}},
+		{"shell bare command", `{"command":"x"}`, []string{NameShell}},
+		{"edit alias key", `{"filePath":"a.go","old_string":"a","new_string":"b"}`, []string{NameEdit}},
+		{"undeclared key", `{"command":"x","bogus":1}`, nil},
+		{"schema mismatch", `{"command":1}`, nil},
+		{"empty object", `{}`, nil},
+		{"not an object", `["command"]`, nil},
+		{"malformed", `{"command":`, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ToolsAcceptingArgs(candidates, json.RawMessage(tc.args))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("ToolsAcceptingArgs(%s) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSanitizeUnknownArgsRejectsTrailingGarbage guards the single-pass decoder:
 // a valid JSON prefix followed by non-whitespace must be rejected exactly like
 // json.Valid did, instead of silently decoding the prefix.

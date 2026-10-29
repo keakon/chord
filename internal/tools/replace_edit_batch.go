@@ -58,11 +58,15 @@ func planExactReplacements(content string, edits []textReplacement) (batchReplac
 	var matched, skipped []int
 	for i, edit := range edits {
 		if edit.OldString == "" {
-			problems = append(problems, batchEntryProblem{entry: i, summary: "old_string is required"})
+			problems = append(problems, batchEntryProblem{entry: i, summary: missingOldStringSummary(edit.NewString)})
 			continue
 		}
 		if edit.NewString == nil {
-			problems = append(problems, batchEntryProblem{entry: i, summary: "new_string is required; use an empty string for deletion"})
+			summary := missingNewStringSummary(edit.OldString)
+			if summary == "" {
+				summary = "new_string is required; use an empty string for deletion"
+			}
+			problems = append(problems, batchEntryProblem{entry: i, summary: summary})
 			continue
 		}
 		oldText, newText, note, err := prepareReplacementText(edit.OldString, *edit.NewString)

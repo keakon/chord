@@ -449,7 +449,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		}
 	}
 
-	if err := p.validateKnownTool(tc.Name); err != nil {
+	if err := p.validateKnownTool(tc.Name, tc.Args); err != nil {
 		return execResult, err
 	}
 
@@ -723,7 +723,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 		return execResult, err
 	}
 	p = p.withMachineStateBaseDir(tc)
-	if err := p.validateKnownTool(tc.Name); err != nil {
+	if err := p.validateKnownTool(tc.Name, tc.Args); err != nil {
 		return execResult, err
 	}
 	// Mirror execute(): the speculative run has no permission edits or hooks to
@@ -1125,7 +1125,7 @@ func attachHiddenSiblingNudge(execResult *ToolExecutionResult, nudge string) {
 	execResult.Result = appendNotes(execResult.Result, []string{nudge})
 }
 
-func (p toolExecutionPipeline) validateKnownTool(name string) error {
+func (p toolExecutionPipeline) validateKnownTool(name string, args json.RawMessage) error {
 	name = tools.NormalizeName(name)
 	if name == "" {
 		return fmt.Errorf("malformed tool call: missing tool name")
@@ -1137,9 +1137,35 @@ func (p toolExecutionPipeline) validateKnownTool(name string) error {
 		return nil
 	}
 	if _, ok := p.registry.Get(name); !ok {
-		return fmt.Errorf("tool not found: %s", name)
+		return fmt.Errorf("tool not found: %s%s", name, p.unknownToolArgsHint(args))
 	}
 	return nil
+}
+
+// unknownToolArgsHint names the one available tool whose schema the arguments
+// fit, so a garbled tool name the model cannot map back by spelling still gets
+// a concrete retry target. Tools the current ruleset disables are excluded: the
+// model cannot call them, so pointing at one would only trade this error for a
+// permission denial. Several fits are left unnamed rather than guessed.
+func (p toolExecutionPipeline) unknownToolArgsHint(args json.RawMessage) string {
+	candidates := p.registry.ToolsSnapshot()
+	if p.visibleToolNames != nil {
+		visible := p.visibleToolNames()
+		candidates = slices.DeleteFunc(candidates, func(tool tools.Tool) bool {
+			_, ok := visible[tools.NormalizeName(tool.Name())]
+			return !ok
+		})
+	} else if p.currentRuleset != nil {
+		toolRules := p.currentRuleset()
+		candidates = slices.DeleteFunc(candidates, func(tool tools.Tool) bool {
+			return toolRules.IsDisabled(tool.Name())
+		})
+	}
+	fits := tools.ToolsAcceptingArgs(candidates, args)
+	if len(fits) != 1 {
+		return ""
+	}
+	return fmt.Sprintf("; the arguments match the %s tool, so call %s with these arguments if that is what you meant", fits[0], fits[0])
 }
 
 func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) (err error) {

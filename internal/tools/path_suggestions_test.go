@@ -102,6 +102,39 @@ func TestReadToolFileNotFoundSuggestsWhitespaceRepairFromBaseDir(t *testing.T) {
 	}
 }
 
+func TestReadToolFileNotFoundNamesMissingParentDirectory(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, "kept"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	_, err := (ReadTool{BaseDir: base}).Execute(context.Background(), json.RawMessage(`{"path":"kept/removed/tree/file.go"}`))
+	if err == nil {
+		t.Fatal("ReadTool.Execute err = nil, want file-not-found error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"file not found: kept/removed/tree/file.go",
+		"The parent directory kept/removed/tree does not exist",
+		"nearest existing directory: kept",
+		"may have been removed",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("ReadTool.Execute err = %v, want substring %q", err, want)
+		}
+	}
+	if strings.Contains(msg, base) {
+		t.Fatalf("ReadTool.Execute err = %v, want no absolute base path", err)
+	}
+
+	_, err = (ReadTool{BaseDir: base}).Execute(context.Background(), json.RawMessage(`{"path":"kept/missing.go"}`))
+	if err == nil {
+		t.Fatal("ReadTool.Execute err = nil, want file-not-found error")
+	}
+	if strings.Contains(err.Error(), "parent directory") {
+		t.Fatalf("an existing parent must not get the missing-directory hint: %v", err)
+	}
+}
+
 func TestSuggestWhitespacePathRepairHandlesVariousSpacePositions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

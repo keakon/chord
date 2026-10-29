@@ -29,6 +29,23 @@ func runEdit(t *testing.T, dir string, args map[string]any) (string, error) {
 	return (EditTool{BaseDir: dir}).Execute(context.Background(), raw)
 }
 
+func TestEditMissingNewStringNamesDoubleEscapedArguments(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "sample.txt", "alpha\n")
+	_, err := runEdit(t, dir, map[string]any{"path": path, "old_string": `alpha", "new_string": "beta`})
+	if err == nil || !strings.Contains(err.Error(), "escaped one level too deep") {
+		t.Fatalf("error = %v, want the double-escape hint", err)
+	}
+	if !strings.Contains(err.Error(), "old_string") || !strings.Contains(err.Error(), "new_string") {
+		t.Fatalf("error = %v, want both field names in the hint", err)
+	}
+
+	_, err = runEdit(t, dir, map[string]any{"path": path, "old_string": "alpha"})
+	if err == nil || strings.Contains(err.Error(), "escaped") || !strings.Contains(err.Error(), "new_string is required") {
+		t.Fatalf("error = %v, want the plain required-field error", err)
+	}
+}
+
 // A1: when the model emits straight quotes but the file uses curly quotes
 // (the dominant failure mode observed in real sessions), the punctuation-
 // tolerant fallback should still apply the edit instead of erroring.

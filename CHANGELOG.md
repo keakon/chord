@@ -105,6 +105,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Context-pressure notices skip the checkpoint only once the whole latest request is answered, and ask for long conclusions to be written to notes before they are sent, so a later compaction cannot drop unrecorded findings.
 
+- Tool errors explain more common mistakes: `edit` names arguments escaped one level too deep, a not-found `read` path whose parent directory is missing says so and names the nearest existing directory, `grep` explains that `paths` does not expand globs, arguments wrapped in a `tool_uses` list ask for separate tool calls, and a call to an unknown tool name whose arguments fit exactly one available tool names that tool.
+
 ### Fixes
 
 - The context summary card labels a manually triggered model summary as `MANUAL` instead of `AUTO`. Automatic model summaries keep `AUTO`, model-driven checkpoints keep `MODEL-DRIVEN`, and degraded checkpoints keep `FALLBACK` / `TRUNCATED`.

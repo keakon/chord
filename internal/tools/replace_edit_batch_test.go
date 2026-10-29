@@ -48,7 +48,9 @@ func TestEditBatchRejectsWithoutWriting(t *testing.T) {
 		{"overlap", []map[string]any{{"old_string": "alpha", "new_string": "changed"}, {"old_string": "alpha beta", "new_string": "text"}}, "overlaps"},
 		{"ambiguous", []map[string]any{{"old_string": "beta", "new_string": "changed"}}, "found 2 times"},
 		{"missing replacement", []map[string]any{{"old_string": "alpha"}}, "new_string is required"},
+		{"double escaped replacement", []map[string]any{{"old_string": `alpha", "new_string": "beta`}}, "escaped one level too deep"},
 		{"empty search", []map[string]any{{"old_string": "", "new_string": "text"}}, "old_string is required"},
+		{"double escaped", []map[string]any{{"new_string": `text", "old_string": "alpha`}}, "escaped one level too deep"},
 		{"control", []map[string]any{{"old_string": "alpha", "new_string": "\x00"}}, "new_string"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,6 +72,19 @@ func TestEditBatchRejectsWithoutWriting(t *testing.T) {
 				t.Fatalf("failed batch changed file: %q", got)
 			}
 		})
+	}
+}
+
+func TestEditMissingOldStringNamesDoubleEscapedArguments(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "sample.txt", "alpha\n")
+	_, err := runEdit(t, dir, map[string]any{"path": path, "new_string": `beta", "old_string": "alpha`})
+	if err == nil || !strings.Contains(err.Error(), "escaped one level too deep") {
+		t.Fatalf("error = %v, want the double-escape hint", err)
+	}
+	_, err = runEdit(t, dir, map[string]any{"path": path, "new_string": "beta"})
+	if err == nil || strings.Contains(err.Error(), "escaped") || !strings.Contains(err.Error(), "old_string is required") {
+		t.Fatalf("error = %v, want the plain required-field error", err)
 	}
 }
 

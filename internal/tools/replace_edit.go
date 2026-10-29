@@ -165,9 +165,12 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return t.executeBatch(ctx, resolvedPath, a.Path, a.Edits)
 	}
 	if a.OldString == "" {
-		return "", fmt.Errorf("old_string is required")
+		return "", fmt.Errorf("%s", missingOldStringSummary(a.NewString))
 	}
 	if a.NewString == nil {
+		if summary := missingNewStringSummary(a.OldString); summary != "" {
+			return "", fmt.Errorf("%s", summary)
+		}
 		return "", fmt.Errorf("new_string is required and must be a string; use an empty string to delete old_string")
 	}
 
@@ -311,6 +314,27 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", err
 	}
 	return out, nil
+}
+
+// missingOldStringSummary explains an empty old_string. When new_string itself
+// contains an `"old_string":` key, the model escaped the closing quote of
+// new_string, so the JSON decoder folded the intended old_string into the
+// new_string text; naming that cause saves a blind retry with the same bytes.
+func missingOldStringSummary(newString *string) string {
+	if newString != nil && strings.Contains(*newString, `"old_string":`) {
+		return `old_string is required; new_string contains an "old_string": key, so the arguments were escaped one level too deep and both values were decoded as new_string. Resend old_string and new_string as separate JSON string fields without escaping the quotes between them`
+	}
+	return "old_string is required"
+}
+
+// missingNewStringSummary explains a missing new_string. When old_string
+// itself contains a "new_string": key, the model escaped the closing quote of
+// old_string, so the JSON decoder folded the intended new_string into it.
+func missingNewStringSummary(oldString string) string {
+	if strings.Contains(oldString, `"new_string":`) {
+		return `new_string is required; old_string contains a "new_string": key, so the arguments were escaped one level too deep and both values were decoded as old_string. Resend old_string and new_string as separate JSON string fields without escaping the quotes between them`
+	}
+	return ""
 }
 
 func prepareReplacementText(oldString, newString string) (string, string, string, error) {

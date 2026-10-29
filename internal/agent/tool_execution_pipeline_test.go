@@ -1245,6 +1245,58 @@ func TestToolExecutionPipelineRejectsMalformedOrUnknownToolBeforePermission(t *t
 	}
 }
 
+func TestToolExecutionPipelineUnknownToolNamesToolMatchingArgs(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(requiredValueTool{})
+	pipeline := toolExecutionPipeline{registry: registry}
+	call := func(args string) error {
+		_, err := pipeline.execute(context.Background(), message.ToolCall{ID: "call-1", Name: "garbled_tool9", Args: json.RawMessage(args)}, false)
+		return err
+	}
+
+	err := call(`{"value":"x"}`)
+	if err == nil || !strings.Contains(err.Error(), "tool not found: garbled_tool9; the arguments match the RequiredValue tool") {
+		t.Fatalf("err = %v, want a hint naming RequiredValue", err)
+	}
+	if err := call(`{}`); err == nil || err.Error() != "tool not found: garbled_tool9" {
+		t.Fatalf("err = %v, want the bare unknown-tool error for empty args", err)
+	}
+
+	registry.Register(strictArgsTool{})
+	if err := call(`{"value":"x"}`); err == nil || err.Error() != "tool not found: garbled_tool9" {
+		t.Fatalf("err = %v, want no guess when two tools fit", err)
+	}
+
+	pipeline.currentRuleset = func() permission.Ruleset {
+		return permission.Ruleset{{Permission: "RequiredValue", Pattern: "*", Action: permission.ActionDeny}}
+	}
+	if err := call(`{"value":"x"}`); err == nil || !strings.Contains(err.Error(), "match the StrictArgs tool") {
+		t.Fatalf("err = %v, want the hint to skip the disabled RequiredValue and name StrictArgs", err)
+	}
+}
+
+func TestUnknownToolArgsHintUsesOnlyVisibleTools(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(requiredValueTool{})
+	pipeline := toolExecutionPipeline{
+		registry: registry,
+		visibleToolNames: func() map[string]struct{} {
+			return map[string]struct{}{}
+		},
+	}
+	args := json.RawMessage(`{"value":"x"}`)
+	if hint := pipeline.unknownToolArgsHint(args); hint != "" {
+		t.Fatalf("hint = %q, want no suggestion when the matching tool is hidden", hint)
+	}
+
+	pipeline.visibleToolNames = func() map[string]struct{} {
+		return map[string]struct{}{tools.NormalizeName(requiredValueTool{}.Name()): {}}
+	}
+	if hint := pipeline.unknownToolArgsHint(args); !strings.Contains(hint, "the arguments match the RequiredValue tool") {
+		t.Fatalf("hint = %q, want the visible matching tool", hint)
+	}
+}
+
 func TestMainAndSubToolExecutionPipelineConsistentHookHandling(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

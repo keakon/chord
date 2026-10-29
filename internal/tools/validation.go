@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/schemaargs"
@@ -69,7 +70,11 @@ func SanitizeUnknownArgsWithDiagnostics(tool Tool, args json.RawMessage) (json.R
 		return args, ignored, invalid, err
 	}
 	if strict, ok := tool.(StrictArgumentsTool); ok && strict.StrictArguments() && len(ignored) > 0 {
-		return args, ignored, invalid, fmt.Errorf("%s rejects unsupported, duplicate or null parameters before execution", tool.Name())
+		paths := make([]string, 0, len(ignored))
+		for _, arg := range ignored {
+			paths = append(paths, arg.Path)
+		}
+		return args, ignored, invalid, fmt.Errorf("%s rejects unsupported, duplicate or null parameters before execution: %s", tool.Name(), strings.Join(paths, ", "))
 	}
 	return sanitized, ignored, invalid, nil
 }
@@ -117,9 +122,62 @@ func validateToolArgsDecoded(tool Tool, args json.RawMessage, recordIgnored, rec
 		return nil, nil, nil, err
 	}
 	if err := schemaargs.ValidateArguments(value, tool.Parameters(), ignoredSink, invalidSink); err != nil {
-		return nil, ignored, invalid, fmt.Errorf("arguments do not match %s schema: %w", tool.Name(), err)
+		return nil, ignored, invalid, fmt.Errorf("arguments do not match %s schema: %w%s", tool.Name(), err, multiToolWrapperHint(args))
 	}
 	return value, ignored, invalid, nil
+}
+
+// multiToolWrapperHint names a parallel-call wrapper ({"tool_uses":
+// [{"recipient_name": ...}]}) that a model packed into one tool's arguments.
+// The runtime cannot execute it: each wrapped call would need its own call ID,
+// permission check and result, so the hint asks for separate calls instead of
+// leaving the model with a bare missing-field error. It reads the raw
+// arguments because schema stripping has already removed the unknown key from
+// the decoded value.
+func multiToolWrapperHint(args json.RawMessage) string {
+	var wrapper struct {
+		ToolUses []json.RawMessage `json:"tool_uses"`
+	}
+	if json.Unmarshal(args, &wrapper) != nil || len(wrapper.ToolUses) == 0 {
+		return ""
+	}
+	return "; the arguments contain a tool_uses wrapper, which is not supported. Send each tool call as its own function call with that tool's arguments; to run several shell commands, join them with && or ; in one command"
+}
+
+// ToolsAcceptingArgs returns, sorted, the names of candidate tools whose schema
+// declares every top-level argument key and accepts the arguments. It traces a
+// call with an unknown tool name back to the intended tool by argument shape: a
+// garbled name (for example manage_sheuniq12 for shell) shares nothing with the
+// real one, but its arguments still fit. Empty or non-object arguments fit no
+// tool, so a bare call never produces a guess.
+func ToolsAcceptingArgs(candidates []Tool, args json.RawMessage) []string {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(args, &obj) != nil || len(obj) == 0 {
+		return nil
+	}
+	var names []string
+	for _, tool := range candidates {
+		props, _ := tool.Parameters()["properties"].(map[string]any)
+		var aliases map[string]string
+		if aliaser, ok := tool.(argumentAliaser); ok {
+			aliases = aliaser.argumentAliases()
+		}
+		declared := true
+		for key := range obj {
+			if _, ok := props[key]; ok {
+				continue
+			}
+			if _, ok := aliases[key]; !ok {
+				declared = false
+				break
+			}
+		}
+		if declared && ValidateToolArgs(tool, args) == nil {
+			names = append(names, tool.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // argumentAliaser is implemented by tools that tolerate non-canonical argument

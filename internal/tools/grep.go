@@ -874,7 +874,13 @@ func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re 
 }
 
 func grepPathErrorWithHint(path string, baseDir string, err error) error {
-	if err == nil || !strings.Contains(err.Error(), "path not found:") || !strings.ContainsAny(path, " \t\n\r") {
+	if err == nil || !strings.Contains(err.Error(), "path not found:") {
+		return err
+	}
+	if strings.ContainsAny(path, "*?[") {
+		return fmt.Errorf("%w. grep.paths takes literal file or directory paths and does not expand glob patterns; pass the directory in paths and the pattern in includes (for example paths [\"internal\"] with includes [\"**/router_*.go\"])", err)
+	}
+	if !strings.ContainsAny(path, " \t\n\r") {
 		return err
 	}
 	parts := strings.Fields(path)

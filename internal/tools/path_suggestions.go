@@ -49,7 +49,34 @@ func defaultPathSuggestionOptions() pathSuggestionOptions {
 
 func fileNotFoundErrorWithPathSuggestionsInDir(path, baseDir string, kind PathTargetKind) error {
 	msg := fmt.Sprintf("file not found: %s", formatToolPathInDir(path, baseDir, path))
-	return withPathSuggestionsInDir(msg, path, baseDir, kind)
+	return withPathSuggestionsInDir(msg+missingParentDirectoryHint(path, baseDir), path, baseDir, kind)
+}
+
+// missingParentDirectoryHint explains a not-found path whose parent directory
+// is gone too. Such paths usually point into a removed temporary worktree or
+// assume a different working directory, so retrying sibling file names cannot
+// help; naming the nearest directory that exists tells the model where the
+// path stopped resolving. The ancestor is a prefix of the requested path, so
+// the hint discloses nothing beyond its existence.
+func missingParentDirectoryHint(path, baseDir string) string {
+	resolved, err := resolveToolPathInDir(path, baseDir)
+	if err != nil {
+		return ""
+	}
+	parent := filepath.Dir(resolved)
+	if directoryExists(parent) {
+		return ""
+	}
+	hint := fmt.Sprintf("\nThe parent directory %s does not exist", formatToolPathInDir(parent, baseDir, parent))
+	if ancestor, ok := nearestExistingAncestor(resolved); ok {
+		// A relative request gets a relative answer: an ancestor the formatter
+		// leaves absolute (the working directory itself, or a directory above
+		// it) would expose the workdir the request never named.
+		if shown := formatToolPathInDir(ancestor, baseDir, ancestor); shown != ancestor || filepath.IsAbs(path) {
+			hint += fmt.Sprintf(" (nearest existing directory: %s)", shown)
+		}
+	}
+	return hint + "; it may have been removed, or the path assumes a different working directory."
 }
 
 // withPathSuggestionsInDir returns baseMsg, optionally followed by a "Did you mean:"

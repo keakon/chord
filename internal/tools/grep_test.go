@@ -351,6 +351,23 @@ func TestGrepPathErrorHintsForSpaceSeparatedExistingPaths(t *testing.T) {
 	}
 }
 
+func TestGrepPathErrorHintsGlobBelongsInIncludes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "router_ingress.go"), []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"pattern": "needle", "paths": []string{filepath.Join(dir, "router_*.go")}})
+	_, err := GrepTool{}.Execute(context.Background(), raw)
+	if err == nil {
+		t.Fatal("expected path error for a glob in paths")
+	}
+	for _, want := range []string{"path not found:", "does not expand glob patterns", "includes"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
 func TestGrepSupportsMultiplePaths(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"cmd", "internal"} {
