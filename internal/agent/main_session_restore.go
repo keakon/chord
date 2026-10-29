@@ -886,7 +886,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	if loaded.InputDelivery != nil {
 		a.delivery.committed = loaded.InputDelivery.Clone()
 		a.delivery.loading = true
-		a.delivery.restoredNextInputsBlocked = true
+		a.delivery.restoredHeld = deliveryHasQueuedInput(a.delivery.committed)
 		a.publishInputDelivery()
 	}
 	a.ensureLLMSessionIdentity(a.llmClient)

@@ -152,6 +152,9 @@ func (a *MainAgent) dispatch(evt Event) {
 		if a.delivery.snapshot.Load() != nil {
 			a.publishInputDelivery()
 		}
+		// The input that tripped the error was left queued; with the
+		// environment fixed, nothing else would pick it up.
+		a.advanceInputDelivery()
 	case eventInputDeliveryAdvance:
 		a.advanceInputDelivery()
 	case eventInputDeliveryOperation:

@@ -20,8 +20,6 @@ const (
 	InputQueueRejected                   = "rejected"
 	InputQueueConflict                   = "conflict"
 	InputQueueUnknown                    = "unknown"
-	InputQueuePause                      = "pause"
-	InputQueueResume                     = "resume"
 	InputQueueClear                      = "clear"
 	InputQueueHoldEdit                   = "hold_edit"
 	InputQueueReleaseEdit                = "release_edit"
@@ -77,11 +75,13 @@ type QueueControl struct {
 }
 
 type InputQueueSnapshot struct {
-	Target                    InputTarget                  `json:"target"`
-	ViewVersion               uint64                       `json:"view_version"`
-	State                     *recovery.InputDeliveryState `json:"state"`
-	Blocked                   string                       `json:"blocked,omitempty"`
-	RestoredNextInputsBlocked bool                         `json:"restored_next_inputs_blocked,omitempty"`
+	Target      InputTarget                  `json:"target"`
+	ViewVersion uint64                       `json:"view_version"`
+	State       *recovery.InputDeliveryState `json:"state"`
+	Blocked     string                       `json:"blocked,omitempty"`
+	// RestoredHeld reports that inputs restored with the session wait for the
+	// user to continue or send a message before any of them starts.
+	RestoredHeld bool `json:"restored_held,omitempty"`
 }
 
 func (s *InputQueueSnapshot) Clone() *InputQueueSnapshot {
@@ -110,27 +110,27 @@ type InputQueueChangedEvent struct{ Snapshot *InputQueueSnapshot }
 func (InputQueueChangedEvent) agentEvent() {}
 
 type inputDeliveryRuntime struct {
-	loading                   bool
-	environmentError          string
-	resumeOperations          []*deliveryOperation
-	navigation                bool
-	navigationReady           bool
-	acceptedOrders            map[string]int64
-	permit                    *deliveryOperation
-	request                   *deliveryRequest
-	cancelGeneration          atomic.Uint64
-	once                      sync.Once
-	runtimeID                 string
-	snapshot                  atomic.Pointer[InputQueueSnapshot]
-	committed                 *recovery.InputDeliveryState
-	pending                   []*deliveryOperation
-	inflight                  *deliveryOperation
-	owner                     *recoveryOwnership
-	viewVersion               uint64
-	persistenceError          error
-	currentWorkID             string
-	currentOrigin             string
-	restoredNextInputsBlocked bool
+	loading          bool
+	restoredHeld     bool
+	environmentError string
+	resumeOperations []*deliveryOperation
+	navigation       bool
+	navigationReady  bool
+	acceptedOrders   map[string]int64
+	permit           *deliveryOperation
+	request          *deliveryRequest
+	cancelGeneration atomic.Uint64
+	once             sync.Once
+	runtimeID        string
+	snapshot         atomic.Pointer[InputQueueSnapshot]
+	committed        *recovery.InputDeliveryState
+	pending          []*deliveryOperation
+	inflight         *deliveryOperation
+	owner            *recoveryOwnership
+	viewVersion      uint64
+	persistenceError error
+	currentWorkID    string
+	currentOrigin    string
 }
 
 func (a *MainAgent) InputDeliveryTarget() InputTarget {

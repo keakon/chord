@@ -20,10 +20,13 @@ type deliveryOperation struct {
 	delete              *DeleteInput
 	control             *QueueControl
 	inputID             string
+	resumePermitted     func() bool
 	mutate              func(*recovery.InputDeliveryState) error
 	finish              func()
-	resumeAllowed       func() bool
 	syncTranscript      bool
+	// barrier orders finish behind every earlier delivery operation without
+	// changing the queue: no apply, no revision bump, no durable write.
+	barrier bool
 }
 
 func (op *deliveryOperation) identity() (string, InputTarget) {
@@ -68,7 +71,7 @@ func (a *MainAgent) publishInputDelivery() {
 		}
 	}
 	a.delivery.viewVersion++
-	snapshot := &InputQueueSnapshot{Target: a.InputDeliveryTarget(), ViewVersion: a.delivery.viewVersion, State: a.delivery.committed.Clone(), RestoredNextInputsBlocked: a.delivery.restoredNextInputsBlocked}
+	snapshot := &InputQueueSnapshot{Target: a.InputDeliveryTarget(), ViewVersion: a.delivery.viewVersion, State: a.delivery.committed.Clone(), RestoredHeld: a.delivery.restoredHeld}
 	if a.delivery.environmentError != "" {
 		snapshot.Blocked = a.delivery.environmentError
 	}
@@ -128,10 +131,14 @@ func (a *MainAgent) startNextDeliveryOperation() {
 	if a.delivery.owner != owner {
 		a.delivery.inflight = op
 		transcript := a.ctxMgr.Snapshot()
+		liveWorkID := ""
+		if a.turn != nil {
+			liveWorkID = a.turn.DeliveryWorkID
+		}
 		a.outputWg.Go(func() {
 			state, err := owner.manager.LoadInputDelivery()
 			if err == nil && state != nil {
-				restored := recovery.ReconcileInputDelivery(state, transcript)
+				restored := recovery.ReconcileInputDelivery(state, transcript, liveWorkID)
 				state, err = owner.manager.SaveInputDelivery(state.Revision, restored)
 			}
 			a.sendEvent(Event{Type: eventInputDeliveryCommitted, Payload: deliveryCommit{owner: owner, op: op, state: state, err: err, loaded: true}})
@@ -144,15 +151,27 @@ func (a *MainAgent) startNextDeliveryOperation() {
 		a.startNextDeliveryOperation()
 		return
 	}
-	if a.delivery.committed == nil && op.submit != nil && op.submit.DeliveryPolicy == recovery.InputDeliveryNextRequest && a.turn == nil && !a.sessionExecutionPaused() && !a.mcpTransitionActive.Load() && !a.pendingUserDrainSuspended && len(a.delivery.pending) == 0 {
+	if op.barrier {
+		// Settle through the event loop rather than inline so finish never
+		// re-enters whoever queued the barrier.
+		a.delivery.inflight = op
+		committed := a.delivery.committed
+		a.outputWg.Go(func() {
+			a.sendEvent(Event{Type: eventInputDeliveryCommitted, Payload: deliveryCommit{owner: owner, op: op, state: committed}})
+		})
+		return
+	}
+	if a.delivery.committed == nil && op.submit != nil && a.immediateDispatchEligible(op, op.submit) {
 		// Loading an absent queue at startup must not turn an ordinary idle
-		// send into the first durable queue transaction.
+		// send into the first durable queue transaction. A submit that is not
+		// immediately dispatchable (cancel-covered, busy, paused) stays durable
+		// instead: re-dispatching it here would loop forever.
 		a.handleDeliveryOperation(op)
 		return
 	}
 	state := a.delivery.committed.Clone()
 	if state == nil {
-		state = &recovery.InputDeliveryState{SessionID: filepath.Base(owner.dir), Gate: recovery.FollowupGate{Mode: recovery.FollowupGateRunning}}
+		state = &recovery.InputDeliveryState{SessionID: filepath.Base(owner.dir)}
 	}
 	base := state.Revision
 	var err error
@@ -219,6 +238,9 @@ func (a *MainAgent) handleDeliveryCommitted(commit deliveryCommit) {
 		return
 	}
 	a.delivery.owner = commit.owner
+	// Only a session restore marks the load as loading; a reload after a
+	// storage recovery keeps inputs the user submitted live runnable.
+	restoring := commit.loaded && a.delivery.loading
 	if commit.loaded {
 		a.delivery.loading = false
 	}
@@ -244,19 +266,20 @@ func (a *MainAgent) handleDeliveryCommitted(commit deliveryCommit) {
 		if commit.loaded && commit.op.loadOnly && len(a.delivery.pending) > 0 {
 			a.delivery.pending = a.delivery.pending[1:]
 		}
-		if commit.loaded && commit.state != nil {
-			for _, input := range commit.state.Inputs {
-				if input.Stage == recovery.PendingInputStageQueued && input.DeliveryPolicy == recovery.InputDeliveryNextRequest {
-					a.delivery.restoredNextInputsBlocked = true
-				}
-			}
+		if restoring {
+			// Reconciliation can return claimed rows to the queue, so the hold
+			// follows the reconciled state rather than the file read at restore.
+			a.delivery.restoredHeld = deliveryHasQueuedInput(commit.state)
 		}
 		if !commit.loaded {
-			if commit.op.mutate == nil {
+			if commit.op.mutate == nil && !commit.op.barrier {
 				a.delivery.environmentError = ""
 			}
+			if commit.op.submit != nil {
+				// A new submission is the user re-engaging with the session.
+				a.delivery.restoredHeld = false
+			}
 			if commit.op.submit != nil && commit.op.submit.DeliveryPolicy == recovery.InputDeliveryNextRequest {
-				a.delivery.restoredNextInputsBlocked = false
 				if !a.sessionExecutionPaused() {
 					a.resumePendingUserDrain()
 				}
@@ -264,11 +287,8 @@ func (a *MainAgent) handleDeliveryCommitted(commit deliveryCommit) {
 					a.mailboxDeliveryPaused.Store(false)
 				}
 			}
-			if commit.op.control != nil && commit.op.control.Action == InputQueueResume && commit.op.resumeAllowed != nil && commit.op.resumeAllowed() {
-				a.resumePendingUserDrain()
-			}
 			// The TUI decides its notice from the snapshot it can read when this
-			// result arrives, so publish the settled gate before the result. A
+			// result arrives, so publish the settled queue before the result. A
 			// later publish would leave the reader racing the agent's event loop.
 			a.publishInputDelivery()
 			published = true

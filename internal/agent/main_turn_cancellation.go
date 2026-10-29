@@ -72,7 +72,6 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 		// the next idle drain must not race the off-loop cancel caller.
 		a.mailboxDeliveryPaused.Store(true)
 	}
-	a.pauseInputDeliveryForCancel()
 	a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkCancelled)
 	a.pauseQuestionWork()
 	a.mainLLMRequestInFlight.Store(false)
@@ -159,7 +158,6 @@ func (a *MainAgent) handleTurnCancelRequested(evt Event) {
 		return
 	}
 	a.raiseCancelUpTo(payload.AcceptedUpTo)
-	a.pauseInputDeliveryForCancel()
 	if a.turn == nil {
 		a.pauseQuestionWork()
 		log.Debugf("cancel request recorded without an active turn accepted_up_to=%v", payload.AcceptedUpTo)

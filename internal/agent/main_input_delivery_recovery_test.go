@@ -9,19 +9,17 @@ import (
 	"github.com/keakon/chord/internal/recovery"
 )
 
-func TestInputDeliveryResumeRetiresUnknownInputs(t *testing.T) {
+func TestInputDeliverySettleRetiresUnknownInputs(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
-	state := &recovery.InputDeliveryState{Revision: 3,
-		Gate:   recovery.FollowupGate{Mode: recovery.FollowupGatePaused, Reason: recovery.FollowupOutcomeUnknown, WaitingWorkID: "work"},
-		Works:  []recovery.DeliveryWork{{WorkID: "work", Origin: recovery.DeliveryWorkUser, Outcome: recovery.DeliveryWorkUnknown}},
+	a.delivery.committed = &recovery.InputDeliveryState{Revision: 3,
+		Works:  []recovery.DeliveryWork{{WorkID: "work", Origin: recovery.DeliveryWorkUser, Outcome: recovery.DeliveryWorkActive}},
 		Inputs: []recovery.PendingInput{{InputID: "input", WorkID: "work", Stage: recovery.PendingInputStageStarted}},
 	}
-	if err := a.applyDeliveryControl(&QueueControl{Action: InputQueueResume, ExpectedQueueRevision: 3}, state); err != nil {
-		t.Fatal(err)
-	}
-	if len(state.Inputs) != 0 {
-		t.Fatalf("resume retained %d consumed unknown inputs", len(state.Inputs))
+	a.settleDeliveryWork("work", recovery.DeliveryWorkUnknown)
+	finishDeliveryWrites(t, a)
+	if len(a.delivery.committed.Inputs) != 0 {
+		t.Fatalf("settle retained %d consumed unknown inputs", len(a.delivery.committed.Inputs))
 	}
 }
 
@@ -32,11 +30,10 @@ func TestInputDeliveryReconciledClaimRequiresStartPermit(t *testing.T) {
 	a.newTurn(work)
 	a.delivery.owner = a.currentRecoveryOwnership()
 	state := &recovery.InputDeliveryState{Revision: 3,
-		Gate:   recovery.FollowupGate{Mode: recovery.FollowupGateRunning, WaitingWorkID: work},
 		Works:  []recovery.DeliveryWork{{WorkID: work, Origin: recovery.DeliveryWorkUser, Outcome: recovery.DeliveryWorkActive}},
 		Inputs: []recovery.PendingInput{{InputID: "input", WorkID: work, Stage: recovery.PendingInputStageClaimed, DeliveryPolicy: recovery.InputDeliveryNextRequest}},
 	}
-	a.delivery.committed = recovery.ReconcileInputDelivery(state, []message.Message{{Role: message.RoleUser, InputID: "input", Content: "sample"}})
+	a.delivery.committed = recovery.ReconcileInputDelivery(state, []message.Message{{Role: message.RoleUser, InputID: "input", Content: "sample"}}, "")
 	if !a.prepareDeliveryRequest(context.Background(), a.turn.ID, "") {
 		t.Fatal("request gate allows claimed input without durable start permit")
 	}
@@ -63,7 +60,7 @@ func TestInputDeliveryPermitRecoveryBeforeDispatch(t *testing.T) {
 			a.delivery.permit = a.newDeliveryPermit([]string{id}, work, a.WorkDirSnapshot(), a.turn.ID, a.turn.Epoch, a.delivery.cancelGeneration.Load())
 			a.delivery.persistenceError = fmt.Errorf("sample permit write failure")
 			a.delivery.request = &deliveryRequest{turnID: a.turn.ID, turnEpoch: a.turn.Epoch}
-			runDeliveryOperation(t, a, &deliveryOperation{control: &QueueControl{OperationID: "pause", Target: a.InputDeliveryTarget(), Action: InputQueuePause, ExpectedQueueRevision: a.delivery.committed.Revision}})
+			runDeliveryOperation(t, a, &deliveryOperation{control: &QueueControl{OperationID: "clear", Target: a.InputDeliveryTarget(), Action: InputQueueClear, ExpectedQueueRevision: a.delivery.committed.Revision}})
 			finishDeliveryWrites(t, a)
 			waitForBlockingStreamProviderCalls(t, p, 1)
 			disk, err := a.recoveryManager().LoadInputDelivery()

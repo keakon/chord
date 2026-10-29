@@ -336,13 +336,9 @@ func (a *MainAgent) freezeSessionPause(cmd *sessionPauseCommand) {
 	a.pause.capturing = true
 	a.delivery.cancelGeneration.Add(1)
 	if a.delivery.committed != nil || a.delivery.inflight != nil || len(a.delivery.pending) > 0 {
-		op := &deliveryOperation{}
-		op.mutate = func(queue *recovery.InputDeliveryState) error {
-			if queue.Gate.Mode == recovery.FollowupGateRunning {
-				queue.Gate.Mode, queue.Gate.Reason = recovery.FollowupGatePaused, recovery.FollowupSessionPaused
-			}
-			return nil
-		}
+		// The barrier serializes this capture behind every pending delivery
+		// operation, so the paused checkpoint sees a settled queue.
+		op := &deliveryOperation{barrier: true}
 		op.finish = func() { a.captureInitialDeliveryPause(cmd, state.FrozenAt) }
 		op.failed = func(err error) { a.pause.capturing = false; a.failSessionPauseSave(err); cmd.result <- err }
 		a.delivery.pending = append(a.delivery.pending, op)

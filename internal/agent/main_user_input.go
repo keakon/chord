@@ -120,7 +120,9 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 		return
 	}
 
-	a.delivery.restoredNextInputsBlocked = false
+	// This message is the user's explicit re-engagement: restored inputs it
+	// is queued behind may run now.
+	a.releaseRestoredHold()
 	if a.delivery.inflight != nil || len(a.delivery.pending) > 0 || a.delivery.persistenceError != nil || a.deliveryHasRunnableQueue() {
 		a.handleDeliveryOperation(&deliveryOperation{userIntentApplied: true, inputID: inputID, acceptedOrder: acceptedOrder, submit: &SubmitInput{OperationID: makeRequestID(), RequestID: requestID, Target: a.InputDeliveryTarget(), DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: content, Parts: parts}})
 		return

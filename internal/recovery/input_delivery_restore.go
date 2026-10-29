@@ -19,9 +19,13 @@ import (
 // Retiring a claimed row would erase the evidence prepareInputDeliveryRequest
 // uses to refuse a live turn that lost its execution permit — turning "permit
 // unknown" into "nothing to deliver" — and a started row is the durable record
-// of an interrupted work whose outcome is unknown. Skipping consumed work is
-// the explicit queue resume's job; settlement retires rows on its own path.
-func ReconcileInputDelivery(state *InputDeliveryState, transcript []message.Message) *InputDeliveryState {
+// of an interrupted work whose outcome is unknown. Settlement retires rows on
+// its own path once the continued work settles.
+//
+// liveWorkID names the work of a turn still running in this process (a reload
+// after storage recovery happens mid-turn); it stays active. Every other work
+// recorded as active belongs to a turn that died.
+func ReconcileInputDelivery(state *InputDeliveryState, transcript []message.Message, liveWorkID string) *InputDeliveryState {
 	out := state.Clone()
 	if out == nil {
 		return nil
@@ -31,9 +35,6 @@ func ReconcileInputDelivery(state *InputDeliveryState, transcript []message.Mess
 		if msg.InputID != "" {
 			present[msg.InputID] = true
 		}
-	}
-	if out.Gate.Mode == FollowupGateRunning {
-		out.Gate.Mode, out.Gate.Reason = FollowupGatePaused, FollowupRestored
 	}
 	for i := range out.Inputs {
 		input := &out.Inputs[i]
@@ -46,13 +47,18 @@ func ReconcileInputDelivery(state *InputDeliveryState, transcript []message.Mess
 		case PendingInputStageStarted:
 			for j := range out.Works {
 				work := &out.Works[j]
-				if work.WorkID == input.WorkID && work.Outcome == DeliveryWorkActive {
+				if work.WorkID == input.WorkID && work.WorkID != liveWorkID && work.Outcome == DeliveryWorkActive {
 					work.Outcome = DeliveryWorkUnknown
-					if out.Gate.Reason == FollowupRestored {
-						out.Gate.Reason = FollowupOutcomeUnknown
-					}
 				}
 			}
+		}
+	}
+	// A work still recorded as active that is not the live turn's belongs to a
+	// turn that died: it will never settle, and waits pinned to it must read as
+	// unresolved, not as forever-pending.
+	for j := range out.Works {
+		if out.Works[j].Outcome == DeliveryWorkActive && out.Works[j].WorkID != liveWorkID {
+			out.Works[j].Outcome = DeliveryWorkUnknown
 		}
 	}
 	out.Inputs = slices.DeleteFunc(out.Inputs, func(input PendingInput) bool {
@@ -63,15 +69,8 @@ func ReconcileInputDelivery(state *InputDeliveryState, transcript []message.Mess
 		if input.WorkID != "" {
 			referenced[input.WorkID] = true
 		}
-	}
-	if out.Gate.WaitingWorkID != "" {
-		for _, work := range out.Works {
-			if work.WorkID == out.Gate.WaitingWorkID && (work.Outcome != DeliveryWorkActive || referenced[work.WorkID]) {
-				referenced[work.WorkID] = true
-			}
-		}
-		if !referenced[out.Gate.WaitingWorkID] {
-			out.Gate.WaitingWorkID = ""
+		if input.WaitWorkID != "" {
+			referenced[input.WaitWorkID] = true
 		}
 	}
 	out.Works = slices.DeleteFunc(out.Works, func(work DeliveryWork) bool { return !referenced[work.WorkID] })

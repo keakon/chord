@@ -17,7 +17,6 @@ func deliveryFixture(t *testing.T) (*RecoveryManager, *InputDeliveryState) {
 	manager := NewRecoveryManager(dir)
 	t.Cleanup(func() { _ = manager.Close() })
 	return manager, &InputDeliveryState{SessionID: filepath.Base(dir), Revision: 1, NextSequence: 1,
-		Gate:   FollowupGate{Mode: FollowupGateRunning},
 		Inputs: []PendingInput{{InputID: "input-1", OwnerTaskID: identity.MainAgentID, Sequence: 1, Revision: 1, Stage: PendingInputStageQueued, DeliveryPolicy: InputDeliveryAfterCompletion, Content: "sample input"}},
 	}
 }
@@ -64,10 +63,14 @@ func TestInputDeliveryValidation(t *testing.T) {
 		"duplicate hold": func(s *InputDeliveryState) { s.EditHolds = []string{"input-1", "input-1"} },
 		"work":           func(s *InputDeliveryState) { s.Inputs[0].Stage = PendingInputStageClaimed },
 		"queued work":    func(s *InputDeliveryState) { s.Inputs[0].WorkID = "work-1" },
-		"gate work":      func(s *InputDeliveryState) { s.Gate.WaitingWorkID = "work-1" },
-		"running reason": func(s *InputDeliveryState) { s.Gate.Reason = FollowupUserPaused },
-		"paused reason":  func(s *InputDeliveryState) { s.Gate.Mode = FollowupGatePaused },
-		"size":           func(s *InputDeliveryState) { s.Inputs[0].Content = strings.Repeat("x", InputDeliveryMaxTextBytes+1) },
+		"wait work":      func(s *InputDeliveryState) { s.Inputs[0].WaitWorkID = "work-1" },
+		"claimed wait": func(s *InputDeliveryState) {
+			s.Inputs[0].Stage = PendingInputStageClaimed
+			s.Inputs[0].WorkID = "work-1"
+			s.Works = []DeliveryWork{{WorkID: "work-1", Origin: DeliveryWorkFollowup, Outcome: DeliveryWorkActive}}
+			s.Inputs[0].WaitWorkID = "work-1"
+		},
+		"size": func(s *InputDeliveryState) { s.Inputs[0].Content = strings.Repeat("x", InputDeliveryMaxTextBytes+1) },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -135,18 +138,14 @@ func TestInputDeliveryReconcileCrashWindows(t *testing.T) {
 				if stage != PendingInputStageQueued {
 					state.Inputs[0].WorkID = "work-1"
 					state.Works = []DeliveryWork{{WorkID: "work-1", Origin: DeliveryWorkFollowup, Outcome: DeliveryWorkActive}}
-					state.Gate.WaitingWorkID = "work-1"
 				}
 				var transcript []message.Message
 				if present {
 					transcript = []message.Message{{Role: message.RoleUser, InputID: "input-1"}}
 				}
-				restored := ReconcileInputDelivery(state, transcript)
+				restored := ReconcileInputDelivery(state, transcript, "")
 				if err := ValidateInputDelivery(restored, filepath.Base(manager.sessionDir)); err != nil {
 					t.Fatal(err)
-				}
-				if restored.Gate.Mode != FollowupGatePaused {
-					t.Fatal("restore granted execution")
 				}
 				if stage == PendingInputStageQueued && present {
 					if len(restored.Inputs) != 0 {
@@ -267,13 +266,12 @@ func TestInputDeliveryTranscriptRequestIdentity(t *testing.T) {
 	}
 }
 
-func TestInputDeliveryPreservesPauseReasonAndHold(t *testing.T) {
+func TestInputDeliveryReconcileKeepsEditHold(t *testing.T) {
 	_, state := deliveryFixture(t)
-	state.Gate = FollowupGate{Mode: FollowupGatePaused, Reason: FollowupUserPaused}
 	state.EditHolds = []string{"input-1"}
-	restored := ReconcileInputDelivery(state, nil)
-	if restored.Gate.Reason != FollowupUserPaused || len(restored.EditHolds) != 1 {
-		t.Fatal("restore lost pause or edit hold")
+	restored := ReconcileInputDelivery(state, nil, "")
+	if len(restored.EditHolds) != 1 {
+		t.Fatal("restore lost edit hold")
 	}
 	restored.Inputs[0].Content = "replacement"
 	restored.EditHolds[0] = "changed"
@@ -358,7 +356,7 @@ func TestInputDeliveryQueueOnlySessionIsDiscoverable(t *testing.T) {
 	}
 	manager := NewRecoveryManager(dir)
 	defer manager.Close()
-	state := &InputDeliveryState{SessionID: "queue-only", Revision: 1, NextSequence: 1, Gate: FollowupGate{Mode: FollowupGatePaused, Reason: FollowupUserPaused}, Inputs: []PendingInput{{InputID: "input", OwnerTaskID: identity.MainAgentID, Revision: 1, Sequence: 1, Stage: PendingInputStageQueued, DeliveryPolicy: InputDeliveryAfterCompletion, Content: "sample"}}}
+	state := &InputDeliveryState{SessionID: "queue-only", Revision: 1, NextSequence: 1, Inputs: []PendingInput{{InputID: "input", OwnerTaskID: identity.MainAgentID, Revision: 1, Sequence: 1, Stage: PendingInputStageQueued, DeliveryPolicy: InputDeliveryAfterCompletion, Content: "sample"}}}
 	if _, err := manager.SaveInputDelivery(0, state); err != nil {
 		t.Fatal(err)
 	}
@@ -368,5 +366,25 @@ func TestInputDeliveryQueueOnlySessionIsDiscoverable(t *testing.T) {
 	}
 	if candidates := RecentSessionCandidates(root, ""); len(candidates) != 1 || candidates[0] != dir {
 		t.Fatalf("candidates=%v", candidates)
+	}
+}
+
+// A reload after storage recovery happens while a turn is still running: its
+// work must stay active so its settlement can still retire its rows.
+func TestReconcileInputDeliveryKeepsLiveWorkActive(t *testing.T) {
+	state := &InputDeliveryState{SessionID: "s", Revision: 1, Works: []DeliveryWork{
+		{WorkID: "live", Origin: DeliveryWorkUser, Outcome: DeliveryWorkActive},
+		{WorkID: "dead", Origin: DeliveryWorkUser, Outcome: DeliveryWorkActive},
+	}, Inputs: []PendingInput{
+		{InputID: "a", Stage: PendingInputStageStarted, WorkID: "live"},
+		{InputID: "b", Stage: PendingInputStageStarted, WorkID: "dead"},
+	}}
+	out := ReconcileInputDelivery(state, nil, "live")
+	outcomes := map[string]string{}
+	for _, work := range out.Works {
+		outcomes[work.WorkID] = work.Outcome
+	}
+	if outcomes["live"] != DeliveryWorkActive || outcomes["dead"] != DeliveryWorkUnknown {
+		t.Fatalf("outcomes = %v, want live active and dead unknown", outcomes)
 	}
 }

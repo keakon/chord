@@ -54,12 +54,11 @@ func (m *Model) submitManagedDraft(draft queuedDraft) tea.Cmd {
 	draft.DeliveryManaged = true
 	draft.DeliveryStatus = "Saving"
 	target := m.agent.InputDeliveryTarget()
-	if editing := m.inputQueue.editing; editing != nil {
-		draft.DeliveryPolicy = editing.DeliveryPolicy
-	}
 	op := m.nextInputQueueOperation(inputQueueAction{draft: draft, kind: "submit"})
 	var admitted bool
 	if editing := m.inputQueue.editing; editing != nil {
+		// Saving an edit keeps the row's policy whichever key submitted it;
+		// the queue panel's n/a keys are the explicit way to switch it.
 		draft.DeliveryPolicy = editing.DeliveryPolicy
 		admitted = m.agent.UpdateQueuedInput(agent.UpdateInput{OperationID: op, Target: target, InputID: editing.InputID, ExpectedRevision: editing.Revision, DeliveryPolicy: draft.DeliveryPolicy, Content: new(draft.Content), Parts: draft.contentParts()})
 	} else {
@@ -119,15 +118,22 @@ func (m *Model) applyInputQueueSnapshot(snapshot *agent.InputQueueSnapshot) {
 			draft.DeliveryManaged, draft.Mirrored = true, true
 			draft.DeliveryPolicy, draft.DeliveryStage = input.DeliveryPolicy, input.Stage
 			draft.EditHeld = slices.Contains(snapshot.State.EditHolds, input.InputID)
-			draft.DeliveryRunnable = input.Stage == recovery.PendingInputStageQueued && !draft.EditHeld && snapshot.Blocked == "" && (input.DeliveryPolicy == recovery.InputDeliveryNextRequest && !snapshot.RestoredNextInputsBlocked || input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion && snapshot.State.Gate.Mode == recovery.FollowupGateRunning)
+			draft.DeliveryRunnable = input.Stage == recovery.PendingInputStageQueued && !draft.EditHeld && snapshot.Blocked == ""
 			draft.DeliveryStatus = "Next request"
 			if input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion {
 				draft.DeliveryStatus = "After completion"
+				if reason := afterCompletionWaitReason(snapshot.State, input); reason != "" {
+					draft.DeliveryStatus += " · Waiting: " + reason
+					draft.DeliveryRunnable = false
+				}
+			}
+			if snapshot.RestoredHeld && input.Stage == recovery.PendingInputStageQueued {
+				draft.DeliveryStatus += " · Restored: continue or send a message to run it"
+				draft.DeliveryRunnable = false
 			}
 			if snapshot.Blocked != "" {
 				draft.DeliveryStatus += " · Blocked: " + snapshot.Blocked
-			} else if snapshot.State.Gate.Mode == recovery.FollowupGatePaused && input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion {
-				draft.DeliveryStatus += " · Paused: " + snapshot.State.Gate.Reason
+				draft.DeliveryRunnable = false
 			}
 			if draft.EditHeld {
 				draft.DeliveryStatus += " · Editing"
@@ -198,29 +204,28 @@ func (m *Model) handleInputQueueResult(result agent.InputQueueOperationResultEve
 		}
 	}
 	m.applyInputQueueSnapshot(m.agent.InputQueueSnapshot())
-	if action.kind == "release" && m.followupGatePaused() || action.kind == "submit" && m.submittedInputWaitsForResume(action) {
-		return m.enqueueToast("Queue remains paused; use /queue resume when ready", "info")
-	}
 	return nil
 }
 
-// submittedInputWaitsForResume reports whether the input just committed cannot
-// start because the follow-up gate is paused. Ordinary (next-request) inputs
-// bypass the gate, so a paused gate is not news for them; announcing it on
-// every send made an idle session look blocked while the message ran normally.
-func (m *Model) submittedInputWaitsForResume(action inputQueueAction) bool {
-	if action.draft.DeliveryPolicy != recovery.InputDeliveryAfterCompletion {
-		return false
+// afterCompletionWaitReason names why a queued after-completion input has not
+// fired yet: the work it waits behind is still running, or settled without
+// success and no newer work has started. An empty result means the input
+// fires at the next idle.
+func afterCompletionWaitReason(state *recovery.InputDeliveryState, input recovery.PendingInput) string {
+	switch state.AfterCompletionWait(input) {
+	case "", recovery.DeliveryWorkCompleted:
+		return ""
+	case recovery.DeliveryWorkActive:
+		return "task in progress"
+	case recovery.DeliveryWorkFailed:
+		return "last task failed; send a message to run it next"
+	case recovery.DeliveryWorkCancelled:
+		return "last task cancelled; send a message to run it next"
+	default:
+		// Unknown is unreachable like failed/cancelled: the next turn
+		// re-points the wait, so the remedy is the same.
+		return "last task outcome unknown; send a message to run it next"
 	}
-	return m.followupGatePaused()
-}
-
-// followupGatePaused reports whether the live queue snapshot still holds the
-// follow-up gate. A release normalizes the gate, so the state observed when
-// the operation started cannot decide whether the pause notice is stale.
-func (m *Model) followupGatePaused() bool {
-	snapshot := m.inputQueue.snapshot
-	return snapshot != nil && snapshot.State != nil && snapshot.State.Gate.Mode == recovery.FollowupGatePaused
 }
 
 func (m *Model) editManagedDraft(draft queuedDraft) tea.Cmd {
@@ -309,7 +314,7 @@ func (m *Model) handleInputQueueCommand(content string) tea.Cmd {
 		op := m.nextInputQueueOperation(inputQueueAction{draft: draft, kind: "policy"})
 		m.agent.UpdateQueuedInput(agent.UpdateInput{OperationID: op, Target: m.agent.InputDeliveryTarget(), InputID: draft.InputID, ExpectedRevision: draft.Revision, DeliveryPolicy: policy})
 	} else {
-		if action != agent.InputQueuePause && action != agent.InputQueueResume && action != agent.InputQueueClear {
+		if action != agent.InputQueueClear {
 			return m.enqueueToast("Unknown queue action", "warn")
 		}
 		revision := uint64(0)
@@ -338,10 +343,6 @@ func (m *Model) handleInputQueueKey(msg tea.KeyMsg) tea.Cmd {
 	case "down", "j":
 		m.inputQueue.cursor = min(max(0, len(drafts)-1), m.inputQueue.cursor+1)
 		return nil
-	case "p":
-		return m.handleInputQueueCommand("/queue pause")
-	case "r":
-		return m.handleInputQueueCommand("/queue resume")
 	case "c":
 		return m.handleInputQueueCommand("/queue clear")
 	case "x":
@@ -387,9 +388,6 @@ func (m *Model) renderInputQueuePanel() string {
 		if snapshot.Blocked != "" {
 			lines = append(lines, "Storage blocked: "+snapshot.Blocked)
 		}
-		if snapshot.State != nil && snapshot.State.Gate.Mode == recovery.FollowupGatePaused {
-			lines = append(lines, "Paused: "+snapshot.State.Gate.Reason+" · /queue resume")
-		}
 	}
 	start := max(0, m.inputQueue.cursor-max(1, m.height-10)/2)
 	for i := start; i < min(len(drafts), start+max(1, m.height-10)); i++ {
@@ -403,7 +401,7 @@ func (m *Model) renderInputQueuePanel() string {
 	if len(drafts) == 0 {
 		lines = append(lines, "No queued inputs")
 	}
-	cfg := OverlayConfig{Title: "Input queue", MaxWidth: width, MinContentHeight: 1, Hint: "Enter edit · d delete · w withdraw · n next · a after · p pause · r resume · c clear · x cancel edit · Esc close"}
+	cfg := OverlayConfig{Title: "Input queue", MaxWidth: width, MinContentHeight: 1, Hint: "Enter edit · d delete · w withdraw · n next · a after · c clear · x cancel edit · Esc close"}
 	out, _ := RenderOverlay(cfg, strings.Join(lines, "\n"), image.Rect(0, 0, m.width, m.height))
 	return out
 }

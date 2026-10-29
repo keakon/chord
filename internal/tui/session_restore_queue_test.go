@@ -42,7 +42,6 @@ func restoredQueueSnapshot(target agent.InputTarget, inputs []recovery.PendingIn
 		State: &recovery.InputDeliveryState{
 			SessionID: target.SessionID,
 			Revision:  1,
-			Gate:      recovery.FollowupGate{Mode: recovery.FollowupGatePaused, Reason: recovery.FollowupRestored},
 			Inputs:    inputs,
 		},
 	}

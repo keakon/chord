@@ -393,7 +393,7 @@ func (a *MainAgent) handleContinueFromContext(workID string) {
 		a.emitLoopStateChanged()
 	}
 	if workID == "" {
-		a.delivery.restoredNextInputsBlocked = false
+		a.releaseRestoredHold()
 		workID = a.newDeliveryWork(recovery.DeliveryWorkContext)
 		a.adoptConsumedDeliveryInputs(workID)
 	}

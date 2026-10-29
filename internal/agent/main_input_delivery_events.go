@@ -92,7 +92,10 @@ func (a *MainAgent) handleDeliveryOperation(op *deliveryOperation) {
 			a.rejectDeliveryOperation(op, InputQueueRejected, fmt.Errorf("this command cannot run after completion; the draft was preserved"))
 			return
 		}
-		if input.DeliveryPolicy == recovery.InputDeliveryNextRequest && !a.sessionExecutionPaused() && a.turn == nil && !a.mcpTransitionActive.Load() && !a.pendingUserDrainSuspended && a.delivery.inflight == nil && len(a.delivery.pending) == 0 && a.delivery.persistenceError == nil && !a.deliveryHasRunnableQueue() {
+		// A cancel-covered message must never start work directly: it rides the
+		// durable queue so the covered-cancel retirement keeps its receipt and
+		// transcript presentation.
+		if a.immediateDispatchEligible(op, input) {
 			if op.inputID == "" {
 				op.inputID = rand.Text()
 			}
@@ -181,22 +184,25 @@ func (a *MainAgent) handleDeliveryOperation(op *deliveryOperation) {
 	if op.control != nil && a.delivery.persistenceError != nil && a.delivery.inflight == nil {
 		a.delivery.owner = nil
 	}
-	if op.control != nil && op.control.Action == InputQueueResume {
-		generation := a.delivery.cancelGeneration.Load()
-		op.resumeAllowed = func() bool {
-			return !a.sessionExecutionPaused() && a.delivery.cancelGeneration.Load() == generation
-		}
-	}
 	a.delivery.pending = append(a.delivery.pending, op)
 	a.startNextDeliveryOperation()
 }
 
+// immediateDispatchEligible reports whether an ordinary submit can run right
+// now as a direct user message instead of a durable queue row. Both the
+// submit path and the absent-queue re-dispatch must agree on this: a submit
+// that is not eligible has to stay durable, or the absent-queue re-dispatch
+// would loop forever between the queue and the composer.
+func (a *MainAgent) immediateDispatchEligible(op *deliveryOperation, input *SubmitInput) bool {
+	return input.DeliveryPolicy == recovery.InputDeliveryNextRequest &&
+		!a.cancelCoversAcceptedOrder(op.acceptedOrder) &&
+		!a.sessionExecutionPaused() && a.turn == nil && !a.mcpTransitionActive.Load() &&
+		!a.pendingUserDrainSuspended && a.delivery.inflight == nil &&
+		len(a.delivery.pending) == 0 && a.delivery.persistenceError == nil &&
+		!a.deliveryHasRunnableQueue()
+}
+
 func (a *MainAgent) applyDeliveryOperation(op *deliveryOperation, state *recovery.InputDeliveryState) error {
-	// Normalize before the operation so a new submit reserves its predecessor
-	// against the gate that will actually govern it, and after it so deleting
-	// or releasing the last waiting input does not leave a dead pause behind.
-	normalizeFollowupGate(state)
-	defer normalizeFollowupGate(state)
 	_, target := op.identity()
 	if target != a.InputDeliveryTarget() {
 		return fmt.Errorf("input target changed; refresh the input queue")
@@ -213,24 +219,31 @@ func (a *MainAgent) applyDeliveryOperation(op *deliveryOperation, state *recover
 			return fmt.Errorf("working directory changed; refresh the input target")
 		}
 		state.NextSequence++
-		state.Inputs = append(state.Inputs, recovery.PendingInput{InputID: op.inputID, OwnerTaskID: identity.MainAgentID, Sequence: state.NextSequence, Revision: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: input.DeliveryPolicy, WorkDir: dir.Path, WorktreeID: dir.WorktreeID, DraftID: input.DraftID, RequestID: input.RequestID, Content: input.Content, Parts: cloneContentParts(input.Parts), FromUser: true})
-		if state.Gate.Mode == recovery.FollowupGateRunning && a.delivery.currentWorkID != "" {
-			state.Gate.WaitingWorkID = a.delivery.currentWorkID
+		next := recovery.PendingInput{InputID: op.inputID, OwnerTaskID: identity.MainAgentID, Sequence: state.NextSequence, Revision: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: input.DeliveryPolicy, WorkDir: dir.Path, WorktreeID: dir.WorktreeID, DraftID: input.DraftID, RequestID: input.RequestID, Content: input.Content, Parts: cloneContentParts(input.Parts), FromUser: true}
+		// An after-completion input queued while work is running waits for that
+		// work to settle successfully; one queued while idle starts at the next
+		// idle. newTurn re-points stale waits, so the wait never gets stuck.
+		// The running work is recorded for every mid-turn submit so its settle
+		// outcome stays readable no matter which policy the input carries.
+		if a.delivery.currentWorkID != "" {
+			if input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion {
+				next.WaitWorkID = a.delivery.currentWorkID
+			}
 			ensureDeliveryWork(state, a.delivery.currentWorkID, a.delivery.currentOrigin)
 		}
-		if a.cancelCoversAcceptedOrder(op.acceptedOrder) && state.Gate.Mode == recovery.FollowupGateRunning {
-			state.Gate.Mode, state.Gate.Reason = recovery.FollowupGatePaused, recovery.FollowupPredecessorCancelled
-		}
+		state.Inputs = append(state.Inputs, next)
 	case op.update != nil:
 		update := op.update
 		input, err := deliveryInputForEdit(state, update.InputID, update.ExpectedRevision)
 		if err != nil {
 			return err
 		}
+		policyChanged := false
 		if update.DeliveryPolicy != "" {
 			if update.DeliveryPolicy != recovery.InputDeliveryNextRequest && update.DeliveryPolicy != recovery.InputDeliveryAfterCompletion {
 				return fmt.Errorf("invalid delivery policy %q", update.DeliveryPolicy)
 			}
+			policyChanged = input.DeliveryPolicy != update.DeliveryPolicy
 			input.DeliveryPolicy = update.DeliveryPolicy
 		}
 		if update.Content != nil {
@@ -244,6 +257,17 @@ func (a *MainAgent) applyDeliveryOperation(op *deliveryOperation, state *recover
 			return fmt.Errorf("this command cannot run after completion")
 		}
 		input.Revision++
+		// Editing the content keeps the wait, so an edit never starts an input
+		// that was held behind a predecessor. Switching the policy re-sets it:
+		// a next-request input never waits, and a newly after-completion input
+		// waits on whatever is running now.
+		if policyChanged {
+			input.WaitWorkID = ""
+			if input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion && a.delivery.currentWorkID != "" {
+				input.WaitWorkID = a.delivery.currentWorkID
+				ensureDeliveryWork(state, a.delivery.currentWorkID, a.delivery.currentOrigin)
+			}
+		}
 		removeDeliveryHold(state, input.InputID)
 	case op.delete != nil:
 		input, err := deliveryInputForEdit(state, op.delete.InputID, op.delete.ExpectedRevision)
@@ -287,9 +311,6 @@ func (a *MainAgent) applyDeliveryControl(control *QueueControl, state *recovery.
 				return recovery.ErrInputDeliveryConflict
 			}
 			state.EditHolds = append(state.EditHolds, input.InputID)
-			if state.Gate.Mode == recovery.FollowupGateRunning {
-				state.Gate.Mode, state.Gate.Reason = recovery.FollowupGatePaused, recovery.FollowupEditHold
-			}
 		} else {
 			if !held {
 				return recovery.ErrInputDeliveryConflict
@@ -297,44 +318,17 @@ func (a *MainAgent) applyDeliveryControl(control *QueueControl, state *recovery.
 			removeDeliveryHold(state, input.InputID)
 		}
 		input.Revision++
-	case InputQueuePause, InputQueueResume, InputQueueClear:
+	case InputQueueClear:
 		if control.ExpectedQueueRevision != state.Revision {
 			return recovery.ErrInputDeliveryConflict
 		}
-		switch control.Action {
-		case InputQueuePause:
-			state.Gate.Mode, state.Gate.Reason = recovery.FollowupGatePaused, recovery.FollowupUserPaused
-		case InputQueueClear:
-			state.Inputs = slices.DeleteFunc(state.Inputs, func(input recovery.PendingInput) bool {
-				if input.Stage == recovery.PendingInputStageQueued && input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion {
-					removeDeliveryHold(state, input.InputID)
-					return true
-				}
-				return false
-			})
-		case InputQueueResume:
-			if a.turn != nil || a.mcpTransitionActive.Load() || a.questionWaiting.Load() || len(state.EditHolds) > 0 {
-				return fmt.Errorf("wait for current work and finish editing before resuming the queue")
+		state.Inputs = slices.DeleteFunc(state.Inputs, func(input recovery.PendingInput) bool {
+			if input.Stage == recovery.PendingInputStageQueued && input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion {
+				removeDeliveryHold(state, input.InputID)
+				return true
 			}
-			dir := a.WorkDirSnapshot()
-			for _, input := range state.Inputs {
-				if input.Stage != recovery.PendingInputStageQueued {
-					continue
-				}
-				if input.DeliveryPolicy == recovery.InputDeliveryNextRequest {
-					return fmt.Errorf("ordinary inputs must be processed first")
-				}
-				if input.WorkDir != dir.Path || input.WorktreeID != dir.WorktreeID {
-					return fmt.Errorf("return to the queued input's working directory before resuming")
-				}
-			}
-			// Explicit resume skips already-consumed work; its transcript and
-			// unknown outcome are not rewritten as successful completion.
-			state.Inputs = slices.DeleteFunc(state.Inputs, func(input recovery.PendingInput) bool {
-				return input.Stage != recovery.PendingInputStageQueued
-			})
-			state.Gate = recovery.FollowupGate{Mode: recovery.FollowupGateRunning}
-		}
+			return false
+		})
 	default:
 		return fmt.Errorf("invalid input queue action %q", control.Action)
 	}
@@ -354,16 +348,7 @@ func ensureDeliveryWork(state *recovery.InputDeliveryState, id, origin string) {
 }
 
 func (a *MainAgent) deliveryHasRunnableQueue() bool {
-	state := a.delivery.committed
-	if state == nil {
-		return false
-	}
-	for _, input := range state.Inputs {
-		if input.Stage == recovery.PendingInputStageQueued && (input.DeliveryPolicy == recovery.InputDeliveryNextRequest || state.Gate.Mode == recovery.FollowupGateRunning) {
-			return true
-		}
-	}
-	return false
+	return len(a.runnableDeliveryInputs(true)) > 0
 }
 
 func deliveryIntentTextBytes(op *deliveryOperation) int {

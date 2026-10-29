@@ -10,7 +10,7 @@
 {"type":"send","request_id":"request-1","content":"Check the documentation","delivery_policy":"after_completion"}
 ```
 
-`ready`, `ready_paused`, `session_switched`, and `status_response` can carry `input_queue`. A missing/null projection is unknown; an empty `inputs` array is a confirmed empty queue. Subscribe to `input_queue_changed` for updates. Its projection contains runtime/session identity, `view_version`, `view_version_cas`, `queue_revision`, the gate, work outcomes, and up to 128 input summaries with previews limited to 160 Unicode characters and attachment counts. Binary data and attachment paths are omitted. Compare runtime/session identity first, then `view_version`; `queue_revision` is for durable compare-and-swap and can remain unchanged during a storage-error update. `view_version_cas: true` advertises that the server checks view-bound operations against this version.
+`ready`, `ready_paused`, `session_switched`, and `status_response` can carry `input_queue`. A missing/null projection is unknown; an empty `inputs` array is a confirmed empty queue. Subscribe to `input_queue_changed` for updates. Its projection contains runtime/session identity, `view_version`, `view_version_cas`, `queue_revision`, work outcomes, and up to 128 input summaries with previews limited to 160 Unicode characters and attachment counts. Binary data and attachment paths are omitted. Compare runtime/session identity first, then `view_version`; `queue_revision` is for durable compare-and-swap and can remain unchanged during a storage-error update. `view_version_cas: true` advertises that the server checks view-bound operations against this version. `restored_held: true` means the inputs came back with a restored session and none of them starts until the user continues or sends a new input.
 
 Send `input_queue` operations with a unique `operation_id`, current `binding_id` where required, and the complete `target` from the projection: `runtime_id`, `session_id`, `session_epoch`, `owner_task_id`, and `work_dir_generation`. The target owner must be `main`. Include the nonzero `expected_view_version` when an operation must apply only to the displayed projection. A stale version returns `conflict` without applying the operation. Chord checks the version both when headless receives the command and when MainAgent processes it; durable mutations also compare their item or queue revision before saving. Responses use `input_queue_result` regardless of event subscriptions, with `committed`, `rejected`, `conflict`, or `unknown`, and current revisions.
 
@@ -19,9 +19,9 @@ Send `input_queue` operations with a unique `operation_id`, current `binding_id`
 | `get` | `input_id`; returns full text and attachment count |
 | `update` | `input_id`, `expected_revision`; optional `content` and/or `delivery_policy` |
 | `delete`, `hold_edit`, `release_edit` | `input_id`, `expected_revision` |
-| `pause`, `resume`, `clear` | `expected_queue_revision` |
+| `clear` | `expected_queue_revision` |
 
-Omitting `content` preserves the body and attachments. Providing it replaces the text; body edits on attachment-bearing inputs require the local TUI. Holds and edits do not automatically resume the after-completion queue. `clear` removes only unstarted after-completion inputs. Resume does not retry a failed task. ACP prompts retain ordinary next-request delivery.
+Omitting `content` preserves the body and attachments. Providing it replaces the text; body edits on attachment-bearing inputs require the local TUI. Holding or editing an input does not start it. `clear` removes only unstarted after-completion inputs. An after-completion input reports the work it waits on through its `wait_work_id`; that work's entry in `works` carries the outcome, and the input fires at the first idle after that work settles successfully. ACP prompts retain ordinary next-request delivery.
 
 ## What it is
 

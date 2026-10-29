@@ -60,11 +60,11 @@ func TestInputDeliveryDurableSubmitAndEdit(t *testing.T) {
 		t.Fatalf("edit: %+v", edited)
 	}
 	snapshot := a.InputQueueSnapshot()
-	if snapshot.State.Inputs[0].Content != "replacement" || snapshot.State.Gate.Mode != recovery.FollowupGateRunning || len(snapshot.State.EditHolds) != 0 {
+	if snapshot.State.Inputs[0].Content != "replacement" || len(snapshot.State.EditHolds) != 0 {
 		t.Fatalf("edited snapshot: %+v", snapshot)
 	}
-	// Releasing the hold restores the interrupted gate, but the follow-up still
-	// waits for the work it was queued behind.
+	// The edit kept the after-completion policy, so the follow-up still waits
+	// for the work it was queued behind to settle.
 	if ids := selectDeliveryInputs(snapshot.State, true); len(ids) != 0 {
 		t.Fatalf("edited follow-up ran before its predecessor settled: %v", ids)
 	}
@@ -135,7 +135,7 @@ func TestInputDeliveryRejectsStaleViewForAllOperationKinds(t *testing.T) {
 		{"immediate submit", &deliveryOperation{submit: &SubmitInput{ExpectedViewVersion: staleView, OperationID: "stale-immediate", Target: target, DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: "now"}}},
 		{"update", &deliveryOperation{update: &UpdateInput{ExpectedViewVersion: staleView, OperationID: "stale-update", Target: target, InputID: queued.InputID, ExpectedRevision: revision, Content: &content}}},
 		{"delete", &deliveryOperation{delete: &DeleteInput{ExpectedViewVersion: staleView, OperationID: "stale-delete", Target: target, InputID: queued.InputID, ExpectedRevision: revision}}},
-		{"pause", &deliveryOperation{control: &QueueControl{ExpectedViewVersion: staleView, OperationID: "stale-pause", Target: target, Action: InputQueuePause, ExpectedQueueRevision: queueRevision}}},
+		{"clear", &deliveryOperation{control: &QueueControl{ExpectedViewVersion: staleView, OperationID: "stale-clear", Target: target, Action: InputQueueClear, ExpectedQueueRevision: queueRevision}}},
 		{"hold edit", &deliveryOperation{control: &QueueControl{ExpectedViewVersion: staleView, OperationID: "stale-hold", Target: target, Action: InputQueueHoldEdit, InputID: queued.InputID, ExpectedRevision: revision}}},
 	}
 	for _, tc := range operations {
@@ -150,7 +150,7 @@ func TestInputDeliveryRejectsStaleViewForAllOperationKinds(t *testing.T) {
 		})
 	}
 	state := a.InputQueueSnapshot().State
-	if state.Revision != queueRevision || len(state.Inputs) != 1 || state.Inputs[0].Content != "queued" || state.Gate.Mode != recovery.FollowupGateRunning || len(state.EditHolds) != 0 {
+	if state.Revision != queueRevision || len(state.Inputs) != 1 || state.Inputs[0].Content != "queued" || len(state.EditHolds) != 0 {
 		t.Fatalf("stale operation mutated queue: %+v", state)
 	}
 }

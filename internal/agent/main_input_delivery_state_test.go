@@ -11,9 +11,13 @@ func TestInputDeliverySelection(t *testing.T) {
 	queued := func(id string, seq int64, policy recovery.InputDeliveryPolicy) recovery.PendingInput {
 		return recovery.PendingInput{InputID: id, Sequence: seq, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: policy}
 	}
-	state := &recovery.InputDeliveryState{Gate: recovery.FollowupGate{Mode: recovery.FollowupGateRunning, WaitingWorkID: "work-a"},
-		Works:  []recovery.DeliveryWork{{WorkID: "work-a", Outcome: recovery.DeliveryWorkActive}},
-		Inputs: []recovery.PendingInput{queued("b", 1, recovery.InputDeliveryAfterCompletion), queued("d", 2, recovery.InputDeliveryNextRequest), queued("c", 3, recovery.InputDeliveryAfterCompletion)},
+	waiting := func(id string, seq int64) recovery.PendingInput {
+		input := queued(id, seq, recovery.InputDeliveryAfterCompletion)
+		input.WaitWorkID = "work-a"
+		return input
+	}
+	state := &recovery.InputDeliveryState{Works: []recovery.DeliveryWork{{WorkID: "work-a", Outcome: recovery.DeliveryWorkActive}},
+		Inputs: []recovery.PendingInput{waiting("b", 1), queued("d", 2, recovery.InputDeliveryNextRequest), waiting("c", 3)},
 	}
 	if got := selectDeliveryInputs(state, true); !reflect.DeepEqual(got, []string{"d"}) {
 		t.Fatalf("ordinary priority: %v", got)
@@ -31,9 +35,10 @@ func TestInputDeliverySelection(t *testing.T) {
 	if got := selectDeliveryInputs(state, true); !reflect.DeepEqual(got, []string{"b"}) {
 		t.Fatalf("serial followup: %v", got)
 	}
-	state.Gate.Mode = recovery.FollowupGatePaused
-	if got := selectDeliveryInputs(state, true); len(got) != 0 {
-		t.Fatalf("paused gate bypassed: %v", got)
+	// A follow-up queued while nothing ran never inherits an older failure.
+	state.Inputs[0].WaitWorkID = ""
+	if got := selectDeliveryInputs(state, true); !reflect.DeepEqual(got, []string{"b"}) {
+		t.Fatalf("idle-deposit followup blocked: %v", got)
 	}
 }
 

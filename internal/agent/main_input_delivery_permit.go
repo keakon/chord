@@ -14,7 +14,7 @@ func (a *MainAgent) retryDeliveryPermit() bool {
 	if permit == nil {
 		return false
 	}
-	if !permit.resumeAllowed() {
+	if !permit.resumePermitted() {
 		a.delivery.permit = nil
 		a.delivery.request = nil
 		return true
@@ -26,12 +26,12 @@ func (a *MainAgent) retryDeliveryPermit() bool {
 
 func (a *MainAgent) newDeliveryPermit(ids []string, workID string, dir WorkDirSnapshot, turnID, turnEpoch, cancelGeneration uint64) *deliveryOperation {
 	permit := &deliveryOperation{syncTranscript: true}
-	permit.resumeAllowed = func() bool {
+	permit.resumePermitted = func() bool {
 		currentDir := a.WorkDirSnapshot()
 		return !a.sessionExecutionPaused() && !a.delivery.navigation && !a.shuttingDown.Load() && a.turn != nil && a.turn.ID == turnID && a.turn.Epoch == turnEpoch && a.turn.Ctx.Err() == nil && a.delivery.cancelGeneration.Load() == cancelGeneration && currentDir.Path == dir.Path && currentDir.WorktreeID == dir.WorktreeID
 	}
 	permit.mutate = func(state *recovery.InputDeliveryState) error {
-		if !permit.resumeAllowed() {
+		if !permit.resumePermitted() {
 			return recovery.ErrInputDeliveryConflict
 		}
 		// A failed permit callback never dispatched the request, including when

@@ -66,10 +66,7 @@ func (a *MainAgent) prepareInputDeliveryRequest(pending deliveryRequest) bool {
 			}
 		}
 	}
-	if a.delivery.restoredNextInputsBlocked {
-		return false
-	}
-	ids := selectDeliveryInputs(a.delivery.committed, false)
+	ids := a.runnableDeliveryInputs(false)
 	if len(ids) == 0 {
 		return false
 	}
@@ -112,16 +109,9 @@ func (a *MainAgent) advanceInputDelivery() {
 	if a.turn != nil || a.pendingUserDrainSuspended || a.pendingHandoff != nil || a.delivery.navigation || a.sessionExecutionPaused() || a.shuttingDown.Load() || a.mcpTransitionActive.Load() || a.questionWaiting.Load() || a.IsCompactionRunning() || a.delivery.persistenceError != nil || a.delivery.inflight != nil || len(a.delivery.pending) > 0 {
 		return
 	}
-	ids := selectDeliveryInputs(a.delivery.committed, true)
+	ids := a.runnableDeliveryInputs(true)
 	if len(ids) == 0 {
 		return
-	}
-	if a.delivery.restoredNextInputsBlocked {
-		for _, input := range a.delivery.committed.Inputs {
-			if slices.Contains(ids, input.InputID) && input.DeliveryPolicy == recovery.InputDeliveryNextRequest {
-				return
-			}
-		}
 	}
 	a.claimDeliveryInputs(ids, true)
 }
@@ -137,16 +127,6 @@ func (a *MainAgent) claimDeliveryInputs(ids []string, newTurn bool) {
 				a.delivery.environmentError = "Queued input belongs to another working directory: " + input.WorkDir
 				a.publishInputDelivery()
 				a.emitToTUI(ToastEvent{Message: a.delivery.environmentError, Level: "warn"})
-			}
-			if a.delivery.committed.Gate.Mode == recovery.FollowupGateRunning {
-				op := &deliveryOperation{mutate: func(state *recovery.InputDeliveryState) error {
-					if state.Gate.Mode == recovery.FollowupGateRunning {
-						state.Gate.Mode, state.Gate.Reason = recovery.FollowupGatePaused, recovery.FollowupWorkDirChanged
-					}
-					return nil
-				}}
-				a.delivery.pending = append(a.delivery.pending, op)
-				a.startNextDeliveryOperation()
 			}
 			return
 		}
@@ -177,12 +157,10 @@ func (a *MainAgent) claimDeliveryInputs(ids []string, newTurn bool) {
 				return fmt.Errorf("queued input belongs to another working directory")
 			}
 			input.Stage, input.WorkID = recovery.PendingInputStageClaimed, workID
+			input.WaitWorkID = ""
 			input.Revision++
 		}
 		ensureDeliveryWork(state, workID, origin)
-		if state.Gate.Mode == recovery.FollowupGateRunning {
-			state.Gate.WaitingWorkID = workID
-		}
 		return nil
 	}
 	op.finish = func() {
@@ -260,9 +238,6 @@ func (a *MainAgent) retireCoveredDeliveryInputs(ids []string) bool {
 				input.Stage, input.WorkID = recovery.PendingInputStageClaimed, workID
 				input.Revision++
 			}
-		}
-		if state.Gate.Mode == recovery.FollowupGateRunning {
-			state.Gate.Mode, state.Gate.Reason = recovery.FollowupGatePaused, recovery.FollowupPredecessorCancelled
 		}
 		return nil
 	}}

@@ -10,8 +10,8 @@ func (a *MainAgent) handleInputQueueSlash(content string) bool {
 	if len(fields) == 0 || fields[0] != "/queue" {
 		return false
 	}
-	if len(fields) != 2 || fields[1] != InputQueuePause && fields[1] != InputQueueResume && fields[1] != InputQueueClear {
-		a.emitToTUI(ToastEvent{Message: "Use /queue pause, /queue resume or /queue clear; query status for the input queue", Level: "info"})
+	if len(fields) != 2 || fields[1] != InputQueueClear {
+		a.emitToTUI(ToastEvent{Message: "Use /queue clear; query status for the input queue", Level: "info"})
 		return true
 	}
 	revision := uint64(0)

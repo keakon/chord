@@ -93,8 +93,13 @@ func TestInputDeliveryFollowupsRequireDurableCompletion(t *testing.T) {
 	if nextWork == work || nextWork == "" {
 		t.Fatal("followup reused predecessor work")
 	}
-	if ids := selectDeliveryInputs(a.delivery.committed, true); len(ids) != 0 {
-		t.Fatalf("second overtook first: %v", ids)
+	for _, input := range a.delivery.committed.Inputs {
+		if input.InputID != second {
+			continue
+		}
+		if input.Stage != recovery.PendingInputStageQueued || input.WorkID != "" {
+			t.Fatalf("second followup not queued behind the first: %+v", input)
+		}
 	}
 	a.settleDeliveryWork(nextWork, recovery.DeliveryWorkCompleted)
 	finishDeliveryWrites(t, a)
@@ -118,51 +123,36 @@ func TestInputDeliveryCancelledClaimRetainsUnappendedInput(t *testing.T) {
 	if len(state.Inputs) != 1 || state.Inputs[0].Stage != recovery.PendingInputStageQueued {
 		t.Fatalf("cancel lost reserved input: %+v", state)
 	}
-	// Cancelling the claim pauses follow-ups only while one waits behind it.
-	if state.Gate.Mode != recovery.FollowupGateRunning {
-		t.Fatalf("cancel paused a queue with no follow-up to protect: %+v", state)
-	}
 }
-func TestInputDeliveryFailurePauseSurvivesOrdinaryCompletion(t *testing.T) {
+
+// A failed turn holds the follow-up only until the user re-engages: the next
+// turn re-points the wait, and its successful settle makes the follow-up run.
+func TestInputDeliveryFailureHoldsUntilUserReengages(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
 	a.newTurn(work)
+	a.recordCommittedUserMessage(message.Message{Role: message.RoleUser, Content: "initial task"})
 	submitDeliveryForTest(t, a, "followup", recovery.InputDeliveryAfterCompletion)
 	a.settleDeliveryWork(work, recovery.DeliveryWorkFailed)
 	finishDeliveryWrites(t, a)
+	if ids := selectDeliveryInputs(a.delivery.committed, true); len(ids) != 0 {
+		t.Fatalf("followup ran behind a failed predecessor: %v", ids)
+	}
 	ordinaryWork := a.newDeliveryWork(recovery.DeliveryWorkUser)
 	a.newTurn(ordinaryWork)
-	submitDeliveryForTest(t, a, "ordinary", recovery.InputDeliveryNextRequest)
-	a.delivery.request = &deliveryRequest{turnID: a.turn.ID + 1}
-	a.claimDeliveryInputs(selectDeliveryInputs(a.delivery.committed, false), false)
 	finishDeliveryWrites(t, a)
+	if state := a.delivery.committed; state.Inputs[0].WaitWorkID != ordinaryWork {
+		t.Fatalf("new turn did not re-point the stale wait: %+v", state.Inputs[0])
+	}
 	a.settleDeliveryWork(ordinaryWork, recovery.DeliveryWorkCompleted)
 	finishDeliveryWrites(t, a)
-	if a.delivery.committed.Gate.Reason != recovery.FollowupPredecessorFailed || len(selectDeliveryInputs(a.delivery.committed, true)) != 0 {
-		t.Fatal("ordinary completion released paused followup")
+	if ids := selectDeliveryInputs(a.delivery.committed, true); len(ids) != 1 {
+		t.Fatalf("followup did not ride the next successful settle: %v", ids)
 	}
 }
 
-// A failed turn only pauses the queue to protect follow-ups queued behind it.
-// With none waiting, the pause must not outlive the failure: it would keep the
-// queue reporting itself paused and make the next follow-up wait for an
-// unexplained /queue resume.
-func TestInputDeliveryFailurePauseWithoutWaitingFollowupDoesNotStick(t *testing.T) {
-	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
-	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
-	a.newTurn(work)
-	submitDeliveryForTest(t, a, "ordinary", recovery.InputDeliveryNextRequest)
-	a.settleDeliveryWork(work, recovery.DeliveryWorkFailed)
-	finishDeliveryWrites(t, a)
-	state := a.delivery.committed
-	if state == nil || state.Gate.Mode != recovery.FollowupGateRunning || state.Gate.Reason != "" {
-		t.Fatalf("failure pause outlived its follow-ups: %+v", state)
-	}
-}
-
-func TestInputDeliveryFailurePauseClearsWhenLastFollowupIsRemoved(t *testing.T) {
+func TestInputDeliveryDeleteRemovesWaitingFollowup(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
@@ -170,23 +160,18 @@ func TestInputDeliveryFailurePauseClearsWhenLastFollowupIsRemoved(t *testing.T) 
 	followup := submitDeliveryForTest(t, a, "followup", recovery.InputDeliveryAfterCompletion)
 	a.settleDeliveryWork(work, recovery.DeliveryWorkFailed)
 	finishDeliveryWrites(t, a)
-	if state := a.delivery.committed; state.Gate.Mode != recovery.FollowupGatePaused || state.Gate.Reason != recovery.FollowupPredecessorFailed || state.Gate.WaitingWorkID != work {
-		t.Fatalf("failure did not protect the queued follow-up: %+v", state)
-	}
 	result := runDeliveryOperation(t, a, &deliveryOperation{delete: &DeleteInput{OperationID: "delete-followup", Target: a.InputDeliveryTarget(), InputID: followup, ExpectedRevision: 1}})
 	if result.Result != InputQueueCommitted {
 		t.Fatalf("delete: %+v", result)
 	}
-	state := a.delivery.committed
-	if len(state.Inputs) != 0 || state.Gate.Mode != recovery.FollowupGateRunning || state.Gate.WaitingWorkID != "" {
-		t.Fatalf("removing the last follow-up left a dead pause: %+v", state)
+	if state := a.delivery.committed; len(state.Inputs) != 0 {
+		t.Fatalf("delete left the queued follow-up behind: %+v", state)
 	}
 }
 
-// A release can normalize the gate from paused to running. The TUI decides
-// whether to announce a pause from the snapshot it can read when the result
-// arrives, so the settled queue state must be published first.
-func TestInputDeliveryPublishesSettledGateBeforeResult(t *testing.T) {
+// The TUI renders each row from the snapshot it can read when an operation
+// result arrives, so the settled queue state must be published first.
+func TestInputDeliveryPublishesSettledQueueBeforeResult(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
@@ -220,7 +205,7 @@ func TestInputDeliveryPublishesSettledGateBeforeResult(t *testing.T) {
 		case event := <-a.outputCh:
 			switch e := event.(type) {
 			case InputQueueChangedEvent:
-				if e.Snapshot.State != nil && e.Snapshot.State.Gate.Mode == recovery.FollowupGateRunning {
+				if e.Snapshot.State != nil && len(e.Snapshot.State.EditHolds) == 0 {
 					settled = true
 				}
 			case InputQueueOperationResultEvent:
@@ -239,45 +224,6 @@ func TestInputDeliveryPublishesSettledGateBeforeResult(t *testing.T) {
 			t.Fatal("release did not settle")
 			return
 		}
-	}
-}
-
-func TestNormalizeFollowupGateKeepsUserIntentAndHolds(t *testing.T) {
-	t.Parallel()
-	followup := recovery.PendingInput{InputID: "followup", Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryAfterCompletion}
-	ordinary := recovery.PendingInput{InputID: "ordinary", Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryNextRequest}
-	claimed := recovery.PendingInput{InputID: "claimed", Stage: recovery.PendingInputStageClaimed, DeliveryPolicy: recovery.InputDeliveryAfterCompletion, WorkID: "work"}
-	for _, tc := range []struct {
-		name   string
-		reason string
-		inputs []recovery.PendingInput
-		holds  []string
-		want   string
-	}{
-		{name: "failure without waiting followup", reason: recovery.FollowupPredecessorFailed, inputs: []recovery.PendingInput{ordinary}, want: recovery.FollowupGateRunning},
-		{name: "failure with waiting followup", reason: recovery.FollowupPredecessorFailed, inputs: []recovery.PendingInput{followup}, want: recovery.FollowupGatePaused},
-		{name: "cancelled claim without followup", reason: recovery.FollowupPredecessorCancelled, want: recovery.FollowupGateRunning},
-		{name: "unknown outcome with consumed followup", reason: recovery.FollowupOutcomeUnknown, inputs: []recovery.PendingInput{claimed}, want: recovery.FollowupGateRunning},
-		{name: "released edit hold", reason: recovery.FollowupEditHold, inputs: []recovery.PendingInput{ordinary}, want: recovery.FollowupGateRunning},
-		{name: "active edit hold", reason: recovery.FollowupEditHold, inputs: []recovery.PendingInput{followup}, holds: []string{"followup"}, want: recovery.FollowupGatePaused},
-		{name: "explicit user pause", reason: recovery.FollowupUserPaused, want: recovery.FollowupGatePaused},
-		{name: "session pause outlives the queue", reason: recovery.FollowupSessionPaused, want: recovery.FollowupGatePaused},
-		{name: "restore pause outlives the queue", reason: recovery.FollowupRestored, want: recovery.FollowupGatePaused},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			state := &recovery.InputDeliveryState{
-				Gate:      recovery.FollowupGate{Mode: recovery.FollowupGatePaused, Reason: tc.reason, WaitingWorkID: "work"},
-				Inputs:    tc.inputs,
-				EditHolds: tc.holds,
-			}
-			normalizeFollowupGate(state)
-			if state.Gate.Mode != tc.want {
-				t.Fatalf("gate = %+v, want %q", state.Gate, tc.want)
-			}
-			if tc.want == recovery.FollowupGateRunning && state.Gate.WaitingWorkID != "" {
-				t.Fatalf("released gate kept a waiter: %+v", state.Gate)
-			}
-		})
 	}
 }
 
@@ -349,10 +295,11 @@ func TestInputDeliveryEndToEndSerialRequests(t *testing.T) {
 					works[event.WorkID] = true
 				}
 			case InputQueueChangedEvent:
-				if state := event.Snapshot.State; state != nil && len(state.Inputs) == 0 {
+				if state := event.Snapshot.State; state != nil && len(state.Inputs) == 0 && len(state.Works) > 0 {
+					finished = true
 					for _, work := range state.Works {
-						if work.WorkID == state.Gate.WaitingWorkID && work.Outcome == recovery.DeliveryWorkCompleted {
-							finished = true
+						if work.Outcome != recovery.DeliveryWorkCompleted {
+							finished = false
 						}
 					}
 				}
@@ -419,8 +366,8 @@ func TestInputDeliveryPendingWritePreventsGlobalIdle(t *testing.T) {
 		t.Fatal("idle crossed a pending persistence barrier")
 	}
 	a.delivery.inflight = nil
-	a.delivery.committed = &recovery.InputDeliveryState{Gate: recovery.FollowupGate{Mode: recovery.FollowupGatePaused, Reason: recovery.FollowupUserPaused}, Inputs: []recovery.PendingInput{{InputID: "input", Sequence: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryAfterCompletion}}}
+	a.delivery.committed = &recovery.InputDeliveryState{Inputs: []recovery.PendingInput{{InputID: "input", Sequence: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryAfterCompletion, WaitWorkID: "work"}}, Works: []recovery.DeliveryWork{{WorkID: "work", Origin: recovery.DeliveryWorkUser, Outcome: recovery.DeliveryWorkFailed}}}
 	if a.deliveryPreventsGlobalIdle() {
-		t.Fatal("paused queue suppressed idle indefinitely")
+		t.Fatal("waiting follow-up suppressed idle indefinitely")
 	}
 }

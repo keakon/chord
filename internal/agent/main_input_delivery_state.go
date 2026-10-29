@@ -15,7 +15,10 @@ import (
 )
 
 // selectDeliveryInputs returns a stable selection without mutating committed
-// state. A held ordinary input blocks later ordinary inputs and all followups.
+// state. A held input blocks later inputs of the same policy class, and
+// after-completion inputs fire one per idle in sequence order — each only once
+// the work it was queued behind has settled successfully (or nothing was
+// running when it was queued).
 func selectDeliveryInputs(state *recovery.InputDeliveryState, allowFollowup bool) []string {
 	if state == nil {
 		return nil
@@ -32,22 +35,8 @@ func selectDeliveryInputs(state *recovery.InputDeliveryState, allowFollowup bool
 		}
 		ordinary = append(ordinary, input.InputID)
 	}
-	if len(ordinary) > 0 {
+	if len(ordinary) > 0 || !allowFollowup {
 		return ordinary
-	}
-	if !allowFollowup || state.Gate.Mode != recovery.FollowupGateRunning {
-		return nil
-	}
-	if state.Gate.WaitingWorkID != "" {
-		completed := false
-		for _, work := range state.Works {
-			if work.WorkID == state.Gate.WaitingWorkID {
-				completed = work.Outcome == recovery.DeliveryWorkCompleted
-			}
-		}
-		if !completed {
-			return nil
-		}
 	}
 	for _, input := range inputs {
 		if input.Stage != recovery.PendingInputStageQueued || input.DeliveryPolicy != recovery.InputDeliveryAfterCompletion {
@@ -56,79 +45,57 @@ func selectDeliveryInputs(state *recovery.InputDeliveryState, allowFollowup bool
 		if slices.Contains(state.EditHolds, input.InputID) {
 			return nil
 		}
+		if !afterCompletionSettled(state, input) {
+			continue
+		}
 		return []string{input.InputID}
 	}
 	return nil
 }
 
-// normalizeFollowupGate clears a pause that no longer withholds anything. A
-// paused gate exists to keep after-completion inputs from starting (and to
-// leave edit-held ones alone), so once neither is queued the pause is dead
-// state: it would keep the queue reporting itself paused and make the next
-// follow-up wait for a resume that releases nothing. Explicit user pauses and
-// session-level pauses record intent outside the queue and are left alone.
-//
-// An edit hold derives its pause from the gate it interrupted, so releasing
-// the hold restores that gate even while follow-ups are queued: the item the
-// user just re-sent must run after the work it was waiting for. A predecessor
-// that failed, was cancelled, or has an unknown outcome is still recorded, so
-// those follow-ups keep waiting for an explicit resume.
-//
-// A working-directory pause is left alone for the opposite reason: it reports
-// a mismatch that only /queue resume with the original directory active can
-// acknowledge, and the waiter test below cannot see it — the input it holds
-// back may be an ordinary one, which bypasses the gate — so normalizing it
-// here would only be undone by the next claim.
-func normalizeFollowupGate(state *recovery.InputDeliveryState) {
-	if state == nil || state.Gate.Mode != recovery.FollowupGatePaused {
-		return
-	}
-	switch state.Gate.Reason {
-	case recovery.FollowupPredecessorFailed, recovery.FollowupPredecessorCancelled, recovery.FollowupOutcomeUnknown:
-	case recovery.FollowupEditHold:
-		if len(state.EditHolds) > 0 {
-			return
-		}
-		switch deliveryWorkOutcome(state, state.Gate.WaitingWorkID) {
-		case recovery.DeliveryWorkFailed:
-			state.Gate.Reason = recovery.FollowupPredecessorFailed
-		case recovery.DeliveryWorkCancelled:
-			state.Gate.Reason = recovery.FollowupPredecessorCancelled
-		case recovery.DeliveryWorkUnknown:
-			state.Gate.Reason = recovery.FollowupOutcomeUnknown
-		case recovery.DeliveryWorkActive:
-			// The interrupted gate resumes, but the waiter still holds the
-			// queued follow-up back until that work settles.
-			state.Gate.Mode, state.Gate.Reason = recovery.FollowupGateRunning, ""
-			return
-		default:
-			state.Gate = recovery.FollowupGate{Mode: recovery.FollowupGateRunning}
-			return
-		}
-	default:
-		return
-	}
-	if len(state.EditHolds) > 0 {
-		return
+func deliveryHasQueuedInput(state *recovery.InputDeliveryState) bool {
+	if state == nil {
+		return false
 	}
 	for _, input := range state.Inputs {
-		if input.Stage == recovery.PendingInputStageQueued && input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion {
-			return
+		if input.Stage == recovery.PendingInputStageQueued {
+			return true
 		}
 	}
-	state.Gate = recovery.FollowupGate{Mode: recovery.FollowupGateRunning}
+	return false
 }
 
-func deliveryWorkOutcome(state *recovery.InputDeliveryState, workID string) string {
-	if state == nil || workID == "" {
-		return ""
+// runnableDeliveryInputs is selectDeliveryInputs behind the restore hold: a
+// restored session is idle until the user continues or sends a message, so
+// queued inputs it carried never start a turn or join a request on their own.
+func (a *MainAgent) runnableDeliveryInputs(allowFollowup bool) []string {
+	if a.delivery.restoredHeld {
+		return nil
 	}
-	for _, work := range state.Works {
-		if work.WorkID == workID {
-			return work.Outcome
-		}
+	return selectDeliveryInputs(a.delivery.committed, allowFollowup)
+}
+
+// releaseRestoredHold records the user's explicit re-engagement after a
+// restore. Only the user's own message, submission or continue calls it.
+func (a *MainAgent) releaseRestoredHold() {
+	if !a.delivery.restoredHeld {
+		return
 	}
-	return ""
+	a.delivery.restoredHeld = false
+	a.publishInputDelivery()
+}
+
+// afterCompletionSettled reports whether a queued after-completion input may
+// start: either nothing was running when it was queued, or the work it waits
+// behind has settled successfully. A failed, cancelled or unknown wait is not
+// sticky — newTurn re-points the wait at whatever runs next, so the input
+// rides the first successful settle after the user re-engages.
+func afterCompletionSettled(state *recovery.InputDeliveryState, input recovery.PendingInput) bool {
+	switch state.AfterCompletionWait(input) {
+	case "", recovery.DeliveryWorkCompleted:
+		return true
+	}
+	return false
 }
 
 func deliveryInputForEdit(state *recovery.InputDeliveryState, id string, revision uint64) (*recovery.PendingInput, error) {
@@ -270,16 +237,5 @@ func (a *MainAgent) deliveryPreventsGlobalIdle() bool {
 	if a.delivery.persistenceError != nil || a.delivery.environmentError != "" || a.pendingUserDrainSuspended {
 		return false
 	}
-	ids := selectDeliveryInputs(a.delivery.committed, true)
-	if len(ids) == 0 {
-		return false
-	}
-	if a.delivery.restoredNextInputsBlocked {
-		for _, input := range a.delivery.committed.Inputs {
-			if slices.Contains(ids, input.InputID) && input.DeliveryPolicy == recovery.InputDeliveryNextRequest {
-				return false
-			}
-		}
-	}
-	return true
+	return len(a.runnableDeliveryInputs(true)) > 0
 }

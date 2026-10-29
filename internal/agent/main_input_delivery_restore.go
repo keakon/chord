@@ -39,13 +39,7 @@ func (a *MainAgent) deferDeliverySessionSwitch(resume func(), superseded func())
 	}
 	a.delivery.navigation = true
 	a.delivery.cancelGeneration.Add(1)
-	op := &deliveryOperation{}
-	op.mutate = func(state *recovery.InputDeliveryState) error {
-		if state.Gate.Mode == recovery.FollowupGateRunning {
-			state.Gate.Mode, state.Gate.Reason = recovery.FollowupGatePaused, recovery.FollowupSessionSwitched
-		}
-		return nil
-	}
+	op := &deliveryOperation{barrier: true}
 	op.failed = func(err error) {
 		a.delivery.navigation = false
 		a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn"})
@@ -63,6 +57,7 @@ func (a *MainAgent) resetInputDeliverySession() {
 	}
 	a.delivery.committed = nil
 	a.delivery.loading = false
+	a.delivery.restoredHeld = false
 	a.delivery.environmentError = ""
 	a.delivery.owner = nil
 	a.delivery.request = nil
@@ -71,7 +66,6 @@ func (a *MainAgent) resetInputDeliverySession() {
 	a.delivery.currentOrigin = ""
 	a.delivery.acceptedOrders = nil
 	a.delivery.persistenceError = nil
-	a.delivery.restoredNextInputsBlocked = false
 	a.delivery.snapshot.Store(nil)
 }
 

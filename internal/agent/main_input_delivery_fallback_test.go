@@ -96,15 +96,14 @@ func TestFallbackInputResumesAfterQueueStorageRecovery(t *testing.T) {
 	if a.delivery.request == nil || a.delivery.request.fallback != payload {
 		t.Fatal("storage failure lost fallback continuation")
 	}
-	runDeliveryOperation(t, a, &deliveryOperation{control: &QueueControl{OperationID: "pause", Target: a.InputDeliveryTarget(), Action: InputQueuePause, ExpectedQueueRevision: a.delivery.committed.Revision}})
+	runDeliveryOperation(t, a, &deliveryOperation{control: &QueueControl{OperationID: "clear", Target: a.InputDeliveryTarget(), Action: InputQueueClear, ExpectedQueueRevision: a.delivery.committed.Revision}})
 	finishDeliveryWrites(t, a)
 	select {
 	case result := <-payload.reply:
-		// Reloaded, unclaimed ordinary inputs remain parked until fresh user
-		// intent; recovery must resume the original fallback, not launch a new
-		// primary request or silently replay the restored queue.
-		if result.err != nil || requestHasUserText(result.messages, "correction") || !a.delivery.restoredNextInputsBlocked {
-			t.Fatalf("recovered fallback violated restored queue policy: %+v", result)
+		// The reloaded queue is authoritative again, and the resumed fallback is
+		// the next request the agent sends: the queued ordinary input rides it.
+		if result.err != nil || !requestHasUserText(result.messages, "correction") {
+			t.Fatalf("recovered fallback lost the queued correction: %+v", result)
 		}
 	default:
 		t.Fatal("storage recovery did not resume the waiting fallback")

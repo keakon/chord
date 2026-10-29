@@ -70,21 +70,7 @@ func (a *MainAgent) settleDeliveryWork(workID, outcome string) {
 				}
 			}
 			state.Inputs = slices.DeleteFunc(state.Inputs, func(input recovery.PendingInput) bool { return input.WorkID == workID })
-			if outcome != recovery.DeliveryWorkCompleted && state.Gate.Mode == recovery.FollowupGateRunning {
-				reason := recovery.FollowupPredecessorFailed
-				if outcome == recovery.DeliveryWorkCancelled {
-					reason = recovery.FollowupPredecessorCancelled
-				}
-				if outcome == recovery.DeliveryWorkUnknown {
-					reason = recovery.FollowupOutcomeUnknown
-				}
-				state.Gate.Mode, state.Gate.Reason = recovery.FollowupGatePaused, reason
-			}
 		}
-		// A failure only pauses the queue to protect follow-ups queued behind
-		// it; with none waiting the pause would outlive its cause and block
-		// later follow-ups until an unexplained /queue resume.
-		normalizeFollowupGate(state)
 		return nil
 	}
 	op.finish = func() {
@@ -98,23 +84,72 @@ func (a *MainAgent) settleDeliveryWork(workID, outcome string) {
 }
 
 func pruneDeliveryWorks(state *recovery.InputDeliveryState, currentWorkID string) {
-	referenced := map[string]bool{state.Gate.WaitingWorkID: true, currentWorkID: true}
+	referenced := map[string]bool{currentWorkID: true}
 	for _, input := range state.Inputs {
 		referenced[input.WorkID] = true
+		referenced[input.WaitWorkID] = true
 	}
 	state.Works = slices.DeleteFunc(state.Works, func(work recovery.DeliveryWork) bool { return !referenced[work.WorkID] })
 }
 
-func (a *MainAgent) pauseInputDeliveryForCancel() {
-	if a.delivery.committed == nil && a.delivery.inflight == nil && len(a.delivery.pending) == 0 {
+// rolloverDeliveryWaits re-points every queued after-completion input at the
+// work this new turn runs. "After completion" means after whatever most
+// recently started, so follow-ups chain one behind another: when one of them
+// runs, the rest wait for it, and its failure, cancellation or crash holds
+// them until the user's next request — itself a new turn — re-bases the wait.
+// The same op retires rows left by an interrupted work whose outcome is
+// unknown: they exist so an explicit continue can adopt them, and a new turn
+// that did not adopt them supersedes that work.
+//
+// The op is queued only when there is something to change, keeping ordinary
+// turns free of queue writes.
+func (a *MainAgent) rolloverDeliveryWaits(workID string) {
+	if workID == "" || !a.deliveryNeedsRollover(workID) {
 		return
 	}
-	op := &deliveryOperation{mutate: func(state *recovery.InputDeliveryState) error {
-		if state.Gate.Mode == recovery.FollowupGateRunning {
-			state.Gate.Mode, state.Gate.Reason = recovery.FollowupGatePaused, recovery.FollowupPredecessorCancelled
+	origin := a.delivery.currentOrigin
+	op := &deliveryOperation{}
+	op.mutate = func(state *recovery.InputDeliveryState) error {
+		for i := range state.Inputs {
+			if input := &state.Inputs[i]; queuedAfterCompletion(*input) {
+				input.WaitWorkID = workID
+			}
 		}
+		state.Inputs = slices.DeleteFunc(state.Inputs, func(input recovery.PendingInput) bool {
+			return orphanedByUnknownWork(state, input, workID)
+		})
+		ensureDeliveryWork(state, workID, origin)
 		return nil
-	}}
+	}
 	a.delivery.pending = append(a.delivery.pending, op)
 	a.startNextDeliveryOperation()
+}
+
+func queuedAfterCompletion(input recovery.PendingInput) bool {
+	return input.Stage == recovery.PendingInputStageQueued && input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion
+}
+
+func orphanedByUnknownWork(state *recovery.InputDeliveryState, input recovery.PendingInput, liveWorkID string) bool {
+	if input.Stage == recovery.PendingInputStageQueued || input.WorkID == "" || input.WorkID == liveWorkID {
+		return false
+	}
+	for _, work := range state.Works {
+		if work.WorkID == input.WorkID {
+			return work.Outcome == recovery.DeliveryWorkUnknown
+		}
+	}
+	return false
+}
+
+func (a *MainAgent) deliveryNeedsRollover(liveWorkID string) bool {
+	state := a.delivery.committed
+	if state == nil {
+		return false
+	}
+	for _, input := range state.Inputs {
+		if queuedAfterCompletion(input) && input.WaitWorkID != liveWorkID || orphanedByUnknownWork(state, input, liveWorkID) {
+			return true
+		}
+	}
+	return false
 }

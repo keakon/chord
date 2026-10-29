@@ -2,8 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"slices"
-	"strings"
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
@@ -16,10 +14,12 @@ import (
 func TestInputQueueSnapshotDoesNotCreateCardsOrFallback(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
-	snapshot := &agent.InputQueueSnapshot{Target: backend.InputDeliveryTarget(), ViewVersion: 1, State: &recovery.InputDeliveryState{Gate: recovery.FollowupGate{Mode: recovery.FollowupGatePaused, Reason: recovery.FollowupRestored}, Inputs: []recovery.PendingInput{{InputID: "input", DraftID: "draft", Revision: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryAfterCompletion, Content: "sample"}}}}
+	snapshot := &agent.InputQueueSnapshot{Target: backend.InputDeliveryTarget(), ViewVersion: 1, State: &recovery.InputDeliveryState{
+		Works:  []recovery.DeliveryWork{{WorkID: "work", Origin: recovery.DeliveryWorkUser, Outcome: recovery.DeliveryWorkFailed}},
+		Inputs: []recovery.PendingInput{{InputID: "input", DraftID: "draft", Revision: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryAfterCompletion, WaitWorkID: "work", Content: "sample"}}}}
 	m.applyInputQueueSnapshot(snapshot)
 	if len(m.queuedDrafts) != 1 || m.queuedDraftsAutoContinue() {
-		t.Fatal("paused projection is runnable or missing")
+		t.Fatal("waiting projection is runnable or missing")
 	}
 	m.queueSyncEnabled = false
 	if cmd := m.drainQueuedDrafts(); cmd != nil || len(m.queuedDrafts) != 1 {
@@ -52,94 +52,6 @@ func TestInputQueueLateHoldPreservesComposer(t *testing.T) {
 	m.handleInputQueueResult(agent.InputQueueOperationResultEvent{Target: backend.InputDeliveryTarget(), OperationID: op, Result: agent.InputQueueCommitted, ItemRevision: 2})
 	if m.input.Value() != "new draft" || m.inputQueue.editing != nil {
 		t.Fatal("late hold replaced or rebound new draft")
-	}
-}
-
-func TestInputQueuePausedToastOnlyWhenTheSubmittedInputWaits(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		policy recovery.InputDeliveryPolicy
-		want   bool
-	}{
-		{name: "ordinary input bypasses the gate", policy: recovery.InputDeliveryNextRequest},
-		{name: "follow-up waits for resume", policy: recovery.InputDeliveryAfterCompletion, want: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			backend := &pausedQueueAgent{}
-			backend.snapshot = &agent.InputQueueSnapshot{
-				Target:      backend.InputDeliveryTarget(),
-				ViewVersion: 1,
-				State: &recovery.InputDeliveryState{
-					Revision: 1,
-					Gate:     recovery.FollowupGate{Mode: recovery.FollowupGatePaused, Reason: recovery.FollowupPredecessorFailed},
-				},
-			}
-			m := NewModel(backend)
-			m.applyInputQueueSnapshot(backend.snapshot)
-			m.submitManagedDraft(queuedDraft{ID: "draft", Content: "sample", DeliveryPolicy: tc.policy})
-			var op string
-			for id := range m.inputQueue.pending {
-				op = id
-			}
-			m.handleInputQueueResult(agent.InputQueueOperationResultEvent{Target: backend.InputDeliveryTarget(), OperationID: op, Result: agent.InputQueueCommitted})
-
-			toasts := inputQueueToasts(m)
-			announced := slices.ContainsFunc(toasts, func(msg string) bool { return strings.Contains(msg, "Queue remains paused") })
-			if announced != tc.want {
-				t.Fatalf("paused toast = %v, want %v (toasts=%q)", announced, tc.want, toasts)
-			}
-		})
-	}
-}
-
-type pausedQueueAgent struct {
-	sessionControlAgent
-	snapshot *agent.InputQueueSnapshot
-}
-
-func (a *pausedQueueAgent) InputQueueSnapshot() *agent.InputQueueSnapshot { return a.snapshot }
-
-func inputQueueToasts(m Model) []string {
-	var toasts []string
-	if m.activeToast != nil {
-		toasts = append(toasts, m.activeToast.Message)
-	}
-	for _, item := range m.toastQueue {
-		toasts = append(toasts, item.Message)
-	}
-	return toasts
-}
-
-func TestInputQueueReleaseToastReflectsGateAfterOperation(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		gate string
-		want bool
-	}{
-		{name: "running gate skips the pause notice", gate: recovery.FollowupGateRunning},
-		{name: "paused gate keeps the pause notice", gate: recovery.FollowupGatePaused, want: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			backend := &pausedQueueAgent{}
-			backend.snapshot = &agent.InputQueueSnapshot{
-				Target:      backend.InputDeliveryTarget(),
-				ViewVersion: 1,
-				State: &recovery.InputDeliveryState{
-					Revision: 1,
-					Gate:     recovery.FollowupGate{Mode: tc.gate},
-				},
-			}
-			m := NewModel(backend)
-			m.applyInputQueueSnapshot(backend.snapshot)
-			op := m.nextInputQueueOperation(inputQueueAction{kind: "release", draft: queuedDraft{ID: "draft", InputID: "input"}})
-			m.handleInputQueueResult(agent.InputQueueOperationResultEvent{Target: backend.InputDeliveryTarget(), OperationID: op, Result: agent.InputQueueCommitted})
-
-			toasts := inputQueueToasts(m)
-			announced := slices.ContainsFunc(toasts, func(msg string) bool { return strings.Contains(msg, "Queue remains paused") })
-			if announced != tc.want {
-				t.Fatalf("paused toast = %v, want %v (toasts=%q)", announced, tc.want, toasts)
-			}
-		})
 	}
 }
 
@@ -283,15 +195,32 @@ func TestInputQueueStartedSnapshotDoesNotRestoreConsumedDraft(t *testing.T) {
 	}
 }
 
+func TestAfterCompletionWaitReasonUnknownMatchesUnsettled(t *testing.T) {
+	input := recovery.PendingInput{WaitWorkID: "work"}
+	for outcome, want := range map[string]string{
+		recovery.DeliveryWorkActive:    "task in progress",
+		recovery.DeliveryWorkCompleted: "",
+		recovery.DeliveryWorkFailed:    "last task failed; send a message to run it next",
+		recovery.DeliveryWorkCancelled: "last task cancelled; send a message to run it next",
+		recovery.DeliveryWorkUnknown:   "last task outcome unknown; send a message to run it next",
+	} {
+		state := &recovery.InputDeliveryState{Works: []recovery.DeliveryWork{{WorkID: "work", Outcome: outcome}}}
+		if got := afterCompletionWaitReason(state, input); got != want {
+			t.Errorf("outcome %q: reason = %q, want %q", outcome, got, want)
+		}
+	}
+}
+
 func TestInputQueueStatusInvalidatesRenderCache(t *testing.T) {
 	backend := &sessionControlAgent{}
 	m := NewModel(backend)
-	snapshot := &agent.InputQueueSnapshot{Target: backend.InputDeliveryTarget(), ViewVersion: 1, State: &recovery.InputDeliveryState{Gate: recovery.FollowupGate{Mode: recovery.FollowupGateRunning}, Inputs: []recovery.PendingInput{{InputID: "input", DraftID: "draft", Revision: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: "sample"}}}}
+	snapshot := &agent.InputQueueSnapshot{Target: backend.InputDeliveryTarget(), ViewVersion: 1, State: &recovery.InputDeliveryState{Inputs: []recovery.PendingInput{{InputID: "input", DraftID: "draft", Revision: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: "sample"}}}}
 	m.applyInputQueueSnapshot(snapshot)
 	for _, change := range []func(){
 		func() { snapshot.State.Inputs[0].DeliveryPolicy = recovery.InputDeliveryAfterCompletion },
 		func() {
-			snapshot.State.Gate = recovery.FollowupGate{Mode: recovery.FollowupGatePaused, Reason: recovery.FollowupUserPaused}
+			snapshot.State.Inputs[0].WaitWorkID = "work"
+			snapshot.State.Works = []recovery.DeliveryWork{{WorkID: "work", Origin: recovery.DeliveryWorkUser, Outcome: recovery.DeliveryWorkFailed}}
 		},
 		func() { snapshot.Blocked = "storage unavailable" },
 		func() { snapshot.State.EditHolds = []string{"input"} },
@@ -307,5 +236,27 @@ func TestInputQueueStatusInvalidatesRenderCache(t *testing.T) {
 		if after := m.queuedDraftsFingerprint(80, 3); after == before {
 			t.Fatalf("status change kept stale cache: %s", m.queuedDrafts[0].DeliveryStatus)
 		}
+	}
+}
+
+func TestInputQueueEditResubmitKeepsRowPolicy(t *testing.T) {
+	backend := &inputQueueEditAgent{}
+	m := NewModel(backend)
+	draft := queuedDraft{ID: "draft", InputID: "input", Revision: 2, Content: "sample", DeliveryManaged: true, EditHeld: true, DeliveryStage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryAfterCompletion}
+	m.editManagedDraft(draft)
+	m.submitManagedDraft(queuedDraft{ID: "draft", InputID: "input", Content: "edited", DeliveryPolicy: recovery.InputDeliveryNextRequest})
+	if len(backend.updates) != 1 {
+		t.Fatal("edit was not submitted as an update")
+	}
+	if backend.updates[0].DeliveryPolicy != recovery.InputDeliveryAfterCompletion {
+		t.Fatalf("Enter on an after-completion edit switched its policy: %+v", backend.updates[0].DeliveryPolicy)
+	}
+
+	m.input.Reset()
+	backend.updates = nil
+	m.editManagedDraft(queuedDraft{ID: "draft-2", InputID: "input-2", Revision: 1, Content: "other", DeliveryManaged: true, EditHeld: true, DeliveryStage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryNextRequest})
+	m.submitManagedDraft(queuedDraft{ID: "draft-2", InputID: "input-2", Content: "edited", DeliveryPolicy: recovery.InputDeliveryAfterCompletion})
+	if len(backend.updates) != 1 || backend.updates[0].DeliveryPolicy != recovery.InputDeliveryNextRequest {
+		t.Fatalf("Alt+Enter on a next-request edit switched its policy: %+v", backend.updates)
 	}
 }

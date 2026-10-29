@@ -10,7 +10,7 @@ MainAgent 的 `send` 支持 `delivery_policy: "next_request"`（默认）和 `"a
 {"type":"send","request_id":"request-1","content":"Check the documentation","delivery_policy":"after_completion"}
 ```
 
-`ready`、`ready_paused`、`session_switched` 和 `status_response` 可包含 `input_queue`。缺失或 null 表示尚未取得投影；空 `inputs` 数组表示确认空队列。订阅 `input_queue_changed` 获取变化。投影包含 runtime/session 身份、`view_version`、`view_version_cas`、`queue_revision`、暂停状态、工作结果，以及最多 128 项输入摘要；每项预览最多 160 个 Unicode 字符，附件只返回数量，不包含二进制或附件路径。先校验 runtime/session，再比较 `view_version`；`queue_revision` 用于持久 CAS，存储错误变化时可能保持不变。`view_version_cas: true` 表示服务端会按该版本检查视图相关操作。
+`ready`、`ready_paused`、`session_switched` 和 `status_response` 可包含 `input_queue`。缺失或 null 表示尚未取得投影；空 `inputs` 数组表示确认空队列。订阅 `input_queue_changed` 获取变化。投影包含 runtime/session 身份、`view_version`、`view_version_cas`、`queue_revision`、工作结果，以及最多 128 项输入摘要；每项预览最多 160 个 Unicode 字符，附件只返回数量，不包含二进制或附件路径。先校验 runtime/session，再比较 `view_version`；`queue_revision` 用于持久 CAS，存储错误变化时可能保持不变。`view_version_cas: true` 表示服务端会按该版本检查视图相关操作。`restored_held: true` 表示这些输入随恢复的会话一起载入，用户继续或发送新输入之前不会开始。
 
 `input_queue` 操作须提供唯一 `operation_id`、要求绑定时的当前 `binding_id`，以及从投影取得的完整 `target`：`runtime_id`、`session_id`、`session_epoch`、`owner_task_id`、`work_dir_generation`。owner 必须为 `main`。需要确保操作只应用到当前展示的投影时，应携带非零 `expected_view_version`；视图版本过期时返回 `conflict`，操作不会执行。Chord 在 headless 收到命令时和 MainAgent 处理操作时都会检查版本；持久改动还会在保存前比较输入或队列修订号。`input_queue_result` 不受事件订阅过滤，返回 `committed`、`rejected`、`conflict` 或 `unknown`，并携带当前版本。
 
@@ -19,9 +19,9 @@ MainAgent 的 `send` 支持 `delivery_policy: "next_request"`（默认）和 `"a
 | `get` | `input_id`；返回完整文本和附件数量 |
 | `update` | `input_id`、`expected_revision`；可选 `content` 和/或 `delivery_policy` |
 | `delete`、`hold_edit`、`release_edit` | `input_id`、`expected_revision` |
-| `pause`、`resume`、`clear` | `expected_queue_revision` |
+| `clear` | `expected_queue_revision` |
 
-省略 `content` 保留正文和附件；提供该字段表示替换正文。含附件输入的正文编辑须使用本地 TUI。持有或编辑结束不会自动继续后续队列；`clear` 只移除未开始的后续项，resume 不会重试失败任务。ACP prompt 仍使用普通的下一次请求策略。
+省略 `content` 保留正文和附件；提供该字段表示替换正文。含附件输入的正文编辑须使用本地 TUI。持有或编辑某项输入不会让它立即开始。`clear` 只移除未开始的后续项。后续项通过自身的 `wait_work_id` 表明在等哪个工作，`works` 里对应条目携带其结果；该工作成功收口后的第一个空闲时刻，后续项才会发出。ACP prompt 仍使用普通的下一次请求策略。
 
 ## 它是什么
 

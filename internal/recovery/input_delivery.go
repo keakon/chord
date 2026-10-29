@@ -24,17 +24,6 @@ const (
 	InputDeliveryFile                                = "input-delivery.json"
 	InputDeliveryMaxInputs                           = 128
 	InputDeliveryMaxTextBytes                        = 4 << 20
-	FollowupGateRunning                              = "running"
-	FollowupGatePaused                               = "paused"
-	FollowupUserPaused                               = "user_paused"
-	FollowupPredecessorFailed                        = "predecessor_failed"
-	FollowupPredecessorCancelled                     = "predecessor_cancelled"
-	FollowupOutcomeUnknown                           = "outcome_unknown"
-	FollowupSessionPaused                            = "session_paused"
-	FollowupSessionSwitched                          = "session_switched"
-	FollowupRestored                                 = "restored"
-	FollowupWorkDirChanged                           = "workdir_changed"
-	FollowupEditHold                                 = "edit_hold"
 	DeliveryWorkUser                                 = "user"
 	DeliveryWorkFollowup                             = "followup"
 	DeliveryWorkContext                              = "context"
@@ -58,16 +47,9 @@ type InputDeliveryState struct {
 	SessionID    string         `json:"session_id"`
 	Revision     uint64         `json:"revision"`
 	NextSequence int64          `json:"next_sequence"`
-	Gate         FollowupGate   `json:"gate"`
 	Inputs       []PendingInput `json:"inputs"`
 	Works        []DeliveryWork `json:"works"`
 	EditHolds    []string       `json:"edit_holds"`
-}
-
-type FollowupGate struct {
-	Mode          string `json:"mode"`
-	Reason        string `json:"reason,omitempty"`
-	WaitingWorkID string `json:"waiting_work_id,omitempty"`
 }
 
 type DeliveryWork struct {
@@ -85,6 +67,24 @@ func (s *InputDeliveryState) Clone() *InputDeliveryState {
 	out.Works = slices.Clone(s.Works)
 	out.EditHolds = slices.Clone(s.EditHolds)
 	return &out
+}
+
+// AfterCompletionWait reports the outcome of the work a queued
+// after-completion input waits behind: "" when it waits on nothing, the
+// recorded outcome otherwise, and DeliveryWorkUnknown when the work is missing
+// from the durable state. Only DeliveryWorkCompleted (or "") lets it start.
+func (s *InputDeliveryState) AfterCompletionWait(input PendingInput) string {
+	if input.WaitWorkID == "" {
+		return ""
+	}
+	if s != nil {
+		for _, work := range s.Works {
+			if work.WorkID == input.WaitWorkID {
+				return work.Outcome
+			}
+		}
+	}
+	return DeliveryWorkUnknown
 }
 
 // ValidateInputDelivery is shared by read and write. A corrupt existing file
@@ -114,23 +114,6 @@ func ValidateInputDelivery(s *InputDeliveryState, sessionID string) error {
 		}
 		works[w.WorkID] = true
 	}
-	if s.Gate.WaitingWorkID != "" && !works[s.Gate.WaitingWorkID] {
-		return fmt.Errorf("gate references missing work")
-	}
-	switch s.Gate.Mode {
-	case FollowupGateRunning:
-		if s.Gate.Reason != "" {
-			return fmt.Errorf("running gate has pause reason")
-		}
-	case FollowupGatePaused:
-		switch s.Gate.Reason {
-		case FollowupUserPaused, FollowupPredecessorFailed, FollowupPredecessorCancelled, FollowupOutcomeUnknown, FollowupSessionPaused, FollowupSessionSwitched, FollowupRestored, FollowupWorkDirChanged, FollowupEditHold:
-		default:
-			return fmt.Errorf("invalid pause reason %q", s.Gate.Reason)
-		}
-	default:
-		return fmt.Errorf("invalid gate mode %q", s.Gate.Mode)
-	}
 	ids := make(map[string]string, len(s.Inputs))
 	sequences := make(map[int64]bool, len(s.Inputs))
 	textBytes := 0
@@ -149,9 +132,15 @@ func ValidateInputDelivery(s *InputDeliveryState, sessionID string) error {
 			if input.WorkID != "" {
 				return fmt.Errorf("queued input has work identity")
 			}
+			if input.WaitWorkID != "" && !works[input.WaitWorkID] {
+				return fmt.Errorf("queued input waits on missing work")
+			}
 		case PendingInputStageClaimed, PendingInputStageStarted:
 			if !works[input.WorkID] {
 				return fmt.Errorf("consumed input references missing work")
+			}
+			if input.WaitWorkID != "" {
+				return fmt.Errorf("consumed input retains wait identity")
 			}
 		default:
 			return fmt.Errorf("invalid delivery input stage %q", input.Stage)

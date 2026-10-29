@@ -49,6 +49,7 @@ type PendingInput struct {
 	WorkDir             string                   `json:"work_dir,omitempty"`
 	WorktreeID          string                   `json:"worktree_id,omitempty"`
 	WorkID              string                   `json:"work_id,omitempty"`
+	WaitWorkID          string                   `json:"wait_work_id,omitempty"`
 	InputID             string                   `json:"input_id"`
 	OwnerTaskID         string                   `json:"owner_task_id"`
 	Sequence            int64                    `json:"sequence"`

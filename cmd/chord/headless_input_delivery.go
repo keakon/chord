@@ -24,6 +24,7 @@ type headlessInputQueueItem struct {
 	Policy      recovery.InputDeliveryPolicy `json:"delivery_policy"`
 	Stage       string                       `json:"stage"`
 	WorkID      string                       `json:"work_id,omitempty"`
+	WaitWorkID  string                       `json:"wait_work_id,omitempty"`
 	WorkDir     string                       `json:"work_dir"`
 	WorktreeID  string                       `json:"worktree_id,omitempty"`
 	Preview     string                       `json:"preview"`
@@ -32,28 +33,26 @@ type headlessInputQueueItem struct {
 }
 
 type headlessInputQueue struct {
-	RestoredNextInputsBlocked bool `json:"restored_next_inputs_blocked,omitempty"`
 	agent.InputTarget
 	ViewVersion    uint64                   `json:"view_version"`
 	ViewVersionCAS bool                     `json:"view_version_cas"`
 	QueueRevision  uint64                   `json:"queue_revision"`
-	Gate           recovery.FollowupGate    `json:"gate"`
 	Works          []recovery.DeliveryWork  `json:"works"`
 	Inputs         []headlessInputQueueItem `json:"inputs"`
 	Blocked        string                   `json:"blocked,omitempty"`
+	RestoredHeld   bool                     `json:"restored_held,omitempty"`
 }
 
 func inputQueueProjection(snapshot *agent.InputQueueSnapshot) *headlessInputQueue {
 	if snapshot == nil {
 		return nil
 	}
-	out := &headlessInputQueue{RestoredNextInputsBlocked: snapshot.RestoredNextInputsBlocked, InputTarget: snapshot.Target, ViewVersion: snapshot.ViewVersion, ViewVersionCAS: true, Blocked: snapshot.Blocked, Inputs: []headlessInputQueueItem{}}
+	out := &headlessInputQueue{InputTarget: snapshot.Target, ViewVersion: snapshot.ViewVersion, ViewVersionCAS: true, Blocked: snapshot.Blocked, RestoredHeld: snapshot.RestoredHeld, Inputs: []headlessInputQueueItem{}}
 	if snapshot.State == nil {
-		out.Gate.Mode = recovery.FollowupGateRunning
 		return out
 	}
 	state := snapshot.State
-	out.QueueRevision, out.Gate = state.Revision, state.Gate
+	out.QueueRevision = state.Revision
 	out.Works = append([]recovery.DeliveryWork(nil), state.Works...)
 	holds := make(map[string]bool)
 	for _, id := range state.EditHolds {
@@ -70,7 +69,7 @@ func inputQueueProjection(snapshot *agent.InputQueueSnapshot) *headlessInputQueu
 				attachments++
 			}
 		}
-		out.Inputs = append(out.Inputs, headlessInputQueueItem{InputID: input.InputID, Revision: input.Revision, Sequence: input.Sequence, Policy: input.DeliveryPolicy, Stage: input.Stage, WorkID: input.WorkID, WorkDir: input.WorkDir, WorktreeID: input.WorktreeID, Preview: string(preview), Attachments: attachments, EditHeld: holds[input.InputID]})
+		out.Inputs = append(out.Inputs, headlessInputQueueItem{InputID: input.InputID, Revision: input.Revision, Sequence: input.Sequence, Policy: input.DeliveryPolicy, Stage: input.Stage, WorkID: input.WorkID, WorkDir: input.WorkDir, WorktreeID: input.WorktreeID, Preview: string(preview), Attachments: attachments, WaitWorkID: input.WaitWorkID, EditHeld: holds[input.InputID]})
 	}
 	return out
 }
@@ -187,7 +186,7 @@ func handleHeadlessInputQueue(cmd headlessCommand, backend headlessBackend, out 
 			return
 		}
 		admitted = queue.DeleteQueuedInput(agent.DeleteInput{ExpectedViewVersion: expectedView, OperationID: cmd.OperationID, Target: target, InputID: cmd.InputID, ExpectedRevision: *cmd.ExpectedRevision})
-	case agent.InputQueuePause, agent.InputQueueResume, agent.InputQueueClear:
+	case agent.InputQueueClear:
 		if cmd.ExpectedQueueRevision == nil {
 			reject("expected_queue_revision is required")
 			return
