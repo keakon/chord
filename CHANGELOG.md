@@ -57,6 +57,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- When a `job_output` wait times out, the notice now says that a job you started delivers its completion as a durable message at your next request and wakes an idle agent, so the agent does other work or ends the turn instead of waiting again; repeated timeouts escalate to an explicit stop-waiting notice.
+
 - SubAgent toasts now show the worker's sidebar label, and same-category notifications from different workers keep separate queue entries.
 
 - Responses requests carry Codex-shaped client identifiers: the session id on the wire is a UUID derived deterministically from Chord's own session id, `x-codex-installation-id` is now a single machine-level id that reuses `~/.codex/installation_id` when that file exists and is otherwise persisted under Chord's config home, and the window id advances only when history is durably compacted. One machine and one session now present as one Codex client to the backend instead of one client per session.

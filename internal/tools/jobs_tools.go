@@ -133,7 +133,8 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		}
 	}
 	chunk, dropped := j.readIncremental(reader)
-	noNewBytes := chunk == "" && dropped == 0
+	producedOutput := chunk != "" || dropped > 0
+	noNewBytes := !producedOutput
 	if blocked {
 		// Only a wait that actually blocked counts as a renewal. A wait:"exit"
 		// on an already-finished job returns immediately and the caller is
@@ -160,7 +161,8 @@ func (JobOutputTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		// receives — leaving it waiting on a job it was promised a wake for.
 		globalJobRegistry.claimReported(j.ID)
 	}
-	note := jobWaitNotice(j, waitOutcome, time.Since(waitStartedAt))
+	exitTimeouts := j.noteExitWaitOutcome(reader, waitOutcome == jobWaitTimeout, producedOutput || j.isFinished())
+	note := jobWaitNotice(j, waitOutcome, exitTimeouts, time.Since(waitStartedAt))
 	if streak >= jobOutputPollWarnStreak {
 		note = jobOutputPollNotice(streak)
 	}
@@ -213,7 +215,7 @@ func waitForOutput(ctx context.Context, j *job, signal <-chan struct{}) {
 	}
 }
 
-func jobWaitNotice(j *job, outcome jobWaitOutcome, waited time.Duration) string {
+func jobWaitNotice(j *job, outcome jobWaitOutcome, exitTimeouts int, waited time.Duration) string {
 	if j == nil || (outcome != jobWaitTimeout && outcome != jobWaitCancelled) || j.isFinished() {
 		return ""
 	}
@@ -222,7 +224,11 @@ func jobWaitNotice(j *job, outcome jobWaitOutcome, waited time.Duration) string 
 	if outcome == jobWaitCancelled {
 		return fmt.Sprintf("[notice] wait: exit was cancelled by the caller after %s; job %s is still running; %s. %s", formatWaitDuration(waited), j.ID, quiet, jobOutputWaitGuidance)
 	}
-	return fmt.Sprintf("[notice] wait: exit timed out after %s; job %s is still running; %s. %s", formatWaitDuration(waited), j.ID, quiet, jobOutputWaitGuidance)
+	lead := "Waiting again only repeats this check."
+	if exitTimeouts >= 2 {
+		lead = fmt.Sprintf("%d consecutive timeouts; stop waiting.", exitTimeouts)
+	}
+	return fmt.Sprintf("[notice] wait: exit timed out after %s; job %s is still running; %s. %s %s", formatWaitDuration(waited), j.ID, quiet, lead, jobOutputWaitGuidance)
 }
 
 func formatWaitDuration(d time.Duration) string {
@@ -248,7 +254,7 @@ const (
 const jobOutputWaitGuidance = "Use `wait: output` when the next step needs an output chunk expected within the wait cap; the job may keep running. " +
 	"Use `wait: exit` when the next step needs a terminal result expected within the cap. " +
 	"Renew `wait: output` only while new chunks advance the next step; progress logs alone do not justify renewals when only the final result matters. " +
-	"For your own jobs, do other work or end the turn and await the completion notification instead of repeatedly waiting for a final result. " +
+	"For your own jobs, completion arrives as a durable message at your next request, and an idle agent is woken, so do other work instead of waiting again; if nothing is left, end the turn with a one-line note that the result is pending. " +
 	"Reading another agent's job does not subscribe you to its completion notification; coordinate with its owner instead."
 
 func jobOutputPollNotice(streak int) string {

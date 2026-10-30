@@ -330,6 +330,9 @@ func TestJobOutputWaitExitTimesOutWithNoticeWhileJobKeepsRunning(t *testing.T) {
 		"[notice] wait: exit timed out after",
 		"still running",
 		"no output 0s",
+		"Waiting again only repeats this check",
+		"completion arrives as a durable message at your next request, and an idle agent is woken",
+		"end the turn with a one-line note that the result is pending",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("wait:exit timeout result missing %q:\n%s", want, out)
@@ -343,6 +346,50 @@ func TestJobOutputWaitExitTimesOutWithNoticeWhileJobKeepsRunning(t *testing.T) {
 			continue
 		}
 		t.Fatalf("wait:exit result carried a non-meta line %q:\n%s", trimmed, out)
+	}
+}
+
+func TestJobOutputConsecutiveExitTimeoutsEscalate(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	t.Cleanup(func() { StopAllJobsForShutdown() })
+	restoreWait := jobOutputWaitMs
+	t.Cleanup(func() { jobOutputWaitMs = restoreWait })
+	jobOutputWaitMs = 30
+
+	id, err := ExecuteJobForTest(jobTestCtx(), "sleep 5", "repeated timeouts", nil)
+	if err != nil {
+		t.Fatalf("ExecuteJobForTest: %v", err)
+	}
+	first := runJobOutput(t, map[string]any{"job_id": id, "wait": "exit"})
+	if strings.Contains(first, "consecutive timeouts") {
+		t.Fatalf("first timeout must not escalate:\n%s", first)
+	}
+	second := runJobOutput(t, map[string]any{"job_id": id, "wait": "exit"})
+	if !strings.Contains(second, "2 consecutive timeouts; stop waiting") {
+		t.Fatalf("second timeout must escalate:\n%s", second)
+	}
+	third := runJobOutput(t, map[string]any{"job_id": id, "wait": "exit"})
+	if !strings.Contains(third, "3 consecutive timeouts; stop waiting") {
+		t.Fatalf("third timeout must keep escalating:\n%s", third)
+	}
+}
+
+func TestExitWaitStreakIsPerReaderAndResetsOnProgress(t *testing.T) {
+	j := &job{ID: "job-streak"}
+	if got := j.noteExitWaitOutcome("main", true, false); got != 1 {
+		t.Fatalf("first timeout streak = %d, want 1", got)
+	}
+	if got := j.noteExitWaitOutcome("main", true, false); got != 2 {
+		t.Fatalf("second timeout streak = %d, want 2", got)
+	}
+	if got := j.noteExitWaitOutcome("main", false, false); got != 2 {
+		t.Fatalf("read without progress streak = %d, want 2", got)
+	}
+	if got := j.noteExitWaitOutcome("main", false, true); got != 0 {
+		t.Fatalf("progress must reset the streak, got %d", got)
+	}
+	if got := j.noteExitWaitOutcome("worker", true, false); got != 1 {
+		t.Fatalf("another reader starts its own streak, got %d", got)
 	}
 }
 

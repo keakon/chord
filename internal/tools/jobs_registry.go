@@ -141,6 +141,7 @@ type job struct {
 type jobReaderState struct {
 	offset          int64
 	noProgressReads int
+	exitTimeouts    int
 }
 
 // JobRegistry owns every background or foreground shell execution. A job's
@@ -1113,6 +1114,23 @@ func (j *job) noteReadOutcome(reader string, noNewBytes bool) int {
 		state.noProgressReads = 0
 	}
 	return state.noProgressReads
+}
+
+// noteExitWaitOutcome tracks one reader's consecutive timed-out exit waits. A
+// read that produced output, or a wait that ended, breaks the streak because
+// the wait had something new to return; reads without progress keep it.
+func (j *job) noteExitWaitOutcome(reader string, timedOut, progressed bool) int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	state := j.readerStateLocked(reader)
+	if progressed {
+		state.exitTimeouts = 0
+		return 0
+	}
+	if timedOut {
+		state.exitTimeouts++
+	}
+	return state.exitTimeouts
 }
 
 // outputWaitState returns the current output generation and whether this reader

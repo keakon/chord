@@ -57,6 +57,8 @@
 
 ### 改进
 
+- `job_output` 等待超时后，提示会说明自己启动的任务完成时结果会作为持久消息在下一次请求送达、agent 空闲时自动唤醒，让 agent 改做其他工作或结束回合，而不是反复等待；同一任务连续超时会升级为明确的停止等待提示。
+
 - SubAgent 通知会显示侧栏中的 worker 名称；不同 worker 发来的同类通知会分别排队，不再相互覆盖。
 
 - Responses 请求带上 Codex 形状的客户端标识：wire 上的会话 id 是由 Chord 自身会话 id 确定性推导出的 UUID，`x-codex-installation-id` 改为一台机器一个 id——存在 `~/.codex/installation_id` 时直接复用，否则由 Chord 在自己的配置目录持久化——window id 只在历史被 durable 压缩后推进。同机同会话在后端看来是一个 Codex 客户端，不再每个会话一个。

@@ -367,7 +367,7 @@ func TestJobOutputDescriptionDistinguishesWaitPurposes(t *testing.T) {
 func TestJobOutputDescriptionLimitsCompletionNotificationsToOwner(t *testing.T) {
 	desc := JobOutputTool{}.Description()
 	for _, want := range []string{
-		"For your own jobs, do other work or end the turn and await the completion notification instead of repeatedly waiting for a final result",
+		"For your own jobs, completion arrives as a durable message at your next request, and an idle agent is woken, so do other work instead of waiting again",
 		"Reading another agent's job does not subscribe you to its completion notification",
 		"coordinate with its owner instead",
 	} {
