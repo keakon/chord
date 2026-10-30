@@ -298,7 +298,7 @@ type SubAgent struct {
 	workDirState workDirBinding
 
 	// cachedSessionReminderContent is the meta user message content carrying
-	// environment + AGENTS.md (under "# AGENTS.md instructions" /
+	// environment + workspace rules (under "# Workspace Instructions" /
 	// <INSTRUCTIONS>). Built at construction and rebuilt on a worktree switch,
 	// so the environment block always names the active checkout; injected into
 	// every request so the prompt prefix keeps one stable shape. Not persisted.
@@ -1693,8 +1693,8 @@ func (s *SubAgent) buildSystemPrompt() string {
 	}
 	parts = append(parts, taskSection)
 
-	// AGENTS.md is delivered as a meta user message under a
-	// "# AGENTS.md instructions" / <INSTRUCTIONS> self-identifying block via
+	// Workspace instructions are delivered as a meta user message under a
+	// "# Workspace Instructions" / <INSTRUCTIONS> self-identifying block via
 	// cachedSessionReminder (mirrors MainAgent). It does not belong in the
 	// stable system prompt.
 

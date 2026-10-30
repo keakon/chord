@@ -851,7 +851,7 @@ type MainAgent struct {
 	cachedSubAgents []*config.AgentConfig
 
 	// cachedSessionReminderContent is the meta user message content carrying
-	// environment + AGENTS.md (under "# AGENTS.md instructions" /
+	// environment + workspace rules (under "# Workspace Instructions" /
 	// <INSTRUCTIONS>). Built once ensureSessionBuilt completes and refreshed
 	// in place on session-head events; injected into every LLM request so the
 	// prompt prefix keeps one stable shape. Not persisted to ctxMgr or jsonl.

@@ -138,7 +138,7 @@ func mainAgentResponseClosurePromptText(doneVisible bool) string {
 - Match the report length to the size of the change: a small single-area change takes 2-5 sentences or up to 3 bullets, a medium change up to 6 bullets, and a large multi-file change one or two bullets per file; drop headings and tables unless they carry real structure
 - Compress by leaving content out instead of packing sentences: name files and symbols instead of pasting code, and do not restate the plan or the steps already visible in tool cards
 - Never compress failing test output, error messages, security warnings, destructive-action confirmations, verification status, or unresolved limitations
-- An output structure that the user or an active instruction explicitly requires — a requested format, an AGENTS.md or skill template, or a mandated report schema — wins over this default length; keep that structure and make each required section as short as it can be
+- An output structure that the user or an active instruction explicitly requires — a requested format, a workspace-instruction or skill template, or a mandated report schema — wins over this default length; keep that structure and make each required section as short as it can be
 ` + completionReportLine + `
 - ` + responseClosureStopLine + " to the user"
 }

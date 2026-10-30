@@ -104,9 +104,9 @@ func (a *MainAgent) buildSystemPrompt() string {
 	if block := a.primaryAgentCoordinationPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
-	// AGENTS.md is injected as a meta user message (under a
-	// "# AGENTS.md instructions" / <INSTRUCTIONS> self-identifying block) via
-	// injectSessionContextReminder. The stable prompt never mentions it: the
+	// Workspace instructions are injected as a meta user message (under a
+	// "# Workspace Instructions" / <INSTRUCTIONS> self-identifying block) via
+	// injectSessionContextReminder. The stable prompt never frames them: the
 	// block names itself and states its own precedence, and a prompt line that
 	// depends on whether rules exist would both invalidate the cached prefix and
 	// claim a block that the request may not carry.

@@ -126,9 +126,9 @@ func RenderDirectoryInstructionFacts(facts []DirectoryInstructionFact) string {
 			continue
 		}
 		if b.Len() == 0 {
-			b.WriteString("# AGENTS.md instructions\n\nDeeper directory rules override parent rules only within their subtree; sibling rules do not override each other. System instructions, explicit user requests, and role permissions remain higher priority.\n")
+			b.WriteString("# Workspace Instructions\n\nDeeper directory rules override parent rules only within their subtree; sibling rules do not override each other. System instructions, explicit user requests, and role permissions remain higher priority.\n")
 		}
-		fmt.Fprintf(&b, "\nScope: %s (checkout: %s)\nSource: %s\n<INSTRUCTIONS>\n%s\n</INSTRUCTIONS>\n", f.Scope, f.CheckoutRoot, f.SourcePath, f.Body)
+		fmt.Fprintf(&b, "\nScope: %s (checkout: %s)\n<INSTRUCTIONS>\n%s\n</INSTRUCTIONS>\n", f.Scope, f.CheckoutRoot, f.Body)
 	}
 	return b.String()
 }

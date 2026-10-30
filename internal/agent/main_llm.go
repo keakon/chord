@@ -663,9 +663,9 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	messages = a.injectCompactionFileContext(messages, llmClient.NextRequestModelRef())
 	fileContextMessages := messages
 
-	// Inject the meta user message carrying environment + AGENTS.md before the
-	// first user message. AGENTS.md is delivered under a "# AGENTS.md
-	// instructions" / <INSTRUCTIONS> self-identifying block. This is a
+	// Inject the meta user message carrying environment + workspace rules before
+	// the first user message. Rules are delivered under a "# Workspace
+	// Instructions" / <INSTRUCTIONS> self-identifying block. This is a
 	// per-request overlay; it never enters ctxMgr or the session jsonl.
 	beforeReminder := len(messages)
 	messages = a.injectSessionContextReminder(messages)

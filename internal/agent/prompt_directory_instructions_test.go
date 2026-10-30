@@ -23,8 +23,8 @@ func TestLoadAgentsMDWithWorkDir_RootOnly(t *testing.T) {
 	if !strings.Contains(got, "<INSTRUCTIONS>\nroot instructions\n</INSTRUCTIONS>") {
 		t.Fatalf("expected root instructions, got %q", got)
 	}
-	if !strings.Contains(got, "Scope: .") || !strings.Contains(got, "Source: ") {
-		t.Fatalf("missing source/scope: %q", got)
+	if !strings.Contains(got, "Scope: .") || strings.Contains(got, "Source: ") || strings.Contains(got, "AGENTS.md") {
+		t.Fatalf("missing scope or unexpected file framing: %q", got)
 	}
 }
 
@@ -215,7 +215,7 @@ func TestBuildSystemPrompt_NeverFramesAgentsMD(t *testing.T) {
 		"sub without rules":  (&SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}).buildSystemPrompt(),
 		"sub with rules":     sub.buildSystemPrompt(),
 	} {
-		for _, unwanted := range []string{"## Workspace Instructions", "# AGENTS.md instructions"} {
+		for _, unwanted := range []string{"# Workspace Instructions", "AGENTS.md"} {
 			if strings.Contains(prompt, unwanted) {
 				t.Fatalf("%s: system prompt mentions AGENTS.md (%q), got:\n%s", name, unwanted, prompt)
 			}

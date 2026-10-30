@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+func TestRenderDirectoryInstructionFactsOmitsFileFraming(t *testing.T) {
+	facts := []DirectoryInstructionFact{
+		{CheckoutRoot: "/repo", Scope: ".", SourcePath: "/repo/AGENTS.md", Operation: DirectoryInstructionUpsert, Body: "Use tabs."},
+		{CheckoutRoot: "/repo", Scope: "pkg", SourcePath: "/repo/pkg/AGENTS.md", Operation: DirectoryInstructionUpsert, Body: "Keep identifiers unchanged."},
+	}
+	want := `# Workspace Instructions
+
+Deeper directory rules override parent rules only within their subtree; sibling rules do not override each other. System instructions, explicit user requests, and role permissions remain higher priority.
+
+Scope: . (checkout: /repo)
+<INSTRUCTIONS>
+Use tabs.
+</INSTRUCTIONS>
+
+Scope: pkg (checkout: /repo)
+<INSTRUCTIONS>
+Keep identifiers unchanged.
+</INSTRUCTIONS>
+`
+	if got := RenderDirectoryInstructionFacts(facts); got != want {
+		t.Fatalf("rendered instructions = %q, want %q", got, want)
+	}
+}
+
 func TestDirectoryInstructionFactsAreTypedAndIsolated(t *testing.T) {
 	f := DirectoryInstructionFact{CheckoutRoot: "/repo", Scope: "pkg", SourcePath: "/repo/pkg/AGENTS.md", Operation: DirectoryInstructionUpsert, Body: "Use scoped conventions."}
 	f.BodyHash = DirectoryInstructionBodyHash(f.Body)
