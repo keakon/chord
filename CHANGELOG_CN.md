@@ -75,8 +75,6 @@
 
 - OpenCode 导入会把源会话已应用的压缩映射为 Chord 的上下文摘要 checkpoint：配对摘要成为 checkpoint，站在压缩保留的最旧一条消息之前；这些近期消息留作历史；源侧早已折叠掉的早期消息由该 checkpoint 替换——即源模型当时看到的形态。只有最新一次可用的压缩会塑造导入结果；导出未记录压缩保留了哪些消息时，保留完整历史并在报告中说明。压缩已完成却没有摘要文本时同样跳过，除非被替换的早期消息里还留有可作锚点的原始请求：此时 checkpoint 只携带该请求，报告会说明摘要文本缺失。CLI 输出与 `import-report.json` 记录映射的 checkpoint 数、被替换的消息数和被跳过的标记数。
 
-- 内嵌模型目录采用 [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2)，加入 Gemini 4 Argon，保留 1M token 共享窗口，默认流式绑定上限为 65,536 token，long decode 续传需要显式配置；记录 DeepSeek-V4.1-Flash-1017 在既有 `deepseek/deepseek-flash` 线路上的发布。
-
 - 系统提示词要求 Agent 原样保留标识符和契约细节，在设计与评审中给出首选方案及决定性理由，保留既有用法时让调用方仍可按原契约使用。提示词也要求回复和交接先讲结果与证据，并限定凭证只能通过批准机制使用。
 
 - 委派任务的重复检测现在只看调用方声明的身份：描述与其他任务偶然相似不再产生 `duplicate_detected` 提示；显式 `semantic_task_key` 复用仍以 `already_exists` 拒绝；复用 `plan_task_ref` 且未声明不同 key 时仍会附带提示。
@@ -253,8 +251,8 @@
 - 发送前可预览图片：单击输入框图片占位符选中整张附件，双击用现有图片查看器预览，关闭后继续编辑同一份草稿。
 - 输入框选区支持整段删除，以及输入文字、换行或粘贴文本替换；图片和大段粘贴占位符整块参与编辑，一次撤销即可恢复。
 - TUI 新增 `/status`，可在不同终端宽度下查看实时运行信息，支持键盘导航和鼠标操作。
-- 内嵌模型目录包含 32 个已验证模型、21 个 preset 绑定，固定到 chord-models `v2026-10-10.1`，记录公布的限额、模态、价格和模型行为配方。`chord config add` 可接入已记录的官方端点并写入必需的协议设置；自定义 URL 可用 `--catalog` 显式借用模型事实。
-- 不必等 Chord 发版即可刷新模型目录：`chord config refresh-catalog` 从 [chord-models](https://github.com/keakon/chord-models) 下载最新版本，`chord config add --refresh-catalog` 在添加模型前刷新。更新的快照整体替换内置目录，下载或校验失败保留原有缓存；`chord doctor config` 显示当前版本和来源。
+- 内嵌模型目录包含 32 个已验证模型、21 个 preset 绑定，记录公布的限额、模态、价格和模型行为配方。`chord config add` 可接入已记录的官方端点并写入必需的协议设置；自定义 URL 可用 `--catalog` 显式借用模型事实。
+- 不必等 Chord 发版即可刷新模型目录：`chord config refresh-catalog` 下载最新发布的目录，`chord config add --refresh-catalog` 在添加模型前刷新。更新的快照整体替换内置目录，下载或校验失败保留原有缓存；`chord doctor config` 显示当前版本和来源。
 - 目录刷新同时带来 candidate 条目——社区发现、尚未完整验证的 wire 名——它们会进入 `chord config add` 的建议列表，标注被观察到的 provider 作用域与来源。候选永不填充默认值：采纳意味着把观测值写成你自己的显式配置；同一 wire 名在多个作用域被观察到时并列展示，Chord 不替你挑选。
 - 很可能已被更新的已验证模型取代的目录引用现在会以 advisory 形式上报：`chord doctor config` 列出它们及重新绑定 / 保留现状的命令，启动时提示未处理数量，`chord config add <provider>/<model> --keep-current` 可在当前目录版本下确认不再提示。
 - 新增 `chord config advise`，查看显式模型设置与已验证目录建议之间的差异。`--accept pin` 采纳建议，`--accept follow-catalog` 移除可安全删除的覆盖项，`--keep-current` 确认保留当前值，`--json` 供脚本读取。
