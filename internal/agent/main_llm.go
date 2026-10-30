@@ -633,7 +633,10 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	if dropped.any() {
 		log.Warnf("dropping unsupported binary parts before LLM request kinds=%s", dropped.summary())
 		if a.unsupportedPartToast.first(modelName, toastCategoryInput, dropped.summary()) {
-			a.emitToTUI(ToastEvent{Level: "warn", Message: "The current model does not support " + dropped.summary() + " input; attachments were ignored", AgentID: a.instanceID})
+			// Main-agent toasts carry no AgentID: the empty string is the main
+			// agent, and the instance ID ("main-N") would make the TUI attribute
+			// this notice to a SubAgent.
+			a.emitToTUI(ToastEvent{Level: "warn", Message: "The current model does not support " + dropped.summary() + " input; attachments were ignored"})
 		}
 	}
 

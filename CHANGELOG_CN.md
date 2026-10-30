@@ -57,6 +57,8 @@
 
 ### 改进
 
+- SubAgent 通知会显示侧栏中的 worker 名称；不同 worker 发来的同类通知会分别排队，不再相互覆盖。
+
 - Responses 请求带上 Codex 形状的客户端标识：wire 上的会话 id 是由 Chord 自身会话 id 确定性推导出的 UUID，`x-codex-installation-id` 改为一台机器一个 id——存在 `~/.codex/installation_id` 时直接复用，否则由 Chord 在自己的配置目录持久化——window id 只在历史被 durable 压缩后推进。同机同会话在后端看来是一个 Codex 客户端，不再每个会话一个。
 
 - `preset: codex` 默认发送 zstd 压缩的请求体，与 Codex 客户端一致。`compress` 新增显式的 `off` 用于退出，省略 `compress` 现在表示「取 preset 默认」——其他 preset 仍按原文发送请求体。

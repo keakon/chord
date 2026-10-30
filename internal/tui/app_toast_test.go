@@ -153,6 +153,49 @@ func TestToastEventCategoryMergesQueuedNotifications(t *testing.T) {
 	}
 }
 
+func TestToastEventAttributesSubAgentAndKeepsCategoriesSeparate(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.sidebar.Update([]agent.SubAgentInfo{
+		{InstanceID: "agent-1", AgentDefName: "reviewer", TaskDesc: "reviewing tests"},
+		{InstanceID: "agent-2", AgentDefName: "writer", TaskDesc: "writing docs"},
+	}, "", "builder")
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToastEvent{Message: "main notice", Level: "info", Category: "worker", AgentID: "main"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToastEvent{Message: "first notice", Level: "info", Category: "worker", AgentID: "agent-1"}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToastEvent{Message: "second notice", Level: "info", Category: "worker", AgentID: "agent-2"}})
+
+	if m.activeToast == nil || m.activeToast.Message != "main notice" || m.activeToast.Category != "worker" {
+		t.Fatalf("main toast = %#v, want its original message and category", m.activeToast)
+	}
+	if len(m.toastQueue) != 2 {
+		t.Fatalf("queued toasts = %#v, want one notification per SubAgent", m.toastQueue)
+	}
+	if got := m.toastQueue[0]; got.Message != "reviewing tests: first notice" || got.Category != "agent-1:worker" {
+		t.Fatalf("first SubAgent toast = %#v, want labeled and source-scoped", got)
+	}
+	if got := m.toastQueue[1]; got.Message != "writing docs: second notice" || got.Category != "agent-2:worker" {
+		t.Fatalf("second SubAgent toast = %#v, want labeled and source-scoped", got)
+	}
+}
+
+func TestToastEventKeepsMainAgentNoticesUnlabeled(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.sidebar.Update([]agent.SubAgentInfo{
+		{InstanceID: "agent-1", AgentDefName: "reviewer", TaskDesc: "reviewing tests"},
+	}, "", "builder")
+
+	// "" is the documented main-agent spelling (ToastEvent.AgentID) and "main"
+	// is what conversation targets carry. Neither may be labeled as a worker,
+	// or a main-agent notice reads as if a SubAgent raised it.
+	for _, agentID := range []string{"", "main"} {
+		m.activeToast = nil
+		_ = m.handleAgentEvent(agentEventMsg{event: agent.ToastEvent{Message: "attachments were ignored", Level: "warn", AgentID: agentID}})
+		if m.activeToast == nil || m.activeToast.Message != "attachments were ignored" {
+			t.Fatalf("main agent id %q toast = %#v, want the unlabeled message", agentID, m.activeToast)
+		}
+	}
+}
+
 func TestToastDurationsStayWithinThreeToFiveSeconds(t *testing.T) {
 	for level, want := range map[string]time.Duration{
 		"info":  3 * time.Second,

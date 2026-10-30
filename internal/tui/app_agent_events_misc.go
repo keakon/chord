@@ -329,7 +329,21 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		}
 		return true, effects
 	case agent.ToastEvent:
-		effects.addFollowup(m.enqueueToastWithCategory(evt.Message, evt.Level, evt.Category))
+		message, category := evt.Message, evt.Category
+		if agentID := strings.TrimSpace(evt.AgentID); agentID != "" && agentID != "main" {
+			label := agentID
+			for _, entry := range m.sidebar.Agents() {
+				if entry.ID == agentID {
+					label = sidebarEntryDisplayName(entry)
+					break
+				}
+			}
+			message = label + ": " + message
+			if category != "" {
+				category = agentID + ":" + category
+			}
+		}
+		effects.addFollowup(m.enqueueToastWithCategory(message, evt.Level, category))
 		if m.shouldPriorityFlushToast(evt.Level) {
 			effects.addFollowup(m.requestStreamBoundaryFlush())
 		}

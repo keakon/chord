@@ -57,6 +57,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- SubAgent toasts now show the worker's sidebar label, and same-category notifications from different workers keep separate queue entries.
+
 - Responses requests carry Codex-shaped client identifiers: the session id on the wire is a UUID derived deterministically from Chord's own session id, `x-codex-installation-id` is now a single machine-level id that reuses `~/.codex/installation_id` when that file exists and is otherwise persisted under Chord's config home, and the window id advances only when history is durably compacted. One machine and one session now present as one Codex client to the backend instead of one client per session.
 
 - `preset: codex` sends zstd-compressed request bodies by default, the way the Codex client does. `compress` gained an explicit `off` to opt out, and an omitted `compress` now means "take the preset's choice" — every other preset still sends the body uncompressed.
