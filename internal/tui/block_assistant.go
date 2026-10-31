@@ -731,6 +731,23 @@ func markdownTableCells(line string) []string {
 	return cells
 }
 
+// bodyVisibility resolves the body visibility answers for this render,
+// reusing the previous scan when the body text is unchanged. The memo needs no
+// content invalidation: it is keyed by the body it was computed from, so a
+// changed body simply misses. Memory reclamation clears the key to release
+// its reference to the body.
+func (b *Block) bodyVisibility(bodyContent string) (hasVisible, isPlaceholder bool) {
+	if b.bodyVisibilityValid && b.bodyVisibilityKey == bodyContent {
+		return b.bodyVisibilityText, b.bodyVisibilityPlaceholder
+	}
+	hasVisible, isPlaceholder = assistantContentVisibility(bodyContent)
+	b.bodyVisibilityKey = bodyContent
+	b.bodyVisibilityText = hasVisible
+	b.bodyVisibilityPlaceholder = isPlaceholder
+	b.bodyVisibilityValid = true
+	return hasVisible, isPlaceholder
+}
+
 func (b *Block) renderAssistant(width int) []string {
 	// (Note: we removed the "[assistant]" string header for a cleaner conversational look)
 	style := currentStyles.AssistantCardStyle
@@ -773,8 +790,9 @@ func (b *Block) renderAssistant(width int) []string {
 	}
 
 	// Assistant block body.
-	hasContent := assistantContentHasVisibleText(bodyContent) || (summary.HasMeta && !b.Streaming)
-	if b.Streaming && !hasThinking && assistantStreamContentIsPlaceholder(bodyContent) {
+	hasVisible, placeholder := b.bodyVisibility(bodyContent)
+	hasContent := hasVisible || (summary.HasMeta && !b.Streaming)
+	if b.Streaming && !hasThinking && placeholder {
 		return nil
 	}
 	if !hasContent && !b.Streaming && !hasThinking {

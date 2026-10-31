@@ -7,10 +7,36 @@ import (
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
-func assistantContentHasVisibleText(content string) bool {
+// assistantContentVisibility answers both questions renderAssistant asks about
+// an assistant body: whether any visible text exists, and whether what remains
+// is only the streaming placeholder ellipsis. They share one ANSI strip and one
+// rune scan because the body is rescanned on every streaming render, so paying
+// for two full passes made this check grow with message length.
+func assistantContentVisibility(content string) (hasVisible, isPlaceholder bool) {
 	content = removeTrailingCursorGlyph(content)
 	content = terminaltext.StripANSI(content)
-	return message.HasVisibleText(content)
+	if !message.HasVisibleText(content) {
+		return false, true
+	}
+	dots := 0
+	hasEllipsis := false
+	for _, r := range content {
+		switch {
+		case r == '.':
+			dots++
+		case r == '…':
+			hasEllipsis = true
+		case !message.IsVisibleTextRune(r):
+		default:
+			return true, false
+		}
+	}
+	return true, hasEllipsis || dots > 0
+}
+
+func assistantContentHasVisibleText(content string) bool {
+	hasVisible, _ := assistantContentVisibility(content)
+	return hasVisible
 }
 
 func visibleAssistantStreamContent(content string) string {
@@ -23,23 +49,6 @@ func visibleAssistantStreamContent(content string) string {
 }
 
 func assistantStreamContentIsPlaceholder(content string) bool {
-	content = removeTrailingCursorGlyph(content)
-	content = terminaltext.StripANSI(content)
-	if !message.HasVisibleText(content) {
-		return true
-	}
-	dots := 0
-	hasEllipsis := false
-	for _, r := range content {
-		switch {
-		case r == '.':
-			dots++
-		case r == '…':
-			hasEllipsis = true
-		case !message.IsVisibleTextRune(r):
-		default:
-			return false
-		}
-	}
-	return hasEllipsis || dots > 0
+	_, isPlaceholder := assistantContentVisibility(content)
+	return isPlaceholder
 }

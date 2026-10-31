@@ -363,6 +363,8 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	block.Diff = ""
 	block.UserLocalShellResult = ""
 	block.ThinkingParts = nil
+	block.bodyVisibilityKey = ""
+	block.bodyVisibilityValid = false
 	block.InvalidateStreamingSettledCache()
 	block.mdCache = nil
 	block.mdCacheWidth = 0

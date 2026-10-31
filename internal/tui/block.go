@@ -376,6 +376,14 @@ type Block struct {
 	searchMatchOffset            int
 	searchMatchFound             bool
 	searchMatchReady             bool
+	// bodyVisibility* memoizes the visible-text / placeholder check for the
+	// streaming body it was computed from. The check strips ANSI and scans the
+	// whole body, and renders with unchanged content (idle ticks, theme
+	// redraws) would otherwise repeat it, so the answer is kept per body text.
+	bodyVisibilityKey         string
+	bodyVisibilityText        bool
+	bodyVisibilityPlaceholder bool
+	bodyVisibilityValid       bool
 	// hotBytesMemo caches estimatedHotBytes; invalidated whenever render caches
 	// are cleared (InvalidateCache) or repopulated, so the viewport hot-budget
 	// recompute stays O(blocks) instead of O(total cached lines).

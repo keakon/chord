@@ -419,6 +419,8 @@ func (b *Block) ReleaseDerivedRenderCaches() {
 		return
 	}
 	b.InvalidateCache()
+	b.bodyVisibilityKey = ""
+	b.bodyVisibilityValid = false
 	b.mdCache = nil
 	b.mdCacheWidth = 0
 	b.mdCacheContent = ""
