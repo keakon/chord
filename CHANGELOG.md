@@ -59,6 +59,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Release binaries are fully static: the Linux build no longer depends on the system glibc version.
 
+- Sessions with long usage histories resume faster and use less CPU while recording usage. The usage shown in the session picker can lag briefly behind a running session; ending a session brings it up to date.
+
 - Redrawing a long draft in the composer no longer repeats work on every frame.
 
 - The TUI uses less CPU while idle: frames with no visible change reuse the previous render.

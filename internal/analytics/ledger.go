@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
@@ -104,6 +106,15 @@ type SessionUsageSummary struct {
 // for session ordering, so callers outside this package reference it by name.
 const SessionUsageSummaryFileName = "usage-summary.json"
 
+// usageSummaryWriteInterval debounces the usage-summary.json rewrite: steady-
+// state appends mutate the in-memory summary and only hit the disk once per
+// interval. A pending summary stays in memory until the next append past the
+// interval, Sync, Seal, or Close; readers of the on-disk file (the session
+// picker and project reports) see it lag until then, and a crash leaves a
+// stale summary that the next open rebuilds from usage.jsonl. Rebuilds and
+// explicit reconciliations always write immediately.
+const usageSummaryWriteInterval = time.Second
+
 // UsageLedger manages append-only usage.jsonl and usage-summary.json.
 type UsageLedger struct {
 	mu          sync.RWMutex
@@ -120,6 +131,16 @@ type UsageLedger struct {
 	eventSeq                 uint64
 	summaryLoaded            bool
 	summary                  *SessionUsageSummary
+	// summaryDirty records that the in-memory summary carries aggregate events
+	// that are not on disk yet; syncLocked flushes it before the fsync.
+	summaryDirty     bool
+	lastSummaryWrite time.Time
+	// summaryCursorPrimed records that a full ledger scan (restore's evidence
+	// pass) already observed the last aggregate event, so ensureSummaryLocked
+	// can decide freshness without re-reading the file. Primed by the owner
+	// before the ledger is shared with appenders.
+	summaryCursorPrimed bool
+	primedLastEventID   string
 	// file caches the open usage.jsonl handle; guarded by mu. Dropped and
 	// reopened on write errors.
 	file *os.File
@@ -141,6 +162,23 @@ func NewUsageLedger(sessionDir, projectPath string) *UsageLedger {
 		projectPath: strings.TrimSpace(projectPath),
 		projectID:   ProjectIDForPath(projectPath),
 	}
+}
+
+// PrimeSummaryCursor records the last aggregate event ID a full ledger scan
+// already observed (restore's evidence pass), so the first append can decide
+// summary freshness against that cursor instead of re-reading usage.jsonl.
+// Call it before the ledger is shared with appenders. The cursor is consumed
+// by the first summary freshness check: later checks re-read usage.jsonl, so
+// events appended after priming can never make the stale cursor match the
+// on-disk summary and adopt a summary that misses them.
+func (l *UsageLedger) PrimeSummaryCursor(eventID string) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.summaryCursorPrimed = true
+	l.primedLastEventID = eventID
 }
 
 // LoadSessionUsageSummary loads the fresh summary for a session, rebuilding it
@@ -353,10 +391,14 @@ func (l *UsageLedger) BuildSessionStats() (SessionStats, int64, error) {
 // sessionScanResult holds everything rebuilt from one usage.jsonl scan. Keep
 // restore and picker paths to a single pass instead of one scan per stat type.
 type sessionScanResult struct {
-	stats    SessionStats
-	count    int64
-	refs     map[string]AgentModelRefs
-	walltime map[string]*WalltimeStats
+	stats SessionStats
+	count int64
+	refs  map[string]AgentModelRefs
+	// lastAggregateEventID is the last non-walltime event ID the scan saw,
+	// the same cursor readLastCompleteUsageEvent would produce; reuse it to
+	// prime a ledger's summary freshness without a second pass.
+	lastAggregateEventID string
+	walltime             map[string]*WalltimeStats
 }
 
 // scanSessionEvidence rebuilds token/cost stats, latest per-agent model refs,
@@ -395,6 +437,7 @@ func (l *UsageLedger) scanSessionEvidence() (*sessionScanResult, error) {
 			}
 			return
 		}
+		res.lastAggregateEventID = evt.EventID
 		// Diagnostic events advance the count cursor and model refs but are
 		// not LLM calls; keep them out of the aggregated stats. The one
 		// exception is the compaction-lifecycle purpose, which folds into the
@@ -479,14 +522,14 @@ func (l *UsageLedger) BuildSessionStatsWithAgentModelRefs() (SessionStats, int64
 // BuildSessionEvidence rebuilds token/cost stats, model refs, walltime, and
 // the event count in a single ledger scan. Restore uses this so it never
 // parses usage.jsonl twice.
-func (l *UsageLedger) BuildSessionEvidence() (SessionStats, int64, map[string]AgentModelRefs, map[string]*WalltimeStats, error) {
+func (l *UsageLedger) BuildSessionEvidence() (SessionStats, int64, map[string]AgentModelRefs, map[string]*WalltimeStats, string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	res, err := l.scanSessionEvidence()
 	if err != nil {
-		return SessionStats{}, 0, nil, nil, err
+		return SessionStats{}, 0, nil, nil, "", err
 	}
-	return res.stats, res.count, res.refs, res.walltime, nil
+	return res.stats, res.count, res.refs, res.walltime, res.lastAggregateEventID, nil
 }
 
 // Close releases the cached descriptor and reports synchronization failures.
@@ -509,12 +552,18 @@ func (l *UsageLedger) Close() error {
 }
 
 // Seal rejects new producers while allowing failed writes to be reconciled.
+// It first flushes a debounced summary, the last summary write this producer
+// owns; a failed flush only leaves the successor to rebuild from usage.jsonl.
 func (l *UsageLedger) Seal() {
-	if l != nil {
-		l.mu.Lock()
-		l.sealed = true
-		l.mu.Unlock()
+	if l == nil {
+		return
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.flushSummaryLocked(); err != nil {
+		log.Warnf("flush usage summary before seal failed session=%v error=%v", l.sessionDir, err)
+	}
+	l.sealed = true
 }
 
 // Sync preserves earlier append failures until explicit RetryWrites succeeds.
@@ -527,10 +576,31 @@ func (l *UsageLedger) Sync() error {
 	return l.syncLocked()
 }
 
+// flushSummaryLocked writes a debounced summary, if any.
+func (l *UsageLedger) flushSummaryLocked() error {
+	if !l.summaryDirty || l.summary == nil {
+		return nil
+	}
+	if err := l.writeSummaryLocked(l.summary); err != nil {
+		return fmt.Errorf("flush usage summary: %w", err)
+	}
+	l.summaryDirty = false
+	l.lastSummaryWrite = time.Now()
+	return nil
+}
+
 func (l *UsageLedger) syncLocked() error {
 	var errs []error
 	for _, failure := range l.failures {
 		errs = append(errs, failure.err)
+	}
+	// Flush a debounced summary before the fsync so the durable state covers
+	// everything the in-memory summary already carries. Seal flushes it
+	// before handing ownership over.
+	if !l.sealed {
+		if err := l.flushSummaryLocked(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if l.file != nil {
 		if err := l.file.Sync(); err != nil {
@@ -679,6 +749,15 @@ func (l *UsageLedger) appendEventLocked(event UsageEvent) error {
 	}
 
 	applyUsageEvent(summary, event)
+	// Steady-state summary writes are debounced: the in-memory summary is
+	// already current for every reader, and syncLocked flushes the pending
+	// state before the ledger closes.
+	if !l.lastSummaryWrite.IsZero() && time.Since(l.lastSummaryWrite) < usageSummaryWriteInterval {
+		l.summaryDirty = true
+		l.summary = summary
+		l.summaryLoaded = true
+		return nil
+	}
 	if err := l.writeSummaryLocked(summary); err != nil {
 		l.summaryLoaded = false
 		l.summary = nil
@@ -686,6 +765,8 @@ func (l *UsageLedger) appendEventLocked(event UsageEvent) error {
 	}
 	l.summary = summary
 	l.summaryLoaded = true
+	l.summaryDirty = false
+	l.lastSummaryWrite = time.Now()
 	return nil
 }
 
@@ -783,9 +864,24 @@ func (l *UsageLedger) ensureSummaryLocked() (*SessionUsageSummary, error) {
 	}
 
 	summary, summaryErr := readUsageSummaryFile(l.summaryPath())
-	lastEvent, hasLastEvent, err := readLastCompleteUsageEvent(l.usagePath())
-	if err != nil {
-		return nil, err
+	var lastEventID string
+	var hasLastEvent bool
+	if l.summaryCursorPrimed {
+		// The evidence scan already walked this exact ledger file; reuse its
+		// cursor instead of a second full pass. Consume it: the cursor is a
+		// snapshot taken before any append, so a later ensure must re-read the
+		// file — otherwise a failed summary write would leave the stale cursor
+		// matching the stale on-disk summary and adopt a summary that misses
+		// the appended events.
+		lastEventID, hasLastEvent = l.primedLastEventID, l.primedLastEventID != ""
+		l.summaryCursorPrimed = false
+		l.primedLastEventID = ""
+	} else {
+		lastEvent, ok, err := readLastCompleteUsageEvent(l.usagePath())
+		if err != nil {
+			return nil, err
+		}
+		lastEventID, hasLastEvent = lastEvent.EventID, ok
 	}
 	if summaryErr != nil && !os.IsNotExist(summaryErr) && !hasLastEvent {
 		return nil, fmt.Errorf("read usage summary: %w", summaryErr)
@@ -793,7 +889,7 @@ func (l *UsageLedger) ensureSummaryLocked() (*SessionUsageSummary, error) {
 	summaryFresh := summary != nil
 
 	switch {
-	case hasLastEvent && summaryFresh && summary.LastEventID == lastEvent.EventID:
+	case hasLastEvent && summaryFresh && summary.LastEventID == lastEventID:
 		l.adoptSummaryLocked(summary)
 		return l.summary, nil
 	case !hasLastEvent && summaryFresh:

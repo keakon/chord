@@ -186,6 +186,13 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 			log.Warnf("failed to close recovery manager error=%v", err)
 		}
 	}
+	// Close flushes the debounced usage summary; without it the last summary
+	// window would only reach disk through a rebuild on the next restore.
+	if a.usageLedger != nil {
+		if err := a.usageLedger.Close(); err != nil {
+			log.Warnf("failed to close usage ledger error=%v", err)
+		}
+	}
 
 	if a.sessionLock != nil {
 		if err := a.sessionLock.Release(); err != nil {
@@ -203,6 +210,13 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 // can only yield a slightly stale snapshot — never a corrupt one. The recovery
 // manager stays open: the stuck persist loop may still be writing JSONL, and
 // Close would turn those writes into silent no-ops.
+//
+// The usage ledger is deliberately left open too, and no usage is lost by it:
+// usage.jsonl appends are synchronous, so only the debounced usage-summary.json
+// window can lag, and the next open rebuilds a stale summary from the ledger
+// (see usageSummaryWriteInterval). Closing here would not close that gap — a
+// live walltime segment appending after Close still leaves the in-memory
+// summary dirty with no owner left to flush it.
 func (a *MainAgent) shutdownTimeoutError(timeout time.Duration) error {
 	if a.recoveryManager() != nil {
 		if err := a.persistSnapshotLocked(a.buildShutdownSnapshot); err != nil {

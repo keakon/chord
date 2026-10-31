@@ -36,6 +36,12 @@ type loadedSessionState struct {
 	InputDelivery *recovery.InputDeliveryState
 	Pause         *recovery.SessionPauseCheckpoint
 	SessionPath   string
+	// UsageLastEventID is the last aggregate usage event the restore evidence
+	// scan observed; the runtime ledger primes its summary freshness with it
+	// so the first append does not re-scan usage.jsonl. It is only meaningful
+	// when UsageScanned reports that the scan completed.
+	UsageLastEventID string
+	UsageScanned     bool
 	// RecordedWorkDir is the checkout the session was working in when it
 	// stopped, read from its metadata. The zero value means the main checkout.
 	// An in-process /resume adopts it so the transcript keeps meaning the same
@@ -384,7 +390,7 @@ func (a *MainAgent) restoreSessionEvidence(loaded *loadedSessionState, sessionPa
 	}
 	if ledger := analytics.NewUsageLedger(sessionPath, a.contentRoot); ledger != nil {
 		usageStarted := time.Now()
-		stats, eventCount, modelRefs, walltime, ledgerErr := ledger.BuildSessionEvidence()
+		stats, eventCount, modelRefs, walltime, lastEventID, ledgerErr := ledger.BuildSessionEvidence()
 		if ledgerErr != nil {
 			log.Warnf("failed to rebuild session evidence from usage ledger session=%v error=%v", sessionPath, ledgerErr)
 			return time.Since(usageStarted), 0
@@ -393,6 +399,8 @@ func (a *MainAgent) restoreSessionEvidence(loaded *loadedSessionState, sessionPa
 		loaded.AgentModelRefs = modelRefs
 		loaded.ContextUsage = tokenUsageFromSessionStats(stats)
 		loaded.WalltimeStats = walltime
+		loaded.UsageLastEventID = lastEventID
+		loaded.UsageScanned = true
 		return time.Since(usageStarted), eventCount
 	}
 	return 0, 0
@@ -894,6 +902,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 		a.usageLedger.Close()
 	}
 	a.usageLedger = analytics.NewUsageLedger(loaded.SessionPath, a.contentRoot)
+	if loaded.UsageScanned {
+		a.usageLedger.PrimeSummaryCursor(loaded.UsageLastEventID)
+	}
 	if a.fileBackups != nil {
 		// activateLoadedSession bypasses installSessionTarget (which switches
 		// the backup directory for /new and fork); without this the resumed

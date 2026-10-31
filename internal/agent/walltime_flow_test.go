@@ -97,7 +97,7 @@ func TestWalltimeToolResultKeepsAgentAndSessionAttribution(t *testing.T) {
 	recorder.recordTarget(mainTarget, analytics.WalltimePurposeTool, time.Second)
 	recorder.recordTarget(workerTarget, analytics.WalltimePurposeTool, 2*time.Second)
 
-	_, _, _, oldStats, err := oldLedger.BuildSessionEvidence()
+	_, _, _, oldStats, _, err := oldLedger.BuildSessionEvidence()
 	if err != nil {
 		t.Fatalf("BuildSessionEvidence(old): %v", err)
 	}

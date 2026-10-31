@@ -139,7 +139,7 @@ func TestWalltimeRecorderAppendsAndRepointsLedger(t *testing.T) {
 	rec.recordTarget(rec.captureAt(identity.MainAgentID, "", 0), analytics.WalltimePurposeTool, 1500*time.Millisecond)
 	rec.recordTarget(rec.captureAt(identity.MainAgentID, "", 0), analytics.WalltimePurposeUserWait, 250*time.Millisecond)
 
-	_, _, _, walltime, err := ledgerA.BuildSessionEvidence()
+	_, _, _, walltime, _, err := ledgerA.BuildSessionEvidence()
 	if err != nil {
 		t.Fatalf("BuildSessionEvidence: %v", err)
 	}
@@ -270,7 +270,7 @@ func newWalltimeTestLedger(t *testing.T) *analytics.UsageLedger {
 // single-pass scan production restore uses.
 func walltimeStatsFor(t *testing.T, ledger *analytics.UsageLedger) map[string]*analytics.WalltimeStats {
 	t.Helper()
-	_, _, _, walltime, err := ledger.BuildSessionEvidence()
+	_, _, _, walltime, _, err := ledger.BuildSessionEvidence()
 	if err != nil {
 		t.Fatalf("BuildSessionEvidence: %v", err)
 	}

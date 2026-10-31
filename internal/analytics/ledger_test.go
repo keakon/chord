@@ -229,7 +229,7 @@ func TestBuildSessionEvidenceFoldsWalltimeInOnePass(t *testing.T) {
 		t.Fatalf("AppendEvent(walltime): %v", err)
 	}
 
-	stats, count, refs, walltime, err := ledger.BuildSessionEvidence()
+	stats, count, refs, walltime, _, err := ledger.BuildSessionEvidence()
 	if err != nil {
 		t.Fatalf("BuildSessionEvidence: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestBuildSessionEvidenceFoldsCompactionLifecycle(t *testing.T) {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
-	stats, eventCount, _, _, err := ledger.BuildSessionEvidence()
+	stats, eventCount, _, _, _, err := ledger.BuildSessionEvidence()
 	if err != nil {
 		t.Fatalf("BuildSessionEvidence: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestBuildSessionEvidenceDropsOutOfRangeWalltimeNs(t *testing.T) {
 		t.Fatalf("AppendEvent(walltime): %v", err)
 	}
 
-	_, _, _, walltime, err := ledger.BuildSessionEvidence()
+	_, _, _, walltime, _, err := ledger.BuildSessionEvidence()
 	if err != nil {
 		t.Fatalf("BuildSessionEvidence: %v", err)
 	}
@@ -1183,4 +1183,176 @@ func TestUsageLedgerBuildSessionStatsReturnsLatestAgentModelRefs(t *testing.T) {
 	if got := refs["worker-1"]; got.Selected != "provider/new" || got.Running != "provider/fallback" {
 		t.Fatalf("latest refs = %#v", got)
 	}
+}
+
+// A failed summary write after an append must not let the primed cursor adopt
+// the stale on-disk summary on the next freshness check: the primed cursor is
+// consumed on first use, so the next ensure re-reads usage.jsonl and rebuilds
+// instead of silently dropping the appended events from the stats.
+func TestPrimeSummaryCursorConsumedAfterFirstUse(t *testing.T) {
+	dir := t.TempDir()
+	event := func(id string) UsageEvent {
+		raw := UsageSnapshot{InputTokens: 10, OutputTokens: 5}
+		return UsageEvent{
+			EventID:          id,
+			AgentID:          "main",
+			AgentKind:        "main",
+			Purpose:          "chat",
+			SelectedModelRef: "sample/model-1",
+			RunningModelRef:  "sample/model-1",
+			UsageRaw:         raw,
+			BillingUsage:     NormalizeBillingUsage(raw),
+		}
+	}
+
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	for _, id := range []string{"evt-000001", "evt-000002", "evt-000003", "evt-000004"} {
+		if err := ledger.AppendEvent(event(id)); err != nil {
+			t.Fatalf("AppendEvent(%s): %v", id, err)
+		}
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	primed := NewUsageLedger(dir, "/tmp/project")
+	defer func() { _ = primed.Close() }()
+	primed.PrimeSummaryCursor("evt-000004")
+
+	// Mirror appendEventLocked's flow up to a failed summary write: adopt via
+	// the primed cursor, append the event row, then drop the in-memory summary
+	// the way a failed writeSummaryLocked does — the row is already durable.
+	primed.mu.Lock()
+	summary, err := primed.ensureSummaryLocked()
+	if err != nil {
+		primed.mu.Unlock()
+		t.Fatalf("ensureSummaryLocked: %v", err)
+	}
+	data, err := json.Marshal(event("evt-000005"))
+	if err != nil {
+		primed.mu.Unlock()
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := primed.appendLedgerLineLocked(append(data, '\n')); err != nil {
+		primed.mu.Unlock()
+		t.Fatalf("appendLedgerLineLocked: %v", err)
+	}
+	applyUsageEvent(summary, event("evt-000005"))
+	primed.summaryLoaded = false
+	primed.summary = nil
+	primed.mu.Unlock()
+
+	after, err := primed.Summary()
+	if err != nil {
+		t.Fatalf("Summary after failed summary write: %v", err)
+	}
+	if after.LastEventID != "evt-000005" {
+		t.Fatalf("summary after failed write covers %q, want evt-000005: the appended event must not be silently dropped", after.LastEventID)
+	}
+}
+
+// A primed summary cursor must adopt the on-disk summary without rescanning
+// the ledger, and a cursor that does not match the summary must still trigger
+// the rebuild path.
+func TestPrimeSummaryCursorDecidesFreshness(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "")
+	for i := range 5 {
+		if err := ledger.AppendEvent(sampleUsageEvent(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Removing usage.jsonl proves the primed path adopts the summary without
+	// reading the ledger: an unprimed freshness check would see no events.
+	usagePath := filepath.Join(dir, "usage.jsonl")
+	data, err := os.ReadFile(usagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(usagePath); err != nil {
+		t.Fatal(err)
+	}
+	primed := NewUsageLedger(dir, "")
+	primed.PrimeSummaryCursor("evt-000004")
+	summary, err := primed.Summary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary == nil || summary.LastEventID != "evt-000004" || summary.EventCount != 5 {
+		t.Fatalf("summary after prime = %+v, want the on-disk summary with 5 events", summary)
+	}
+	if err := primed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A cursor behind the on-disk summary cannot vouch for freshness: the
+	// rebuild path must still run and converge on the full ledger.
+	if err := os.WriteFile(usagePath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := NewUsageLedger(dir, "")
+	stale.PrimeSummaryCursor("evt-000001")
+	rebuilt, err := stale.Summary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rebuilt == nil || rebuilt.LastEventID != "evt-000004" {
+		t.Fatalf("stale-cursor summary = %+v, want rebuild to LastEventID evt-000004", rebuilt)
+	}
+	if err := stale.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A debounced summary lags on disk until Close or Seal flushes it.
+func TestDebouncedSummaryFlushesOnCloseAndSeal(t *testing.T) {
+	for _, finish := range []struct {
+		name string
+		run  func(*UsageLedger) error
+	}{
+		{"close", (*UsageLedger).Close},
+		{"seal", func(l *UsageLedger) error { l.Seal(); return l.Close() }},
+	} {
+		t.Run(finish.name, func(t *testing.T) {
+			dir := t.TempDir()
+			ledger := NewUsageLedger(dir, "")
+			if err := ledger.AppendEvent(sampleUsageEvent(0)); err != nil {
+				t.Fatal(err)
+			}
+			for i := 1; i < 5; i++ {
+				ledger.mu.Lock()
+				ledger.lastSummaryWrite = time.Now() // hold the debounce window open
+				ledger.mu.Unlock()
+				if err := ledger.AppendEvent(sampleUsageEvent(i)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := readDiskSummary(t, dir); got.LastEventID != "evt-000000" {
+				t.Fatalf("disk summary before flush = %q, want the debounced evt-000000", got.LastEventID)
+			}
+			if err := finish.run(ledger); err != nil {
+				t.Fatal(err)
+			}
+			if got := readDiskSummary(t, dir); got.LastEventID != "evt-000004" || got.EventCount != 5 {
+				t.Fatalf("disk summary after flush = %+v, want evt-000004 with 5 events", got)
+			}
+		})
+	}
+}
+
+func readDiskSummary(t *testing.T, dir string) SessionUsageSummary {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, SessionUsageSummaryFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary SessionUsageSummary
+	if err := json.Unmarshal(data, &summary); err != nil {
+		t.Fatal(err)
+	}
+	return summary
 }

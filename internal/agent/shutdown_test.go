@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
@@ -437,6 +439,61 @@ func TestSubAgentDoneWaitsForInFlightLLMRequest(t *testing.T) {
 	defer cancel()
 	if err := sub.waitDone(ctx); err != nil {
 		t.Fatalf("waitDone() after the LLM request finished error = %v", err)
+	}
+}
+
+// readDebouncedUsageSummary decodes the on-disk summary directly. Going through
+// analytics.LoadSessionUsageSummary would rebuild a stale summary and hide the
+// debounce window this test has to observe.
+func readDebouncedUsageSummary(t *testing.T, sessionDir string) analytics.SessionUsageSummary {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(sessionDir, analytics.SessionUsageSummaryFileName))
+	if err != nil {
+		t.Fatalf("read usage summary: %v", err)
+	}
+	var summary analytics.SessionUsageSummary
+	if err := json.Unmarshal(data, &summary); err != nil {
+		t.Fatalf("decode usage summary: %v", err)
+	}
+	return summary
+}
+
+// TestShutdownFlushesDebouncedUsageSummary pins the exit-path durability of the
+// usage summary. Appends inside usageSummaryWriteInterval only mutate the
+// in-memory summary, so without the ledger Close on Shutdown the last window
+// would stay on disk as a stale summary until the next restore rebuilt it.
+func TestShutdownFlushesDebouncedUsageSummary(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	appendUsage := func(id string, input int64) {
+		t.Helper()
+		if err := a.usageLedger.AppendEvent(analytics.UsageEvent{
+			EventID:      id,
+			OccurredAt:   time.Now(),
+			AgentID:      "main",
+			Purpose:      "chat",
+			UsageRaw:     analytics.UsageSnapshot{InputTokens: input},
+			BillingUsage: analytics.BillingUsage{InputTokens: input, BillingTotalTokens: input},
+		}); err != nil {
+			t.Fatalf("AppendEvent(%s): %v", id, err)
+		}
+	}
+	// The first append writes the summary and starts the debounce window; the
+	// second one lands inside it and stays in memory only.
+	appendUsage("evt-1", 10)
+	appendUsage("evt-2", 20)
+	if got := readDebouncedUsageSummary(t, a.SessionDir()); got.EventCount != 1 {
+		t.Fatalf("summary event count before shutdown = %d, want 1: the second append must still be debounced", got.EventCount)
+	}
+
+	if err := a.Shutdown(2 * time.Second); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+
+	got := readDebouncedUsageSummary(t, a.SessionDir())
+	if got.EventCount != 2 || got.UsageTotal.InputTokens != 30 {
+		t.Fatalf("summary after shutdown = events %d input tokens %d, want 2 and 30", got.EventCount, got.UsageTotal.InputTokens)
 	}
 }
 

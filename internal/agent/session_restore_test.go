@@ -76,6 +76,89 @@ func TestRestoreUsageEvidenceReusesLedgerScanForAgentModelRefs(t *testing.T) {
 	}
 }
 
+// appendUsageEventLine writes one raw usage.jsonl line. Going through a ledger
+// would also rewrite usage-summary.json, which the test needs to keep stale.
+func appendUsageEventLine(t *testing.T, sessionDir string, event analytics.UsageEvent) {
+	t.Helper()
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal usage event: %v", err)
+	}
+	f, err := os.OpenFile(filepath.Join(sessionDir, "usage.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatalf("open usage.jsonl: %v", err)
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		f.Close()
+		t.Fatalf("write usage.jsonl: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close usage.jsonl: %v", err)
+	}
+}
+
+// TestRestoreScanFailureDoesNotPrimeSummaryCursor pins the cursor handed to the
+// restored ledger: only a completed evidence scan may prime it. Priming with the
+// empty cursor of a failed scan makes the first append adopt the stale on-disk
+// summary — an empty cursor matches a summary that has none — so every event the
+// scan missed stays uncounted and is then written back to disk.
+func TestRestoreScanFailureDoesNotPrimeSummaryCursor(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "restore-scan-failure")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// A directory where usage.jsonl belongs fails the evidence scan (EISDIR)
+	// without making the path unusable for the append below.
+	if err := os.Mkdir(filepath.Join(sessionDir, "usage.jsonl"), 0o700); err != nil {
+		t.Fatalf("mkdir usage.jsonl: %v", err)
+	}
+	staleData, err := json.Marshal(analytics.SessionUsageSummary{SessionID: "restore-scan-failure", Status: "active"})
+	if err != nil {
+		t.Fatalf("marshal stale summary: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, analytics.SessionUsageSummaryFileName), staleData, 0o600); err != nil {
+		t.Fatalf("write stale summary: %v", err)
+	}
+
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	loaded := &loadedSessionState{SessionPath: sessionDir}
+	if _, count := a.restoreSessionEvidence(loaded, sessionDir); count != 0 || loaded.UsageScanned {
+		t.Fatalf("failed scan reported scanned=%v count=%d, want false and 0", loaded.UsageScanned, count)
+	}
+	a.activateLoadedSession(loaded)
+
+	if err := os.Remove(filepath.Join(sessionDir, "usage.jsonl")); err != nil {
+		t.Fatalf("remove usage.jsonl placeholder: %v", err)
+	}
+	appendUsageEventLine(t, sessionDir, analytics.UsageEvent{
+		EventID:      "evt-a",
+		OccurredAt:   time.Now(),
+		AgentID:      "main",
+		Purpose:      "chat",
+		UsageRaw:     analytics.UsageSnapshot{InputTokens: 10},
+		BillingUsage: analytics.BillingUsage{InputTokens: 10, BillingTotalTokens: 10},
+	})
+	if err := a.usageLedger.AppendEvent(analytics.UsageEvent{
+		EventID:      "evt-b",
+		OccurredAt:   time.Now(),
+		AgentID:      "main",
+		Purpose:      "chat",
+		UsageRaw:     analytics.UsageSnapshot{InputTokens: 20},
+		BillingUsage: analytics.BillingUsage{InputTokens: 20, BillingTotalTokens: 20},
+	}); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	if err := a.usageLedger.Sync(); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	got := readDebouncedUsageSummary(t, sessionDir)
+	if got.EventCount != 2 || got.UsageTotal.InputTokens != 30 {
+		t.Fatalf("summary after append = events %d input tokens %d, want 2 and 30: the append must rebuild the stale summary instead of adopting it", got.EventCount, got.UsageTotal.InputTokens)
+	}
+}
+
 func TestTokenUsageFromSessionStatsIncludesCacheReads(t *testing.T) {
 	usage := tokenUsageFromSessionStats(analytics.SessionStats{
 		InputTokens:      30,
