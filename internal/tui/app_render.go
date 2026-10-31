@@ -325,11 +325,10 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 
 	// Toast
 	if m.activeToast != nil && layout.toast.Dy() > 0 {
-		toastView := m.renderToast()
 		toastKey := m.toastFingerprint()
-		if m.cachedToastKey != toastKey || m.cachedToastRender.text != toastView {
+		if m.cachedToastKey != toastKey {
 			m.cachedToastKey = toastKey
-			m.renderToCache(&m.cachedToastRender, toastView)
+			m.renderToCache(&m.cachedToastRender, m.renderToast())
 		}
 		m.drawCachedRenderable(scr, layout.toast, &m.cachedToastRender)
 	}

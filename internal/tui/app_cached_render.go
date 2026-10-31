@@ -381,7 +381,10 @@ func (m *Model) toastFingerprint() string {
 	if m.activeToast == nil {
 		return ""
 	}
-	return m.activeToast.Level + "|" + m.activeToast.Message
+	// Width and theme version participate: the toast re-wraps at the terminal
+	// width and re-styles on ApplyTheme, and the key is compared before any
+	// rendering so a visible toast costs no lipgloss work on cache-hit frames.
+	return m.activeToast.Level + "|" + m.activeToast.Message + "|" + strconv.Itoa(m.width) + "|" + strconv.FormatUint(appliedThemeVersion, 10)
 }
 
 func (m *Model) mainRenderKey(mode Mode, viewportWidth int) string {
