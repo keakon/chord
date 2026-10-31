@@ -572,7 +572,6 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 	defer f.Close()
 
 	var messages []message.Message
-	readBufferSize := recoveryMinReadBufferSize
 	if info, statErr := f.Stat(); statErr == nil {
 		if count, ok := cachedMessageCount(path, info); ok {
 			messages = make([]message.Message, 0, count)
@@ -586,16 +585,15 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 				return nil, err
 			}
 		}
-		readBufferSize = min(recoveryMaxReadBufferSize, max(recoveryMinReadBufferSize, int(info.Size())))
 	}
-	dec := json.NewDecoder(bufio.NewReaderSize(f, readBufferSize))
+	reader := newMessageLogReader(f)
 	for {
 		var msg message.Message
-		if err := dec.Decode(&msg); err != nil {
+		if err := reader.next(&msg); err != nil {
 			if err != io.EOF {
-				// Last record may be truncated due to crash mid-write.
-				// Log at debug level and return what we have so far.
-				log.Debugf("truncated record at end of JSONL, stopping recovery here agent=%v err=%v", agentID, err)
+				// A truncated tail (crash mid-write) or a malformed record:
+				// keep the records before it.
+				log.Debugf("unreadable JSONL record, stopping recovery here agent=%v err=%v", agentID, err)
 			}
 			break
 		}

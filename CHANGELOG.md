@@ -59,6 +59,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Release binaries are fully static: the Linux build no longer depends on the system glibc version.
 
+- Restoring a session reads its transcript roughly twice as fast.
+
 - Keeping the input history search open no longer re-reads and re-parses the whole history file every two seconds, and folded search text survives across searches instead of being rebuilt after every submitted input.
 
 - Submitting prompts and answering question cards completes sooner on slower disks.

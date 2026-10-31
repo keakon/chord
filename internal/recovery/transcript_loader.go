@@ -1,8 +1,6 @@
 package recovery
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -101,12 +99,11 @@ func readTranscriptOnce(path string) ([]message.Message, error) {
 	if info.Size() == 0 {
 		return nil, fmt.Errorf("transcript is empty")
 	}
-	bufSize := min(recoveryMaxReadBufferSize, max(recoveryMinReadBufferSize, int(info.Size())))
-	dec := json.NewDecoder(bufio.NewReaderSize(f, bufSize))
+	reader := newMessageLogReader(f)
 	var messages []message.Message
 	for {
 		var msg message.Message
-		if err := dec.Decode(&msg); err != nil {
+		if err := reader.next(&msg); err != nil {
 			if err == io.EOF {
 				return messages, nil
 			}
@@ -115,7 +112,7 @@ func readTranscriptOnce(path string) ([]message.Message, error) {
 			// restore treats the tail as truncated and keeps prior records; for
 			// memory extraction we require complete records, so a truncated tail
 			// that happened mid-record is retried, and other parse errors fail.
-			if isTruncatedRecordError(err) {
+			if errors.Is(err, errTruncatedRecord) {
 				return messages, nil
 			}
 			return nil, fmt.Errorf("%w: %v", errTranscriptTransient, err)
@@ -123,15 +120,6 @@ func readTranscriptOnce(path string) ([]message.Message, error) {
 		// Attachments are deliberately NOT loaded from disk here.
 		messages = append(messages, msg)
 	}
-}
-
-// isTruncatedRecordError reports whether the JSONL decoder error is a truncated
-// final record (crash mid-write), which session restore tolerates by stopping.
-func isTruncatedRecordError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // ListRecentCandidates returns the most recent unlocked (not held by a live
