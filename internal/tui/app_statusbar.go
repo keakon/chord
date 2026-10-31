@@ -634,16 +634,24 @@ func (m *Model) renderStatusBar() string {
 	} else if inputs.NextEnterHint != "" {
 		hint = "enter ⇢ " + inputs.NextEnterHint
 	}
-	canFitHint := leftWidth+lipgloss.Width(hint)+statusBarGroupGapWidth()+activityWidth <= rightStart
+	styledHint := ""
+	escWidth := 0
+	if hint != "" {
+		// Render once per frame: the fit check and the appended hint share the
+		// styled result that the budget is measured against.
+		styledHint = currentStyles.DimStyle.Render(hint)
+		escWidth = statusBarGroupGapWidth() + lipgloss.Width(styledHint)
+	}
+	canFitHint := leftWidth+escWidth+activityWidth <= rightStart
 	if inputs.NextEscHint != "" {
-		canFitHint = statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, inputs.NextEscHint)
+		canFitHint = statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, escWidth)
 	}
 	if hint != "" && canFitHint {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
 			leftSide,
 			currentStyles.DimStyle.Render(statusBarActivityPathGap),
-			currentStyles.DimStyle.Render(hint),
+			styledHint,
 		)
 		leftWidth = lipgloss.Width(leftSide)
 		activityText, activityWidth = m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
@@ -703,8 +711,7 @@ func (m *Model) renderStatusBarLine(padded string) string {
 	return currentStyles.StatusBarStyle.Width(width).Render(ansi.Truncate(padded, width, ""))
 }
 
-func statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth int, hint string) bool {
-	escWidth := statusBarGroupGapWidth() + lipgloss.Width(currentStyles.DimStyle.Render("esc ⇢ "+hint))
+func statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, escWidth int) bool {
 	leftWithEsc := leftWidth + escWidth
 	if activityWidth == 0 {
 		return leftWithEsc <= rightStart

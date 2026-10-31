@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/keakon/lipgloss/v2"
@@ -28,10 +29,25 @@ const (
 // ate status width.
 const statusBarActivityPathGap = " · "
 
+type statusBarGapWidth struct {
+	styles *uitheme.Styles
+	width  int
+}
+
+// The gap width depends only on the immutable style snapshot, so render it once
+// per theme instead of rebuilding the styled separator for every budget check.
+var statusBarGapWidthCache atomic.Pointer[statusBarGapWidth]
+
 // statusBarGroupGapWidth is the display width of the rendered group separator;
 // every budget that reserves room for it must use this value.
 func statusBarGroupGapWidth() int {
-	return lipgloss.Width(currentStyles.DimStyle.Render(statusBarActivityPathGap))
+	styles := currentStyles
+	if cached := statusBarGapWidthCache.Load(); cached != nil && cached.styles == styles {
+		return cached.width
+	}
+	width := lipgloss.Width(styles.DimStyle.Render(statusBarActivityPathGap))
+	statusBarGapWidthCache.Store(&statusBarGapWidth{styles: styles, width: width})
+	return width
 }
 
 func normalizeSeparatorVariant(variant string) string {
