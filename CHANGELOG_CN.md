@@ -38,6 +38,8 @@
 - 通过 `present` 交付文件，恢复会话后仍可找到交付记录。工具卡按公共根目录归组，逐条列出每个文件的路径（有说明时附说明）；按 `Enter` 会直接预览单个文件，有多个文件时先打开列表。文件列表一行一个文件，底部提供预览、打开、打开方式和复制路径操作。只有用户需要接收的文件才应声明交付；改过的仓库源码、测试和 changelog 留在 diff 或提交中。TUI 支持预览文本、Markdown 和图片，也可用系统关联应用打开 HTML、PDF 等文件。`.chord/` 下的文件属于私有工作状态，默认不交付；只有明确要求接收、且其路径被 `present` 权限规则点名时才会交付。
 - HTTP MCP 服务支持 OAuth 登录，可通过 CLI 或 TUI 管理凭证，并用 `chord doctor mcp` 分别检查认证、连接和工具目录状态。Headless 和 gateway 展示状态及宿主机登录指引。
 
+- `chord doctor agents` 列出 agent 定义的 mode 与 backend，并检查每个外部后端命令是否在 `PATH` 中。命令缺失时返回 `1`，定义加载失败时返回 `2`。
+
 - 快捷键可通过空列表（`[]`）禁用，帮助和输入提示同步显示有效绑定。启动提示与 `chord doctor config` 会定位无效快捷键声明、显示最终绑定及来源，并提示部分确定的按键遮蔽。
 - 支持通过 `chord doctor config --model ... --field ...` 查询模型配置值，展示磁盘解析值、覆盖关系、目录或推导来源及修改位置，提供文本和 JSON 输出。
 - `prevent_sleep` 在 macOS 之外新增 Linux（本地 logind/GNOME 服务）和 Windows（系统电源请求）支持。TUI、headless、ACP 均保护执行主机；覆盖范围取决于服务和设备电源策略，WSL 无法保护 Windows 宿主机。

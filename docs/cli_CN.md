@@ -27,6 +27,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord doctor config`             | 校验全局 / 项目配置文件与模型池引用                               |
 | `chord doctor models`             | 诊断已配置的 provider/model 调用链                                |
 | `chord doctor skills`             | 诊断 skill 的发现、加载与可见性                                    |
+| `chord doctor agents`             | 诊断 agent 定义与外部后端命令                                      |
 | `chord cleanup status`            | 查看路径定位器管理的 state/cache/logs 体积                        |
 | `chord cleanup <kind>`            | 清理 `sessions` / `cache` / `logs` / `project`（默认 dry-run）    |
 | `chord worktree list`             | 列出当前仓库下 chord 管理的 worktree                              |
@@ -431,6 +432,28 @@ chord doctor skills
 # 机器可读报告，或对未检查到的行也判失败
 chord doctor skills --json
 chord doctor skills --strict
+```
+
+## `chord doctor agents`
+
+检查 agent 定义能否加载、外部后端命令能否解析。带 `backend` 块的定义跑在外部 coding-agent CLI 上，命令缺失会让该角色的每次委派都失败；报告列出每个定义的 mode 与 backend，并显示解析到的命令路径。launch 参数和环境变量校验在定义加载时就会强制执行，这类错误会以加载失败的形式出现在报告里。
+
+退出码沿用 `doctor` 家族：外部后端命令不在 `PATH` 时返回 `1`，定义加载失败或检查本身跑不起来时返回 `2`。不带 backend 的定义不影响退出码。
+
+### Flag
+
+| 参数     | 说明                     |
+| -------- | ------------------------ |
+| `--json` | 输出机器可读的 JSON 报告 |
+
+### 示例
+
+```bash
+# 列出 agent 定义并验证外部后端命令
+chord doctor agents
+
+# 机器可读报告
+chord doctor agents --json
 ```
 
 ## `chord cleanup`

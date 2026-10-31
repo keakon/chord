@@ -27,6 +27,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord doctor config`            | Validate global/project config files and model pool references   |
 | `chord doctor models`            | Diagnose configured provider/model calls                         |
 | `chord doctor skills`            | Diagnose skill discovery, loading, and visibility                |
+| `chord doctor agents`            | Diagnose agent definitions and external backend commands         |
 | `chord cleanup status`           | Inspect state/cache/log sizes managed by the path locator        |
 | `chord cleanup <kind>`           | Clean `sessions` / `cache` / `logs` / `project` (dry-run by default) |
 | `chord worktree list`            | List chord-managed worktrees of the current repository           |
@@ -431,6 +432,28 @@ chord doctor skills
 # Machine-readable report, or fail on unchecked rows
 chord doctor skills --json
 chord doctor skills --strict
+```
+
+## `chord doctor agents`
+
+Check that agent definitions load and that external backend commands resolve. Agent definitions with a `backend` block run on an external coding-agent CLI, so a missing command fails every delegation for that role; the report names each definition's mode and backend, and shows where the resolved command was found. Launch argument and environment validation already run when definitions load, so those errors surface here as load failures.
+
+Exit codes follow the `doctor` family: `1` when an external backend command is missing from `PATH`, `2` when the definitions fail to load or the check itself cannot run. Definitions without a backend do not change the exit code.
+
+### Flags
+
+| Flag     | Description                         |
+| -------- | ----------------------------------- |
+| `--json` | Emit a machine-readable JSON report |
+
+### Examples
+
+```bash
+# List agent definitions and verify external backend commands
+chord doctor agents
+
+# Machine-readable report
+chord doctor agents --json
 ```
 
 ## `chord cleanup`
