@@ -75,7 +75,9 @@ func (s *Store) refreshDisk(req refreshRequest) {
 	f, err := s.acquire(ctx)
 	if err == nil {
 		var d diskView
-		d, err = s.readDisk()
+		// currentDisk keeps the SameFile+size+mtime fast path, so an unchanged
+		// file does not re-read and re-parse the whole history on every refresh.
+		d, err = s.currentDisk()
 		if err == nil {
 			s.cache = d
 			s.publish(d)

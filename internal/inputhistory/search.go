@@ -28,10 +28,44 @@ type SearchResult struct {
 	TotalMatched int
 }
 
+// foldedKey pins a folded text to one record content: IDs are immutable, and
+// the record size catches the pathological same-ID rewrite so it misses the
+// cache instead of returning stale text.
+type foldedKey struct {
+	id   string
+	size int64
+}
+
 type searchCache struct {
 	mu              sync.Mutex
-	texts           map[string]string
+	texts           map[foldedKey]string
 	bytes, maxBytes int64
+	synced          uint64 // store version this cache was last pruned against
+}
+
+// syncVersion drops folded entries whose records left the view. Store changes
+// no longer reset the cache wholesale; records are immutable per ID, so a
+// version bump only means records were added, removed, or trimmed.
+func (c *searchCache) syncVersion(version uint64, entries []Entry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.synced == version {
+		return
+	}
+	c.synced = version
+	if len(c.texts) == 0 {
+		return
+	}
+	keep := make(map[string]struct{}, len(entries))
+	for i := range entries {
+		keep[entries[i].Record.ID] = struct{}{}
+	}
+	for k, text := range c.texts {
+		if _, ok := keep[k.id]; !ok {
+			delete(c.texts, k)
+			c.bytes -= int64(len(text))
+		}
+	}
 }
 
 func cachedFolded(ctx context.Context, s Snapshot, r Record) (string, error) {
@@ -39,8 +73,9 @@ func cachedFolded(ctx context.Context, s Snapshot, r Record) (string, error) {
 		return folded(ctx, r)
 	}
 	c := s.cache
+	key := foldedKey{id: r.ID, size: r.Size()}
 	c.mu.Lock()
-	text, ok := c.texts[r.ID]
+	text, ok := c.texts[key]
 	c.mu.Unlock()
 	if ok {
 		return text, nil
@@ -52,10 +87,10 @@ func cachedFolded(ctx context.Context, s Snapshot, r Record) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.texts == nil {
-		c.texts = make(map[string]string)
+		c.texts = make(map[foldedKey]string)
 	}
-	if _, ok = c.texts[r.ID]; !ok && c.bytes+int64(len(text)) <= c.maxBytes {
-		c.texts[r.ID] = text
+	if _, ok = c.texts[key]; !ok && c.bytes+int64(len(text)) <= c.maxBytes {
+		c.texts[key] = text
 		c.bytes += int64(len(text))
 	}
 	return text, nil

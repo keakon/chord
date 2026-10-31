@@ -136,7 +136,11 @@ func signal(ch chan struct{}) {
 	default:
 	}
 }
-func (s *Store) changed() { s.version++; s.searchCache = nil; signal(s.notify) }
+
+// changed bumps the view version. The folded-text search cache survives:
+// record contents are immutable per ID, and view() prunes entries whose
+// records left the view.
+func (s *Store) changed() { s.version++; signal(s.notify) }
 func (s *Store) issue(id string, out AdmissionOutcome, state SaveState, err error) {
 	s.status.ID = id
 	s.status.Reason = out
@@ -260,6 +264,9 @@ func (s *Store) view() Snapshot {
 	for i := range v.Entries {
 		v.Entries[i].Order = uint64(i + 1)
 		v.Entries[i].Record.TextParts = append([]TextPart(nil), v.Entries[i].Record.TextParts...)
+	}
+	if v.cache != nil {
+		v.cache.syncVersion(v.Version, v.Entries)
 	}
 	return v
 }
