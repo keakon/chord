@@ -577,6 +577,17 @@ func (s *SubAgent) GetContextStats() (current, limit int) {
 	return s.ctxMgr.EffectiveContextTokens(), s.ctxMgr.GetUsableCompactionBudget()
 }
 
+// UsageSnapshot returns the cumulative token usage this SubAgent has consumed.
+// The context manager normalizes usage before it accumulates, so the snapshot
+// needs no further adjustment. Bare-literal SubAgents in tests carry no context
+// manager and report zero.
+func (s *SubAgent) UsageSnapshot() AgentUsage {
+	if s == nil || s.ctxMgr == nil {
+		return AgentUsage{}
+	}
+	return AgentUsage{Tokens: s.ctxMgr.GetStats()}
+}
+
 // GetContextUsageState reports the observation state behind GetContextStats.
 func (s *SubAgent) GetContextUsageState() ctxmgr.ContextUsageState {
 	return s.ctxMgr.ContextUsageState()

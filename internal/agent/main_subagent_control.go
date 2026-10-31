@@ -804,6 +804,12 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	// fresh spawn does: it is not the checkout its parent's snapshot describes.
 	sub = NewSubAgent(subCfg)
 	sub.RestoreMessages(msgs)
+	if record.Usage != nil {
+		// The task's usage count spans attempts: the fresh runtime's context
+		// manager starts empty, so restore the counts the record already
+		// persisted before this attempt reports more.
+		sub.ctxMgr.RestoreStats(record.Usage.Tokens)
+	}
 	// Durable pressure-notice rows after the newest checkpoint already told
 	// the model what the runtime now would re-tell: rebuild the delivery
 	// marks from the transcript so a restored worker does not re-notice.

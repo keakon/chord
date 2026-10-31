@@ -19,6 +19,28 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// AgentUsage is the cumulative usage one subagent task has reported. Tokens
+// keeps message.TokenUsage normalization: InputTokens already includes cache
+// reads and excludes cache writes, so a display total is Input + Output +
+// CacheWrite. CostUSD carries the external backend's own cumulative cost
+// report; native runtimes leave CostKnown false.
+type AgentUsage struct {
+	Tokens    message.TokenUsage `json:"tokens"`
+	CostUSD   float64            `json:"cost_usd,omitempty"`
+	CostKnown bool               `json:"cost_known,omitempty"`
+}
+
+// TotalTokens returns the display total over every billable class: input
+// (already including cache reads), output, and cache writes.
+func (u AgentUsage) TotalTokens() int {
+	return u.Tokens.InputTokens + u.Tokens.OutputTokens + u.Tokens.CacheWriteTokens
+}
+
+// Zero reports whether the task has reported no usage yet.
+func (u AgentUsage) Zero() bool {
+	return u.TotalTokens() == 0 && !u.CostKnown
+}
+
 // SubAgentInfo carries read-only information about a running SubAgent for TUI
 // display (sidebar listing). The fields are snapshot values safe to read from
 // any goroutine.
@@ -41,6 +63,7 @@ type SubAgentInfo struct {
 	LastSummary         string
 	UrgentInboxCount    int
 	LastArtifact        tools.ArtifactRef
+	Usage               AgentUsage
 }
 
 type delegationCaller struct {

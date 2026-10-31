@@ -122,6 +122,9 @@ type DurableTaskRecord struct {
 	LastReplyKind        string              `json:"last_reply_kind,omitempty"`
 	LastReplySummary     string              `json:"last_reply_summary,omitempty"`
 	LastArtifactRefs     []tools.ArtifactRef `json:"last_artifact_refs,omitempty"`
+	// Usage is the task's cumulative reported usage. A live runtime seeds it
+	// back on rehydration, so the count spans attempts.
+	Usage *AgentUsage `json:"usage,omitempty"`
 	// EscalationCount and EscalationMailboxID track needs_repair escalations the
 	// owner has not answered. They live on the durable task rather than a turn so
 	// the budget spans attempts: the loop they converge is exactly the one that
@@ -191,6 +194,7 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 	out.LastReplySummary = strings.TrimSpace(out.LastReplySummary)
 	out.EscalationMailboxID = strings.TrimSpace(out.EscalationMailboxID)
 	out.LastArtifactRefs = tools.NormalizeArtifactRefs(out.LastArtifactRefs)
+	out.Usage = cloneAgentUsage(out.Usage)
 	out.LastCompletion = normalizeCompletionEnvelope(out.LastCompletion)
 	out.PendingCompletion = normalizeCompletionEnvelope(out.PendingCompletion)
 	out.ExternalSession = cloneExternalTaskSession(out.ExternalSession)
@@ -203,6 +207,14 @@ func cloneDurableTaskRecord(in *DurableTaskRecord) *DurableTaskRecord {
 		out.Attempt = 1
 	}
 	out.LatestSettlement = cloneTaskSettlement(out.LatestSettlement)
+	return &out
+}
+
+func cloneAgentUsage(in *AgentUsage) *AgentUsage {
+	if in == nil {
+		return nil
+	}
+	out := *in
 	return &out
 }
 
@@ -696,6 +708,13 @@ func buildTaskRecordFromSub(sub *SubAgent, previous *DurableTaskRecord, closedRe
 	rec.InstanceHistory = dedupeTaskInstanceHistory(rec.InstanceHistory)
 	rec.LastSummary = strings.TrimSpace(summary)
 	rec.Persistence = sub.PersistenceHealth()
+	// The live runtime is the usage truth for this task; a revived runtime was
+	// seeded from the previous record, so replacing never loses earlier counts.
+	if usage := sub.UsageSnapshot(); !usage.Zero() {
+		rec.Usage = &usage
+	} else {
+		rec.Usage = nil
+	}
 	if pending := sub.PendingCompleteIntent(); pending != nil {
 		rec.PendingCompletion = normalizeCompletionEnvelope(&CompletionEnvelope{Summary: pending.Summary})
 		if pending.Envelope != nil {

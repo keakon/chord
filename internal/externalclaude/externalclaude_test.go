@@ -163,7 +163,7 @@ func TestDecodeRecordedShapes(t *testing.T) {
 
 	// Observed on 2.1.303: an authentication failure reports subtype "success"
 	// with is_error true, so classification must not trust the subtype.
-	resultLine := `{"type":"result","subtype":"success","is_error":true,"result":"Not logged in","session_id":"efe26821-06f5-49b3-968e-34e763b3de3f","terminal_reason":"api_error","num_turns":1}`
+	resultLine := `{"type":"result","subtype":"success","is_error":true,"result":"Not logged in","session_id":"efe26821-06f5-49b3-968e-34e763b3de3f","terminal_reason":"api_error","num_turns":1,"usage":{"input_tokens":7,"output_tokens":90,"cache_read_input_tokens":11,"cache_creation_input_tokens":3},"modelUsage":{"claude-opus-5":{"inputTokens":7,"outputTokens":90,"cacheReadInputTokens":11,"cacheCreationInputTokens":3}}}`
 	event, err = Decode([]byte(resultLine))
 	if err != nil {
 		t.Fatalf("Decode(result) error = %v", err)
@@ -173,6 +173,12 @@ func TestDecodeRecordedShapes(t *testing.T) {
 	}
 	if event.TerminalReason != "api_error" {
 		t.Fatalf("TerminalReason = %q", event.TerminalReason)
+	}
+	if event.Usage == nil || event.Usage.InputTokens != 7 || event.Usage.OutputTokens != 90 {
+		t.Fatalf("result usage = %+v", event.Usage)
+	}
+	if got := event.ModelUsage["claude-opus-5"]; got.InputTokens != 7 || got.OutputTokens != 90 || got.CacheReadInputTokens != 11 || got.CacheCreationInputTokens != 3 {
+		t.Fatalf("result modelUsage = %+v", got)
 	}
 
 	streamLine := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}}`

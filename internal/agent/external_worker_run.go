@@ -433,6 +433,9 @@ func (w *externalWorker) handleExternalEvent(event externalclaude.Event) (termin
 		}
 	case externalclaude.TypeAssistant:
 		if event.ParentToolUseID == "" {
+			if event.Message != nil && event.Message.Usage != nil {
+				w.usage.observeMessage(event.Message.ID, *event.Message.Usage)
+			}
 			if text := event.AssistantText(); text != "" {
 				if err := w.persistExternalMessage(message.Message{Role: message.RoleAssistant, Content: text}); err != nil {
 					w.setResultError(err)
@@ -599,6 +602,14 @@ func (w *externalWorker) handleExternalResult(event externalclaude.Event) (stop 
 		return true, externalTaskInput{}
 	}
 	w.resultSeen = true
+	// The result's total_cost_usd and modelUsage are the Claude session's
+	// running totals, so they replace — never add to — the tracker's cost and
+	// whole-tree tokens. The usage field covers only this turn's main loop and
+	// is the fallback for releases that do not report modelUsage. Per-message
+	// output counts are placeholders, so they stay live progress and a crash
+	// fallback rather than the final total.
+	w.usage.observeResultCost(event.TotalCostUSD)
+	w.usage.observeResultUsage(event.Usage, event.ModelUsage)
 	text := strings.TrimSpace(event.Result)
 	if text == "" {
 		text = w.lastAssistantText()

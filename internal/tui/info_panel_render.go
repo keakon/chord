@@ -292,6 +292,11 @@ func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIn
 		appendInt(e.UrgentCount)
 		b.WriteString(e.LastArtifact.RelPath)
 		b.WriteString(e.LastArtifact.Type)
+		// The usage sub-line rides the same fingerprint so a count that moves
+		// between refreshes invalidates the cached panel.
+		appendInt(e.Usage.TotalTokens())
+		appendBool(e.Usage.CostKnown)
+		appendFloat6(e.Usage.CostUSD)
 		appendSep()
 	}
 	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionAgents))

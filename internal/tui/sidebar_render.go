@@ -198,7 +198,7 @@ func (s Sidebar) buildInfoPanelRenderedLines(innerWidth int) []sidebarRenderedLi
 	var lines []sidebarRenderedLine
 	for _, entry := range s.agents {
 		isFocused := s.isFocused(entry.ID)
-		line, reason := sidebarEntryText(entry, isFocused, innerWidth)
+		line, reason, usage := sidebarEntryText(entry, isFocused, innerWidth)
 
 		if isFocused {
 			line = infoPanelAgentRowStyle(entry, true).Width(innerWidth).Render(line)
@@ -215,6 +215,9 @@ func (s Sidebar) buildInfoPanelRenderedLines(innerWidth int) []sidebarRenderedLi
 			}
 			lines = append(lines, sidebarRenderedLine{Text: style.Width(innerWidth).Render(reason), AgentID: entry.ID})
 		}
+		if usage != "" {
+			lines = append(lines, sidebarRenderedLine{Text: currentStyles.InfoPanelDim.Width(innerWidth).Render(usage), AgentID: entry.ID})
+		}
 	}
 	return lines
 }
@@ -226,7 +229,7 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 	var lines []string
 	for _, entry := range s.agents {
 		isFocused := s.isFocused(entry.ID)
-		line, reason := sidebarEntryText(entry, isFocused, innerWidth)
+		line, reason, usage := sidebarEntryText(entry, isFocused, innerWidth)
 
 		if isFocused {
 			line = sidebarEntryStyle(entry, true).Width(innerWidth).Render(line)
@@ -236,6 +239,9 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 		lines = append(lines, line)
 		if reason != "" {
 			lines = append(lines, sidebarEntryStyle(entry, isFocused).Width(innerWidth).Render(reason))
+		}
+		if usage != "" {
+			lines = append(lines, currentStyles.InfoPanelDim.Width(innerWidth).Render(usage))
 		}
 
 		files := entry.EditedFiles

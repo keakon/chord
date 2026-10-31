@@ -135,6 +135,13 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 		artifact := runtime.LastArtifact()
 		ownerAgentID, ownerTaskID, depth, _ := runtime.OwnerSnapshot()
 		backend := ""
+		usage := AgentUsage{}
+		switch rt := runtime.(type) {
+		case *SubAgent:
+			usage = rt.UsageSnapshot()
+		case *externalWorker:
+			usage = rt.UsageSnapshot()
+		}
 		if _, ok := runtime.(*externalWorker); ok {
 			backend = config.BackendKindClaudeCode
 		}
@@ -156,6 +163,7 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 			LastSummary:      summary,
 			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(runtime.InstanceID()),
 			LastArtifact:     artifact,
+			Usage:            usage,
 		})
 		applyAwaitingOwnerReason(&infos[len(infos)-1], a.subs.taskRecords[runtime.TaskID()], reasons)
 		seenTasks[runtime.TaskID()] = struct{}{}
@@ -199,6 +207,10 @@ func (a *MainAgent) parkedSubAgentInfo(rec *DurableTaskRecord) SubAgentInfo {
 	selectedRef := a.restoredSubAgentModelRef(rec)
 	runningRef := restoredRunningModelRef(rec, selectedRef)
 	backend := ""
+	usage := AgentUsage{}
+	if rec.Usage != nil {
+		usage = *rec.Usage
+	}
 	if rec.ExternalSession != nil {
 		// The external CLI owns its model; the record has no Chord refs to show.
 		backend = rec.ExternalSession.Backend
@@ -221,6 +233,7 @@ func (a *MainAgent) parkedSubAgentInfo(rec *DurableTaskRecord) SubAgentInfo {
 		LastSummary:      rec.LastSummary,
 		UrgentInboxCount: a.subAgentUrgentInboxCountLocked(rec.LatestInstanceID),
 		LastArtifact:     artifact,
+		Usage:            usage,
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tui/terminaltext"
 	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
@@ -46,7 +47,7 @@ func TestSidebarRowsRenderStateAsIconOnly(t *testing.T) {
 		{"idle", "idle"},
 		{"", "unknown"},
 	} {
-		line, _ := sidebarEntryText(SidebarEntry{ID: "worker", TaskDesc: "ship tests", Status: tc.status}, false, 60)
+		line, _, _ := sidebarEntryText(SidebarEntry{ID: "worker", TaskDesc: "ship tests", Status: tc.status}, false, 60)
 		if !strings.HasPrefix(line, "  "+statusIndicator(tc.status)+" ship tests") {
 			t.Fatalf("status %q row = %q, want icon and name", tc.status, line)
 		}
@@ -77,7 +78,7 @@ func TestSidebarReasonLayout(t *testing.T) {
 	for _, width := range []int{40, 24, 12, 4, 3, 1, 0} {
 		for _, depth := range []int{0, 1, 8} {
 			entry := SidebarEntry{ID: "worker", TaskDesc: "检查数据库迁移 and compatibility", Status: "waiting_main", TreeDepth: depth, AwaitingOwnerReason: "\x1b[31mNeed\n a\tdecision\x1b[0m \x1b]8;;https://example.org\x1b\\link\x1b]8;;\x1b\\"}
-			line, reason := sidebarEntryText(entry, true, width)
+			line, reason, _ := sidebarEntryText(entry, true, width)
 			for _, text := range []string{line, reason} {
 				if lipgloss.Width(text) > width || strings.ContainsAny(text, "\x1b\n\t") {
 					t.Fatalf("width=%d text=%q", width, text)
@@ -90,7 +91,7 @@ func TestSidebarReasonLayout(t *testing.T) {
 				t.Fatal("blank reason row")
 			}
 			entry.Status = "waiting_descendant"
-			_, reason = sidebarEntryText(entry, false, width)
+			_, reason, _ = sidebarEntryText(entry, false, width)
 			if reason != "" {
 				t.Fatal("child wait showed owner reason")
 			}
@@ -118,7 +119,7 @@ func TestSidebarDefaultPanelPreservesNestedNames(t *testing.T) {
 	for _, state := range []string{string(agent.SubAgentStateWaitingMain), string(agent.SubAgentStateWaitingDescendant)} {
 		for _, depth := range []int{1, 2, 3} {
 			entry := SidebarEntry{ID: "worker", TaskDesc: "Implement API", Status: state, TreeDepth: depth, AwaitingOwnerReason: "Choose an interface"}
-			line, reason := sidebarEntryText(entry, false, rowWidth)
+			line, reason, _ := sidebarEntryText(entry, false, rowWidth)
 			if lipgloss.Width(line) > rowWidth || lipgloss.Width(reason) > rowWidth {
 				t.Fatalf("state=%s depth=%d exceeds row width: %q / %q", state, depth, line, reason)
 			}
@@ -133,6 +134,73 @@ func TestSidebarDefaultPanelPreservesNestedNames(t *testing.T) {
 			if reason != "" && len(reason)-len(strings.TrimLeft(reason, " ")) != lipgloss.Width(prefix) {
 				t.Fatalf("reason is not aligned with name: %q / %q", line, reason)
 			}
+		}
+	}
+}
+
+func TestSidebarUsageSubLine(t *testing.T) {
+	usage := agent.AgentUsage{
+		Tokens:    message.TokenUsage{InputTokens: 45000, OutputTokens: 3200},
+		CostUSD:   0.42,
+		CostKnown: true,
+	}
+	_, _, usageLine := sidebarEntryText(SidebarEntry{ID: "worker", TaskDesc: "Ship tests", Status: "running", Usage: usage}, false, 60)
+	if !strings.Contains(terminaltext.StripANSI(usageLine), "48.2k tok · $0.42") {
+		t.Fatalf("usage line = %q", usageLine)
+	}
+	if !strings.HasPrefix(usageLine, "    ") {
+		t.Fatalf("usage line is not indented under the name: %q", usageLine)
+	}
+	if _, _, empty := sidebarEntryText(SidebarEntry{ID: "worker", TaskDesc: "Ship tests", Status: "running"}, false, 60); empty != "" {
+		t.Fatalf("zero usage rendered %q", empty)
+	}
+	tokensOnly := usage
+	tokensOnly.CostKnown = false
+	if _, _, tokensLine := sidebarEntryText(SidebarEntry{ID: "worker", TaskDesc: "Ship tests", Status: "running", Usage: tokensOnly}, false, 60); strings.Contains(tokensLine, "$") {
+		t.Fatalf("tokens-only usage rendered a cost: %q", tokensLine)
+	}
+}
+
+func TestSidebarUsageRowOwnership(t *testing.T) {
+	s := NewSidebar(uitheme.Default())
+	s.Update([]agent.SubAgentInfo{{
+		InstanceID: "worker", State: "running", TaskDesc: "Migration",
+		Usage: agent.AgentUsage{Tokens: message.TokenUsage{InputTokens: 1000}, CostUSD: 0.02, CostKnown: true},
+	}}, "worker", "orchestrator")
+	lines := s.buildInfoPanelRenderedLines(40)
+	if len(lines) != 3 || lines[2].AgentID != "worker" {
+		t.Fatalf("rows=%+v", lines)
+	}
+	if !strings.Contains(terminaltext.StripANSI(lines[2].Text), "1.0k tok · $0.02") {
+		t.Fatalf("usage row = %q", lines[2].Text)
+	}
+}
+
+func TestSidebarUsageFormatters(t *testing.T) {
+	for _, tc := range []struct {
+		tokens int
+		want   string
+	}{
+		{950, "950"},
+		{48200, "48.2k"},
+		{1_200_000, "1.2M"},
+	} {
+		if got := formatTokens(tc.tokens); got != tc.want {
+			t.Fatalf("formatTokens(%d) = %q, want %q", tc.tokens, got, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		cost float64
+		want string
+	}{
+		{0, "0"},
+		{0.42, "0.42"},
+		{0.02, "0.02"},
+		{0.0009, "0.0009"},
+		{1.5, "1.50"},
+	} {
+		if got := formatSidebarCost(tc.cost); got != tc.want {
+			t.Fatalf("formatSidebarCost(%v) = %q, want %q", tc.cost, got, tc.want)
 		}
 	}
 }

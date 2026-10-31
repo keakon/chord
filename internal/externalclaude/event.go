@@ -38,15 +38,16 @@ type Event struct {
 	StreamEvent *StreamEvent `json:"-"`
 
 	// result fields.
-	Result            string             `json:"result,omitempty"`
-	IsError           bool               `json:"is_error,omitempty"`
-	DurationMS        int64              `json:"duration_ms,omitempty"`
-	DurationAPIMS     int64              `json:"duration_api_ms,omitempty"`
-	NumTurns          int                `json:"num_turns,omitempty"`
-	TotalCostUSD      float64            `json:"total_cost_usd,omitempty"`
-	TerminalReason    string             `json:"terminal_reason,omitempty"`
-	Usage             *Usage             `json:"usage,omitempty"`
-	PermissionDenials []PermissionDenial `json:"permission_denials,omitempty"`
+	Result            string                `json:"result,omitempty"`
+	IsError           bool                  `json:"is_error,omitempty"`
+	DurationMS        int64                 `json:"duration_ms,omitempty"`
+	DurationAPIMS     int64                 `json:"duration_api_ms,omitempty"`
+	NumTurns          int                   `json:"num_turns,omitempty"`
+	TotalCostUSD      float64               `json:"total_cost_usd,omitempty"`
+	TerminalReason    string                `json:"terminal_reason,omitempty"`
+	Usage             *Usage                `json:"usage,omitempty"`
+	ModelUsage        map[string]ModelUsage `json:"modelUsage,omitempty"`
+	PermissionDenials []PermissionDenial    `json:"permission_denials,omitempty"`
 
 	// control_request / control_response.
 	RequestID string               `json:"request_id,omitempty"`
@@ -104,6 +105,16 @@ type Usage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+}
+
+// ModelUsage is one entry of a result's cumulative per-model token totals.
+// Unlike the per-step Usage on assistant messages, modelUsage covers the whole
+// session tree, including work done by nested agents.
+type ModelUsage struct {
+	InputTokens              int `json:"inputTokens"`
+	OutputTokens             int `json:"outputTokens"`
+	CacheReadInputTokens     int `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int `json:"cacheCreationInputTokens"`
 }
 
 // UnmarshalJSON accepts "event" only when it carries the stream_event object.

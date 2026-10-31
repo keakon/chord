@@ -48,6 +48,9 @@ type SidebarEntry struct {
 	LastSummary         string
 	UrgentCount         int
 	LastArtifact        tools.ArtifactRef
+	// Usage is the task's cumulative reported usage; zero entries render no
+	// usage line.
+	Usage agent.AgentUsage
 	// External marks a worker whose transcript and tool execution live in an
 	// external coding-agent process; it must not be labeled as a healthy Chord
 	// transcript.
@@ -164,6 +167,7 @@ func (s *Sidebar) Update(subAgents []agent.SubAgentInfo, focusedID, mainRole str
 			AwaitingOwnerReason: info.AwaitingOwnerReason,
 			UrgentCount:         info.UrgentInboxCount,
 			LastArtifact:        info.LastArtifact,
+			Usage:               info.Usage,
 			External:            info.Backend != "",
 		}
 		if existing, ok := existingByID[info.InstanceID]; ok {

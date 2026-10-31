@@ -165,6 +165,7 @@ type externalWorker struct {
 	lastAssistantMu sync.Mutex
 	lastAssistant   string
 
+	usage *externalUsageTracker
 	// stderrTail keeps the current run's redacted stderr for launch-failure
 	// classification; it resets before every spawn.
 	stderrTail externalStderrTail
@@ -236,6 +237,7 @@ func (a *MainAgent) newExternalWorker(cfg externalWorkerConfig) (*externalWorker
 		toolSeen:                 make(map[string]bool),
 		toolBindings:             make(map[string]*externalToolBinding),
 		ctxMgr:                   ctxmgr.NewManager(0, 0),
+		usage:                    newExternalUsageTracker(),
 		permissionRequests:       make(map[string]externalPermissionRequest),
 		permissionOutcomes:       make(map[string]*externalPermissionOutcome),
 	}
@@ -283,6 +285,14 @@ func (w *externalWorker) LastSummary() string {
 func (w *externalWorker) LastArtifact() tools.ArtifactRef {
 	ref, _ := w.runtimeState.artifactSnapshot()
 	return ref
+}
+
+// UsageSnapshot returns the usage the external CLI has reported for this task.
+func (w *externalWorker) UsageSnapshot() AgentUsage {
+	if w == nil || w.usage == nil {
+		return AgentUsage{}
+	}
+	return w.usage.snapshot()
 }
 
 func (w *externalWorker) TaskDescription() string { return w.taskDesc }
@@ -437,6 +447,11 @@ func (w *externalWorker) buildTaskRecord(previous *DurableTaskRecord, closedReas
 	rec.InstanceHistory = dedupeTaskInstanceHistory(append(rec.InstanceHistory, w.instanceID))
 	rec.LastSummary = summary
 	rec.Persistence = w.PersistenceHealth()
+	if usage := w.UsageSnapshot(); !usage.Zero() {
+		rec.Usage = &usage
+	} else {
+		rec.Usage = nil
+	}
 	w.promptMu.Lock()
 	envKeys := slices.Sorted(maps.Keys(w.backend.Env))
 	rec.ExternalSession = &ExternalTaskSession{

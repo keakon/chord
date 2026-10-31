@@ -208,6 +208,9 @@ func (a *MainAgent) rehydrateExternalTaskLeader(record *DurableTaskRecord, activ
 	}()
 	w.sessionID, w.resumeNext, w.processEnded, w.runID = sessionID, resume, true, binding.RunID
 	w.sessionEstablished = resume
+	if record.Usage != nil {
+		w.usage.seed(*record.Usage)
+	}
 	w.ownerAgentID, w.ownerTaskID, w.depth, w.joinToOwner = record.OwnerAgentID, record.OwnerTaskID, record.Depth, record.JoinToOwner
 	w.workDirState = binding.WorkDirState
 	w.ctxMgr.RestoreMessages(history)
