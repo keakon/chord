@@ -164,6 +164,10 @@ type externalWorker struct {
 
 	lastAssistantMu sync.Mutex
 	lastAssistant   string
+
+	// stderrTail keeps the current run's redacted stderr for launch-failure
+	// classification; it resets before every spawn.
+	stderrTail externalStderrTail
 }
 
 type externalWorkerConfig struct {

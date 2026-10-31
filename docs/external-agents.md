@@ -99,7 +99,7 @@ A tool the role ruleset disables is passed to the CLI through `--disallowedTools
 
 Claude can also reject a tool on its own side before requesting host authorization — some tools are unavailable in the CLI's own managed mode. Chord does not bypass these restrictions.
 
-Chord disables project and user customization, hooks, user/project/plugin MCP servers, plugins, and sandbox auto-approval; the only MCP server in the process is Chord's private notify bridge. Apart from that in-process notify bridge, authorization depends on the CLI requesting `can_use_tool` before execution. Detecting an unauthorized result afterward cannot prove that no side effect occurred. The command and administrator policy remain trusted boundaries; role permissions are not an operating-system sandbox. Shell rules use last-match precedence: `git *` is not read-only, and `go test` executes repository code.
+Chord disables project and user customization, hooks, user/project/plugin MCP servers, plugins, sandbox auto-approval, and Claude Code's auto memory; the only MCP server in the process is Chord's private notify bridge. Apart from that in-process notify bridge, authorization depends on the CLI requesting `can_use_tool` before execution. Detecting an unauthorized result afterward cannot prove that no side effect occurred. The command and administrator policy remain trusted boundaries; role permissions are not an operating-system sandbox. Shell rules use last-match precedence: `git *` is not read-only, and `go test` executes repository code.
 
 ## Quota and credentials
 

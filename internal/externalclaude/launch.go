@@ -146,5 +146,9 @@ func processEnvironment(inherited []string, overrides map[string]string) []strin
 		env = append(env, key+"="+value)
 	}
 	env = append(env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
+	// Auto memory would let the CLI write project notes to its own files and
+	// read them back in later sessions, invisible to Chord's task records and
+	// permission decisions.
+	env = append(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1")
 	return env
 }

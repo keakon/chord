@@ -579,3 +579,19 @@ func containsSequence(haystack, needle []string) bool {
 	}
 	return false
 }
+
+func TestProcessEnvironmentAppendsManagedToggles(t *testing.T) {
+	env := processEnvironment([]string{"PATH=/usr/bin", "CLAUDE_CODE_EFFORT_LEVEL=high"}, nil)
+	joined := strings.Join(env, "\n")
+	for _, want := range []string{
+		"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1",
+		"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("environment %v missing %s", env, want)
+		}
+	}
+	if strings.Contains(joined, "CLAUDE_CODE_EFFORT_LEVEL") {
+		t.Fatalf("environment kept a non-allowlisted CLAUDE_ override: %v", env)
+	}
+}

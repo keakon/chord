@@ -99,7 +99,7 @@ permission:
 
 Claude 自身也可能先于宿主授权拒绝工具——某些工具在 CLI 自己的受管模式下不可用。Chord 不会绕过这些限制。
 
-Chord 禁用项目和用户自定义、hooks、用户/项目/插件 MCP server、插件及 sandbox 自动批准；进程里唯一的 MCP server 是 Chord 私有的 notify 桥。除这条进程内的 notify 桥外，逐调用授权依赖 CLI 在执行前请求 `can_use_tool`；事后发现未授权结果，不能证明没有发生副作用。外部命令和管理员策略仍是受信任边界，角色权限不是操作系统沙箱。shell 规则采用最后匹配优先；宽泛的 `git *` 不等于只读权限，`go test` 也会执行仓库代码。
+Chord 禁用项目和用户自定义、hooks、用户/项目/插件 MCP server、插件、sandbox 自动批准以及 Claude Code 的 auto memory；进程里唯一的 MCP server 是 Chord 私有的 notify 桥。除这条进程内的 notify 桥外，逐调用授权依赖 CLI 在执行前请求 `can_use_tool`；事后发现未授权结果，不能证明没有发生副作用。外部命令和管理员策略仍是受信任边界，角色权限不是操作系统沙箱。shell 规则采用最后匹配优先；宽泛的 `git *` 不等于只读权限，`go test` 也会执行仓库代码。
 
 ## 额度与凭据
 

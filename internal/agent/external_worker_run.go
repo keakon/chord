@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,9 +69,16 @@ func (w *externalWorker) runExternalWorker() {
 			}
 			if w.closing.Load() || w.ctx.Err() != nil {
 				w.finishCancelledUnlessRequested()
-			} else {
-				w.finishFailure(err)
+				return
 			}
+			// A classified failure (missing CLI, no login) replaces the bare
+			// wrap with guidance and raises a toast; everything else keeps the
+			// error with the run's redacted stderr tail appended.
+			reason, toast := w.externalLaunchFailure(err)
+			if toast != "" {
+				w.parent.emitToTUI(ToastEvent{AgentID: w.instanceID, Message: toast, Level: "warn"})
+			}
+			w.finishFailure(errors.New(reason))
 			return
 		}
 		w.setSession(session)
@@ -148,6 +156,14 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 	if w.parent == nil {
 		return nil, true, fmt.Errorf("external worker has no parent agent")
 	}
+	// Reset before any early return: a failure between here and the spawn must
+	// not classify or decorate this attempt with the previous turn's stderr.
+	w.stderrTail.reset()
+	// Preflight before any durable run state exists: a missing CLI must fail
+	// before the record would claim a launched run and a supervisor receipt.
+	if err := w.preflightExternalCommand(); err != nil {
+		return nil, true, err
+	}
 	if err := w.ensureSessionID(); err != nil {
 		return nil, true, err
 	}
@@ -214,7 +230,9 @@ func (w *externalWorker) startSession(input externalTaskInput, resume bool) (ses
 		Env:     env,
 		Dir:     w.workDir,
 		OnStderr: func(line string) {
-			log.Warnf("external agent stderr instance=%v line=%v", w.instanceID, externalclaude.RedactDiagnostic(line, env))
+			redacted := externalclaude.RedactDiagnostic(line, env)
+			w.stderrTail.add(redacted)
+			log.Warnf("external agent stderr instance=%v line=%v", w.instanceID, redacted)
 		},
 		MCPHandler: w.handleExternalMCP,
 		// The process runs under its own supervisor: Chord can be killed
