@@ -15,13 +15,17 @@ GOPLS ?= gopls
 MODERNIZE_VERSION ?= v0.50.0
 MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
-.PHONY: ci preflight fmt fmt-check deps-check test test-fast test-cover stress race race-fast vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check model-catalog-check bench-tui clean
+.PHONY: ci preflight build fmt fmt-check deps-check test test-fast test-cover stress race race-fast vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check model-catalog-check bench-tui clean
 
 ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check
 
 # Same Go gates as .githooks/pre-push; docs checks stay in the hook because
 # they depend on the changed paths.
 preflight: fmt-check deps-check vet staticcheck modernize-check test-fast resource-scripts-check
+
+# Release-style build: pure Go (no cgo), path-trimmed, and stripped.
+build:
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w" -o chord ./cmd/chord/
 
 # fmt / fmt-check cover every Go file Git tracks or would add. Ignored private
 # trees (for example .chord/) must never block the gate or get rewritten by it.

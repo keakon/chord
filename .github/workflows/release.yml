@@ -92,8 +92,14 @@ jobs:
             out="build/${name}/chord${ext}"
             mkdir -p "$(dirname "${out}")"
 
-            GOOS="${goos}" GOARCH="${goarch}" \
-              go build -trimpath -ldflags "${ldflags}" \
+            build_env=(GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0)
+            # Every Apple Silicon chip implements ARMv8.1+; linux/arm64 still
+            # covers v8.0 boards without LSE atomics, so raise the baseline only here.
+            if [[ "${goos}" == "darwin" && "${goarch}" == "arm64" ]]; then
+              build_env+=(GOARM64=v8.1)
+            fi
+
+            env "${build_env[@]}" go build -trimpath -ldflags "${ldflags}" \
               -o "${out}" ./cmd/chord/
 
             cp LICENSE "build/${name}/"

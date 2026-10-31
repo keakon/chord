@@ -19,7 +19,10 @@ go install honnef.co/go/tools/cmd/staticcheck@latest
 
 ```bash
 go build ./...
+make build
 ```
+
+`go build ./...` checks that every package compiles; `make build` writes `./chord` with cgo disabled, `-trimpath`, and stripped symbols.
 
 ## Git Hooks Setup (Required)
 
