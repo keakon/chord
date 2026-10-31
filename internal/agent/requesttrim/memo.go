@@ -20,9 +20,11 @@ import (
 // itself, which otherwise re-copied every call's args, re-hashed every result
 // body, and re-parsed every shell invocation on every request.
 //
-// Each map is bounded: beyond the cap it is dropped wholesale and rebuilt from
-// the current history on demand. Reduction-cache clears (session restore,
-// compaction apply, model-identity change) reset the memo outright.
+// Each map is bounded: once full it keeps roughly half its entries and drops
+// the rest, so a session that crosses the cap degrades to partial recompute
+// instead of re-deriving every verdict on every request. Reduction-cache
+// clears (session restore, compaction apply, model-identity change) reset the
+// memo outright.
 //
 // All methods are nil-receiver safe: a nil memo computes directly, which is
 // what agent-less scans (unit tests) fall back to.
@@ -38,6 +40,26 @@ type Memo struct {
 // reductionToolCallMemoMaxEntries bounds each memo map so a pathological
 // session cannot grow it without limit; every cached verdict is recomputable.
 const reductionToolCallMemoMaxEntries = 8192
+
+// memoMapForInsert returns the map to insert into: a nil map gets a fresh
+// small allocation, a full map keeps roughly half its entries (arbitrary
+// which, since Go map iteration order is unspecified — any half preserves the
+// bulk of the hit rate) and reuses its backing array.
+func memoMapForInsert[V any](m map[string]V, maxEntries int) map[string]V {
+	if m == nil {
+		return make(map[string]V, 64)
+	}
+	if len(m) < maxEntries {
+		return m
+	}
+	for k := range m {
+		if len(m) <= maxEntries/2 {
+			return m
+		}
+		delete(m, k)
+	}
+	return m
+}
 
 // shellInvocationParse is the memoized singleShellInvocationLiteralArgs result
 // for one (tool call, program) pair.
@@ -55,9 +77,7 @@ func (m *Memo) toolCallMetaFor(toolCallID, name string, args []byte) ToolCall {
 		m.mu.Unlock()
 		return v
 	}
-	if m.meta == nil || len(m.meta) >= reductionToolCallMemoMaxEntries {
-		m.meta = make(map[string]ToolCall, 64)
-	}
+	m.meta = memoMapForInsert(m.meta, reductionToolCallMemoMaxEntries)
 	v := ToolCall{Name: tools.NormalizeName(name), Args: string(args)}
 	m.meta[toolCallID] = v
 	m.mu.Unlock()
@@ -92,9 +112,7 @@ func (m *Memo) toolResultDigest(toolCallID, content string) [sha256.Size]byte {
 		m.mu.Unlock()
 		return digest
 	}
-	if m.digests == nil || len(m.digests) >= reductionToolCallMemoMaxEntries {
-		m.digests = make(map[string][sha256.Size]byte, 64)
-	}
+	m.digests = memoMapForInsert(m.digests, reductionToolCallMemoMaxEntries)
 	digest := ContentHash(content)
 	m.digests[toolCallID] = digest
 	m.mu.Unlock()
@@ -111,9 +129,7 @@ func (m *Memo) ToolInputKey(toolCallID string, meta ToolCall) string {
 		m.mu.Unlock()
 		return key
 	}
-	if m.inputKeys == nil || len(m.inputKeys) >= reductionToolCallMemoMaxEntries {
-		m.inputKeys = make(map[string]string, 64)
-	}
+	m.inputKeys = memoMapForInsert(m.inputKeys, reductionToolCallMemoMaxEntries)
 	key := contextReductionToolInputKey(meta.Name, meta.Args)
 	m.inputKeys[toolCallID] = key
 	m.mu.Unlock()
@@ -138,9 +154,7 @@ func (m *Memo) shellInvocationLiteralArgs(toolCallID, argsJSON, program string) 
 	// the meantime; re-check capacity after re-acquiring rather than before.
 	literal, ok := singleShellInvocationLiteralArgs(argsJSON, program)
 	m.mu.Lock()
-	if m.shell == nil || len(m.shell) >= reductionToolCallMemoMaxEntries {
-		m.shell = make(map[string]shellInvocationParse, 64)
-	}
+	m.shell = memoMapForInsert(m.shell, reductionToolCallMemoMaxEntries)
 	m.shell[key] = shellInvocationParse{literal: literal, ok: ok}
 	m.mu.Unlock()
 	return literal, ok
@@ -160,9 +174,7 @@ func (m *Memo) toolResultTrustworthy(toolCallID, toolStatus, content string) boo
 		m.mu.Unlock()
 		return cached
 	}
-	if m.trustworthy == nil || len(m.trustworthy) >= reductionToolCallMemoMaxEntries {
-		m.trustworthy = make(map[string]bool, 64)
-	}
+	m.trustworthy = memoMapForInsert(m.trustworthy, reductionToolCallMemoMaxEntries)
 	verdict := message.IsToolResultSuccessStatus(toolStatus) ||
 		(strings.TrimSpace(toolStatus) == "" && !message.IsToolErrorContent(content))
 	m.trustworthy[toolCallID] = verdict
