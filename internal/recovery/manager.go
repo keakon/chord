@@ -560,6 +560,15 @@ func (r *RecoveryManager) LoadMessages(agentID string) ([]message.Message, error
 	if info, statErr := f.Stat(); statErr == nil {
 		if count, ok := cachedMessageCount(path, info); ok {
 			messages = make([]message.Message, 0, count)
+		} else if info.Size() > messageCountSampleBytes {
+			if estimate := estimateMessageCount(f, info.Size()); estimate > 0 {
+				messages = make([]message.Message, 0, estimate)
+			}
+			// The probe consumed the leading block even when it could not
+			// extrapolate (a single record can span it).
+			if _, err := f.Seek(0, io.SeekStart); err != nil {
+				return nil, err
+			}
 		}
 		readBufferSize = min(recoveryMaxReadBufferSize, max(recoveryMinReadBufferSize, int(info.Size())))
 	}
@@ -885,6 +894,37 @@ type messageCountEntry struct {
 	size    int64
 	modTime time.Time
 	count   int
+}
+
+// messageCountSampleBytes bounds the probe that estimates the record count when
+// the exact count is not cached. Restore then allocates the message slice once
+// instead of regrowing it through copies of the 768-byte message struct. Early
+// records run shorter than later tool output, so the extrapolation overshoots;
+// the cap bounds that waste to about 12 MiB, and larger sessions keep growing
+// through append.
+const (
+	messageCountSampleBytes = 64 * 1024
+	maxEstimatedMessages    = 16 * 1024
+)
+
+// estimateMessageCount extrapolates the record count from the newline ratio in
+// one leading block. The caller owns the file position and must rewind before
+// decoding. Zero means "no useful estimate".
+func estimateMessageCount(f *os.File, size int64) int {
+	if size <= messageCountSampleBytes {
+		return 0
+	}
+	buf := make([]byte, messageCountSampleBytes)
+	n, _ := io.ReadFull(f, buf)
+	if n <= 0 {
+		return 0
+	}
+	lines := bytes.Count(buf[:n], []byte{'\n'})
+	if lines == 0 {
+		return 0
+	}
+	estimate := int(size*int64(lines)/int64(n)) + 1
+	return min(estimate, maxEstimatedMessages)
 }
 
 func cachedMessageCount(mainPath string, info os.FileInfo) (int, bool) {
