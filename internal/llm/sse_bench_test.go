@@ -91,6 +91,33 @@ var responsesFragmentsCallbackFixedFixture = func() []byte {
 	return []byte(strings.Join(events, "\n\n"))
 }()
 
+// geminiCallbackFixedFixture keeps a thinking run, a long run of small text
+// deltas, and a signature-only tail. Consecutive same-type parts merge into
+// one GeminiReplayPart, so this shape regresses hard if the merge ever goes
+// back to re-copying the accumulated text on every delta.
+var geminiCallbackFixedFixture = func() []byte {
+	lines := []string{
+		`data: {"candidates":[{"content":{"parts":[{"text":"outline "}]}}]}`,
+	}
+	for range 3 {
+		lines = append(lines, `data: {"candidates":[{"content":{"parts":[{"text":"thinking step","thought":true}]}}]}`)
+	}
+	for range 1000 {
+		lines = append(lines, `data: {"candidates":[{"content":{"parts":[{"text":"word "}]}}]}`)
+	}
+	lines = append(lines,
+		`data: {"candidates":[{"content":{"parts":[{"thoughtSignature":"sig-1"}]}}]}`,
+		`data: {"candidates":[{"content":{"parts":[{"text":"final"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":130,"totalTokenCount":142}}`,
+		"",
+	)
+	return []byte(strings.Join(lines, "\n"))
+}()
+
+var (
+	geminiFixtureWantContent   = "outline " + strings.Repeat("word ", 1000) + "final"
+	geminiFixtureWantReasoning = strings.Repeat("thinking step", 3)
+)
+
 type fixedSSEBenchFixture struct {
 	provider string
 	name     string
@@ -102,6 +129,7 @@ func loadFixedCallbackFixtures() []fixedSSEBenchFixture {
 		{provider: "openai", name: "openai_fixed", body: openAICallbackFixedFixture},
 		{provider: "responses", name: "responses_fixed", body: responsesCallbackFixedFixture},
 		{provider: "responses_ws", name: "responses_ws_fixed", body: responsesWSCallbackFixedFixture},
+		{provider: "gemini", name: "gemini_fixed", body: geminiCallbackFixedFixture},
 	}
 }
 
@@ -129,6 +157,59 @@ func TestOpenAIFixedSSEParseAllocsGuard(t *testing.T) {
 	const maxAllocs = 90
 	if allocs > maxAllocs {
 		t.Fatalf("fixed OpenAI SSE parse allocs = %.0f, want ≤%d", allocs, maxAllocs)
+	}
+}
+
+// TestGeminiFixedSSEParseAllocsGuard pins the linear merge behavior of
+// geminiTextPartAccumulator: the fixture carries 124 streaming parts that
+// collapse into four GeminiReplayPart entries, and a per-delta re-copy of the
+// accumulated text would blow the allocation budget long before this bound.
+func TestGeminiFixedSSEParseAllocsGuard(t *testing.T) {
+	var parsed *message.Response
+	allocs := testing.AllocsPerRun(50, func() {
+		resp, err := parseGeminiSSEStream(bytes.NewReader(geminiCallbackFixedFixture), nil, nil)
+		if err != nil {
+			t.Fatalf("parse fixed Gemini SSE: %v", err)
+		}
+		parsed = resp
+	})
+	if parsed.Content != geminiFixtureWantContent {
+		t.Fatalf("fixed Gemini SSE content = %q, want %q", parsed.Content, geminiFixtureWantContent)
+	}
+	if parsed.ReasoningContent != geminiFixtureWantReasoning {
+		t.Fatalf("fixed Gemini SSE reasoning = %q, want %q", parsed.ReasoningContent, geminiFixtureWantReasoning)
+	}
+	if parsed.StopReason != "STOP" {
+		t.Fatalf("fixed Gemini SSE stop reason = %q, want STOP", parsed.StopReason)
+	}
+	if len(parsed.GeminiParts) != 4 {
+		t.Fatalf("fixed Gemini SSE parts = %d (%+v), want 4", len(parsed.GeminiParts), parsed.GeminiParts)
+	}
+	if parsed.GeminiParts[3].Text != "final" {
+		t.Fatalf("fixed Gemini SSE final part = %+v, want text \"final\"", parsed.GeminiParts[3])
+	}
+	// The per-chunk JSON decode dominates the allocation count, so a merge
+	// regression that re-copies the accumulated text per delta shows up in
+	// bytes, not counts: at 1000 deltas it would multiply bytesPerOp several
+	// times over the linear bound below. Under the race detector Sonic swaps
+	// in its non-JIT compatibility decoder, which inflates byte measurements
+	// by orders of magnitude, so the byte bound applies to normal builds only.
+	const maxAllocs = 9500
+	if allocs > maxAllocs {
+		t.Fatalf("fixed Gemini SSE parse allocs = %.0f, want ≤%d", allocs, maxAllocs)
+	}
+	if !raceBuildEnabled {
+		bytesPerOp := testing.Benchmark(func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				if _, err := parseGeminiSSEStream(bytes.NewReader(geminiCallbackFixedFixture), nil, nil); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}).AllocedBytesPerOp()
+		const maxBytesPerOp = 3 * 1024 * 1024
+		if bytesPerOp > maxBytesPerOp {
+			t.Fatalf("fixed Gemini SSE parse bytes/op = %d, want ≤%d", bytesPerOp, maxBytesPerOp)
+		}
 	}
 }
 
@@ -191,7 +272,7 @@ func BenchmarkResponsesFragmentedText(b *testing.B) {
 // cumulative-to-fragment normalization.
 func BenchmarkSSEParseWithCallback(b *testing.B) {
 	fixtures := loadFixedCallbackFixtures()
-	providers := []string{"openai", "responses", "responses_ws"}
+	providers := []string{"openai", "responses", "responses_ws", "gemini"}
 	for _, provider := range providers {
 		var fixture fixedSSEBenchFixture
 		ok := false
@@ -230,6 +311,8 @@ func BenchmarkSSEParseWithCallback(b *testing.B) {
 					resp, err = parseOpenAISSEStreamOptions(reader, cb, nil, false)
 				case "responses", "responses_ws":
 					resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, nil, nil, "", false, false, false)
+				case "gemini":
+					resp, err = parseGeminiSSEStream(reader, cb, nil)
 				default:
 					b.Fatalf("unsupported provider %q", provider)
 				}
@@ -254,7 +337,7 @@ func BenchmarkSSEParseWithCollector(b *testing.B) {
 	if err != nil {
 		b.Fatalf("load SSE benchmark corpus: %v", err)
 	}
-	providers := []string{"openai", "responses", "responses_ws"}
+	providers := []string{"openai", "responses", "responses_ws", "gemini"}
 	for _, provider := range providers {
 		corpus, ok := corpora[provider]
 		if !ok || len(corpus.Entries) == 0 {
@@ -291,6 +374,8 @@ func BenchmarkSSEParseWithCollector(b *testing.B) {
 					resp, err = parseOpenAISSEStreamOptions(reader, nil, collector, false)
 				case "responses", "responses_ws":
 					resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, collector, nil, "", false, false, false)
+				case "gemini":
+					resp, err = parseGeminiSSEStream(reader, nil, collector)
 				default:
 					b.Fatalf("unsupported provider %q", provider)
 				}

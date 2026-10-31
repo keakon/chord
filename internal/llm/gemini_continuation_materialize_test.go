@@ -18,9 +18,11 @@ func TestGeminiContinuationMaterializePreservesReplayBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := &message.Response{}
+	wantParts := newGeminiTextPartAccumulator(want)
 	for _, part := range parts {
-		appendGeminiResponseTextPart(want, part)
+		wantParts.append(part)
 	}
+	wantParts.Flush()
 	if !reflect.DeepEqual(got.GeminiParts, want.GeminiParts) || got.Content != "def" || got.ReasoningContent != "abc" {
 		t.Fatalf("response=%+v", got)
 	}

@@ -165,25 +165,13 @@ func (s *geminiDecodeState) Materialize() (*message.Response, error) {
 	var text, thought strings.Builder
 	calls := make(map[int]*openAIToolAccumulator)
 	seq := geminiToolCallSeq.Add(1)
-	var replay strings.Builder
-	var replayThought bool
-	flushReplay := func(signature string) {
-		appendGeminiResponseTextPart(resp, geminiPart{Text: replay.String(), Thought: replayThought, ThoughtSignature: signature})
-		replay.Reset()
-	}
+	textParts := newGeminiTextPartAccumulator(resp)
 	for _, p := range s.parts {
 		if p.FunctionCall == nil {
 			if p.Text == "" && p.ThoughtSignature == "" {
 				continue
 			}
-			if replayThought != p.Thought {
-				flushReplay("")
-			}
-			replayThought = p.Thought
-			replay.WriteString(p.Text)
-			if p.ThoughtSignature != "" {
-				flushReplay(p.ThoughtSignature)
-			}
+			textParts.append(p)
 			if p.Thought {
 				thought.WriteString(p.Text)
 			} else {
@@ -194,7 +182,7 @@ func (s *geminiDecodeState) Materialize() (*message.Response, error) {
 		if p.FunctionCall.Name == "" {
 			continue
 		}
-		flushReplay("")
+		textParts.Flush()
 		index := len(calls)
 		id := fmt.Sprintf("gemini_%x_%d", seq, index)
 		acc := &openAIToolAccumulator{id: id, name: p.FunctionCall.Name, thoughtSignature: p.ThoughtSignature}
@@ -206,7 +194,7 @@ func (s *geminiDecodeState) Materialize() (*message.Response, error) {
 		calls[index] = acc
 		resp.GeminiParts = append(resp.GeminiParts, message.GeminiReplayPart{Type: "function_call", ToolCallID: id, ThoughtSignature: p.ThoughtSignature})
 	}
-	flushReplay("")
+	textParts.Flush()
 	finalizeGeminiToolCalls(calls, resp, nil, s.finish == "MAX_TOKENS")
 	resp.Content, resp.ReasoningContent = text.String(), thought.String()
 	if resp.Content == "" && resp.ReasoningContent == "" && len(resp.ToolCalls) == 0 {

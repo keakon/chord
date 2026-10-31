@@ -798,6 +798,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	var resp message.Response
 	var content strings.Builder
 	var reasoning strings.Builder
+	var textParts = newGeminiTextPartAccumulator(&resp)
 	var inThinking bool
 	var toolCalls = make(map[int]*openAIToolAccumulator)
 	var nextToolIndex int
@@ -874,7 +875,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		for _, candidate := range chunk.Candidates {
 			for _, part := range candidate.Content.Parts {
 				if part.FunctionCall == nil {
-					appendGeminiResponseTextPart(&resp, part)
+					textParts.append(part)
 				}
 				if part.Text != "" {
 					if part.Thought {
@@ -913,6 +914,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					acc := &openAIToolAccumulator{id: id, name: name, thoughtSignature: cloneLongLivedLLMString(part.ThoughtSignature)}
 					acc.args.Write(args)
 					toolCalls[idx] = acc
+					textParts.Flush()
 					resp.GeminiParts = append(resp.GeminiParts, message.GeminiReplayPart{Type: "function_call", ToolCallID: id, ThoughtSignature: acc.thoughtSignature})
 					if cb != nil {
 						cb(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: id, Name: acc.name}})
@@ -922,6 +924,8 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			}
 			if candidate.FinishReason != "" {
 				resp.StopReason = cloneLongLivedLLMString(candidate.FinishReason)
+				// Truncation may remove replay parts and invalidate the open index.
+				textParts.Flush()
 				finalizeGeminiToolCalls(toolCalls, &resp, cb, candidate.FinishReason == "MAX_TOKENS")
 			}
 		}
@@ -929,6 +933,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			resp.Usage = usage.tokens()
 		}
 	}
+	textParts.Flush()
 	if err := scanner.Err(); err != nil {
 		flushContent()
 		if canRecoverPartialResponsesAfterError(err) {
@@ -1011,34 +1016,71 @@ func finalizeGeminiToolCalls(toolCalls map[int]*openAIToolAccumulator, resp *mes
 	}
 }
 
-func appendGeminiResponseTextPart(resp *message.Response, part geminiPart) {
-	if resp == nil || (part.Text == "" && part.ThoughtSignature == "") {
+// geminiTextPartAccumulator merges consecutive unsigned streaming text parts
+// into single GeminiReplayPart entries without re-copying the accumulated text
+// on every delta. The open part's bytes live in a strings.Builder and are
+// materialized into resp.GeminiParts only when the part closes, so per-delta
+// cost stays linear in the new bytes. The open part is always the last element
+// of resp.GeminiParts; call Flush before appending a function_call part,
+// removing replay parts, and after the last text part.
+type geminiTextPartAccumulator struct {
+	resp     *message.Response
+	open     int // index in resp.GeminiParts of the unsigned open part; -1 when closed
+	partType string
+	text     strings.Builder
+}
+
+func newGeminiTextPartAccumulator(resp *message.Response) *geminiTextPartAccumulator {
+	return &geminiTextPartAccumulator{resp: resp, open: -1}
+}
+
+// append merges one streaming part. Semantics match the previous last-element
+// merge: consecutive same-type parts merge while unsigned; a signature-bearing
+// part merges its text into the open part and closes it; anything else starts
+// a new part. Gemini signatures are positional and must remain on their
+// original part boundary, so merging never crosses a signed part.
+func (a *geminiTextPartAccumulator) append(part geminiPart) {
+	if part.Text == "" && part.ThoughtSignature == "" {
 		return
 	}
 	partType := "text"
 	if part.Thought {
 		partType = "thought"
 	}
-	signature := cloneLongLivedLLMString(part.ThoughtSignature)
-	if n := len(resp.GeminiParts); n > 0 && resp.GeminiParts[n-1].Type == partType {
-		previous := &resp.GeminiParts[n-1]
-		// Streaming commonly emits a signature-only tail for the preceding
-		// text. Merge that tail, but never merge across an already signed part:
-		// Gemini signatures are positional and must remain on their original
-		// part boundary.
-		if previous.ThoughtSignature == "" {
-			previous.Text += part.Text
-			if signature != "" {
-				previous.ThoughtSignature = signature
-			}
+	if a.open >= 0 && a.partType == partType {
+		a.text.WriteString(part.Text)
+		if part.ThoughtSignature == "" {
 			return
 		}
+		a.close(cloneLongLivedLLMString(part.ThoughtSignature))
+		return
 	}
-	resp.GeminiParts = append(resp.GeminiParts, message.GeminiReplayPart{
-		Type:             partType,
-		Text:             part.Text,
-		ThoughtSignature: signature,
-	})
+	a.Flush()
+	a.open = len(a.resp.GeminiParts)
+	a.partType = partType
+	a.resp.GeminiParts = append(a.resp.GeminiParts, message.GeminiReplayPart{Type: partType})
+	a.text.WriteString(part.Text)
+	if part.ThoughtSignature != "" {
+		a.close(cloneLongLivedLLMString(part.ThoughtSignature))
+	}
+}
+
+func (a *geminiTextPartAccumulator) close(signature string) {
+	a.resp.GeminiParts[a.open].Text = a.text.String()
+	a.resp.GeminiParts[a.open].ThoughtSignature = signature
+	a.text.Reset()
+	a.open = -1
+}
+
+// Flush materializes the open part, if any. Nothing reads resp.GeminiParts
+// mid-parse, so deferring the text write until the part closes is safe.
+func (a *geminiTextPartAccumulator) Flush() {
+	if a.open < 0 {
+		return
+	}
+	a.resp.GeminiParts[a.open].Text = a.text.String()
+	a.text.Reset()
+	a.open = -1
 }
 
 func parseGeminiHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *APIError {
