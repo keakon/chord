@@ -10,6 +10,8 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 type cachedRenderable struct {
@@ -314,31 +316,27 @@ func (m *Model) queuedDraftsFingerprint(width, maxLines int) string {
 	if len(drafts) == 0 && len(mailboxes) == 0 || width <= 0 || maxLines <= 0 {
 		return ""
 	}
+	// Queued content is immutable per InputID revision, so identity, status,
+	// revision, and scalar shape pin everything the bar renders. Splicing the
+	// full draft text into the key copied megabytes of queued input on every
+	// frame while the bar was visible.
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d|%d|%d|%d", width, maxLines, len(drafts), len(mailboxes))
 	for _, draft := range drafts {
-		b.WriteByte('|')
-		b.WriteString(draft.ID)
-		b.WriteByte(':')
-		b.WriteString(draft.DeliveryStatus)
-		b.WriteByte(':')
-		b.WriteString(draft.DisplayContent)
-		b.WriteByte(':')
-		b.WriteString(draft.Content)
+		imageCount := 0
 		for _, part := range draft.Parts {
-			b.WriteByte(':')
-			b.WriteString(part.Type.String())
-			b.WriteByte('=')
-			b.WriteString(part.DisplayText)
+			if part.Type == message.ContentPartImage {
+				imageCount++
+			}
 		}
+		fmt.Fprintf(&b, "|%s:%s:%d:%d:%d:%d:%d",
+			draft.ID, draft.DeliveryStatus, draft.Revision,
+			len(draft.DisplayContent), len(draft.Content), len(draft.Parts), imageCount)
 	}
 	for _, item := range mailboxes {
-		b.WriteByte('|')
-		b.WriteString(item.MessageID)
-		b.WriteByte(':')
-		b.WriteString(item.Summary)
-		b.WriteByte(':')
-		b.WriteString(item.TargetAgentID)
+		// A mailbox item is replaced in place under its MessageID, and its
+		// summary is short, so the text itself keys it.
+		fmt.Fprintf(&b, "|%s:%s:%s", item.MessageID, item.TargetAgentID, item.Summary)
 	}
 	return b.String()
 }

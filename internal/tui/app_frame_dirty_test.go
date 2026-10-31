@@ -230,3 +230,42 @@ func TestStatusPanelSteadyFrameStaysClean(t *testing.T) {
 		t.Fatal("steady status-panel frame was marked dirty")
 	}
 }
+
+// The queue-bar fingerprint pins everything the bar renders: identity,
+// delivery status, revision, and scalar shape. A revision bump (content
+// change) must change the key even when the text length matches.
+func TestQueuedDraftsFingerprintTracksRenderedInputs(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	m := NewModelWithSize(nil, 100, 30)
+	t.Cleanup(func() { _ = m.Close() })
+
+	m.queuedDrafts = []queuedDraft{{
+		ID: "draft-1", InputID: "input-1", Revision: 1,
+		Content: "sample queued text one", DisplayContent: "sample queued text one",
+	}}
+	base := m.queuedDraftsFingerprint(80, 4)
+
+	// Same shape, new revision: the rendered text may differ, so the key must.
+	m.queuedDrafts[0].Revision = 2
+	m.queuedDrafts[0].Content = "sample queued text TWO"
+	m.queuedDrafts[0].DisplayContent = "sample queued text TWO"
+	if got := m.queuedDraftsFingerprint(80, 4); got == base {
+		t.Fatal("revision bump did not change the queue fingerprint")
+	}
+
+	// Status changes render a prefixed line, so the key must track it.
+	m.queuedDrafts[0].Revision = 2
+	m.queuedDrafts[0].DeliveryStatus = "waiting"
+	if got := m.queuedDraftsFingerprint(80, 4); got == base {
+		t.Fatal("delivery status change did not change the queue fingerprint")
+	}
+
+	// A new draft changes membership and order.
+	m.queuedDrafts = append(m.queuedDrafts, queuedDraft{
+		ID: "draft-2", InputID: "input-2", Revision: 1,
+		Content: "second", DisplayContent: "second",
+	})
+	if got := m.queuedDraftsFingerprint(80, 4); got == base {
+		t.Fatal("queue membership change did not change the fingerprint")
+	}
+}
