@@ -66,6 +66,15 @@ func (m *Model) drawFrame(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 		)
 	}
 
+	// The frame rebuild starts from a clean slate: nothing has re-rendered
+	// yet, so if every layer blits its cache unchanged the frame is
+	// byte-identical to the previous one and View() can skip its comparison.
+	// A resize since the last frame reshapes every layer rect, so it starts
+	// the frame dirty.
+	m.frameContentDirty = m.screenResized
+	m.screenResized = false
+	m.overlayDrawnThisFrame = false
+
 	m.clearScreenBuffer(scr)
 
 	if m.quitting {
@@ -183,13 +192,14 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 			m.cachedMainRender.text = mainContent
 			m.cachedMainRender.lines = nil
 			m.cachedMainRender.cellsValid = false
+			m.frameContentDirty = true
 			uv.NewStyledString(mainContent).Draw(scr, layout.main)
 			return
 		}
 		if !m.cachedMainRender.cellsValid {
 			m.renderToCache(&m.cachedMainRender, mainContent)
 		}
-		m.drawCachedRenderableToClearedArea(scr, layout.main, &m.cachedMainRender)
+		m.blitCachedRenderable(scr, layout.main, &m.cachedMainRender)
 	}
 }
 
@@ -201,7 +211,13 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 		if m.cachedInfoPanelRender.text != infoView {
 			m.renderToCache(&m.cachedInfoPanelRender, infoView)
 		}
-		m.drawCachedRenderableToClearedArea(scr, layout.infoPanel, &m.cachedInfoPanelRender)
+		m.blitCachedRenderable(scr, layout.infoPanel, &m.cachedInfoPanelRender)
+	} else if m.cachedInfoPanelRender.text != "" {
+		// The panel stopped being drawn (narrow window or status mode), so its
+		// area now shows the cleared background instead of the cached cells.
+		// Clear the cache so only this first frame is dirty.
+		m.frameContentDirty = true
+		m.cachedInfoPanelRender = cachedRenderable{}
 	}
 
 	// Sync textarea height (safety net; primary sync happens in Update paths).
@@ -281,50 +297,55 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 			}
 		}
 	}
-	m.drawCachedRenderableToClearedArea(scr, layout.input, &m.cachedInputRender)
+	m.blitCachedRenderable(scr, layout.input, &m.cachedInputRender)
 
 	// Attachment bar (above input)
 	if layout.attachments.Dy() > 0 {
-		attachmentsPresent := len(m.attachments) > 0
-		if attachmentsPresent {
-			attachKey := m.attachmentsFingerprint()
-			if m.cachedAttachKey != attachKey || !m.cachedAttachmentsPresent {
-				m.cachedAttachKey = attachKey
-				m.cachedAttachmentsPresent = true
-				m.renderToCache(&m.cachedAttachRender, m.renderAttachments())
-			}
-		} else if m.cachedAttachmentsPresent {
-			m.cachedAttachmentsPresent = false
-			m.cachedAttachKey = ""
-			m.cachedAttachRender = cachedRenderable{}
+		attachKey := m.attachmentsFingerprint()
+		if m.cachedAttachKey != attachKey || !m.cachedAttachmentsPresent {
+			m.cachedAttachKey = attachKey
+			m.cachedAttachmentsPresent = true
+			m.renderToCache(&m.cachedAttachRender, m.renderAttachments())
 		}
-		m.drawCachedRenderableToClearedArea(scr, layout.attachments, &m.cachedAttachRender)
+		m.blitCachedRenderable(scr, layout.attachments, &m.cachedAttachRender)
+	} else if m.cachedAttachRender.text != "" || m.cachedAttachmentsPresent {
+		// The bar stopped being drawn (its layout height tracks the
+		// attachments), so its area now shows the cleared background. Clear the
+		// cache so only this first frame is dirty.
+		m.frameContentDirty = true
+		m.cachedAttachmentsPresent = false
+		m.cachedAttachKey = ""
+		m.cachedAttachRender = cachedRenderable{}
 	}
 
 	// Queued drafts bar (above attachments/input)
 	if layout.queue.Dy() > 0 {
-		queuePresent := m.queuedMailboxLineCount() > 0 && layout.queue.Dx() > 0 && layout.queue.Dy() > 0
-		if queuePresent {
-			queueKey := m.queuedDraftsFingerprint(layout.queue.Dx(), layout.queue.Dy())
-			if m.cachedQueueKey != queueKey || !m.cachedQueuePresent || m.cachedQueueWidth != layout.queue.Dx() || m.cachedQueueHeight != layout.queue.Dy() {
-				m.cachedQueuePresent = true
-				m.cachedQueueWidth = layout.queue.Dx()
-				m.cachedQueueHeight = layout.queue.Dy()
-				m.cachedQueueKey = queueKey
-				m.renderToCache(&m.cachedQueueRender, m.renderQueuedDrafts(layout.queue.Dx(), layout.queue.Dy()))
-			}
-		} else if m.cachedQueuePresent {
-			m.cachedQueuePresent = false
-			m.cachedQueueWidth = 0
-			m.cachedQueueHeight = 0
-			m.cachedQueueKey = ""
-			m.cachedQueueRender = cachedRenderable{}
+		queueKey := m.queuedDraftsFingerprint(layout.queue.Dx(), layout.queue.Dy())
+		if m.cachedQueueKey != queueKey || !m.cachedQueuePresent || m.cachedQueueWidth != layout.queue.Dx() || m.cachedQueueHeight != layout.queue.Dy() {
+			m.cachedQueuePresent = true
+			m.cachedQueueWidth = layout.queue.Dx()
+			m.cachedQueueHeight = layout.queue.Dy()
+			m.cachedQueueKey = queueKey
+			m.renderToCache(&m.cachedQueueRender, m.renderQueuedDrafts(layout.queue.Dx(), layout.queue.Dy()))
 		}
-		m.drawCachedRenderableToClearedArea(scr, layout.queue, &m.cachedQueueRender)
+		m.blitCachedRenderable(scr, layout.queue, &m.cachedQueueRender)
+	} else if m.cachedQueueRender.text != "" || m.cachedQueuePresent {
+		// The bar stopped being drawn (its layout height tracks the queued
+		// drafts and mailboxes), so its area now shows the cleared background.
+		// Clear the cache so only this first frame is dirty.
+		m.frameContentDirty = true
+		m.cachedQueuePresent = false
+		m.cachedQueueWidth = 0
+		m.cachedQueueHeight = 0
+		m.cachedQueueKey = ""
+		m.cachedQueueRender = cachedRenderable{}
 	}
 
-	// Toast
+	// Toast: transient and short-lived, so keep its frames on the compared
+	// path — the toast rect can move with layout and its disappearance clears
+	// the area without any renderToCache call.
 	if m.activeToast != nil && layout.toast.Dy() > 0 {
+		m.frameContentDirty = true
 		toastKey := m.toastFingerprint()
 		if m.cachedToastKey != toastKey {
 			m.cachedToastKey = toastKey
@@ -343,7 +364,7 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 			m.cachedStatusKey = statusKey
 			m.renderToCache(&m.cachedStatusRender, statusView)
 		}
-		m.drawCachedRenderableToClearedArea(scr, layout.status, &m.cachedStatusRender)
+		m.blitCachedRenderable(scr, layout.status, &m.cachedStatusRender)
 	}
 
 }
@@ -450,6 +471,7 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 	}
 
 	// Slash completion: draw absolutely last, above all other dialogs/panels
+	popupVisible := false
 	if m.mode == ModeInsert {
 		if drop, dropLines := m.slashCompletionOverlay(); drop != "" && dropLines <= layout.main.Dy() {
 			// Slash completion: draw at bottom of main area
@@ -457,6 +479,7 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 			// Keep within main area so it doesn't overlap the info panel/sidebar.
 			dropRect := image.Rect(layout.main.Min.X, y0, layout.main.Max.X, layout.main.Max.Y)
 			uv.NewStyledString(drop).Draw(scr, dropRect)
+			popupVisible = true
 		}
 		// @ mention file completion popup
 		if m.atMentionOpen && m.atMentionList != nil && m.atMentionList.Len() > 0 {
@@ -467,7 +490,30 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 			y := max(layout.input.Min.Y-popupHeight, 0)
 			popupRect := image.Rect(x, y, x+popupWidth, y+popupHeight)
 			uv.NewStyledString(popup).Draw(scr, popupRect)
+			popupVisible = true
 		}
+	}
+	// The popups draw straight into the screen buffer, so both their content
+	// changes and their disappearance change the frame without any
+	// renderToCache call.
+	if popupVisible || m.popupOverlaysVisible {
+		m.frameContentDirty = true
+	}
+	m.popupOverlaysVisible = popupVisible
+
+	// A mode change away from an overlay stops drawing it without any
+	// renderToCache call; the exposed cells now show the base layers, so the
+	// frame differs from the previous one. Clear the caches so only the first
+	// such frame is dirty and later frames can take the clean-frame path.
+	if !m.overlayDrawnThisFrame && (m.cachedOverlayRender.text != "" || m.cachedHelpRender.text != "") {
+		m.frameContentDirty = true
+		m.cachedOverlayRender = cachedRenderable{}
+		m.cachedHelpRender = cachedRenderable{}
+	}
+	if m.mode != ModeStatus && (m.cachedStatusPanelHint.text != "" || m.cachedStatusPanelBody.text != "") {
+		m.frameContentDirty = true
+		m.cachedStatusPanelHint = cachedRenderable{}
+		m.cachedStatusPanelBody = cachedRenderable{}
 	}
 }
 
@@ -522,7 +568,12 @@ func (m *Model) View() tea.View {
 	canvas := m.screenBuf
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
-	if m.cachedFullViewValid && screenLinesEqual(m.cachedScreenLines, canvas.Lines) {
+	if m.cachedFullViewValid && !m.frameContentDirty {
+		// No layer re-rendered and none disappeared this frame: the rebuilt
+		// canvas is byte-identical to the previous one, so reuse the cached
+		// render without the full-screen per-cell comparison.
+		v.Content = m.cachedFullView.Content
+	} else if m.cachedFullViewValid && screenLinesEqual(m.cachedScreenLines, canvas.Lines) {
 		v.Content = m.cachedFullView.Content
 	} else {
 		v.Content = canvas.Render()
@@ -586,6 +637,9 @@ func (m *Model) ensureScreenBuffer(width, height int) {
 		m.screenBuf = newScreenBuffer(width, height)
 		m.refreshScreenBlankLine(width)
 		return
+	}
+	if m.screenBuf.Width() != width || m.screenBuf.Height() != height {
+		m.screenResized = true
 	}
 	m.screenBuf.Method = ansi.GraphemeWidth
 	m.screenBuf.Resize(width, height)

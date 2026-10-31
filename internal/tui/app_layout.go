@@ -138,6 +138,7 @@ func (m *Model) renderOverlayCached(scr uv.Screen, area image.Rectangle, cache *
 	if text == "" || area.Dx() <= 0 || area.Dy() <= 0 {
 		return
 	}
+	m.overlayDrawnThisFrame = true
 	m.renderToCache(cache, text)
 	m.drawCachedRenderable(scr, area, cache)
 }

@@ -139,29 +139,31 @@ func TestApplyWheelScrollDeltaBulkPathMatchesDirectViewportScroll(t *testing.T) 
 	}
 }
 
-func TestDrawCachedRenderableToClearedAreaClearsStaleCellsWhenSourceLineEmpty(t *testing.T) {
+func TestBlitCachedRenderableLeavesEmptySourceLinesUntouched(t *testing.T) {
 	m := NewModel(nil)
 	width := 20
 	buf := uv.NewScreenBuffer(width, 1)
 
-	// Seed the row with styled content that should be cleared.
+	// drawFrame clears the whole buffer before the blit, so the blit itself
+	// only writes cached lines: a pre-existing styled row with an empty source
+	// line must stay exactly as it is.
 	styled := uv.Cell{Content: "─", Width: 1, Style: uv.Style{Fg: uv.ColorFrom(color.RGBA{R: 255, G: 0, B: 0, A: 255})}}
 	for x := range width {
 		buf.SetCell(x, 0, &styled)
 	}
 
 	cache := cachedRenderable{lines: [][]uv.Cell{nil}}
-	m.drawCachedRenderableToClearedArea(buf, buf.Bounds(), &cache)
+	m.blitCachedRenderable(buf, buf.Bounds(), &cache)
 
 	line := buf.Line(0)
 	for x := range width {
-		if !line[x].Equal(&uv.EmptyCell) {
-			t.Fatalf("cell[%d] = %#v, want EmptyCell", x, line[x])
+		if !line[x].Equal(&styled) {
+			t.Fatalf("cell[%d] = %#v, want the seeded styled cell", x, line[x])
 		}
 	}
 }
 
-func TestDrawCachedRenderableToClearedAreaClearsStaleCellsBeyondSourceHeight(t *testing.T) {
+func TestBlitCachedRenderableLeavesRowsBeyondSourceUntouched(t *testing.T) {
 	m := NewModel(nil)
 	width := 10
 	height := 3
@@ -174,11 +176,11 @@ func TestDrawCachedRenderableToClearedAreaClearsStaleCellsBeyondSourceHeight(t *
 		}
 	}
 
-	// Only provide one source line; the remaining rows must be cleared.
+	// Rows beyond the cached lines belong to the frame's full-screen clear,
+	// not to the blit; the blit must leave them exactly as it found them.
 	cache := cachedRenderable{lines: [][]uv.Cell{{{Content: "A", Width: 1}}}}
-	m.drawCachedRenderableToClearedArea(buf, buf.Bounds(), &cache)
+	m.blitCachedRenderable(buf, buf.Bounds(), &cache)
 
-	// First row should be overwritten (starts with "A"), remaining rows empty.
 	row0 := buf.Line(0)
 	if row0[0].Content != "A" {
 		t.Fatalf("row0[0].Content = %q, want %q", row0[0].Content, "A")
@@ -186,13 +188,12 @@ func TestDrawCachedRenderableToClearedAreaClearsStaleCellsBeyondSourceHeight(t *
 	for y := 1; y < height; y++ {
 		row := buf.Line(y)
 		for x := range width {
-			if !row[x].Equal(&uv.EmptyCell) {
-				t.Fatalf("cell[%d,%d] = %#v, want EmptyCell", x, y, row[x])
+			if !row[x].Equal(&styled) {
+				t.Fatalf("cell[%d,%d] = %#v, want the seeded styled cell", x, y, row[x])
 			}
 		}
 	}
 }
-
 func TestDrawCachedRenderableSkipsRowsOutsideCachedContent(t *testing.T) {
 	m := NewModelWithSize(nil, 40, 10)
 	cache := &cachedRenderable{

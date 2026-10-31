@@ -164,79 +164,96 @@ type slashRenderCache struct {
 // The single exception is cachedMainSearchBlockIndex (-1 == no search), which
 // invalidateDrawCaches re-applies after the zero-out.
 type viewCacheState struct {
-	streamRenderDeferred               bool
-	streamRenderForceView              bool
-	streamRenderDeferNext              bool
-	cachedFullView                     tea.View
-	cachedFullViewValid                bool
-	cachedScreenLines                  uv.Lines
-	renderFreezeActive                 bool
-	renderFreezeReason                 string
-	renderFreezeEnteredAt              time.Time
-	cachedFrozenView                   tea.View
-	cachedFrozenViewValid              bool
-	cachedMainSpinnerFrame             string
-	cachedMainSearchBlockIndex         int
-	cachedMainSelActive                bool
-	cachedMainSel                      SelectionRange
-	cachedMainKey                      string
-	cachedMainRender                   cachedRenderable
-	cachedInputMode                    Mode
-	cachedInputWidth                   int
-	cachedInputHeight                  int
-	cachedInputSuppressed              bool
-	cachedInputSelectionAlive          bool
-	cachedInputFocused                 bool
-	cachedInputBangMode                bool
-	cachedInputValue                   string
-	cachedInputLine                    int
-	cachedInputColumn                  int
-	cachedInputScrollY                 int
-	cachedInputSelection               composer.Selection
-	cachedInputKey                     string
-	cachedInputAnimKey                 string
-	cachedInputRender                  cachedRenderable
-	cachedInputCursor                  tea.Cursor
-	cachedInputCursorOK                bool
-	cachedStatusKey                    string
-	cachedStatusRender                 cachedRenderable
-	cachedStatusPanelHint              cachedRenderable
-	cachedStatusBarModeKey             string
-	cachedStatusBarModePill            string
-	cachedStatusBarViewingKey          string
-	cachedStatusBarViewingPill         string
-	cachedStatusBarPillsKey            string
-	cachedStatusBarLeftSide            string
-	cachedStatusBarLeftW               int
-	cachedStatusBarRightKey            string
-	cachedStatusBarRightSide           string
-	cachedStatusBarRightWidth          int
-	cachedStatusBarRightStart          int
-	cachedStatusBarRightOffsets        statusBarRightOffsets
-	cachedStatusBarPathValue           string
-	cachedStatusBarPathShown           string
-	cachedStatusBarActivityKey         string
-	cachedStatusBarActivityText        string
-	cachedStatusBarActivityWidth       int
-	cachedSepWidth                     int
-	cachedSepTheme                     string
-	cachedSepBusy                      bool
-	cachedSepInsert                    bool
-	cachedSepFrame                     int64
-	cachedSepResult                    string
-	cachedQueuePresent                 bool
-	cachedQueueWidth                   int
-	cachedQueueHeight                  int
-	cachedQueueKey                     string
-	cachedQueueRender                  cachedRenderable
-	cachedAttachmentsPresent           bool
-	cachedAttachKey                    string
-	cachedAttachRender                 cachedRenderable
-	cachedToastKey                     string
-	cachedToastRender                  cachedRenderable
-	cachedHelpRender                   cachedRenderable
-	cachedInfoPanelRender              cachedRenderable
-	cachedOverlayRender                cachedRenderable
+	streamRenderDeferred         bool
+	streamRenderForceView        bool
+	streamRenderDeferNext        bool
+	cachedFullView               tea.View
+	cachedFullViewValid          bool
+	cachedScreenLines            uv.Lines
+	renderFreezeActive           bool
+	renderFreezeReason           string
+	renderFreezeEnteredAt        time.Time
+	cachedFrozenView             tea.View
+	cachedFrozenViewValid        bool
+	cachedMainSpinnerFrame       string
+	cachedMainSearchBlockIndex   int
+	cachedMainSelActive          bool
+	cachedMainSel                SelectionRange
+	cachedMainKey                string
+	cachedMainRender             cachedRenderable
+	cachedInputMode              Mode
+	cachedInputWidth             int
+	cachedInputHeight            int
+	cachedInputSuppressed        bool
+	cachedInputSelectionAlive    bool
+	cachedInputFocused           bool
+	cachedInputBangMode          bool
+	cachedInputValue             string
+	cachedInputLine              int
+	cachedInputColumn            int
+	cachedInputScrollY           int
+	cachedInputSelection         composer.Selection
+	cachedInputKey               string
+	cachedInputAnimKey           string
+	cachedInputRender            cachedRenderable
+	cachedInputCursor            tea.Cursor
+	cachedInputCursorOK          bool
+	cachedStatusKey              string
+	cachedStatusRender           cachedRenderable
+	cachedStatusPanelBody        cachedRenderable
+	cachedStatusPanelHint        cachedRenderable
+	cachedStatusBarModeKey       string
+	cachedStatusBarModePill      string
+	cachedStatusBarViewingKey    string
+	cachedStatusBarViewingPill   string
+	cachedStatusBarPillsKey      string
+	cachedStatusBarLeftSide      string
+	cachedStatusBarLeftW         int
+	cachedStatusBarRightKey      string
+	cachedStatusBarRightSide     string
+	cachedStatusBarRightWidth    int
+	cachedStatusBarRightStart    int
+	cachedStatusBarRightOffsets  statusBarRightOffsets
+	cachedStatusBarPathValue     string
+	cachedStatusBarPathShown     string
+	cachedStatusBarActivityKey   string
+	cachedStatusBarActivityText  string
+	cachedStatusBarActivityWidth int
+	cachedSepWidth               int
+	cachedSepTheme               string
+	cachedSepBusy                bool
+	cachedSepInsert              bool
+	cachedSepFrame               int64
+	cachedSepResult              string
+	cachedQueuePresent           bool
+	cachedQueueWidth             int
+	cachedQueueHeight            int
+	cachedQueueKey               string
+	cachedQueueRender            cachedRenderable
+	cachedAttachmentsPresent     bool
+	cachedAttachKey              string
+	cachedAttachRender           cachedRenderable
+	cachedToastKey               string
+	cachedToastRender            cachedRenderable
+	cachedHelpRender             cachedRenderable
+	cachedInfoPanelRender        cachedRenderable
+	cachedOverlayRender          cachedRenderable
+	// frameContentDirty is set during Draw whenever a layer re-rendered or a
+	// visible layer stopped being drawn; View() reuses the previous frame's
+	// rendered content without the full-screen per-cell comparison only when
+	// the flag stayed clear.
+	frameContentDirty bool
+	// screenResized carries a screen buffer resize into the next drawFrame,
+	// which starts each frame from a clear frameContentDirty.
+	screenResized bool
+	// overlayDrawnThisFrame tracks whether any mode overlay blitted during the
+	// current drawFrame, so a mode change away from an overlay (which stops
+	// drawing it without any renderToCache call) can mark the frame dirty.
+	overlayDrawnThisFrame bool
+	// popupOverlaysVisible records whether the slash-completion or @mention
+	// popup drew last frame; they draw directly without renderToCache, so
+	// both their content changes and their disappearance need dirty marking.
+	popupOverlaysVisible               bool
 	cachedInfoPanelW                   int
 	cachedInfoPanelH                   int
 	cachedInfoPanelFP                  string

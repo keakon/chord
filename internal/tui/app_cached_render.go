@@ -175,7 +175,11 @@ func (m *Model) consumeStreamFlush(msg streamFlushTickMsg) bool {
 	return true
 }
 
-func (m *Model) drawCachedRenderableToClearedArea(scr uv.Screen, area image.Rectangle, cache *cachedRenderable) {
+// blitCachedRenderable copies a cached region render into the frame's screen
+// buffer. drawFrame clears the whole buffer up front, so stale cells from a
+// render that shrank are already empty here and the blit only writes the
+// cached lines back.
+func (m *Model) blitCachedRenderable(scr uv.Screen, area image.Rectangle, cache *cachedRenderable) {
 	if cache == nil || area.Dx() <= 0 || area.Dy() <= 0 {
 		return
 	}
@@ -187,21 +191,12 @@ func (m *Model) drawCachedRenderableToClearedArea(scr uv.Screen, area image.Rect
 		m.drawCachedRenderable(scr, area, cache)
 		return
 	}
-	// Always clear the full destination region (not just the rows we will draw).
-	// Some terminals can leave stale styled cells behind unless every cell is
-	// overwritten, especially when the new render has fewer lines than the previous
-	// one (e.g. collapsing sections in the info panel).
 	for row := 0; row < area.Dy(); row++ {
+		if row >= len(cache.lines) {
+			return
+		}
 		dst := lines.Line(area.Min.Y + row)
 		if area.Min.X >= len(dst) {
-			continue
-		}
-		rowEnd := min(area.Max.X, len(dst))
-		for i := area.Min.X; i < rowEnd; i++ {
-			dst[i] = uv.EmptyCell
-		}
-
-		if row >= len(cache.lines) {
 			continue
 		}
 		src := cache.lines[row]
@@ -252,6 +247,10 @@ func (m *Model) renderToCache(cache *cachedRenderable, text string) {
 	if cache.text == text && cache.cellsValid {
 		return
 	}
+	// The layer re-rendered, so this frame's screen can differ from the
+	// previous one; View() only skips its per-cell comparison when no layer
+	// re-rendered and no visible layer disappeared.
+	m.frameContentDirty = true
 	cache.text = text
 	parts := strings.Split(text, "\n")
 	cache.lines = make([][]uv.Cell, len(parts))
