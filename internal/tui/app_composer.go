@@ -11,11 +11,11 @@ import (
 	"github.com/keakon/chord/internal/tui/composer"
 )
 
-func (m Model) hasComposerContent() bool {
+func (m *Model) hasComposerContent() bool {
 	return m.input.Value() != "" || len(m.attachments) > 0 || m.editingQueuedDraftID != "" || m.input.HasInlinePastes()
 }
 
-func (m Model) focusedActivity() agent.AgentActivityEvent {
+func (m *Model) focusedActivity() agent.AgentActivityEvent {
 	statusActiveID := m.focusedAgentID
 	if statusActiveID == "" {
 		statusActiveID = "main"
@@ -23,7 +23,7 @@ func (m Model) focusedActivity() agent.AgentActivityEvent {
 	return m.activityForAgent(statusActiveID)
 }
 
-func (m Model) shouldQueueDraft() bool {
+func (m *Model) shouldQueueDraft() bool {
 	if m.agent == nil {
 		return false
 	}
@@ -108,7 +108,7 @@ func (m *Model) syncQueuedDraft(draft queuedDraft) bool {
 	return ok
 }
 
-func (m Model) queuedDraftsAutoContinue() bool {
+func (m *Model) queuedDraftsAutoContinue() bool {
 	if m.takeoverInputFrozen() || m.takeover.status.State == recovery.SessionPauseReady {
 		return false
 	}

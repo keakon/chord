@@ -159,7 +159,7 @@ func (m *Model) interactionSuppressed() bool {
 	return m.startupRestorePending || m.sessionSwitch.active()
 }
 
-func (m Model) shouldRenderSessionSwitchOverlay() bool {
+func (m *Model) shouldRenderSessionSwitchOverlay() bool {
 	if !m.interactionSuppressed() || !m.sessionSwitch.active() {
 		return false
 	}

@@ -153,7 +153,7 @@ func (m *Model) enqueueToastWithCategory(msg, level, category string) tea.Cmd {
 	return nil
 }
 
-func (m Model) renderQueuedDrafts(width, maxLines int) string {
+func (m *Model) renderQueuedDrafts(width, maxLines int) string {
 	drafts := m.visibleQueuedDrafts()
 	mailboxes := m.visibleQueuedMailboxes()
 	if len(drafts) == 0 && len(mailboxes) == 0 || width <= 0 || maxLines <= 0 {
@@ -183,7 +183,7 @@ func (m Model) renderQueuedDrafts(width, maxLines int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) renderAttachments() string {
+func (m *Model) renderAttachments() string {
 	mentionAttachments := m.atMentionAttachmentPreviews()
 	if len(m.attachments) == 0 && len(mentionAttachments) == 0 {
 		return ""
@@ -222,7 +222,7 @@ func renderAttachmentLine(index int, a Attachment) string {
 	return currentStyles.DimStyle.Render(fmt.Sprintf("  [%d] %s (%s)%s", index, name, size, suffix))
 }
 
-func (m Model) renderToast() string {
+func (m *Model) renderToast() string {
 	if m.activeToast == nil {
 		return ""
 	}

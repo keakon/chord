@@ -143,7 +143,7 @@ func (m *Model) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-func (m Model) searchCurrentInnerOffset() int {
+func (m *Model) searchCurrentInnerOffset() int {
 	if !m.search.State.Active || m.viewport == nil {
 		return -1
 	}
@@ -172,7 +172,7 @@ func (m Model) searchCurrentInnerOffset() int {
 	return match.InnerOffset
 }
 
-func (m Model) searchCurrentBlockIndex() int {
+func (m *Model) searchCurrentBlockIndex() int {
 	if !m.search.State.Active || m.viewport == nil {
 		return -1
 	}

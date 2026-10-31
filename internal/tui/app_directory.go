@@ -9,7 +9,7 @@ import (
 )
 
 // renderDirectory produces the Ctrl+T message directory within the main viewport area.
-func (m Model) renderDirectory() string {
+func (m *Model) renderDirectory() string {
 	width := m.viewport.width
 	height := m.viewport.height
 	if width <= 0 {

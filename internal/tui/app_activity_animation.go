@@ -19,7 +19,7 @@ func activityNeedsVisualAnimation(activity agent.ActivityType) bool {
 	}
 }
 
-func (m Model) hasActiveAgentActivity() bool {
+func (m *Model) hasActiveAgentActivity() bool {
 	for agentID := range m.activities {
 		act := m.activityForAgent(agentID)
 		if act.Type != "" && act.Type != agent.ActivityIdle {

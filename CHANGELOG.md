@@ -57,6 +57,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- The status bar and full-screen views render faster, most noticeably in long sessions.
+
 - When a `job_output` wait times out, the notice now says that a job you started delivers its completion as a durable message at your next request and wakes an idle agent, so the agent does other work or ends the turn instead of waiting again; repeated timeouts escalate to an explicit stop-waiting notice.
 
 - SubAgent toasts now show the worker's sidebar label, and same-category notifications from different workers keep separate queue entries.

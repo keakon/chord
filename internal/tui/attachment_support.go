@@ -61,7 +61,7 @@ func (m *Model) unsupportedAttachmentWarning(a Attachment) string {
 	}
 }
 
-func (m Model) atMentionAttachmentPreviews() []Attachment {
+func (m *Model) atMentionAttachmentPreviews() []Attachment {
 	refs := filecompletion.DedupeRefs(filecompletion.ParseRefs([]string{m.input.Value()}, m.workingDir), m.workingDir)
 	if len(refs) == 0 {
 		return nil
@@ -93,7 +93,7 @@ func (m Model) atMentionAttachmentPreviews() []Attachment {
 		if filecompletion.AttachmentKindForPath(clean) == message.ContentPartPDF {
 			mimeType = "application/pdf"
 		}
-		previews = append(previews, (&m).markAttachmentSupport(Attachment{
+		previews = append(previews, m.markAttachmentSupport(Attachment{
 			FileName:  filepath.Base(clean),
 			MimeType:  mimeType,
 			SizeBytes: int(info.Size()),

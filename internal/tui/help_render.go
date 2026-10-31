@@ -10,7 +10,7 @@ import (
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
-func (m Model) helpLines(width int) []string {
+func (m *Model) helpLines(width int) []string {
 	if width <= 0 {
 		width = 80
 	}

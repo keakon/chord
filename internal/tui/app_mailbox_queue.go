@@ -27,7 +27,7 @@ func queuedMailboxFromMessage(msg agent.SubAgentMailboxMessage) queuedMailbox {
 	}
 }
 
-func (m Model) visibleQueuedMailboxes() []queuedMailbox {
+func (m *Model) visibleQueuedMailboxes() []queuedMailbox {
 	agentID := normalizeDraftAgentID(m.focusedAgentID)
 	visible := make([]queuedMailbox, 0, len(m.mailboxQueue))
 	for _, item := range m.mailboxQueue {
@@ -41,7 +41,7 @@ func (m Model) visibleQueuedMailboxes() []queuedMailbox {
 // visibleQueuedDraftCount and visibleQueuedMailboxCount count what
 // queuedMailboxLineCount needs without materializing a slice each call, since
 // the layout pass asks for the line count several times per frame.
-func (m Model) visibleQueuedDraftCount() int {
+func (m *Model) visibleQueuedDraftCount() int {
 	agentID := normalizeDraftAgentID(m.focusedAgentID)
 	count := 0
 	for _, draft := range m.queuedDrafts {
@@ -52,7 +52,7 @@ func (m Model) visibleQueuedDraftCount() int {
 	return count
 }
 
-func (m Model) visibleQueuedMailboxCount() int {
+func (m *Model) visibleQueuedMailboxCount() int {
 	agentID := normalizeDraftAgentID(m.focusedAgentID)
 	count := 0
 	for _, item := range m.mailboxQueue {
@@ -63,7 +63,7 @@ func (m Model) visibleQueuedMailboxCount() int {
 	return count
 }
 
-func (m Model) queuedMailboxLineCount() int {
+func (m *Model) queuedMailboxLineCount() int {
 	return m.visibleQueuedDraftCount() + m.visibleQueuedMailboxCount()
 }
 

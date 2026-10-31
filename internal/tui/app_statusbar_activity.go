@@ -100,7 +100,7 @@ func formatStatusBarTransportProgress(bytes, events int64) string {
 	return progress
 }
 
-func (m Model) renderRequestProgressSummary(agentID string) string {
+func (m *Model) renderRequestProgressSummary(agentID string) string {
 	if agentID == "" {
 		agentID = "main"
 	}
@@ -128,7 +128,7 @@ func (m Model) renderRequestProgressSummary(agentID string) string {
 	return summary
 }
 
-func (m Model) executingStartedAt(agentID string) (time.Time, bool) {
+func (m *Model) executingStartedAt(agentID string) (time.Time, bool) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		agentID = "main"
@@ -197,7 +197,7 @@ func latestVisiblePendingUserLocalShellStartedWall(v *Viewport) (time.Time, bool
 	return v.LatestVisiblePendingUserLocalShellStartedAt()
 }
 
-func (m Model) renderStatusBarLocalShell(maxWidth int) string {
+func (m *Model) renderStatusBarLocalShell(maxWidth int) string {
 	startedAt, _ := latestVisiblePendingUserLocalShellStartedWall(m.viewport)
 	elapsed := ""
 	if !startedAt.IsZero() {
@@ -236,7 +236,7 @@ type statusBarActivityDisplay struct {
 // Fixed-width frames keep the footer stable across animation updates.
 var statusBarConnectingFrames = [...]string{"⠋", "⠹", "⠴", "⠧"}
 
-func (m Model) statusBarElapsedTextAt(agentID string, now time.Time) string {
+func (m *Model) statusBarElapsedTextAt(agentID string, now time.Time) string {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		agentID = "main"
@@ -254,7 +254,7 @@ func (m Model) statusBarElapsedTextAt(agentID string, now time.Time) string {
 	return "0s"
 }
 
-func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now time.Time) statusBarActivityDisplay {
+func (m *Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now time.Time) statusBarActivityDisplay {
 	display := statusBarActivityDisplay{}
 	agentID := strings.TrimSpace(a.AgentID)
 	if agentID == "" {
@@ -372,7 +372,7 @@ func (m *Model) renderActivityAt(a agent.AgentActivityEvent, maxWidth int, now t
 	return out
 }
 
-func (m Model) activityForAgent(agentID string) agent.AgentActivityEvent {
+func (m *Model) activityForAgent(agentID string) agent.AgentActivityEvent {
 	activity := m.activities[agentID]
 	if status, ok := m.sidebar.FindStatus(agentID); ok && subAgentStatusSuspendsActivity(status) {
 		return agent.AgentActivityEvent{AgentID: agentID, Type: agent.ActivityIdle}
@@ -380,7 +380,7 @@ func (m Model) activityForAgent(agentID string) agent.AgentActivityEvent {
 	return activity
 }
 
-func (m Model) focusedAgentCanShowIdleSince() bool {
+func (m *Model) focusedAgentCanShowIdleSince() bool {
 	focusedAgentID := m.focusedAgentIDOrMain()
 	activity := m.activityForAgent(focusedAgentID)
 	mainCompacting := focusedAgentID == "main" && m.compactionBgStatus.Active
@@ -395,7 +395,7 @@ func (m Model) focusedAgentCanShowIdleSince() bool {
 	return ok
 }
 
-func (m Model) isFocusedAgentBusy() bool {
+func (m *Model) isFocusedAgentBusy() bool {
 	statusActiveID := m.focusedAgentID
 	if statusActiveID == "" {
 		statusActiveID = "main"

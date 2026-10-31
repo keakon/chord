@@ -408,7 +408,7 @@ func (m *Model) touchStreamDelta(agentID string) {
 	m.streamLastDeltaAt[agentID] = time.Now()
 }
 
-func (m Model) inflightDraftBelongsToAgent(agentID string) bool {
+func (m *Model) inflightDraftBelongsToAgent(agentID string) bool {
 	if m.inflightDraft == nil {
 		return false
 	}

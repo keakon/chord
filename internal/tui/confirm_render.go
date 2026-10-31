@@ -66,7 +66,7 @@ func (m *Model) renderConfirmDialog() string {
 	return out
 }
 
-func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerWidth int) []string {
+func (m *Model) renderConfirmSummary(title string, summary confirmSummary, innerWidth int) []string {
 	lines := []string{title, ""}
 	if toolNameKey(summary.ToolName) == tools.NameDone {
 		if strings.TrimSpace(summary.DoneReport) != "" {
@@ -128,7 +128,7 @@ func renderConfirmPathSection(title string, paths []string, innerWidth int) []st
 	return lines
 }
 
-func (m Model) renderConfirmOptions() string {
+func (m *Model) renderConfirmOptions() string {
 	rows := m.confirmOptionRows()
 	var lines []string
 	for _, row := range rows {

@@ -29,7 +29,7 @@ type statusBarCadenceState struct {
 	compactionValid    bool
 }
 
-func (m Model) statusBarConnectingFrameAt(now time.Time) string {
+func (m *Model) statusBarConnectingFrameAt(now time.Time) string {
 	if !m.animRunning || m.currentCadence().visualAnimDelay <= 0 {
 		return statusBarConnectingFrames[0]
 	}
