@@ -59,6 +59,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Release binaries are fully static: the Linux build no longer depends on the system glibc version.
 
+- Redrawing a long draft in the composer no longer repeats work on every frame.
+
 - The TUI uses less CPU while idle: frames with no visible change reuse the previous render.
 
 - Restoring a session reads its transcript roughly twice as fast.

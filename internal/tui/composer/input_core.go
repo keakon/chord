@@ -40,6 +40,13 @@ type Input struct {
 	nextPasteSeq       int
 	editBoundary       uint64
 
+	// valueCache memoizes textarea.Value() against interactionVersion, which
+	// every value-mutating path bumps. textarea.Value() rebuilds the whole
+	// string from its rows, and the render path reads it several times per
+	// frame.
+	cachedValue        string
+	cachedValueVersion uint64
+
 	// displayLineCache caches the result of clampedDisplayLineCount to avoid
 	// re-running wrapped layout projection on every View()/recalcViewportSize().
 	// Invalidated when content or width changes.
@@ -121,9 +128,15 @@ func (i *Input) Blur() {
 	i.textarea.Blur()
 }
 
-// Value returns the current input text.
+// Value returns the current input text. The result is memoized against
+// interactionVersion, which every mutation path (Update, SetValue,
+// InsertString, restore, paste, reset) bumps.
 func (i *Input) Value() string {
-	return i.textarea.Value()
+	if i.cachedValueVersion != i.interactionVersion {
+		i.cachedValue = i.textarea.Value()
+		i.cachedValueVersion = i.interactionVersion
+	}
+	return i.cachedValue
 }
 
 // HistoryEntry returns content with an independent inline object slice.
@@ -288,19 +301,25 @@ func (i *Input) Update(msg tea.Msg) tea.Cmd {
 			i.ClearSelection()
 		}
 	}
-	before := i.DisplayValue()
+	// Read the textarea directly for the edit-reconciliation values: the memo
+	// is keyed on interactionVersion, which is only bumped at the end of this
+	// function, so a memoized read here would return the pre-edit string and
+	// make every edit look like a no-op (skipping the inline-paste remap and
+	// letting ensureCursorOutsideInlinePastes write the stale text back). The
+	// range validity checks below take after explicitly for the same reason.
+	before := i.textarea.Value()
 	row, col := i.Line(), i.Column()
 	beforePastes := copyInlineLargePastes(i.inlinePastes)
 	var cmd tea.Cmd
 	i.textarea, cmd = i.textarea.Update(msg)
-	after := i.DisplayValue()
+	after := i.textarea.Value()
 	if len(beforePastes) > 0 {
 		switch {
 		case before == after:
-			if !i.inlinePastesValid() {
+			if !i.inlinePastesValidFor(after) {
 				i.inlinePastes = nil
 			}
-		case i.inlinePastesValid():
+		case i.inlinePastesValidFor(after):
 			// Common case: edit happened fully after the last placeholder or before
 			// the first one without invalidating any stored ranges.
 		case func() bool {
@@ -316,10 +335,12 @@ func (i *Input) Update(msg tea.Msg) tea.Cmd {
 			i.inlinePastes = nil
 		}
 	}
-	i.ensureCursorOutsideInlinePastes()
-	if before != i.DisplayValue() || row != i.Line() || col != i.Column() {
+	if before != after || row != i.Line() || col != i.Column() {
 		i.interactionVersion++
 	}
+	// After the bump, so ensureCursorOutsideInlinePastes reads the real
+	// post-edit value through the memo instead of the pre-edit snapshot.
+	i.ensureCursorOutsideInlinePastes()
 	return cmd
 }
 

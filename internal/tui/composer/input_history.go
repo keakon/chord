@@ -3,6 +3,7 @@ package composer
 // Reset clears the input and resets history navigation.
 func (i *Input) Reset() {
 	i.editBoundary++
+	i.interactionVersion++
 	i.textarea.Reset()
 	if i.shellLine != nil {
 		*i.shellLine = false

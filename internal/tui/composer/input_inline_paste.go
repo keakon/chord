@@ -7,7 +7,7 @@ import (
 )
 
 func (i *Input) DisplayValue() string {
-	return i.textarea.Value()
+	return i.Value()
 }
 
 func (i *Input) HasInlinePastes() bool {
@@ -30,10 +30,17 @@ func (i *Input) ContentParts() []message.ContentPart {
 }
 
 func (i *Input) inlinePastesValid() bool {
+	return i.inlinePastesValidFor(i.DisplayValue())
+}
+
+// inlinePastesValidFor checks the stored ranges against display. Update passes
+// the post-edit textarea value because the memoized Value is not refreshed
+// until the interaction version advances at the end of the edit.
+func (i *Input) inlinePastesValidFor(display string) bool {
 	if len(i.inlinePastes) == 0 {
 		return true
 	}
-	runes := []rune(i.DisplayValue())
+	runes := []rune(display)
 	prevEnd := 0
 	for _, paste := range i.inlinePastes {
 		if paste.Start < prevEnd || paste.End < paste.Start || paste.End > len(runes) {
