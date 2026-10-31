@@ -185,11 +185,12 @@ func (a *MainAgent) claimDeliveryInputs(ids []string, newTurn bool) {
 		}
 		turnID, turnEpoch := a.turn.ID, a.turn.Epoch
 		existing := make(map[string]bool)
-		for _, msg := range a.ctxMgr.Snapshot() {
+		a.ctxMgr.ScanBackward(func(msg *message.Message) bool {
 			if msg.Role == message.RoleUser && msg.InputID != "" {
 				existing[msg.InputID] = true
 			}
-		}
+			return false
+		})
 		// Capture only the new durable input and any skill records it adds. A
 		// boundary owner already holds the prepared history and tail overlays.
 		var before int
@@ -207,7 +208,7 @@ func (a *MainAgent) claimDeliveryInputs(ids []string, newTurn bool) {
 			a.recordCommittedUserMessage(message.Message{Role: message.RoleUser, InputID: input.InputID, InputRequestID: input.RequestID, Content: input.Content, Parts: cloneContentParts(input.Parts)})
 		}
 		if boundaryInputs != nil {
-			*boundaryInputs = append(*boundaryInputs, a.ctxMgr.Snapshot()[before:]...)
+			*boundaryInputs = append(*boundaryInputs, a.ctxMgr.SnapshotFrom(before)...)
 		}
 		permit := a.newDeliveryPermit(ids, workID, dir, turnID, turnEpoch, cancelGeneration)
 		a.delivery.permit = permit
@@ -246,9 +247,12 @@ func (a *MainAgent) retireCoveredDeliveryInputs(ids []string) bool {
 			return
 		}
 		present := make(map[string]bool)
-		for _, msg := range a.ctxMgr.Snapshot() {
-			present[msg.InputID] = true
-		}
+		a.ctxMgr.ScanBackward(func(msg *message.Message) bool {
+			if msg.InputID != "" {
+				present[msg.InputID] = true
+			}
+			return false
+		})
 		var consumed []recovery.PendingInput
 		for _, input := range a.delivery.committed.Inputs {
 			if slices.Contains(covered, input.InputID) {

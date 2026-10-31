@@ -101,17 +101,19 @@ func (a *MainAgent) maybeTranslateLatestThinkingAfterIdle(turnID uint64) {
 		return
 	}
 
-	msgs := a.ctxMgr.Snapshot()
-	if len(msgs) == 0 {
+	count := a.ctxMgr.MessageCount()
+	if count == 0 {
 		return
 	}
-	lastIdx := len(msgs) - 1
-	last := msgs[lastIdx]
-	if last.Role != "assistant" {
+	// Clone only the last message; its index stays count-1 even if another
+	// message lands after the count was read.
+	tail := a.ctxMgr.SnapshotFrom(count - 1)
+	if len(tail) == 0 || tail[0].Role != "assistant" {
 		return
 	}
+	last := tail[0]
 
-	stableKey := fmt.Sprintf("msgidx:%d", lastIdx)
+	stableKey := fmt.Sprintf("msgidx:%d", count-1)
 	for _, block := range extractThinkingTranslationBlocks(last) {
 		a.scheduleThinkingTranslation(svc, stableKey, svc.TargetLang, block)
 	}

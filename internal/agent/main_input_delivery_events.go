@@ -100,11 +100,22 @@ func (a *MainAgent) handleDeliveryOperation(op *deliveryOperation) {
 				op.inputID = rand.Text()
 			}
 			a.handleUserMessage(Event{Type: EventUserMessage, Payload: acceptedUserMessage{InputID: op.inputID, RequestID: input.RequestID, AcceptedOrder: op.acceptedOrder, Content: input.Content, Parts: input.Parts}})
-			for _, msg := range a.ctxMgr.Snapshot() {
+			// Capture the match inside the scan; emit after it returns. The
+			// reliable send blocks when the TUI output channel is full, and a
+			// send that blocks while this goroutine holds the context read lock
+			// lets a queued writer starve every later reader (writer
+			// preference), freezing the event loop against the TUI drain.
+			var consumed *message.Message
+			a.ctxMgr.ScanBackward(func(msg *message.Message) bool {
 				if msg.Role == message.RoleUser && msg.InputID == op.inputID {
-					a.emitPendingDraftConsumed(input.DraftID, msg)
-					break
+					matched := msg.Clone()
+					consumed = &matched
+					return true
 				}
+				return false
+			})
+			if consumed != nil {
+				a.emitPendingDraftConsumed(input.DraftID, *consumed)
 			}
 			if input.OperationID != "" {
 				a.emitToTUI(InputQueueOperationResultEvent{Target: input.Target, OperationID: input.OperationID, InputID: op.inputID, Result: InputQueueCommitted})

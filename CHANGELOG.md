@@ -59,6 +59,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Release binaries are fully static: the Linux build no longer depends on the system glibc version.
 
+- Delivering a queued input stays fast in long sessions.
+
 - Long Gemini replies use far less CPU while streaming.
 
 - The status bar and full-screen views render faster, most noticeably in long sessions.

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -56,11 +57,12 @@ func (a *MainAgent) settleDeliveryWork(workID, outcome string) {
 			}
 			work.Outcome = outcome
 			present := make(map[string]bool)
-			for _, msg := range a.ctxMgr.Snapshot() {
+			a.ctxMgr.ScanBackward(func(msg *message.Message) bool {
 				if msg.InputID != "" {
 					present[msg.InputID] = true
 				}
-			}
+				return false
+			})
 			// A claim is a reservation, not evidence that the input was consumed.
 			for j := range state.Inputs {
 				input := &state.Inputs[j]
