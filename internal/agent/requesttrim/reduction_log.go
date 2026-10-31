@@ -63,8 +63,7 @@ func looksLikeBuildLikeLog(ctx Context) bool {
 }
 
 func reduceLongLogOutputSummary(ctx Context) string {
-	counts := summarizeLogSignalCounts(ctx.Content)
-	lines := summarizeRepresentativeLogLines(ctx.Content, 6)
+	counts, lines, total := summarizeLongLogOutput(ctx.Content, 6)
 	preserved := len(lines)
 	if preserved == 0 {
 		lines = []string{"- (no preserved log lines)"}
@@ -72,7 +71,6 @@ func reduceLongLogOutputSummary(ctx Context) string {
 	// State how much was dropped. This summary keeps only marker lines, so
 	// without a count the model cannot tell "one matching line" from "the
 	// output only had one line" and may read the summary as the whole result.
-	total := countMeaningfulLines(ctx.Content)
 	if omitted := total - preserved; omitted > 0 {
 		noun := "lines"
 		if omitted == 1 {
@@ -89,25 +87,100 @@ type logSignalCounts struct {
 	Failures int
 }
 
-func summarizeLogSignalCounts(content string) logSignalCounts {
-	var out logSignalCounts
+// summarizeLongLogOutput collects the signal counts, the representative marker
+// lines, and the meaningful line count in one pass. Each line is trimmed and
+// lowercased once even though all three answers need them, which keeps large
+// build logs from being rescanned for every figure the summary reports.
+func summarizeLongLogOutput(content string, limit int) (logSignalCounts, []string, int) {
+	var counts logSignalCounts
+	var lines []string
+	var seen map[string]struct{}
+	if limit > 0 {
+		lines = make([]string, 0, limit)
+		seen = make(map[string]struct{}, limit)
+	}
+	total := 0
 	forEachLine(content, func(line string) bool {
-		lower := strings.ToLower(strings.TrimSpace(line))
-		if lower == "" {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
 			return true
 		}
-		if strings.Contains(lower, "error") || strings.Contains(lower, "panic:") || strings.Contains(lower, "exception") || strings.Contains(lower, "traceback") {
-			out.Errors++
+		total++
+		lower := strings.ToLower(trimmed)
+		signals := classifyLogLine(lower)
+		if signals.error {
+			counts.Errors++
 		}
-		if strings.Contains(lower, "warning") || strings.Contains(lower, "warn") {
-			out.Warnings++
+		if signals.warning {
+			counts.Warnings++
 		}
-		if strings.Contains(lower, "failed") || strings.Contains(lower, "failure") {
-			out.Failures++
+		if signals.failure {
+			counts.Failures++
+		}
+		if len(lines) < limit && signals.marker {
+			lineKey := TextSnippet(trimmed, SummaryLineSnippetChars)
+			if _, ok := seen[lineKey]; !ok {
+				seen[lineKey] = struct{}{}
+				lines = append(lines, "- "+strings.ReplaceAll(lineKey, "\n", " "))
+			}
 		}
 		return true
 	})
-	return out
+	return counts, lines, total
+}
+
+// logLineSignals records which log markers a line carries. The counters and the
+// representative-line filter used to run one strings.Contains scan per marker;
+// folding them into a single byte scan keeps large logs from being walked a
+// dozen times per line.
+type logLineSignals struct {
+	error   bool
+	warning bool
+	failure bool
+	marker  bool
+}
+
+// classifyLogLine matches the same substrings as the individual contains
+// checks it replaces: error/panic:/exception/traceback, warning/warn,
+// failed/failure, and error/warning/fail/panic:/traceback/exception for the
+// representative-line filter.
+// Keyword bytes are ASCII, so scanning bytes cannot split a multi-byte rune.
+func classifyLogLine(lower string) logLineSignals {
+	var signals logLineSignals
+	for i := 0; i < len(lower); i++ {
+		switch lower[i] {
+		case 'e':
+			if strings.HasPrefix(lower[i:], "error") || strings.HasPrefix(lower[i:], "exception") {
+				signals.error = true
+				signals.marker = true
+			}
+		case 'w':
+			if strings.HasPrefix(lower[i:], "warn") {
+				signals.warning = true
+				if strings.HasPrefix(lower[i:], "warning") {
+					signals.marker = true
+				}
+			}
+		case 'f':
+			if strings.HasPrefix(lower[i:], "failed") || strings.HasPrefix(lower[i:], "failure") {
+				signals.failure = true
+			}
+			if strings.HasPrefix(lower[i:], "fail") {
+				signals.marker = true
+			}
+		case 'p':
+			if strings.HasPrefix(lower[i:], "panic:") {
+				signals.error = true
+				signals.marker = true
+			}
+		case 't':
+			if strings.HasPrefix(lower[i:], "traceback") {
+				signals.error = true
+				signals.marker = true
+			}
+		}
+	}
+	return signals
 }
 
 // summarizeLinesMatching collects up to limit de-duplicated lines for which
@@ -133,12 +206,6 @@ func summarizeLinesMatching(content string, limit int, keep func(trimmed string)
 		return len(out) < limit
 	})
 	return out
-}
-
-func summarizeRepresentativeLogLines(content string, limit int) []string {
-	return summarizeLinesMatching(content, limit, func(trimmed string) bool {
-		return containsAnyMarker(strings.ToLower(trimmed), logLineMarkers)
-	})
 }
 
 func summarizeImportantLines(content string, limit int) []string {

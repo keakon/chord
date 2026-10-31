@@ -55,15 +55,6 @@ var (
 		"exception",
 		"diagnostics:",
 	}
-	// logLineMarkers select representative lines to preserve from a long log.
-	logLineMarkers = []string{
-		"error",
-		"warning",
-		"fail",
-		"panic:",
-		"traceback",
-		"exception",
-	}
 	// importantLineMarkers select lines to preserve when summarizing an error
 	// output, covering both failure and auth/timeout signals.
 	importantLineMarkers = []string{
