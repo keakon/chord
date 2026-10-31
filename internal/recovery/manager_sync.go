@@ -65,8 +65,8 @@ func (r *RecoveryManager) Sync(ctx context.Context) error {
 
 func (r *RecoveryManager) syncOpenWritersLocked() error {
 	var errs []error
-	for id, f := range r.handles {
-		if err := f.Sync(); err != nil {
+	for id, h := range r.handles {
+		if err := h.file.Sync(); err != nil {
 			errs = append(errs, fmt.Errorf("sync %s transcript: %w", id, err))
 		}
 	}
@@ -175,12 +175,12 @@ func (r *RecoveryManager) Close() error {
 		}
 		r.journalHandle = nil
 	}
-	for id, f := range r.handles {
-		if err := f.Close(); err != nil {
+	for id, h := range r.handles {
+		if err := h.file.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close %s transcript: %w", id, err))
 		}
 	}
-	r.handles = make(map[string]*os.File)
+	r.handles = make(map[string]*messageLogHandle)
 	r.closeErr = errors.Join(errs...)
 	return r.closeErr
 }

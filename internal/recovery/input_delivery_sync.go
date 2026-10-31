@@ -16,14 +16,17 @@ func (r *RecoveryManager) SyncMessages(agentID string) error {
 	if r.closed {
 		return ErrClosed
 	}
-	f := r.handles[agentID]
+	var f *os.File
+	if h := r.handles[agentID]; h != nil {
+		f = h.file
+	}
 	if f == nil {
-		var err error
-		f, err = privatefs.OpenFile(r.sessionDir, r.messageLogPath(agentID), os.O_RDWR)
+		opened, err := privatefs.OpenFile(r.sessionDir, r.messageLogPath(agentID), os.O_RDWR)
 		if err != nil {
 			return fmt.Errorf("open transcript barrier: %w", err)
 		}
-		defer f.Close()
+		defer opened.Close()
+		f = opened
 	}
 	syncFile := r.messageSync
 	if syncFile == nil {

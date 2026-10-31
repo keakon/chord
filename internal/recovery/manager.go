@@ -189,16 +189,28 @@ type AgentSnapshot struct {
 	} `json:"persistence"`
 }
 
+// messageLogHandle is an open JSONL message log for one agent.
+type messageLogHandle struct {
+	file           *os.File
+	dirSyncPending bool
+}
+
 // RecoveryManager handles session persistence via JSONL message logs and
 // JSON state snapshots. It keeps file handles open for performance (one
 // handle per agent's JSONL file) and uses a mutex to serialise writes.
 //
 // All public methods are goroutine-safe.
 type RecoveryManager struct {
-	sessionDir      string
-	mu              sync.Mutex
-	handles         map[string]*os.File // agentID → open JSONL file handle
-	closed          bool                // true after Close() is called
+	sessionDir string
+	mu         sync.Mutex
+	// messageLogHandle pairs an open JSONL file with whether the session
+	// directory still owes one fsync to make the file's directory entry
+	// durable. Each newly opened handle owes it once: the log may have been
+	// created by this open or by an earlier process that only wrote
+	// non-durably, so the directory sync runs once per opened log instead of
+	// on every durable message append.
+	handles         map[string]*messageLogHandle
+	closed          bool // true after Close() is called
 	closeErr        error
 	messageWrite    func(*os.File, []byte) (int, error)
 	messageSync     func(*os.File) error
@@ -224,7 +236,7 @@ type RecoveryManager struct {
 func NewRecoveryManager(sessionDir string) *RecoveryManager {
 	return &RecoveryManager{
 		sessionDir: sessionDir,
-		handles:    make(map[string]*os.File),
+		handles:    make(map[string]*messageLogHandle),
 	}
 }
 
@@ -392,7 +404,7 @@ func (r *RecoveryManager) writePersistedRecord(agentID string, data []byte, dura
 		return ErrClosed
 	}
 
-	f, ok := r.handles[agentID]
+	h, ok := r.handles[agentID]
 	if !ok {
 		path := r.messageLogPath(agentID)
 		if err := repairMessageTail(r.sessionDir, path); err != nil {
@@ -402,9 +414,10 @@ func (r *RecoveryManager) writePersistedRecord(agentID string, data []byte, dura
 		if err != nil {
 			return persistWriteError(err, true)
 		}
-		f = opened
-		r.handles[agentID] = f
+		h = &messageLogHandle{file: opened, dirSyncPending: true}
+		r.handles[agentID] = h
 	}
+	f := h.file
 
 	write := r.messageWrite
 	if write == nil {
@@ -429,8 +442,11 @@ func (r *RecoveryManager) writePersistedRecord(agentID string, data []byte, dura
 		if err := syncFile(f); err != nil {
 			return persistWriteError(fmt.Errorf("sync message: %w", err), false)
 		}
-		if err := privatefs.SyncDir(r.sessionDir); err != nil {
-			return persistWriteError(fmt.Errorf("sync message directory: %w", err), false)
+		if h.dirSyncPending {
+			if err := privatefs.SyncDir(r.sessionDir); err != nil {
+				return persistWriteError(fmt.Errorf("sync message directory: %w", err), false)
+			}
+			h.dirSyncPending = false
 		}
 	}
 	return nil
@@ -740,9 +756,9 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("rewrite log: stat: %w", err)
 	}
-	if f, ok := r.handles[agentID]; ok {
+	if h, ok := r.handles[agentID]; ok {
 		delete(r.handles, agentID)
-		if err := f.Close(); err != nil {
+		if err := h.file.Close(); err != nil {
 			return fmt.Errorf("rewrite log: close: %w", err)
 		}
 	}

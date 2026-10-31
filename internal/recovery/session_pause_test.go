@@ -182,7 +182,7 @@ func TestSyncCloseErrorsCannotBeClearedByRepeatedClose(t *testing.T) {
 	if err := r.PersistMessage(identity.MainAgentID, message.Message{Role: message.RoleUser, Content: "sample"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.handles[identity.MainAgentID].Close(); err != nil {
+	if err := r.handles[identity.MainAgentID].file.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Sync(context.Background()); err == nil {

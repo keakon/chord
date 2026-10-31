@@ -388,3 +388,14 @@ func TestReconcileInputDeliveryKeepsLiveWorkActive(t *testing.T) {
 		t.Fatalf("outcomes = %v, want live active and dead unknown", outcomes)
 	}
 }
+
+func TestSyncMessagesWithoutOpenHandle(t *testing.T) {
+	manager, _ := deliveryFixture(t)
+	msg := message.Message{Role: message.RoleUser, InputID: "input-1", Content: "sample"}
+	if err := manager.RewriteLog(identity.MainAgentID, []message.Message{msg}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SyncMessages(identity.MainAgentID); err != nil {
+		t.Fatal(err)
+	}
+}
