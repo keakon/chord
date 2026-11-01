@@ -794,7 +794,9 @@ func newStartFailureWorker(t *testing.T, command string) (*MainAgent, *externalW
 }
 
 func TestExternalStartFailureWithoutCleanupProofDoesNotClaimEnded(t *testing.T) {
-	_, w, input := newStartFailureWorker(t, "claude")
+	// Preflight must pass so the injected launch failure is the only failure;
+	// a host-installed command would make the test depend on PATH.
+	_, w, input := newStartFailureWorker(t, writeFakeClaude(t, ""))
 	original := startExternalSession
 	startExternalSession = func(externalclaude.ProcessConfig) (*externalclaude.Session, error) {
 		return nil, &externalclaude.StartError{Err: errors.New("injected launch failure"), CleanupProven: false}

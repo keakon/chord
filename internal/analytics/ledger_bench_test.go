@@ -53,8 +53,7 @@ func BenchmarkUsageLedgerFirstAppendPrimed(b *testing.B) {
 	writeLedgerFixture(b, template, eventCount)
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		ledger := freshFixtureLedger(b, template, i)
 		_, _, _, _, lastEventID, err := ledger.BuildSessionEvidence()
@@ -71,6 +70,8 @@ func BenchmarkUsageLedgerFirstAppendPrimed(b *testing.B) {
 		if err := ledger.Close(); err != nil {
 			b.Fatal(err)
 		}
+		// b.Loop fails if the next call sees a stopped timer.
+		b.StartTimer()
 	}
 }
 
@@ -82,8 +83,7 @@ func BenchmarkUsageLedgerFirstAppendUnprimed(b *testing.B) {
 	writeLedgerFixture(b, template, eventCount)
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		ledger := freshFixtureLedger(b, template, i)
 		b.StartTimer()
@@ -95,6 +95,8 @@ func BenchmarkUsageLedgerFirstAppendUnprimed(b *testing.B) {
 		if err := ledger.Close(); err != nil {
 			b.Fatal(err)
 		}
+		// b.Loop fails if the next call sees a stopped timer.
+		b.StartTimer()
 	}
 }
 
