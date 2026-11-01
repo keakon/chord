@@ -11,9 +11,10 @@ This repository is intended for open-source contributors. Development can be don
 
 ```bash
 go install golang.org/x/tools/cmd/goimports@latest
-go install golang.org/x/tools/gopls@latest
 go install honnef.co/go/tools/cmd/staticcheck@latest
 ```
+
+`make gopls-check` installs its own pinned gopls, so no manual gopls install is required for the gates.
 
 ## Build
 
@@ -36,7 +37,7 @@ This configures `core.hooksPath` to use `.githooks/` and ensures:
 
 - `pre-commit` rejects staged paths ignored by the staged repository rules
 - `pre-commit` automatically runs `goimports` and `gofmt` on staged `.go` files
-- `pre-push` runs `make preflight` (formatting, dependency, vet, staticcheck, modernize, and test gates) before pushing; its test gate goes through `make test-fast`, so it uses a memory-backed temp dir when one is available (see below)
+- `pre-push` runs `make preflight` (formatting, dependency, vet, staticcheck, gopls, modernize, and test gates) before pushing; its test gate goes through `make test-fast`, so it uses a memory-backed temp dir when one is available (see below)
 
 `pre-commit` refuses to format and re-stage a Go file that also has unstaged changes, because that would sweep hunks belonging to other work into the commit. When you deliberately want to commit only the staged hunks of such a file, pass the override on the command line for that one command:
 
@@ -148,7 +149,7 @@ Any other test entry point can reuse the directory by prefixing the variable, fo
 TMPDIR=$(scripts/test_tmpdir.sh) make test-cover
 ```
 
-`make gopls-check` selects production, cgo, internal-test, and external-test files with `go list` for the current `GOOS`/`GOARCH`. It fails on diagnostics even when gopls exits successfully, as well as on package-loading or tool failures. CI checks linux/amd64, darwin/arm64, and windows/amd64; other operating systems are outside this gate. To check another supported target locally, run `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 make gopls-check`. Python 3 is required to read the package metadata. Run `scripts/test_gopls_check.sh` after changing the gate.
+`make gopls-check` installs the pinned `GOPLS_VERSION` once into the Go build cache, builds it for the host platform, and selects production, cgo, internal-test, and external-test files with `go list` for the current `GOOS`/`GOARCH`. Update `GOPLS_VERSION` in the Makefile deliberately when adopting a newer analyzer release; do not replace the pinned version with `@latest`, because new releases may add checks and fail the existing baseline. The gate fails on diagnostics even when gopls exits successfully, as well as on package-loading or tool failures. CI checks linux/amd64, darwin/arm64, and windows/amd64; other operating systems are outside this gate. To check another supported target locally, run `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 make gopls-check`. Python 3 is required to read the package metadata. Run `scripts/test_gopls_check.sh` after changing the gate.
 
 `make modernize-check` runs the pinned `golang.org/x/tools/go/analysis/passes/modernize` command across production and test code. Update `MODERNIZE_VERSION` in the Makefile deliberately when adopting a newer analyzer release; do not replace the pinned version with `@latest`, because new releases may add checks and fail the existing baseline.
 

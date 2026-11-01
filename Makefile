@@ -11,17 +11,21 @@ LOCAL ?= github.com/keakon/chord
 
 GOIMPORTS ?= goimports
 STATICCHECK ?= staticcheck
-GOPLS ?= gopls
+GOPLS_VERSION ?= v0.24.0
+# gopls runs on the host even when GOOS/GOARCH select another analysis target,
+# and the versioned directory keeps an older pin from being reused.
+GOPLS_DIR := $(shell $(GO) env GOCACHE)/chord-gopls/$(GOPLS_VERSION)-$(shell $(GO) env GOHOSTOS)-$(shell $(GO) env GOHOSTARCH)
+GOPLS ?= $(GOPLS_DIR)/gopls
 MODERNIZE_VERSION ?= v0.50.0
 MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
-.PHONY: ci preflight build fmt fmt-check deps-check test test-fast test-cover stress race race-fast vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check model-catalog-check bench-tui clean
+.PHONY: ci preflight build fmt fmt-check deps-check test test-fast test-cover stress race race-fast vet staticcheck gopls-install gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check model-catalog-check bench-tui clean
 
 ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check
 
 # Same Go gates as .githooks/pre-push; docs checks stay in the hook because
 # they depend on the changed paths.
-preflight: fmt-check deps-check vet staticcheck modernize-check test-fast resource-scripts-check
+preflight: fmt-check deps-check vet staticcheck gopls-check modernize-check test-fast resource-scripts-check
 
 # Release-style build: pure Go (no cgo), path-trimmed, and stripped.
 build:
@@ -82,7 +86,18 @@ vet:
 staticcheck:
 	$(STATICCHECK) -checks 'all,-ST1000' $(PKGS)
 
-gopls-check:
+# Keep cache paths in shell quotes so Make does not split paths with spaces.
+gopls-install:
+	@if [[ ! -x '$(GOPLS_DIR)/gopls' ]]; then \
+		mkdir -p '$(GOPLS_DIR)' && \
+		GOOS=$(shell $(GO) env GOHOSTOS) GOARCH=$(shell $(GO) env GOHOSTARCH) GOBIN='$(GOPLS_DIR)' $(GO) install golang.org/x/tools/gopls@$(GOPLS_VERSION); \
+	fi
+
+ifeq ($(GOPLS),$(GOPLS_DIR)/gopls)
+GOPLS_DEP := gopls-install
+endif
+
+gopls-check: $(GOPLS_DEP)
 	CHORD_GO='$(GO)' GOPLS='$(GOPLS)' ./scripts/check_gopls.sh $(PKGS)
 
 modernize-check:
