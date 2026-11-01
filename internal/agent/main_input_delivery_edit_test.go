@@ -62,8 +62,8 @@ func TestInputDeliveryEditResetsWaitBaseline(t *testing.T) {
 }
 
 // A turn replaced while still running never settles its work: the wait pinned
-// to it must re-point at the replacing turn, or the follow-up would read
-// "task in progress" forever.
+// to it must re-point at the replacing turn, or the follow-up would wait
+// forever.
 func TestInputDeliveryReplacedWorkStillUnlocks(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())

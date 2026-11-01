@@ -28,7 +28,7 @@ After-completion tasks run one at a time in the same session and share its conve
 
 Open **`/queue`** to inspect pending inputs. Select a row with the arrow keys; Enter edits, `d` deletes, `w` withdraws to the composer, `n` switches to next-request delivery, and `a` switches to after-completion delivery. `c` clears unstarted after-completion items, and `x` releases an editing hold. These controls are also available as `/queue clear`, `/queue cancel-edit`, `/queue next N`, `/queue after N`, and `/queue withdraw N`.
 
-Editing holds the original input in the queue until you save or cancel the edit. Saving uses its current revision; a conflict preserves your draft. Saving keeps the item's delivery, whichever key you press, and an after-completion item keeps waiting for the same work; use `n` or `a` to switch the delivery. Inputs that have already started cannot be edited or deleted.
+Editing holds the original input in the queue until you save or cancel the edit. Saving uses its current revision; a conflict preserves your draft. Enter saves the edit as a next-request input; Alt+Enter saves it as an after-completion task, and an item that was already after-completion keeps waiting for the same work. Use `n` or `a` in the queue panel to switch delivery without editing. Inputs that have already started cannot be edited or deleted.
 
 Queued inputs and attachments are saved with the session. A restored session does not start them on its own: the queue marks them as restored until you continue or send a message. Ordinary queued inputs then go out with that request, and after-completion tasks fire once the continued work settles successfully. The queue holds up to 128 inputs and 4 MiB of text.
 

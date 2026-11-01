@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
@@ -195,19 +196,45 @@ func TestInputQueueStartedSnapshotDoesNotRestoreConsumedDraft(t *testing.T) {
 	}
 }
 
-func TestAfterCompletionWaitReasonUnknownMatchesUnsettled(t *testing.T) {
+func TestAfterCompletionWaitNoticeOnlyForSettledWithoutSuccess(t *testing.T) {
 	input := recovery.PendingInput{WaitWorkID: "work"}
-	for outcome, want := range map[string]string{
-		recovery.DeliveryWorkActive:    "task in progress",
-		recovery.DeliveryWorkCompleted: "",
-		recovery.DeliveryWorkFailed:    "last task failed; send a message to run it next",
-		recovery.DeliveryWorkCancelled: "last task cancelled; send a message to run it next",
-		recovery.DeliveryWorkUnknown:   "last task outcome unknown; send a message to run it next",
+	type want struct {
+		waiting bool
+		notice  string
+	}
+	for outcome, expected := range map[string]want{
+		recovery.DeliveryWorkActive:    {true, ""},
+		recovery.DeliveryWorkCompleted: {false, ""},
+		recovery.DeliveryWorkFailed:    {true, "last task failed; send a message to run it next"},
+		recovery.DeliveryWorkCancelled: {true, "last task cancelled; send a message to run it next"},
+		recovery.DeliveryWorkUnknown:   {true, "last task outcome unknown; send a message to run it next"},
 	} {
 		state := &recovery.InputDeliveryState{Works: []recovery.DeliveryWork{{WorkID: "work", Outcome: outcome}}}
-		if got := afterCompletionWaitReason(state, input); got != want {
-			t.Errorf("outcome %q: reason = %q, want %q", outcome, got, want)
+		waiting, notice := afterCompletionWait(state, input)
+		if waiting != expected.waiting || notice != expected.notice {
+			t.Errorf("outcome %q: waiting=%v notice=%q, want waiting=%v notice=%q", outcome, waiting, notice, expected.waiting, expected.notice)
 		}
+	}
+}
+
+func TestInputQueueAfterCompletionActiveWaitShowsOnlyPolicy(t *testing.T) {
+	backend := &sessionControlAgent{}
+	m := NewModel(backend)
+	snapshot := &agent.InputQueueSnapshot{Target: backend.InputDeliveryTarget(), ViewVersion: 1, State: &recovery.InputDeliveryState{
+		Works:  []recovery.DeliveryWork{{WorkID: "work", Origin: recovery.DeliveryWorkUser, Outcome: recovery.DeliveryWorkActive}},
+		Inputs: []recovery.PendingInput{{InputID: "input", DraftID: "draft", Revision: 1, Stage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryAfterCompletion, WaitWorkID: "work", Content: "sample"}}}}
+	m.applyInputQueueSnapshot(snapshot)
+	if len(m.queuedDrafts) != 1 {
+		t.Fatalf("queued drafts = %+v", m.queuedDrafts)
+	}
+	if got := m.queuedDrafts[0]; got.DeliveryStatus != "After completion" || got.DeliveryRunnable {
+		t.Fatalf("active wait status = %q runnable=%v, want plain policy and not runnable", got.DeliveryStatus, got.DeliveryRunnable)
+	}
+	snapshot.ViewVersion++
+	snapshot.State.Works[0].Outcome = recovery.DeliveryWorkFailed
+	m.applyInputQueueSnapshot(snapshot)
+	if got := m.queuedDrafts[0].DeliveryStatus; !strings.HasPrefix(got, "After completion · last task failed") {
+		t.Fatalf("failed wait status = %q, want the remedy notice", got)
 	}
 }
 
@@ -239,7 +266,38 @@ func TestInputQueueStatusInvalidatesRenderCache(t *testing.T) {
 	}
 }
 
-func TestInputQueueEditResubmitKeepsRowPolicy(t *testing.T) {
+func TestInputQueueEditResubmitFollowsSubmitKey(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		row    recovery.InputDeliveryPolicy
+		alt    bool
+		policy recovery.InputDeliveryPolicy
+	}{
+		{name: "enter on after completion", row: recovery.InputDeliveryAfterCompletion, policy: recovery.InputDeliveryNextRequest},
+		{name: "alt+enter on next request", row: recovery.InputDeliveryNextRequest, alt: true, policy: recovery.InputDeliveryAfterCompletion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &inputQueueEditAgent{}
+			m := NewModel(backend)
+			draft := queuedDraft{ID: "draft", InputID: "input", Revision: 1, Content: "sample", DeliveryManaged: true, EditHeld: true, DeliveryStage: recovery.PendingInputStageQueued, DeliveryPolicy: tc.row}
+			m.editManagedDraft(draft)
+			m.input.SetValue("edited")
+			mod := tea.KeyMod(0)
+			if tc.alt {
+				mod = tea.ModAlt
+			}
+			m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: mod}))
+			if len(backend.updates) != 1 {
+				t.Fatalf("edit resubmit updates = %+v", backend.updates)
+			}
+			if got := backend.updates[0].DeliveryPolicy; got != tc.policy {
+				t.Fatalf("resubmit policy = %q, want %q", got, tc.policy)
+			}
+		})
+	}
+}
+
+func TestInputQueueEditResubmitUsesSubmitKeyPolicy(t *testing.T) {
 	backend := &inputQueueEditAgent{}
 	m := NewModel(backend)
 	draft := queuedDraft{ID: "draft", InputID: "input", Revision: 2, Content: "sample", DeliveryManaged: true, EditHeld: true, DeliveryStage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryAfterCompletion}
@@ -248,15 +306,15 @@ func TestInputQueueEditResubmitKeepsRowPolicy(t *testing.T) {
 	if len(backend.updates) != 1 {
 		t.Fatal("edit was not submitted as an update")
 	}
-	if backend.updates[0].DeliveryPolicy != recovery.InputDeliveryAfterCompletion {
-		t.Fatalf("Enter on an after-completion edit switched its policy: %+v", backend.updates[0].DeliveryPolicy)
+	if backend.updates[0].DeliveryPolicy != recovery.InputDeliveryNextRequest {
+		t.Fatalf("Enter on an after-completion edit kept its policy: %+v", backend.updates[0].DeliveryPolicy)
 	}
 
 	m.input.Reset()
 	backend.updates = nil
 	m.editManagedDraft(queuedDraft{ID: "draft-2", InputID: "input-2", Revision: 1, Content: "other", DeliveryManaged: true, EditHeld: true, DeliveryStage: recovery.PendingInputStageQueued, DeliveryPolicy: recovery.InputDeliveryNextRequest})
 	m.submitManagedDraft(queuedDraft{ID: "draft-2", InputID: "input-2", Content: "edited", DeliveryPolicy: recovery.InputDeliveryAfterCompletion})
-	if len(backend.updates) != 1 || backend.updates[0].DeliveryPolicy != recovery.InputDeliveryNextRequest {
-		t.Fatalf("Alt+Enter on a next-request edit switched its policy: %+v", backend.updates)
+	if len(backend.updates) != 1 || backend.updates[0].DeliveryPolicy != recovery.InputDeliveryAfterCompletion {
+		t.Fatalf("Alt+Enter on a next-request edit kept the row policy: %+v", backend.updates)
 	}
 }

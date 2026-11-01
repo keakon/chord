@@ -57,9 +57,8 @@ func (m *Model) submitManagedDraft(draft queuedDraft) tea.Cmd {
 	op := m.nextInputQueueOperation(inputQueueAction{draft: draft, kind: "submit"})
 	var admitted bool
 	if editing := m.inputQueue.editing; editing != nil {
-		// Saving an edit keeps the row's policy whichever key submitted it;
-		// the queue panel's n/a keys are the explicit way to switch it.
-		draft.DeliveryPolicy = editing.DeliveryPolicy
+		// The submit key decides delivery for an edit: Enter becomes a
+		// next-request input, Alt+Enter an after-completion one.
 		admitted = m.agent.UpdateQueuedInput(agent.UpdateInput{OperationID: op, Target: target, InputID: editing.InputID, ExpectedRevision: editing.Revision, DeliveryPolicy: draft.DeliveryPolicy, Content: new(draft.Content), Parts: draft.contentParts()})
 	} else {
 		admitted = m.agent.SubmitUserInput(agent.SubmitInput{OperationID: op, DraftID: draft.ID, Target: target, DeliveryPolicy: draft.DeliveryPolicy, Content: draft.Content, Parts: draft.contentParts()})
@@ -122,9 +121,11 @@ func (m *Model) applyInputQueueSnapshot(snapshot *agent.InputQueueSnapshot) {
 			draft.DeliveryStatus = "Next request"
 			if input.DeliveryPolicy == recovery.InputDeliveryAfterCompletion {
 				draft.DeliveryStatus = "After completion"
-				if reason := afterCompletionWaitReason(snapshot.State, input); reason != "" {
-					draft.DeliveryStatus += " · Waiting: " + reason
+				if waiting, notice := afterCompletionWait(snapshot.State, input); waiting {
 					draft.DeliveryRunnable = false
+					if notice != "" {
+						draft.DeliveryStatus += " · " + notice
+					}
 				}
 			}
 			if snapshot.RestoredHeld && input.Stage == recovery.PendingInputStageQueued {
@@ -207,24 +208,25 @@ func (m *Model) handleInputQueueResult(result agent.InputQueueOperationResultEve
 	return nil
 }
 
-// afterCompletionWaitReason names why a queued after-completion input has not
-// fired yet: the work it waits behind is still running, or settled without
-// success and no newer work has started. An empty result means the input
-// fires at the next idle.
-func afterCompletionWaitReason(state *recovery.InputDeliveryState, input recovery.PendingInput) string {
+// afterCompletionWait reports whether a queued after-completion input is still
+// waiting to start. Waiting on running work is the normal state and has no
+// notice; a predecessor that settled without success needs user action, so the
+// returned notice names the remedy. Not waiting means the input fires at the
+// next idle.
+func afterCompletionWait(state *recovery.InputDeliveryState, input recovery.PendingInput) (waiting bool, notice string) {
 	switch state.AfterCompletionWait(input) {
 	case "", recovery.DeliveryWorkCompleted:
-		return ""
+		return false, ""
 	case recovery.DeliveryWorkActive:
-		return "task in progress"
+		return true, ""
 	case recovery.DeliveryWorkFailed:
-		return "last task failed; send a message to run it next"
+		return true, "last task failed; send a message to run it next"
 	case recovery.DeliveryWorkCancelled:
-		return "last task cancelled; send a message to run it next"
+		return true, "last task cancelled; send a message to run it next"
 	default:
 		// Unknown is unreachable like failed/cancelled: the next turn
 		// re-points the wait, so the remedy is the same.
-		return "last task outcome unknown; send a message to run it next"
+		return true, "last task outcome unknown; send a message to run it next"
 	}
 }
 
