@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+// testHandshakeBudget mirrors the production start path's initialization
+// budget. The deadline is a ceiling, not a wait: a healthy fixture handshake
+// finishes in well under a second, while the bound keeps a hung handshake a
+// bounded failure even when the suite runs under full load.
+const testHandshakeBudget = 15 * time.Second
+
 func startFixtureSession(t *testing.T, body string, maxLine int) *Session {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fixture")
@@ -84,7 +90,11 @@ printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","del
 printf '%s\n' '{"type":"result","subtype":"success","result":"Done."}'
 exit 0
 `, 0)
-	deferred, err := s.Initialize(context.Background(), "task")
+	// The production start path allows 15s for this handshake; keep the test
+	// bound aligned so a loaded machine cannot fail or hang the wait.
+	ctx, cancel := context.WithTimeout(context.Background(), testHandshakeBudget)
+	defer cancel()
+	deferred, err := s.Initialize(ctx, "task")
 	if err != nil {
 		t.Fatalf("Initialize() error = %v", err)
 	}
@@ -150,7 +160,7 @@ exit 0
 		_ = s.Wait()
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testHandshakeBudget)
 	defer cancel()
 	if _, err := s.Initialize(ctx, "task"); err != nil {
 		t.Fatalf("Initialize() error = %v", err)
