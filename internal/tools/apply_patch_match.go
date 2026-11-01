@@ -728,13 +728,13 @@ func applyPatchExpectedLineMissing(fileLines, oldSeq []string) bool {
 
 // applyPatchPartialHunkError layers a "prior hunks matched but were not
 // applied" note onto a single-file hunk failure when earlier hunks in the same
-// file already matched successfully. The file is atomic, so those earlier
-// hunks must be included again even though they matched in memory.
+// file already matched successfully. Matching in memory does not commit any
+// part of the operation, so rebuilding must account for every intended change.
 func applyPatchPartialHunkError(err error, index, total int) error {
 	if err == nil || index == 0 {
 		return err
 	}
-	return fmt.Errorf("%w; note: hunks 1..%d matched successfully in memory but were not applied because this hunk failed, so keep all hunks 1..%d together when rebuilding this operation", err, index, total)
+	return fmt.Errorf("%w; note: hunks 1..%d matched successfully in memory but were not applied because this hunk failed; all %d hunks in this operation remain uncommitted", err, index, total)
 }
 
 func applyPatchUnsafePunctuationMatchError(oldSeq []string, index, total, match int) error {

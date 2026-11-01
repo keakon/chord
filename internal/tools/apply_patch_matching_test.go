@@ -2,10 +2,13 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/toolname"
 )
 
 func TestApplyPatchHunkFailureReportsEarlierContextOrder(t *testing.T) {
@@ -593,4 +596,109 @@ func TestApplyPatchFuzzyRejectsBoilerplateContext(t *testing.T) {
 	if string(got) != file {
 		t.Fatalf("a.js = %q, want unchanged %q", got, file)
 	}
+}
+
+func TestApplyPatchMultiHunkFailureSuggestsSplitting(t *testing.T) {
+	for _, total := range []int{2, 9, 10, 19, 20, 100} {
+		for _, failed := range []int{1, total} {
+			t.Run(fmt.Sprintf("%d_of_%d", failed, total), func(t *testing.T) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "sample.md")
+				var content, patch strings.Builder
+				patch.WriteString("*** Begin Patch\n*** Update File: sample.md\n")
+				for index := 1; index <= total; index++ {
+					fmt.Fprintf(&content, "value_%d\n", index)
+					oldLine := fmt.Sprintf("value_%d", index)
+					if index == failed {
+						oldLine = "missing anchor"
+					}
+					fmt.Fprintf(&patch, "@@\n-%s\n+VALUE_%d\n", oldLine, index)
+				}
+				patch.WriteString("*** End Patch")
+				if err := os.WriteFile(path, []byte(content.String()), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch.String()))
+				if err == nil {
+					t.Fatal("Execute error = nil, want the multi-hunk rejection")
+				}
+				for _, want := range []string{
+					"no changes were committed",
+					fmt.Sprintf("hunk not found (%d/%d)", failed, total),
+					toolname.ApplyPatchRetryGuidance,
+					"split independent changes",
+					"only if partial completion is acceptable",
+					"Keep interdependent hunks together in the same file group",
+				} {
+					if !strings.Contains(out, want) {
+						t.Fatalf("result = %q, want %q", out, want)
+					}
+				}
+				if strings.Contains(out, "keep all hunks") || strings.Contains(out, "with write") {
+					t.Fatalf("result = %q, must not contradict splitting or suggest a section-only write", out)
+				}
+				if failed > 1 && !strings.Contains(out, fmt.Sprintf("all %d hunks in this operation remain uncommitted", total)) {
+					t.Fatalf("result = %q, want the earlier matched hunks identified as uncommitted", out)
+				}
+				assertApplyPatchFile(t, path, content.String())
+			})
+		}
+	}
+}
+
+func TestApplyPatchSingleHunkFailureOmitsSplitGuidance(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.md")
+	content := "alpha\nbeta\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "*** Begin Patch\n" +
+		"*** Update File: notes.md\n" +
+		"@@\n" +
+		"-omega\n" +
+		"+OMEGA\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil {
+		t.Fatal("Execute error = nil, want the hunk failure")
+	}
+	if strings.Contains(out, toolname.ApplyPatchRetryGuidance) {
+		t.Fatalf("result = %q, single-hunk failure must not carry the split guidance", out)
+	}
+	assertApplyPatchFile(t, path, content)
+}
+
+func TestApplyPatchMultiHunkNonMatchFailureOmitsSplitGuidance(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "sample.md", "alpha\nbeta\n")
+	patch := "*** Begin Patch\n" +
+		"*** Update File: missing.md\n@@\n-alpha\n+ALPHA\n@@\n-beta\n+BETA\n" +
+		"*** Update File: sample.md\n@@\n-omega\n+OMEGA\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(out, "- missing.md:") || !strings.Contains(out, "hunk not found (1/1)") {
+		t.Fatalf("result = %q, error = %v, want both failed file groups", out, err)
+	}
+	if strings.Contains(out, toolname.ApplyPatchRetryGuidance) {
+		t.Fatalf("result = %q, a missing multi-hunk target must not turn a single-hunk mismatch into split guidance", out)
+	}
+	assertApplyPatchFile(t, path, "alpha\nbeta\n")
+}
+
+func TestApplyPatchRolledBackMultiHunkOperationOmitsSplitGuidance(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "sample.md", "alpha\nbeta\ngamma\n")
+	patch := "*** Begin Patch\n" +
+		"*** Update File: sample.md\n@@\n-alpha\n+ALPHA\n@@\n-gamma\n+GAMMA\n" +
+		"*** Update File: sample.md\n@@\n-omega\n+OMEGA\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err == nil || !strings.Contains(out, "hunk not found (1/1)") {
+		t.Fatalf("result = %q, error = %v, want the single-hunk root failure", out, err)
+	}
+	if strings.Contains(out, toolname.ApplyPatchRetryGuidance) {
+		t.Fatalf("result = %q, a rolled-back multi-hunk operation must not trigger split guidance", out)
+	}
+	assertApplyPatchFile(t, path, "alpha\nbeta\ngamma\n")
 }

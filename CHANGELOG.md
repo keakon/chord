@@ -61,6 +61,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Multi-hunk `apply_patch` failures suggest splitting independent changes into single-hunk calls only when partial completion is acceptable; interdependent hunks stay in the same file group. Repeated match failures request a fresh read without suggesting that a single hunk be split, and `edit` with identical `old_string` and `new_string` states that retrying the same arguments cannot succeed.
+
 - Copying one card with `yy` or `Cmd+C` now copies only its body. `Nyy` keeps card labels and separators, and tool cards retain their Markdown section headings.
 
 - Release binaries are fully static: the Linux build no longer depends on the system glibc version.

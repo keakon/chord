@@ -190,7 +190,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 
 	// Check for identical old/new.
 	if decodedOld == decodedNew {
-		return "", fmt.Errorf("old_string and new_string are identical, no change needed")
+		return "", fmt.Errorf("old_string and new_string are identical, no change needed; this is deterministic — retrying the same arguments cannot succeed. If a change was intended, rebuild old_string and new_string from a fresh read so they differ; otherwise skip the call")
 	}
 
 	replaceAll := a.ReplaceAll != nil && *a.ReplaceAll

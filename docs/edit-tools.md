@@ -155,7 +155,7 @@ When the patch fails without an applied diff, the tool card keeps the requested-
 
 ### Error Messages
 
-- **"hunk not found (N/M)"**: The indicated hunk does not match the current file. The error identifies the first expected complete line, or labels it as a prefix when the diagnostic preview is truncated. When available, it also explains that the text occurs only within a longer line or earlier than the preceding hunk. If earlier hunks of the same file matched in memory but a later one failed, none of that file group's hunks were applied. Re-read the target range, rebuild the failing hunk from current complete lines, and keep the group's other hunks with it when you resubmit.
+- **"hunk not found (N/M)"**: The indicated hunk does not match the current file. The error identifies the first expected complete line, or labels it as a prefix when the diagnostic preview is truncated. When available, it also explains that the text occurs only within a longer line or earlier than the preceding hunk. If earlier hunks of the same file matched in memory but a later one failed, none of that file group's hunks were applied. Re-read the target range and rebuild the failing hunk from current complete lines, accounting for every intended change that remains uncommitted. Split independent changes into single-hunk calls only if partial completion is acceptable; keep interdependent hunks in the same file group.
 - **"cannot add file that already exists"**: `*** Add File:` targets an existing path; use `*** Update File:` instead.
 - **"apply_patch contains overlapping operations"**: Two operations in one envelope touch paths where one contains the other (for example `dir` and `dir/file`), or resolve to the same file through different names; merge them into one operation. Repeated `*** Update File:` sections for the exact same path are allowed and apply in order.
 - **"changed after planning"**: The file was modified between validation and commit; nothing was written; retry against the current content.
@@ -225,7 +225,7 @@ Each entry has `old_string`, `new_string`, and optional `replace_all`. Do not co
   - Set `replace_all: true` if you want to replace all occurrences
 - **"old_string and new_string are identical"**: A single edit reports this as an error. A batch skips the entry and lists it as skipped; a batch with no text change reports no changes and writes nothing.
 
-When the same target file repeatedly fails approximate matching on `edit`/`apply_patch`, the agent appends a note to the model-visible result (from the second failure on) telling it to read the target range fresh, or switch to `write` for a whole-block replacement, instead of retyping the same old text from memory. The note does not appear in the UI, and any successful result or a new turn resets the count.
+When the same target file repeatedly fails approximate matching on `edit`/`apply_patch`, the agent appends a note to the model-visible result from the second through fourth failure, telling it to read the target range fresh and rebuild a smaller replacement with distinctive context. For `apply_patch`, the note also limits splitting to independent changes where partial completion is acceptable. The note does not appear in the UI. A successful `read`, `edit`, or `apply_patch` for that target, or a new turn, resets the count; multi-file patches skip per-target counting.
 
 ### Invisible Character Cleaning
 

@@ -788,8 +788,8 @@ func TestApplyPatchSingleFileMultiHunkPriorHunkWarning(t *testing.T) {
 	if !strings.Contains(err.Error(), "hunks 1..1 matched successfully in memory but were not applied") {
 		t.Fatalf("err = %v, want prior-hunks matched note", err)
 	}
-	if !strings.Contains(err.Error(), "keep all hunks 1..2 together when rebuilding this operation") || strings.Contains(err.Error(), "only hunks") {
-		t.Fatalf("err = %v, want whole-operation rebuild guidance", err)
+	if !strings.Contains(err.Error(), "all 2 hunks in this operation remain uncommitted") || strings.Contains(err.Error(), "only hunks") {
+		t.Fatalf("err = %v, want the complete uncommitted operation identified", err)
 	}
 	// The file must be unchanged because the whole file group was discarded.
 	got, readErr := os.ReadFile(path)
@@ -827,7 +827,7 @@ func TestApplyPatchRetryAfterFix(t *testing.T) {
 	if err == nil {
 		t.Fatalf("out = %q, want hunk-match failure", out)
 	}
-	if !strings.Contains(out, "- multi.txt:") || !strings.Contains(out, "keep all hunks 1..3 together when rebuilding this operation") {
+	if !strings.Contains(out, "- multi.txt:") || !strings.Contains(out, "all 3 hunks in this operation remain uncommitted") {
 		t.Fatalf("failure must point at the failed group: %q", out)
 	}
 	fixed := strings.ReplaceAll(patch, "-missing", "-delta")

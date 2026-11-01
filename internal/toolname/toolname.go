@@ -56,6 +56,10 @@ const MCPToolPrefix = "mcp_"
 // Codex text; the two packages share it here so the rule has one source.
 const ApplyPatchHunkGuidance = "Prefer the smallest hunk with distinctive context — in repeated blocks such as tests or fixtures, put the enclosing function, test, or case name on the `@@` line. Copy context and `-` lines verbatim from your latest read of the file, never from memory or from text you wrote earlier: long prose lines in notes and docs are easy to retype slightly wrong, and a line outside the range you last read needs a fresh read first. After a mismatch, re-read the current target range and rebuild the hunk instead of retrying it unchanged."
 
+// ApplyPatchRetryGuidance is shared by patch failures and the agent's repeated
+// match-failure note so their recovery advice preserves the same atomicity.
+const ApplyPatchRetryGuidance = "After a fresh read, split independent changes into single-hunk apply_patch calls only if partial completion is acceptable. Keep interdependent hunks together in the same file group."
+
 // Normalize trims user-provided tool names and maps legacy aliases.
 func Normalize(name string) string {
 	name = strings.TrimSpace(name)

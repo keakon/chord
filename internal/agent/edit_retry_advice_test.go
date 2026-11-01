@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -66,6 +67,9 @@ func TestAppendEditRetryAdviceSecondFailureAddsNote(t *testing.T) {
 	}
 	if !strings.Contains(second, "read the target range fresh") {
 		t.Fatalf("out = %q, want fresh-read steering", second)
+	}
+	if strings.Contains(second, "apply_patch calls") || strings.Contains(second, "switch to write") {
+		t.Fatalf("out = %q, edit recovery must not suggest patch splitting or a section-only write", second)
 	}
 }
 
@@ -174,6 +178,28 @@ func TestAppendEditRetryAdviceApplyPatchParsesPatchPath(t *testing.T) {
 	out = applyAdvice(a, out, payload, true)
 	if !strings.Contains(out, "2 repeated approximate-match failures for demo.md") {
 		t.Fatalf("out = %q, want advisory parsed from the apply_patch patch text", out)
+	}
+	if strings.Contains(out, toolname.ApplyPatchRetryGuidance) {
+		t.Fatalf("out = %q, single-hunk failure must not gain split guidance", out)
+	}
+	if strings.Contains(out, "switch to write") {
+		t.Fatalf("out = %q, patch recovery must not suggest a section-only write", out)
+	}
+}
+
+func TestAppendEditRetryAdviceDoesNotRepeatPatchGuidance(t *testing.T) {
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
+	patch := "*** Begin Patch\n*** Update File: demo.md\n@@\n-a\n+b\n@@\n-c\n+d\n*** End Patch"
+	payload := editRetryPayload(tools.NameApplyPatch, mustPatchArgs(t, patch), errors.New("hunk not found (2/2)"))
+	contextResult := "Error: hunk not found (2/2)\n\n" + toolname.ApplyPatchRetryGuidance
+	_ = applyAdvice(a, contextResult, payload, true)
+	out := applyAdvice(a, contextResult, payload, true)
+	if !strings.Contains(out, "2 repeated approximate-match failures") {
+		t.Fatalf("out = %q, want the repeated-failure note", out)
+	}
+	if count := strings.Count(out, toolname.ApplyPatchRetryGuidance); count != 1 {
+		t.Fatalf("guidance count = %d, want 1: %q", count, out)
 	}
 }
 

@@ -169,7 +169,7 @@ const editRetryAdviceCap = 4
 // model-facing note to the context result (never the display result): the
 // target has drifted past what the shown difference conveys, so retrying
 // the same old text from memory keeps failing. The note steers toward a
-// fresh bounded read, a smaller anchor, or a whole-block write. It is
+// fresh bounded read and a smaller replacement. It is
 // injected after the result hooks so user-configured transformations are
 // never overwritten by it. streaks is the caller-owned per-turn failure map
 // (MainAgent and SubAgent each keep their own); the event loop is the sole
@@ -221,7 +221,7 @@ func appendEditRetryAdvice(streaks *map[string]int, contextResult, name, argsJSO
 	// typed, so the note spells it relative to the tool base dir.
 	display := displayPathFromWorkDir(baseDir, path)
 	note := fmt.Sprintf(
-		"Note: %d repeated approximate-match failures for %s. The target text likely drifted beyond what the displayed difference shows: read the target range fresh (read with offset/limit), rebuild the old text from that output, or switch to write for a whole-block replacement. Do not retry the same old text from memory.",
+		"Note: %d repeated approximate-match failures for %s. The target text likely drifted beyond what the displayed difference shows: read the target range fresh (read with offset/limit), rebuild the old text from that output, and use a smaller replacement with distinctive context. Do not retry the same old text from memory.",
 		streak, display)
 	return appendModelContextNote(contextResult, note)
 }

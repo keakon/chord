@@ -373,6 +373,7 @@ func (t ApplyPatchTool) applyPatchPartial(ctx context.Context, result ApplyPatch
 	var failedFiles []failedFile
 	failedIndex := make(map[string]int)
 	var firstFailedErr error
+	multiHunkMatchFailure := false
 	for _, o := range result.Outcomes {
 		if o.succeeded {
 			continue
@@ -393,6 +394,9 @@ func (t ApplyPatchTool) applyPatchPartial(ctx context.Context, result ApplyPatch
 		// wrapped error.
 		if o.rolledBack {
 			continue
+		}
+		if len(o.op.Hunks) > 1 && IsApproximateMatchFailure(NameApplyPatch, o.err) {
+			multiHunkMatchFailure = true
 		}
 		if firstFailedErr == nil {
 			firstFailedErr = o.err
@@ -425,6 +429,9 @@ func (t ApplyPatchTool) applyPatchPartial(ctx context.Context, result ApplyPatch
 	}
 	b.WriteString("Not applied:\n")
 	b.WriteString(strings.Join(failed, "\n"))
+	if len(plan.Mutations) == 0 && multiHunkMatchFailure {
+		b.WriteString("\n\n" + toolname.ApplyPatchRetryGuidance)
+	}
 	if len(plan.Mutations) > 0 {
 		b.WriteString("\n\nChanges under \"Applied patch\" are already on disk; resolve each cause above and resubmit only the failed file groups rebuilt from current file contents.")
 	}

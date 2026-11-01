@@ -1314,3 +1314,25 @@ func TestEditDescriptionLeavesEditWriteRoutingToPrompt(t *testing.T) {
 		t.Fatalf("edit description lost its core contract: %q", desc)
 	}
 }
+
+func TestEditIdenticalStringsErrorIsDeterministicAndActionable(t *testing.T) {
+	dir := t.TempDir()
+	path := writeEditFixture(t, dir, "sample.txt", "alpha\nbeta\n")
+	_, err := runEdit(t, dir, map[string]any{"path": path, "old_string": "alpha", "new_string": "alpha"})
+	if err == nil {
+		t.Fatal("error = nil, want the identical-strings rejection")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "old_string and new_string are identical, no change needed") {
+		t.Fatalf("error = %q, want the identical-strings cause", msg)
+	}
+	if !strings.Contains(msg, "retrying the same arguments cannot succeed") {
+		t.Fatalf("error = %q, want the deterministic-retry warning", msg)
+	}
+	if !strings.Contains(msg, "fresh read") {
+		t.Fatalf("error = %q, want the rebuild steering", msg)
+	}
+	if !strings.Contains(msg, "skip the call") {
+		t.Fatalf("error = %q, want the no-op steering", msg)
+	}
+}
