@@ -59,6 +59,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Copying one card with `yy` or `Cmd+C` now copies only its body. `Nyy` keeps card labels and separators, and tool cards retain their Markdown section headings.
+
 - Release binaries are fully static: the Linux build no longer depends on the system glibc version.
 
 - Sessions with long usage histories resume faster and use less CPU while recording usage. The usage shown in the session picker can lag briefly behind a running session; ending a session brings it up to date.

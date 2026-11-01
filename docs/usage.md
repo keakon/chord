@@ -573,7 +573,8 @@ Unused image byte and transport caches are released after about 30–45 seconds;
 ## Copying text
 
 - Drag in the transcript or main composer to select text. Composer selections preserve actual newlines and trailing spaces when copied, without adding soft line breaks. `Ctrl+Shift+C` copies the composer selection.
-- `yy` copies the focused message card; tool cards are copied as Markdown with `# Tool call`, `## Arguments`, `## Result`, and `## Diff` sections (`edit` cards use `## old_string` / `## new_string` for the replaced text instead, plus `## replace_all` only when it is enabled). Done rejection reasons are copied in a separate `## Rejection reason` section.
+- `yy` copies the focused message card body only, without the `User:`, `Assistant:` or `Thinking:` labels the card itself never shows; tool cards are copied as Markdown with `# Tool call`, `## Arguments`, `## Result`, and `## Diff` sections (`edit` cards use `## old_string` / `## new_string` for the replaced text instead, plus `## replace_all` only when it is enabled). Done rejection reasons are copied in a separate `## Rejection reason` section.
+- `2yy`, `3yy` and other multi-card copies keep each card's label and join them with `---`, so a range pastes as one transcript fragment.
 - `Cmd+C`: copy the current transcript or composer selection in macOS terminals that forward the key to Chord; when a confirmation dialog input is focused, copies that input instead
 - `Ctrl+C`: press twice to quit; in a dialog it acts like `Esc` and is not used for transcript copy
 

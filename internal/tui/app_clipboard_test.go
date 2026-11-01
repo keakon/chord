@@ -783,6 +783,88 @@ func TestMessageCardCopyContentIncludesCardType(t *testing.T) {
 	}
 }
 
+// TestMessageCardCopyBodyOmitsCardType pins the single-card copy format: the
+// body only, with no role label, because the rendered card shows no such header.
+func TestMessageCardCopyBodyOmitsCardType(t *testing.T) {
+	tests := []struct {
+		name  string
+		block *Block
+		want  string
+	}{
+		{
+			name:  "user",
+			block: &Block{Type: BlockUser, Content: "Run the focused test."},
+			want:  "Run the focused test.",
+		},
+		{
+			name:  "assistant",
+			block: &Block{Type: BlockAssistant, Content: "The focused test passed."},
+			want:  "The focused test passed.",
+		},
+		{
+			name: "terminal",
+			block: &Block{
+				Type:                 BlockUser,
+				Content:              "!ls sample.json",
+				UserLocalShellCmd:    "ls sample.json",
+				UserLocalShellResult: "sample.json\n",
+			},
+			want: "command:\nls sample.json\n\noutput:\nsample.json",
+		},
+		{
+			name:  "thinking",
+			block: &Block{Type: BlockThinking, Content: "  check the failing assertion first.  "},
+			want:  "check the failing assertion first.",
+		},
+		{
+			name:  "error",
+			block: &Block{Type: BlockError, Content: "failed"},
+			want:  "failed",
+		},
+		{
+			name:  "boundary marker",
+			block: &Block{Type: BlockBoundaryMarker, Content: "12 earlier messages"},
+			want:  "12 earlier messages",
+		},
+		{
+			name:  "status with title",
+			block: &Block{Type: BlockStatus, StatusTitle: "LOOP", Content: "continue working on the failing test"},
+			want:  "continue working on the failing test",
+		},
+		{
+			name:  "background result keeps its own body",
+			block: &Block{Type: BlockStatus, StatusTitle: "JOB RESULT", Content: "rendered", BackgroundCopyContent: "raw body"},
+			want:  "raw body",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := blockCopyBody(tt.block); got != tt.want {
+				t.Fatalf("blockCopyBody() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSingleCardToolCopyKeepsMarkdownHeading keeps the tool identity: the body
+// alone (JSON arguments plus result) does not say which tool produced it.
+func TestSingleCardToolCopyKeepsMarkdownHeading(t *testing.T) {
+	tool := &Block{
+		Type:          BlockToolCall,
+		ToolName:      "grep",
+		Content:       `{"pattern":"foo"}`,
+		ResultContent: "grep failed: exit status 2",
+	}
+	got := blockCopyBody(tool)
+	if !strings.Contains(got, "# Tool call: grep") {
+		t.Fatalf("single-card tool copy lost its heading: %q", got)
+	}
+	if got != blockCopyContent(tool) {
+		t.Fatalf("single-card tool copy should match the export form\n got: %q\nwant: %q", got, blockCopyContent(tool))
+	}
+}
+
 func TestToolCardCopyContentIsSelfContainedMarkdown(t *testing.T) {
 	block := &Block{
 		Type:          BlockToolCall,
@@ -1047,9 +1129,12 @@ func TestHandleNormalKeyYyIgnoresMouseSelectionAndCopiesFocusedImageCard(t *test
 		t.Fatalf("yy clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
 	}
 
-	want := blockCopyContent(block)
+	want := blockCopyBody(block)
 	if copied != want {
 		t.Fatalf("yy copied = %q, want %q", copied, want)
+	}
+	if strings.HasPrefix(copied, "User:") {
+		t.Fatalf("yy copied a role label the rendered card never shows: %q", copied)
 	}
 	if m.hasMouseSelection() {
 		t.Fatal("second y of yy must clear the pending mouse selection so a text selection cannot divert a later copy")
@@ -1243,6 +1328,14 @@ func TestCopyFocusedBlocksPreservesConversationCardTypes(t *testing.T) {
 }
 
 func TestCopyFocusedBlockCopiesErrorCard(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
 	m := NewModelWithSize(nil, 80, 8)
 	m.mode = ModeNormal
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockError, Content: "failed"})
@@ -1250,8 +1343,19 @@ func TestCopyFocusedBlockCopiesErrorCard(t *testing.T) {
 	m.refreshBlockFocus()
 
 	cmd := m.copyFocusedBlock()
-	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "Error:\n\nfailed" {
-		t.Fatal("copyFocusedBlock should copy labeled BlockError content")
+	if cmd == nil {
+		t.Fatal("copyFocusedBlock should return clipboard command")
+	}
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	if second := v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg); second.err != nil {
+		t.Fatalf("clipboard write error = %v", second.err)
+	}
+	if copied != "failed" {
+		t.Fatalf("copied error card = %q, want unlabeled body %q", copied, "failed")
 	}
 }
 
@@ -1302,6 +1406,136 @@ func TestSuperCopyMouseSelectionKeepsLastCharacter(t *testing.T) {
 	}
 }
 
+func TestSuperCopyHydratesSpilledFocusedCard(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		input string
+	}{
+		{name: "with input", input: "draft content"},
+		{name: "without input"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			originalWrite := clipboardWriteAll
+			var copied string
+			clipboardWriteAll = func(text string) error {
+				copied = text
+				return nil
+			}
+			t.Cleanup(func() { clipboardWriteAll = originalWrite })
+
+			m := NewModelWithSize(nil, 80, 24)
+			t.Cleanup(func() {
+				if err := m.viewport.Close(); err != nil {
+					t.Fatal(err)
+				}
+			})
+			m.mode = ModeNormal
+			m.input.SetValue(tt.input)
+			body := strings.TrimSpace(strings.Repeat("alpha ", 65536))
+			// A small budget exercises idle eviction without a large transcript.
+			m.viewport.baseHotBytes = 4 << 20
+			m.viewport.maxHotBytes = 4 << 20
+			m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: body})
+			m.jumpToVisibleBlockOrdinal(1)
+			m.View()
+			m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: strings.Repeat("tail ", 600)})
+			m.viewport.ScrollToBottom()
+			m.View()
+			if m.focusedBlockID != 1 || m.viewport.blocks[0].spillCold {
+				t.Fatal("focused offscreen card must initially remain hot")
+			}
+			if m.viewport.FocusedBlockIsVisible(1) {
+				t.Fatal("focused card must be outside the visible window")
+			}
+			m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: m.keyMap.Directory[0]}))
+			if m.mode != ModeDirectory {
+				t.Fatal("message directory should open")
+			}
+			m.View()
+			m.viewport.DropOffScreenCaches()
+			m.viewport.ShrinkHotBudget()
+			m.View()
+			if m.focusedBlockID != 1 || !m.viewport.blocks[0].spillCold || m.viewport.blocks[0].Content != "" {
+				t.Fatalf("idle eviction must leave a cold focused card: bytes=%d budget=%d", m.viewport.hotBytes, m.viewport.maxHotBytes)
+			}
+
+			cmd := m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModSuper}))
+			if cmd == nil {
+				t.Fatal("Cmd+C should return a clipboard command for the cold card")
+			}
+			sequence := reflect.ValueOf(cmd())
+			if sequence.Kind() != reflect.Slice || sequence.Len() != 2 {
+				t.Fatal("expected the two-step clipboard sequence")
+			}
+			result := sequence.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+			if result.err != nil {
+				t.Fatal(result.err)
+			}
+			if copied != body || result.success != "Message card copied to clipboard" {
+				t.Fatalf("copied %d bytes, want the %d-byte focused card; success=%q", len(copied), len(body), result.success)
+			}
+		})
+	}
+}
+
+func TestSingleCardCopyEmptyBodyFallback(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		body  string
+		input string
+	}{
+		{name: "empty with input", input: "draft content"},
+		{name: "whitespace with input", body: " \t\n", input: "draft content"},
+		{name: "empty without input"},
+		{name: "whitespace without input", body: " \t\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			originalWrite := clipboardWriteAll
+			copied, writes := "previous clipboard", 0
+			clipboardWriteAll = func(text string) error {
+				copied = text
+				writes++
+				return nil
+			}
+			t.Cleanup(func() { clipboardWriteAll = originalWrite })
+
+			m := NewModelWithSize(nil, 80, 24)
+			m.mode = ModeNormal
+			m.input.SetValue(tt.input)
+			m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: tt.body})
+			m.focusedBlockID = 1
+			m.refreshBlockFocus()
+
+			cmd := m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModSuper}))
+			if tt.input == "" {
+				if cmd != nil || writes != 0 || copied != "previous clipboard" {
+					t.Fatal("empty card and input must leave the clipboard untouched")
+				}
+			} else {
+				if cmd == nil {
+					t.Fatal("Cmd+C should copy the input when the focused card is empty")
+				}
+				sequence := reflect.ValueOf(cmd())
+				if sequence.Kind() != reflect.Slice || sequence.Len() != 2 {
+					t.Fatal("expected the two-step clipboard sequence")
+				}
+				result := sequence.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+				if result.err != nil || result.success != "Input copied to clipboard" || writes != 1 || copied != tt.input {
+					t.Fatalf("clipboard result = %+v, writes=%d, copied=%q", result, writes, copied)
+				}
+			}
+
+			m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+			if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'})); cmd == nil {
+				t.Fatal("yy on an empty card should report that it has no copyable content")
+			}
+			if m.activeToast == nil || m.activeToast.Message != "This card has no copyable content" {
+				t.Fatalf("yy toast = %+v, want empty card notification", m.activeToast)
+			}
+		})
+	}
+}
+
 func TestSuperCopyCopiesErrorCard(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 8)
 	m.mode = ModeNormal
@@ -1310,8 +1544,8 @@ func TestSuperCopyCopiesErrorCard(t *testing.T) {
 	m.refreshBlockFocus()
 
 	cmd := m.handleSuperCopy()
-	if cmd == nil || blockCopyContent(m.viewport.GetFocusedBlock(1)) != "Error:\n\nfailed" {
-		t.Fatal("handleSuperCopy should copy labeled BlockError content")
+	if cmd == nil || blockCopyBody(m.viewport.GetFocusedBlock(1)) != "failed" {
+		t.Fatal("handleSuperCopy should copy the unlabeled BlockError body")
 	}
 }
 
@@ -1348,8 +1582,8 @@ func TestNormalModeYankCopiesErrorCardAtViewport(t *testing.T) {
 	if second.success != "Message card copied to clipboard" {
 		t.Fatalf("clipboard success = %q, want %q", second.success, "Message card copied to clipboard")
 	}
-	if copied != "Error:\n\nfailed" {
-		t.Fatalf("copied text = %q, want labeled error content", copied)
+	if copied != "failed" {
+		t.Fatalf("copied text = %q, want unlabeled error body", copied)
 	}
 }
 

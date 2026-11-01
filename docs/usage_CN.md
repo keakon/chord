@@ -571,7 +571,8 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 ## 复制文本
 
 - 可在转录区和主输入框中用鼠标拖选文字；输入框选区复制保留真实换行和行尾空格，不添加自动折行。`Ctrl+Shift+C` 复制输入框选区。
-- `yy` 复制当前聚焦的消息卡片；工具卡片会按 Markdown 复制，包含 `# Tool call`、`## Arguments`、`## Result`、`## Diff` 等段落（`edit` 卡片会用 `## old_string` / `## new_string` 展示替换文本，而不是 diff；只有启用时才增加 `## replace_all`）。Done 的拒绝理由会单独放在 `## Rejection reason` 段落中。
+- `yy` 复制当前聚焦的消息卡片，只含卡片正文，不带 `User:`、`Assistant:`、`Thinking:` 这类标签（卡片本身也不显示它们）；工具卡片会按 Markdown 复制，包含 `# Tool call`、`## Arguments`、`## Result`、`## Diff` 等段落（`edit` 卡片会用 `## old_string` / `## new_string` 展示替换文本，而不是 diff；只有启用时才增加 `## replace_all`）。Done 的拒绝理由会单独放在 `## Rejection reason` 段落中。
+- `2yy`、`3yy` 等多卡复制保留每张卡的标签，并用 `---` 分隔，便于当作会话片段整体贴出。
 - `Cmd+C`：在会把这个按键转发给 Chord 的 macOS 终端中，复制转录区或主输入框选中的文本；若焦点在权限确认弹窗的输入框，则复制该输入框内容
 - `Ctrl+C`：用于双击退出；弹窗中相当于 `Esc`，不用于复制转录区文本
 

@@ -484,7 +484,11 @@ func (m *Model) copyFocusedBlock() tea.Cmd {
 		if !isCopyableBlockType(b.Type) {
 			return m.enqueueToast("This card type cannot be copied", "info")
 		}
-		return writeClipboardCmd(blockCopyContent(b), "Message card copied to clipboard")
+		content := blockCopyBody(b)
+		if strings.TrimSpace(content) == "" {
+			return m.enqueueToast("This card has no copyable content", "info")
+		}
+		return writeClipboardCmd(content, "Message card copied to clipboard")
 	}
 	return nil
 }
@@ -574,6 +578,9 @@ func appendImagePlaceholderLabels(content string, b *Block) string {
 	return content + "\n\n" + imageText
 }
 
+// blockCopyContent returns the labeled, export-shaped form used when copying
+// several cards at once (they are joined with convformat.BlockSep). Single-card
+// copy uses blockCopyBody so a one-card paste does not gain a role header.
 func blockCopyContent(b *Block) string {
 	if b == nil {
 		return ""
@@ -607,6 +614,33 @@ func blockCopyContent(b *Block) string {
 		if title := strings.TrimSpace(b.StatusTitle); title != "" {
 			return convformat.BlockString(title+":", blockPlainContent(b))
 		}
+	}
+	return blockPlainContent(b)
+}
+
+// blockCopyBody returns the payload for copying a single card. Unlike
+// blockCopyContent (multi-card copy and export), it drops the "User:" /
+// "Assistant:" / "Thinking:" / "Error:" style labels: they are export
+// scaffolding with no counterpart in the rendered card, so a one-card copy
+// would otherwise paste a role header the user never saw. Tool cards keep
+// their Markdown headings, because "# Tool call: grep" is the only thing that
+// identifies which tool produced the body.
+func blockCopyBody(b *Block) string {
+	if b == nil {
+		return ""
+	}
+	switch b.Type {
+	case BlockToolCall, BlockToolResult:
+		return blockCopyContent(b)
+	case BlockStatus:
+		// Background job results already carry their own body; the title is the
+		// only label blockCopyContent would add.
+		if b.BackgroundCopyContent != "" {
+			return b.BackgroundCopyContent
+		}
+	}
+	if b.IsUserLocalShell() {
+		return userLocalShellCopyBody(b)
 	}
 	return blockPlainContent(b)
 }
@@ -756,7 +790,13 @@ func (m *Model) handleSuperCopy() tea.Cmd {
 				if !isCopyableBlockType(b.Type) {
 					return m.enqueueToast("This card type cannot be copied", "info")
 				}
-				return writeClipboardCmd(blockCopyContent(b), "Message card copied to clipboard")
+				b = m.viewport.GetFocusedBlock(b.ID)
+				// An empty body falls through to the input copy below instead of
+				// writing an empty clipboard.
+				if content := blockCopyBody(b); strings.TrimSpace(content) != "" {
+					return writeClipboardCmd(content, "Message card copied to clipboard")
+				}
+				break
 			}
 		}
 	}
