@@ -228,10 +228,10 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 			}
 			pendingComplete := owner.PendingCompleteIntent()
 			if pendingComplete != nil && strings.TrimSpace(pendingComplete.Summary) != "" {
-				pendingText := "Parent pending completion intent:\n- summary: " + pendingComplete.Summary
+				pendingText := "Parent pending completion intent (worker report, not final file evidence):\n- summary: " + pendingComplete.Summary
 				if env := normalizeCompletionEnvelope(pendingComplete.Envelope); env != nil {
-					if len(env.FilesChanged) > 0 {
-						pendingText += "\n- files_changed: " + strings.Join(env.FilesChanged, ", ")
+					if len(env.ReportedFilesChanged) > 0 {
+						pendingText += "\n- reported_files_changed: " + strings.Join(env.ReportedFilesChanged, ", ")
 					}
 					if len(env.Artifacts) > 0 {
 						refs := make([]string, 0, len(env.Artifacts))

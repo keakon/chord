@@ -296,14 +296,14 @@ func TestCommitTerminalTaskRejectsConflictingCompletion(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-terminal")
 	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", &CompletionEnvelope{
-		Summary:      "done",
-		FilesChanged: []string{"internal/a.go"},
+		Summary:              "done",
+		ReportedFilesChanged: []string{"internal/a.go"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", &CompletionEnvelope{
-		Summary:      "done",
-		FilesChanged: []string{"internal/b.go"},
+		Summary:              "done",
+		ReportedFilesChanged: []string{"internal/b.go"},
 	}); err == nil || !strings.Contains(err.Error(), "conflicting terminal settlement") {
 		t.Fatalf("conflicting completion error = %v", err)
 	}

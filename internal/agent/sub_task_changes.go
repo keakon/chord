@@ -80,36 +80,19 @@ func (s *SubAgent) restoreTaskToolChanges(msgs []message.Message) {
 	if s == nil || len(msgs) == 0 {
 		return
 	}
+	evidence := collectTaskFileEvidence(s.taskID, s.effectiveToolBaseDir(), msgs)
+	if evidence == nil {
+		return
+	}
 	s.taskChangesMu.Lock()
 	defer s.taskChangesMu.Unlock()
-	for _, msg := range msgs {
-		if msg.Role != "tool" {
-			continue
+	for _, path := range evidence.ChangedPaths {
+		if s.actualChangedFiles == nil {
+			s.actualChangedFiles = make(map[string]struct{})
 		}
-		paths := append([]string(nil), msg.ToolChangedPaths...)
-		if len(paths) == 0 && msg.FileState != nil {
-			for _, state := range msg.FileState.Writes {
-				paths = append(paths, state.Path)
-			}
-			for _, state := range msg.FileState.Deletes {
-				paths = append(paths, state.Path)
-			}
-		}
-		for _, path := range paths {
-			if len(msg.ToolChangedPaths) == 0 {
-				path = displayPathFromWorkDir(s.effectiveToolBaseDir(), path)
-			}
-			if path = strings.TrimSpace(path); path != "" {
-				if s.actualChangedFiles == nil {
-					s.actualChangedFiles = make(map[string]struct{})
-				}
-				s.actualChangedFiles[path] = struct{}{}
-			}
-		}
-		if msg.FileAttributionIncomplete {
-			s.fileAttributionIncomplete = true
-		}
+		s.actualChangedFiles[path] = struct{}{}
 	}
+	s.fileAttributionIncomplete = s.fileAttributionIncomplete || evidence.FileAttributionIncomplete
 }
 
 // isFileAttributionNeutralTool reports whether a tool cannot change the files
@@ -161,15 +144,8 @@ func (s *SubAgent) enrichCompletionResult(result *AgentResult) *AgentResult {
 	if out.Envelope == nil {
 		out.Envelope = &CompletionEnvelope{Summary: strings.TrimSpace(out.Summary)}
 	}
-	reported := normalizeStringList(out.Envelope.ReportedFilesChanged)
-	if len(reported) == 0 {
-		reported = normalizeStringList(out.Envelope.FilesChanged)
-	}
 	observed, incomplete := s.taskChangeSnapshot()
-	actual := mergeStringLists(out.Envelope.ActualFilesChanged, observed)
-	out.Envelope.ReportedFilesChanged = reported
-	out.Envelope.ActualFilesChanged = actual
-	out.Envelope.FilesChanged = mergeStringLists(reported, actual)
+	out.Envelope.ActualFilesChanged = mergeStringLists(out.Envelope.ActualFilesChanged, observed)
 	out.Envelope.FileAttributionIncomplete = out.Envelope.FileAttributionIncomplete || incomplete
 	if wt := s.completionWorktreeSnapshot(); wt != nil {
 		out.Envelope.Worktree = wt

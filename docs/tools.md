@@ -127,6 +127,14 @@ A worker that cannot deliver a successful result can report the blocker with a n
 
 An agent that runs on an external backend has no `complete` tool, so the contract travels a different path with the same rules: it is delivered to the external process as part of its role instructions at initialization, and its final answer must be a single JSON object satisfying the schema. A final answer that is not a JSON object, or that does not satisfy the schema, fails the task with the violations named; there is no in-process correction turn, so retry the delegation if the external agent needs another attempt.
 
+### Completion reports
+
+A worker reports the checks it actually ran and their results in `complete.summary`, lists checks it did not run in `remaining_limitations`, and uses `artifacts` for full logs when needed. The owner reviews the report against the task's requirements. Chord does not reject completion solely because no check ran or assign a verification status from command exit codes.
+
+The owner report lists the worker's `complete.files_changed` declarations as `reported_files_changed` and paths Chord observed through its tools as `actual_files_changed`. Observed paths take precedence when reviewing attribution, but they describe writes and deletions during the task, not the final diff or code correctness. An empty observed list does not prove that no files changed, and a reported path without an observation does not by itself establish a false report. When Chord cannot fully attribute writes, the report includes `file_attribution_incomplete`.
+
+A compaction checkpoint carries up to 128 observed paths. If there are more, it keeps the incomplete-attribution flag; session restoration merges the retained paths and later observations without recovering paths that the checkpoint omitted. Writes inside external coding-agent processes cannot be attributed to individual files by Chord.
+
 ### Escalation
 
 `escalate` is the SubAgent-side way to ask its owner for help, and a required `kind` says which of two things it means:

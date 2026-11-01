@@ -47,7 +47,6 @@ func normalizeCompletionEnvelope(env *CompletionEnvelope) *CompletionEnvelope {
 	out := *env
 	out.Summary = strings.TrimSpace(out.Summary)
 	out.BlockedReason = strings.TrimSpace(out.BlockedReason)
-	out.FilesChanged = normalizeStringList(out.FilesChanged)
 	out.ReportedFilesChanged = normalizeStringList(out.ReportedFilesChanged)
 	out.ActualFilesChanged = normalizeStringList(out.ActualFilesChanged)
 	out.RemainingLimitations = normalizeStringList(out.RemainingLimitations)
@@ -74,7 +73,7 @@ func normalizeCompletionEnvelope(env *CompletionEnvelope) *CompletionEnvelope {
 		ref := *out.ResultRef
 		out.ResultRef = &ref
 	}
-	if out.Summary == "" && out.BlockedReason == "" && len(out.FilesChanged) == 0 && len(out.ReportedFilesChanged) == 0 && len(out.ActualFilesChanged) == 0 && !out.FileAttributionIncomplete && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 && out.Worktree == nil && out.ResultType == "" && len(out.Result) == 0 && out.ResultRef == nil {
+	if out.Summary == "" && out.BlockedReason == "" && len(out.ReportedFilesChanged) == 0 && len(out.ActualFilesChanged) == 0 && !out.FileAttributionIncomplete && len(out.RemainingLimitations) == 0 && len(out.KnownRisks) == 0 && len(out.FollowUpRecommended) == 0 && len(out.Artifacts) == 0 && out.Worktree == nil && out.ResultType == "" && len(out.Result) == 0 && out.ResultRef == nil {
 		return nil
 	}
 	return &out

@@ -493,7 +493,15 @@ func TestHeadlessSubAgentLifecycleEvents(t *testing.T) {
 			if len(envs) != 1 || envs[0].Type != tt.typeName {
 				t.Fatalf("envelopes = %#v", envs)
 			}
-			payload := envs[0].Payload.(map[string]string)
+			payload := make(map[string]any)
+			switch values := envs[0].Payload.(type) {
+			case map[string]string:
+				for key, value := range values {
+					payload[key] = value
+				}
+			case map[string]any:
+				payload = values
+			}
 			if payload["agent_id"] != "agent-1" || payload["task_id"] != "adhoc-1" || payload["agent_type"] != "reviewer" || payload["parent_agent_id"] != "main" || payload[tt.messageKey] != tt.message {
 				t.Fatalf("payload = %#v", payload)
 			}

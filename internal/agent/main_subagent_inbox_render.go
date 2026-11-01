@@ -170,6 +170,9 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 			b.WriteString("\n- result_type: ")
 			b.WriteString(msg.Completion.ResultType)
 		}
+		if msg.Completion.FileAttributionIncomplete {
+			b.WriteString("\n- file_attribution_incomplete: true")
+		}
 		if msg.Completion.BlockedReason != "" {
 			b.WriteString("\n- blocked_reason: ")
 			b.WriteString(msg.Completion.BlockedReason)
@@ -184,9 +187,13 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 				b.WriteString(label)
 			}
 		}
-		if len(msg.Completion.FilesChanged) > 0 {
-			b.WriteString("\n- files_changed: ")
-			b.WriteString(strings.Join(msg.Completion.FilesChanged, ", "))
+		if len(msg.Completion.ActualFilesChanged) > 0 {
+			b.WriteString("\n- actual_files_changed: ")
+			b.WriteString(strings.Join(msg.Completion.ActualFilesChanged, ", "))
+		}
+		if len(msg.Completion.ReportedFilesChanged) > 0 {
+			b.WriteString("\n- reported_files_changed: ")
+			b.WriteString(strings.Join(msg.Completion.ReportedFilesChanged, ", "))
 		}
 		if len(msg.Completion.RemainingLimitations) > 0 {
 			b.WriteString("\n- remaining_limitations: ")

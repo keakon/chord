@@ -101,9 +101,6 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 	if result.Summary != "done" || env.Summary != "done" {
 		t.Fatalf("summary = %q envelope=%q", result.Summary, env.Summary)
 	}
-	if got := strings.Join(env.FilesChanged, ","); got != "internal/a.go" {
-		t.Fatalf("files_changed = %q", got)
-	}
 	if got := strings.Join(env.ReportedFilesChanged, ","); got != "internal/a.go" {
 		t.Fatalf("reported_files_changed = %q", got)
 	}
@@ -200,7 +197,7 @@ func TestCompleteAcceptsResultRefFromSaveArtifactResultMode(t *testing.T) {
 	}
 }
 
-func TestSubAgentCompletionMergesObservedFileState(t *testing.T) {
+func TestSubAgentCompletionSeparatesObservedFileState(t *testing.T) {
 	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	changedPath := filepath.Join(sub.workDir, "internal", "observed.go")
@@ -211,8 +208,8 @@ func TestSubAgentCompletionMergesObservedFileState(t *testing.T) {
 	}, false)
 
 	result := sub.enrichCompletionResult(&AgentResult{Summary: "done", Envelope: &CompletionEnvelope{
-		Summary:      "done",
-		FilesChanged: []string{"internal/reported.go"},
+		Summary:              "done",
+		ReportedFilesChanged: []string{"internal/reported.go"},
 	}})
 	if result == nil || result.Envelope == nil {
 		t.Fatalf("result = %#v, want completion envelope", result)
@@ -223,9 +220,6 @@ func TestSubAgentCompletionMergesObservedFileState(t *testing.T) {
 	}
 	if got := strings.Join(env.ActualFilesChanged, ","); got != "internal/observed.go" {
 		t.Fatalf("actual_files_changed = %q", got)
-	}
-	if got := strings.Join(env.FilesChanged, ","); got != "internal/reported.go,internal/observed.go" {
-		t.Fatalf("files_changed = %q", got)
 	}
 	if env.FileAttributionIncomplete {
 		t.Fatal("file attribution unexpectedly incomplete")
@@ -242,7 +236,7 @@ func TestSubAgentCompletionMarksUnobservableMutationIncomplete(t *testing.T) {
 	if result == nil || result.Envelope == nil || !result.Envelope.FileAttributionIncomplete {
 		t.Fatalf("result = %#v, want incomplete file attribution", result)
 	}
-	if len(result.Envelope.ActualFilesChanged) != 0 || len(result.Envelope.FilesChanged) != 0 {
+	if len(result.Envelope.ActualFilesChanged) != 0 || len(result.Envelope.ReportedFilesChanged) != 0 {
 		t.Fatalf("unobservable mutation invented paths: %#v", result.Envelope)
 	}
 }
@@ -756,10 +750,10 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 		LastSummary:      "research complete",
 		LastUpdatedTurn:  5,
 		LastArtifactRefs: []tools.ArtifactRef{{ID: "art-1", Type: "research_report", RelPath: "artifacts/subagents/worker-1/report.md"}},
-		LastCompletion:   &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}},
+		LastCompletion:   &CompletionEnvelope{Summary: "research complete", ReportedFilesChanged: []string{"internal/a.go"}},
 	}
 	block := a.buildCoordinationSnapshotOverlayForRequest(nil)
-	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "agent_type: explorer", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go"} {
+	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "agent_type: explorer", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "reported_files_changed: internal/a.go"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("snapshot missing %q:\n%s", want, block)
 		}
@@ -767,7 +761,7 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 }
 
 // TestCoordinationSnapshotCapsCompletionLists pins the per-list length cap on
-// the files_changed / remaining_limitations / known_risks
+// the file evidence / remaining_limitations / known_risks
 // lines: an unbounded list from one verbose completion could otherwise dominate
 // the overlay token budget under the 8-task ceiling. The truncated tail is
 // reported as an explicit "...N more" hint so the reader knows the list
@@ -783,14 +777,16 @@ func TestCoordinationSnapshotCapsCompletionLists(t *testing.T) {
 		LastSummary:     "big completion",
 		LastUpdatedTurn: 7,
 		LastCompletion: &CompletionEnvelope{
-			FilesChanged:         []string{"f-1", "f-2", "f-3", "f-4", "f-5"},
+			ReportedFilesChanged: []string{"f-1", "f-2", "f-3", "f-4", "f-5"},
+			ActualFilesChanged:   []string{"a-1", "a-2", "a-3", "a-4"},
 			RemainingLimitations: []string{"l-1", "l-2", "l-3", "l-4", "l-5", "l-6"},
 			KnownRisks:           []string{"r-1", "r-2", "r-3", "r-4"},
 		},
 	}
 	block := a.buildCoordinationSnapshotOverlayForRequest(nil)
 	for _, want := range []string{
-		"files_changed: f-1, f-2, f-3, ...2 more",
+		"reported_files_changed: f-1, f-2, f-3, ...2 more",
+		"actual_files_changed: a-1, a-2, a-3, ...1 more",
 		"remaining_limitations: l-1, l-2, l-3, ...3 more",
 		"known_risks: r-1, r-2, r-3, ...1 more",
 	} {
@@ -798,7 +794,7 @@ func TestCoordinationSnapshotCapsCompletionLists(t *testing.T) {
 			t.Fatalf("snapshot missing capped list %q:\n%s", want, block)
 		}
 	}
-	for _, leaked := range []string{"f-4", "l-4", "r-4"} {
+	for _, leaked := range []string{"f-4", "a-4", "l-4", "r-4"} {
 		if strings.Contains(block, leaked) {
 			t.Fatalf("snapshot leaked list item past the cap (%q):\n%s", leaked, block)
 		}
@@ -822,7 +818,7 @@ func TestCoordinationSnapshotOmitsCompletionDeliveredByInjectedMailbox(t *testin
 		LastMailboxID:   "worker-1-1",
 		LastSummary:     "research complete",
 		LastUpdatedTurn: 6,
-		LastCompletion:  &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}},
+		LastCompletion:  &CompletionEnvelope{Summary: "research complete", ReportedFilesChanged: []string{"internal/a.go"}},
 	}
 
 	block := a.buildCoordinationSnapshotOverlayForRequest(map[string]struct{}{"worker-1-1": {}})
@@ -834,7 +830,7 @@ func TestCoordinationSnapshotOmitsCompletionDeliveredByInjectedMailbox(t *testin
 	// listed, so the snapshot remains the fallback that keeps terminal
 	// completions visible when no mailbox text expresses them.
 	block = a.buildCoordinationSnapshotOverlayForRequest(nil)
-	if !strings.Contains(block, "task_id: task-1") || !strings.Contains(block, "files_changed: internal/a.go") {
+	if !strings.Contains(block, "task_id: task-1") || !strings.Contains(block, "reported_files_changed: internal/a.go") {
 		t.Fatalf("snapshot missing completion without injected mailbox:\n%s", block)
 	}
 }
@@ -902,7 +898,7 @@ func TestCompletedMailboxTextExpressesContentOnce(t *testing.T) {
 		MessageID: "msg-1", AgentID: "worker-1", TaskID: "task-1",
 		Kind: SubAgentMailboxKindCompleted, Summary: summary, Payload: summary,
 		Completion: &CompletionEnvelope{
-			Summary: summary, FilesChanged: []string{"internal/a.go"},
+			Summary: summary, ReportedFilesChanged: []string{"internal/a.go"},
 			ResultType: "type/report", ResultRef: &tools.ResultRef{ID: "sha-1", RelPath: "artifacts/results/result.json"},
 		},
 	}
@@ -1016,7 +1012,7 @@ func TestMainMailboxAndSnapshotDoNotDoubleBillSameCompletion(t *testing.T) {
 		LastMailboxID:   "worker-1-1",
 		LastSummary:     summary,
 		LastUpdatedTurn: 8,
-		LastCompletion:  &CompletionEnvelope{Summary: summary, FilesChanged: []string{"internal/a.go"}},
+		LastCompletion:  &CompletionEnvelope{Summary: summary, ReportedFilesChanged: []string{"internal/a.go"}},
 	}
 	a.pendingSubAgentMailboxes = []*SubAgentMailboxMessage{{
 		MessageID: "worker-1-1", AgentID: "worker-1", TaskID: "task-1",
@@ -1320,8 +1316,8 @@ func TestSubAgentDeferredCompletionRetainsStructuredEnvelope(t *testing.T) {
 	if pending == nil || pending.Envelope == nil {
 		t.Fatalf("PendingCompleteIntent() = %#v, want structured envelope", pending)
 	}
-	if got := pending.Envelope.FilesChanged; len(got) != 1 || got[0] != "internal/a.go" {
-		t.Fatalf("pending files_changed = %#v", got)
+	if got := pending.Envelope.ReportedFilesChanged; len(got) != 1 || got[0] != "internal/a.go" {
+		t.Fatalf("pending reported_files_changed = %#v", got)
 	}
 	if !slices.Contains(pending.Envelope.KnownRisks, "manual QA") || !slices.Contains(pending.Envelope.FollowUpRecommended, "review") {
 		t.Fatalf("pending envelope = %#v, want the declared risks and follow-ups preserved", pending.Envelope)
@@ -1392,8 +1388,8 @@ func TestUnpairedTypedResultSettlesDegradedAfterRecoveryBudgetSpent(t *testing.T
 		if result.Envelope == nil {
 			t.Fatal("envelope = nil, want the structured fields preserved")
 		}
-		if !slices.Contains(result.Envelope.FilesChanged, "internal/parser/parse.go") {
-			t.Fatalf("files_changed = %#v, want the declared file preserved", result.Envelope.FilesChanged)
+		if !slices.Contains(result.Envelope.ReportedFilesChanged, "internal/parser/parse.go") {
+			t.Fatalf("reported_files_changed = %#v, want the declared file preserved", result.Envelope.ReportedFilesChanged)
 		}
 		if result.Envelope.ResultType != "" || len(result.Envelope.Result) != 0 || result.Envelope.ResultRef != nil {
 			t.Fatalf("typed result = (%q, %s, %#v), want it stripped", result.Envelope.ResultType, result.Envelope.Result, result.Envelope.ResultRef)

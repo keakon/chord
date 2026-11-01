@@ -18,7 +18,7 @@ const maxResultContractRecoveryAttempts = 1
 
 // finishCompletion is shared by regular and degraded Complete calls, after any
 // sibling tools settle. New input invalidates delivery before checking child
-// joins; dropping optional metadata must not bypass it.
+// joins.
 func (s *SubAgent) finishCompletion(callID string, result *AgentResult) {
 	if pending := s.takePendingUserMessagesForContinuation(); len(pending) > 0 {
 		s.appendCompleteToolResult(callID, "Completion deferred: received new user input before completion.", message.ToolStatusSuccess)

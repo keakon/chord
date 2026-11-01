@@ -31,6 +31,7 @@ func (CompleteTool) Name() string { return NameComplete }
 func (CompleteTool) Description() string {
 	return "Mark the current delegated task as complete. Call this only when the assigned task is finished. " +
 		"Provide a concise summary plus structured completion details when available. For generic machine-readable output, provide result_type together with exactly one of result (a small JSON object) or result_ref (an existing immutable result reference); otherwise omit all three fields. " +
+		"In summary, report checks actually run and their results; use remaining_limitations for checks not run and artifacts for full logs when needed. These are your report for owner review, not runtime verification. " +
 		"If a true blocker prevents completion, use the blocker route in the SubAgent Coordination section when your role provides one; otherwise call this tool with blocked_reason to end the task as failed, not completed. A blocked task need not deliver the result required for successful completion. This tool is the only way to signal completion; plain assistant text does not complete the task."
 }
 

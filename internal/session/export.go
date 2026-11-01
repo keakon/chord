@@ -42,6 +42,7 @@ type ExportedMessage struct {
 	SkillActivation           *message.SkillActivationFact   `json:"skill_activation,omitempty"`
 	SkillDiscovery            *message.SkillDiscoveryRecord  `json:"skill_discovery,omitempty"`
 	CompactionSkillActivation *message.SkillActivationCarry  `json:"compaction_skill_activation,omitempty"`
+	CompactionTaskEvidence    *message.TaskEvidence          `json:"compaction_task_evidence,omitempty"`
 	Role                      message.Role                   `json:"role"`
 	Content                   string                         `json:"content"`
 	Kind                      string                         `json:"kind,omitempty"`
@@ -167,6 +168,7 @@ func Export(
 			SkillActivation:           msg.SkillActivation.Clone(),
 			SkillDiscovery:            msg.SkillDiscovery.Clone(),
 			CompactionSkillActivation: msg.CompactionSkillActivation.Clone(),
+			CompactionTaskEvidence:    msg.CompactionTaskEvidence.Clone(),
 			// Use incremental timestamps (1µs apart) to preserve ordering
 			// since source messages don't carry original timestamps.
 			Timestamp: now.Add(time.Duration(i) * time.Microsecond),
@@ -428,6 +430,7 @@ func (es *ExportedSession) ToMessages() []message.Message {
 			SkillActivation:           em.SkillActivation.Clone(),
 			SkillDiscovery:            em.SkillDiscovery.Clone(),
 			CompactionSkillActivation: em.CompactionSkillActivation.Clone(),
+			CompactionTaskEvidence:    em.CompactionTaskEvidence.Clone(),
 		}
 
 		// Restore tool calls.

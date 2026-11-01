@@ -314,7 +314,7 @@ func TestCompactionAckedTerminalMailboxIsNeitherReplayedNorSynthesized(t *testin
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-terminal-mailbox")
 	now := time.Now()
-	completion := &CompletionEnvelope{Summary: "investigation complete", FilesChanged: []string{"internal/agent/main_subagent.go"}}
+	completion := &CompletionEnvelope{Summary: "investigation complete", ReportedFilesChanged: []string{"sample.go"}}
 	settlement := &TaskSettlement{
 		TaskID:           taskID,
 		Attempt:          1,

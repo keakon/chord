@@ -137,6 +137,29 @@ func waitForSubAgentLLMResult(t *testing.T, sub *SubAgent, timeout time.Duration
 	}
 }
 
+func waitForAgentEventType(t *testing.T, ch <-chan Event, want string) Event {
+	t.Helper()
+	select {
+	case evt := <-ch:
+		if evt.Type != want {
+			t.Fatalf("event.Type = %q, want %q (payload %#v)", evt.Type, want, evt.Payload)
+		}
+		return evt
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", want)
+		return Event{}
+	}
+}
+
+func assertNoAgentEvent(t *testing.T, ch <-chan Event) {
+	t.Helper()
+	select {
+	case evt := <-ch:
+		t.Fatalf("unexpected terminal event %#v", evt)
+	default:
+	}
+}
+
 // waitForBlockingStreamProviderCalls waits for recorded requests using a gate
 // captured under the same lock as request recording, avoiding missed wakeups.
 func waitForBlockingStreamProviderCalls(t *testing.T, p *blockingStreamProvider, want int) {

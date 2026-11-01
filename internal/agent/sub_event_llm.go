@@ -362,17 +362,18 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 						completeRejection = contractErr
 						break
 					}
+					degradedEnvelope := &CompletionEnvelope{
+						Summary:              args.Summary,
+						BlockedReason:        args.BlockedReason,
+						ReportedFilesChanged: args.FilesChanged,
+						RemainingLimitations: append(append([]string(nil), args.RemainingLimitations...), droppedTypedResultLimitation),
+						KnownRisks:           args.KnownRisks,
+						FollowUpRecommended:  args.FollowUpRecommended,
+						Artifacts:            artifacts,
+					}
 					completeDegraded = &AgentResult{
-						Summary: strings.TrimSpace(args.Summary),
-						Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
-							Summary:              args.Summary,
-							BlockedReason:        args.BlockedReason,
-							FilesChanged:         args.FilesChanged,
-							RemainingLimitations: append(append([]string(nil), args.RemainingLimitations...), droppedTypedResultLimitation),
-							KnownRisks:           args.KnownRisks,
-							FollowUpRecommended:  args.FollowUpRecommended,
-							Artifacts:            artifacts,
-						}),
+						Summary:  strings.TrimSpace(args.Summary),
+						Envelope: normalizeCompletionEnvelope(degradedEnvelope),
 					}
 				}
 				break
@@ -389,7 +390,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				Envelope: normalizeCompletionEnvelope(&CompletionEnvelope{
 					Summary:              args.Summary,
 					BlockedReason:        args.BlockedReason,
-					FilesChanged:         args.FilesChanged,
+					ReportedFilesChanged: args.FilesChanged,
 					RemainingLimitations: args.RemainingLimitations,
 					KnownRisks:           args.KnownRisks,
 					FollowUpRecommended:  args.FollowUpRecommended,

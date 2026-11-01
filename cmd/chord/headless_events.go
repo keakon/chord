@@ -412,13 +412,14 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	case agent.AgentDoneEvent:
 		touch()
 		if state.isSubscribed("agent_done") {
-			out = append(out, &headlessEnvelope{Type: "agent_done", Payload: map[string]string{
+			out = append(out, &headlessEnvelope{Type: "agent_done", Payload: map[string]any{
 				"agent_id":        e.AgentID,
 				"task_id":         e.TaskID,
 				"agent_type":      e.AgentType,
 				"parent_agent_id": e.ParentAgentID,
 				"parent_task_id":  e.ParentTaskID,
 				"summary":         e.Summary,
+				"message":         e.Message,
 			}})
 		}
 	case agent.InfoEvent:

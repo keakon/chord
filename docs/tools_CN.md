@@ -125,6 +125,14 @@ worker 无法交付成功结果时，可通过非空的 `blocked_reason` 报告�
 
 运行在外部后端上的 Agent 没有 `complete` 工具，契约改走另一条路径，规则相同：它在初始化阶段随角色指令送给外部进程，最终答复必须是满足 schema 的单个 JSON 对象。答复不是 JSON 对象或不满足 schema 时，任务带着违规项失败；外部进程侧没有进程内改正轮次，需要重试时重新委派即可。
 
+### 完成汇报
+
+worker 在 `complete.summary` 中汇报实际运行的检查和结果，用 `remaining_limitations` 列出未运行的检查，需要完整日志时使用 `artifacts`。owner 按任务要求复核这些汇报。Chord 不会仅因未运行检查而拒绝完成，也不会根据命令退出码赋予验证状态。
+
+上级代理收到的报告用 `reported_files_changed` 列出子代理通过 `complete.files_changed` 自报的文件，用 `actual_files_changed` 列出 Chord 通过工具观测到的路径。复核归属时以观测路径为准；它们记录任务期间的写入和删除，不能证明最终差异或代码正确。观测列表为空不能证明没有修改，自报路径缺少观测也不能单独认定为虚报。无法完整归属写入时，报告会包含 `file_attribution_incomplete`。
+
+压缩检查点至多携带 128 条观测路径，超限时保留归属不完整标记。会话恢复会合并保留的路径和后续观测，不会找回检查点省略的路径。外部代码代理进程内的写入无法由 Chord 归属到具体文件。
+
 ### 升级
 
 `escalate` 是 SubAgent 向 owner 求助的方式，必须用 `kind` 声明是哪一种：

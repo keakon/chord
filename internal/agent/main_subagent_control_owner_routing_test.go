@@ -306,7 +306,9 @@ func TestOwnedCompletedMailboxReactivatesWaitingDescendantParent(t *testing.T) {
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
 	parent.setState(SubAgentStateWaitingDescendant, "waiting for child")
-	parent.setPendingCompleteIntent(&AgentResult{Summary: "final summary"})
+	parent.setPendingCompleteIntent(&AgentResult{Summary: "final summary", Envelope: &CompletionEnvelope{
+		ReportedFilesChanged: []string{"reported.go"},
+	}})
 	a.subs.mu.Lock()
 	delete(a.subs.subAgents, "worker-1")
 	a.subs.subAgents[parent.instanceID] = parent
@@ -356,8 +358,12 @@ func TestOwnedCompletedMailboxReactivatesWaitingDescendantParent(t *testing.T) {
 	select {
 	case msg := <-parent.inputCh:
 		text := pendingUserMessageText(msg)
-		if !strings.Contains(text, "Parent pending completion intent:") || !strings.Contains(text, "child done") {
+		if !strings.Contains(text, "Parent pending completion intent (worker report, not final file evidence):") ||
+			!strings.Contains(text, "reported_files_changed: reported.go") || !strings.Contains(text, "child done") {
 			t.Fatalf("parent queued message = %q, want pending summary and child completion details", text)
+		}
+		if strings.Contains(text, "actual_files_changed:") {
+			t.Fatalf("pending intent invented final observations: %s", text)
 		}
 	default:
 		t.Fatal("expected parent to receive a resumed child-completion message")

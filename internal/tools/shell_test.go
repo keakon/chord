@@ -722,7 +722,11 @@ func TestCancelOrForegroundResultKeepsFinishedJobResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start job: %v", err)
 	}
-	<-j.done
+	select {
+	case <-j.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("job did not finish")
+	}
 
 	if _, err := (ShellTool{}).cancelOrForegroundResult(j, time.Now()); err != nil {
 		t.Fatalf("finished job reported as %v, want its natural exit status", err)

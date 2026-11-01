@@ -20,6 +20,7 @@ func (m Message) Clone() Message {
 	cloned.SkillActivation = m.SkillActivation.Clone()
 	cloned.SkillDiscovery = m.SkillDiscovery.Clone()
 	cloned.CompactionSkillActivation = m.CompactionSkillActivation.Clone()
+	cloned.CompactionTaskEvidence = m.CompactionTaskEvidence.Clone()
 	cloned.NativeTools = m.NativeTools.Clone()
 	cloned.Question = append(json.RawMessage(nil), m.Question...)
 	if len(m.Parts) > 0 {

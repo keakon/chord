@@ -73,7 +73,6 @@ type ArtifactRef = tools.ArtifactRef
 type CompletionEnvelope struct {
 	Summary                   string              `json:"summary,omitempty"`
 	BlockedReason             string              `json:"blocked_reason,omitempty"`
-	FilesChanged              []string            `json:"files_changed,omitempty"`
 	ReportedFilesChanged      []string            `json:"reported_files_changed,omitempty"`
 	ActualFilesChanged        []string            `json:"actual_files_changed,omitempty"`
 	FileAttributionIncomplete bool                `json:"file_attribution_incomplete,omitempty"`
@@ -270,7 +269,10 @@ func mailboxMessageBytes(msg SubAgentMailboxMessage) int {
 	total := len(msg.Summary) + len(msg.Payload) + len(msg.MessagePayload)
 	if msg.Completion != nil {
 		total += len(msg.Completion.Summary) + len(msg.Completion.Result)
-		for _, f := range msg.Completion.FilesChanged {
+		for _, f := range msg.Completion.ReportedFilesChanged {
+			total += len(f)
+		}
+		for _, f := range msg.Completion.ActualFilesChanged {
 			total += len(f)
 		}
 		if wt := msg.Completion.Worktree; wt != nil {

@@ -1229,8 +1229,10 @@ func TestRestoreSessionSynthesizesCompletionForSettledTaskWithLostMailbox(t *tes
 
 	now := time.Now()
 	lostCompletion := &CompletionEnvelope{
-		Summary:      "investigation complete",
-		FilesChanged: []string{"internal/agent/main_subagent.go"},
+		Summary:                   "investigation complete",
+		ReportedFilesChanged:      []string{"reported.go"},
+		ActualFilesChanged:        []string{"observed.go"},
+		FileAttributionIncomplete: true,
 	}
 	lostSettlement := &TaskSettlement{
 		TaskID:           lostTaskID,
@@ -1336,6 +1338,14 @@ func TestRestoreSessionSynthesizesCompletionForSettledTaskWithLostMailbox(t *tes
 		}
 		if lost[0].Summary != "investigation complete" || lost[0].Completion == nil || lost[0].Completion.Summary != "investigation complete" {
 			t.Fatalf("synthesized completion = %#v, want investigation complete", lost[0])
+		}
+		report := formatSubAgentMailboxInjectionText(&lost[0])
+		for _, want := range []string{
+			"reported_files_changed: reported.go", "actual_files_changed: observed.go", "file_attribution_incomplete: true",
+		} {
+			if !strings.Contains(report, want) {
+				t.Fatalf("restored report lost %q:\n%s", want, report)
+			}
 		}
 		if strings.TrimSpace(lost[0].OwnerAgentID) != "" || lost[0].AgentID != lostInstanceID {
 			t.Fatalf("synthesized completion owner/source = (%q, %q), want main-owned from %q", lost[0].OwnerAgentID, lost[0].AgentID, lostInstanceID)

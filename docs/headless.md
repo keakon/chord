@@ -399,7 +399,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `local_shell_result`    | Result for a `local_shell` command                                                                | `command`, `output`, `failed`, `error` |
 | `agent_started`         | A delegated SubAgent runtime started, including an on-demand rehydration of a parked task           | `agent_id`, `previous_agent_id` (set for rehydration), `task_id`, `agent_type`, `description`, `parent_agent_id`, `parent_task_id` |
 | `agent_notify`          | An agent sent a non-blocking owner or targeted delegated-workstream update                         | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `target_agent_id`, `target_task_id`, `kind`, `subtype`, `message` |
-| `agent_done`            | A SubAgent completed its task                                                                     | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `summary`                          |
+| `agent_done`            | A SubAgent completed its task                                                                     | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `summary`, `message` |
 | `assistant_rollback`    | Discard in-flight streamed assistant output (mostly relevant for streaming UIs)                   | `agent_id`, `reason`                                                                                         |
 | `info`                  | Informational message from the runtime                                                            | `agent_id`, `message`                                                                                        |
 | `toast`                 | Transient notification surfaced to the user in the TUI; safe to ignore in headless                | `agent_id`, `message`, `level` (`info` / `warn` / `error`)                                                   |
@@ -415,7 +415,9 @@ If an input line on stdin exceeds the protocol line limit, Chord emits an `error
 
 Silent retry telemetry is never pushed. A retry the TUI only records in the error panel emits no `error` envelope and leaves `last_error` / `last_outcome` (`status_response` and `idle`) untouched, so a turn that hits a silent retry and recovers still reports `completed`. A terminal failure is always followed by a non-silent error, which is the one integrations observe.
 
-`assistant_message.text` may be empty for tool-only rounds (including a SubAgent `Complete` call). Chord logs a warning for observability; gateway integrations should skip the empty message and use `agent_done.summary` as the authoritative SubAgent completion content.
+`assistant_message.text` may be empty for tool-only rounds (including a SubAgent `Complete` call). Chord logs a warning for observability; gateway integrations should skip the empty message and read the SubAgent completion from `agent_done`.
+
+`agent_done.message` carries the owner-facing completion report, including reported checks, remaining limitations, and file-attribution warnings when present. File lists keep `reported_files_changed` separate from `actual_files_changed`. Use `message` to read the full report and `summary` for a short completion label. See [Completion reports](./tools.md#completion-reports).
 
 Quiescent SubAgents may release their live runtime while their task and transcript remain durable. A later authorized targeted notification can rehydrate the task with a new `agent_id`; use stable `task_id` for routing and use `previous_agent_id` on `agent_started` to replace runtime-specific labels.
 

@@ -13,8 +13,8 @@ const (
 	coordinationSnapshotMaxTasks        = 8
 	coordinationSnapshotSummaryMaxRunes = 160
 	// Per-list cap for the completion lists a task contributes to the
-	// coordination snapshot. One task's reported files/commands/limitations are
-	// only runtime hints on top of the terminal state, so a small bound keeps a
+	// coordination snapshot. One task's file evidence and reports supplement
+	// the terminal state, so a small bound keeps a
 	// single verbose completion from dominating the overlay token budget under
 	// the 8-task ceiling; the truncated tail stays visible through the
 	// "...N more" hint.
@@ -148,7 +148,7 @@ func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxID
 	}
 
 	var b strings.Builder
-	b.WriteString("SubAgent coordination snapshot (runtime state; use for orchestration, do not expose internal ids unless needed):")
+	b.WriteString("SubAgent coordination snapshot (runtime task state and worker reports; use for orchestration, do not expose internal ids unless needed):")
 	for _, rec := range records {
 		b.WriteString("\n- task_id: ")
 		b.WriteString(rec.TaskID)
@@ -193,13 +193,20 @@ func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxID
 				b.WriteString("\n  result_type: ")
 				b.WriteString(rec.LastCompletion.ResultType)
 			}
+			if rec.LastCompletion.FileAttributionIncomplete {
+				b.WriteString("\n  file_attribution_incomplete: true")
+			}
 			if rec.LastCompletion.ResultRef != nil {
 				b.WriteString("\n  result_ref: ")
 				b.WriteString(rec.LastCompletion.ResultRef.RelPath)
 			}
-			if len(rec.LastCompletion.FilesChanged) > 0 {
-				b.WriteString("\n  files_changed: ")
-				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.FilesChanged))
+			if len(rec.LastCompletion.ActualFilesChanged) > 0 {
+				b.WriteString("\n  actual_files_changed: ")
+				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.ActualFilesChanged))
+			}
+			if len(rec.LastCompletion.ReportedFilesChanged) > 0 {
+				b.WriteString("\n  reported_files_changed: ")
+				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.ReportedFilesChanged))
 			}
 			if len(rec.LastCompletion.RemainingLimitations) > 0 {
 				b.WriteString("\n  remaining_limitations: ")

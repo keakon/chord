@@ -395,7 +395,7 @@ Chord 收到带 request ID 的规则意图后，会在尝试写入规则后发�
 | `local_shell_result` | `local_shell` 命令的执行结果                 | `command`、`output`、`failed`、`error` |
 | `agent_started`      | 某个委托的 SubAgent runtime 开始运行（包括 parked task 的按需 rehydrate） | `agent_id`、`previous_agent_id`（rehydrate 时存在）、`task_id`、`agent_type`、`description`、`parent_agent_id`、`parent_task_id` |
 | `agent_notify`       | 某个 agent 向 owner 或指定委派工作流发送非阻塞更新 | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`target_agent_id`、`target_task_id`、`kind`、`subtype`、`message` |
-| `agent_done`         | 某个 SubAgent 完成任务                       | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`summary` |
+| `agent_done`         | 某个 SubAgent 完成任务                       | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`summary`、`message` |
 | `assistant_rollback` | 丢弃尚未提交的流式 assistant 输出            | `agent_id`、`reason` |
 | `info`               | 运行时信息消息                               | `agent_id`、`message` |
 | `toast`              | TUI 中的瞬时通知；headless 可以忽略          | `agent_id`、`message`、`level`（`info` / `warn` / `error`） |
@@ -411,7 +411,9 @@ Chord 收到带 request ID 的规则意图后，会在尝试写入规则后发�
 
 静默重试不会推送。TUI 只记在错误面板里的那次重试不会产生 `error` envelope，也不会动 `last_error` / `last_outcome`（`status_response` 与 `idle` 里看到的）：中途重试一次、最后恢复成功的回合，`idle` 里看到的仍然是 `completed`。真正失败时总会跟一条非静默错误，集成方只管看那一条。
 
-纯工具调用轮次（包括 SubAgent 调用 `Complete`）的 `assistant_message.text` 可能为空。Chord 会记 warning 便于观测；gateway 集成应跳过空消息，并以 `agent_done.summary` 作为权威的 SubAgent 完成内容。
+纯工具调用轮次（包括 SubAgent 调用 `Complete`）的 `assistant_message.text` 可能为空。Chord 会记 warning 便于观测；gateway 集成应跳过空消息，从 `agent_done` 读取 SubAgent 完成汇报。
+
+`agent_done.message` 包含面向上级代理的完整完成报告，其中可包含检查汇报、剩余限制和文件归属警告。文件列表用 `reported_files_changed` 和 `actual_files_changed` 区分自报与观测。读取完整报告用 `message`，展示简短完成标签用 `summary`。详见[完成汇报](./tools_CN.md#完成汇报)。
 
 进入静止状态的 SubAgent 可能释放 live runtime，但 task 与 transcript 会持久保留。后续获授权的定向通知可用新的 `agent_id` rehydrate 该任务；集成方应使用稳定的 `task_id` 路由，并根据 `agent_started.previous_agent_id` 替换 runtime 级标签。
 

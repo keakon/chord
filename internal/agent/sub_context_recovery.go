@@ -135,6 +135,11 @@ func (s *SubAgent) compactContextForTargetWithCheckpoint(messages []message.Mess
 	if len(compressed) == 0 || len(compressed) >= len(messages) {
 		return nil, false, subModelDrivenSkipCompression
 	}
+	// CompressForTarget keeps the first row, a generated header, and a tail.
+	// Carry only the removed prefix; the retained tail keeps its own tool
+	// facts, including file-state metadata.
+	removedPrefixEnd := len(messages) - (len(compressed) - 2)
+	taskEvidence := buildTaskEvidenceCarry(s.taskID, s.effectiveToolBaseDir(), messages[:removedPrefixEnd])
 	// A successful compaction ends the pressure window that wrote them, so
 	// the compacted context must not keep replaying pre-apply notices.
 	compressed = dropContextNoticeMessages(compressed)
@@ -158,6 +163,7 @@ func (s *SubAgent) compactContextForTargetWithCheckpoint(messages []message.Mess
 		// checkpoint carries the same marker.
 		IsCompactionSummary:       true,
 		CompactionSkillActivation: buildSkillActivationCarry(messages, skillView, skillActivationEpoch(messages, skillView.TaskID)+1),
+		CompactionTaskEvidence:    taskEvidence,
 		Content:                   content,
 	}
 	if buildContent != nil {
@@ -187,6 +193,7 @@ func (s *SubAgent) compactContextForTargetWithCheckpoint(messages []message.Mess
 		}
 	}
 	s.ctxMgr.RestoreMessages(compressed)
+	s.restoreTaskToolChanges(compressed)
 	// A deterministic rewrite supersedes any checkpoint outcome that was
 	// waiting for the next request. The model-driven caller sets its own
 	// applied notice after this method returns.
