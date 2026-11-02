@@ -24,7 +24,7 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 
 	content := pendingUserMessageText(input)
-	msg := message.Message{InputID: input.InputID, Role: "user", Content: content, Mailbox: input.Mailbox, Kind: input.Kind}
+	msg := message.Message{InputID: input.InputID, InputRequestID: input.RequestID, Role: "user", Content: content, Mailbox: input.Mailbox, Kind: input.Kind}
 	if input.InputID != "" {
 		input.Stage = recovery.PendingInputStageTranscriptStaged
 	}
@@ -38,6 +38,7 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 		}
 		return
 	}
+	msg.Content, msg.Parts = s.filterUnsupportedParts(msg.Content, msg.Parts)
 	msg.Parts = s.normalizeUserAttachmentParts(msg.Parts)
 	input.Parts = cloneContentParts(msg.Parts)
 	if input.InputID != "" {
@@ -46,8 +47,6 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 	if input.Mailbox != nil && msg.Kind == "" {
 		msg.Kind = message.KindSubAgentMailbox
 	}
-	msg.Content, msg.Parts = s.filterUnsupportedParts(msg.Content, msg.Parts)
-
 	messageIndex := s.ctxMgr.MessageCount()
 	s.ctxMgr.Append(msg)
 	if input.DraftID != "" {
@@ -56,6 +55,8 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 			Parts:   messagePartsForTUI(msg),
 			AgentID: s.instanceID,
 		})
+	} else if input.FromUser {
+		s.parent.emitUserMessageCommitted(msg, messageIndex, s.instanceID)
 	}
 
 	s.persistMessageAsync(msg, "user message", func() {

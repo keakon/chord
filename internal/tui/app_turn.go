@@ -320,17 +320,18 @@ func (m *Model) stageDraft(draft queuedDraft) tea.Cmd {
 	// lines when the previous composer was multi-line) get clipped.
 	m.recalcViewportSize()
 	block := &Block{
-		ID:         m.nextBlockID,
-		Type:       BlockUser,
-		Content:    userBlockTextFromParts(draft.contentParts(), draft.Content),
-		AgentID:    m.focusedAgentID,
-		LoopAnchor: draft.LoopAnchor,
-		ImageCount: imageCount,
-		ImageParts: imagePartsFromContentParts(draft.contentParts()),
-		PDFNames:   pdfNamesFromContentParts(draft.contentParts()),
-		FileRefs:   draft.FileRefs,
-		MsgIndex:   msgIndex,
-		StartedAt:  draft.QueuedAt,
+		ID:             m.nextBlockID,
+		Type:           BlockUser,
+		Content:        userBlockTextFromParts(draft.contentParts(), draft.Content),
+		AgentID:        m.focusedAgentID,
+		LoopAnchor:     draft.LoopAnchor,
+		ImageCount:     imageCount,
+		ImageParts:     imagePartsFromContentParts(draft.contentParts()),
+		PDFNames:       pdfNamesFromContentParts(draft.contentParts()),
+		FileRefs:       draft.FileRefs,
+		MsgIndex:       msgIndex,
+		InputRequestID: draft.ID,
+		StartedAt:      draft.QueuedAt,
 	}
 	m.nextBlockID++
 	m.appendViewportBlock(block)
@@ -353,8 +354,15 @@ func (m *Model) stageDraft(draft queuedDraft) tea.Cmd {
 }
 
 func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
+	if draft.ID == "" {
+		draft.ID = m.nextDraftID()
+	}
 	cmd := m.stageDraft(draft)
 	if m.agent != nil {
+		if targeted, ok := m.agent.(agent.TargetedConversationController); ok && len(draft.Parts) > 0 {
+			targeted.SendUserMessageWithPartsToTarget(m.focusedConversationTarget(m.focusedAgentID), draft.Parts, draft.ID)
+			return cmd
+		}
 		if len(draft.Parts) > 0 {
 			m.agent.SendUserMessageWithParts(draft.Parts)
 		} else {

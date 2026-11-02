@@ -70,7 +70,7 @@ func (a *MainAgent) queuePausedFollowup(payload *SubAgentSendMessagePayload) {
 		sequence = max(sequence, input.AcceptedOrder+1)
 	}
 	input := pendingUserMessage{
-		InputID: inputID, AcceptedOrder: sequence, Revision: 1,
+		InputID: inputID, RequestID: payload.RequestID, AcceptedOrder: sequence, Revision: 1,
 		Content:  normalizeSubAgentMessage(payload.Kind, text),
 		FromUser: payload.CallerAgentID == "", Stage: recovery.PendingInputStageQueued,
 		Mailbox: &message.MailboxMetadata{AgentID: controlPlaneAgentID(payload.CallerAgentID), TaskID: payload.CallerTaskID, Kind: payload.Kind},
@@ -152,27 +152,25 @@ func (a *MainAgent) respondPausedFollowup(payload *SubAgentSendMessagePayload, h
 	if payload.Reply == nil && err != nil {
 		a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn"})
 	}
-	a.emitExternalInputDelivery(payload, handle, err)
+	a.emitSubAgentInputDelivery(payload, handle, err)
 	respondSubAgentControl(payload.Reply, handle, err)
 }
 
-// emitExternalInputDelivery retires the TUI's optimistic draft for a follow-up
-// that will not run right away. Only focused input (no reply channel) tracks a
-// draft, and only external tasks need it: an internal worker reports its own
-// phases, while a queued external message has no process to report from.
-func (a *MainAgent) emitExternalInputDelivery(payload *SubAgentSendMessagePayload, handle tools.TaskHandle, err error) {
+// emitSubAgentInputDelivery retires a focused draft that will not run. Rejected
+// inputs have no worker phase event, and queued external inputs have no process.
+func (a *MainAgent) emitSubAgentInputDelivery(payload *SubAgentSendMessagePayload, handle tools.TaskHandle, err error) {
 	if payload == nil || payload.Reply != nil {
 		return
 	}
 	record := a.taskRecordByTaskID(strings.TrimSpace(payload.TaskID))
-	if record == nil || record.ExternalSession == nil {
+	if record == nil {
 		return
 	}
 	status := ""
 	switch {
 	case err != nil:
 		status = SubAgentInputDeliveryFailed
-	case handle.Status == externalInputQueued:
+	case record.ExternalSession != nil && handle.Status == externalInputQueued:
 		status = SubAgentInputDeliveryQueued
 	default:
 		return
@@ -181,5 +179,5 @@ func (a *MainAgent) emitExternalInputDelivery(payload *SubAgentSendMessagePayloa
 	if agentID == "" {
 		agentID = record.LatestInstanceID
 	}
-	a.emitToTUI(SubAgentInputDeliveryEvent{AgentID: agentID, Status: status})
+	a.emitToTUI(SubAgentInputDeliveryEvent{AgentID: agentID, RequestID: payload.RequestID, Status: status})
 }

@@ -37,8 +37,9 @@ func (s *SubAgent) InjectUserMessageWithParts(parts []message.ContentPart) bool 
 	return s.enqueueUserMessage(pendingUserMessageFromDraft("", parts))
 }
 
-func (s *SubAgent) InjectManualUserMessageWithParts(parts []message.ContentPart, drainContextAppends bool) bool {
+func (s *SubAgent) InjectManualUserMessageWithParts(parts []message.ContentPart, requestID string, drainContextAppends bool) bool {
 	input := pendingUserMessageFromDraft("", parts)
+	input.RequestID = requestID
 	input.FromUser = true
 	input.DrainContextAppends = drainContextAppends
 	return s.enqueueUserMessage(input)

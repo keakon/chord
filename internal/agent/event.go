@@ -231,6 +231,7 @@ type subAgentControlResult struct {
 
 type SubAgentSendMessagePayload struct {
 	Parts         []message.ContentPart
+	RequestID     string
 	Ctx           context.Context
 	CallerAgentID string
 	CallerTaskID  string
@@ -616,6 +617,18 @@ type PendingDraftConsumedEvent struct {
 
 func (PendingDraftConsumedEvent) agentEvent() {}
 
+// UserMessageCommittedEvent reports the canonical parts of a user submission.
+// The TUI replaces its transient attachment copies, including parts dropped by
+// the model's capability filter.
+type UserMessageCommittedEvent struct {
+	AgentID      string
+	RequestID    string
+	MessageIndex int
+	Parts        []message.ContentPart
+}
+
+func (UserMessageCommittedEvent) agentEvent() {}
+
 // RequestCycleStartedEvent signals that the runtime has started a new main
 // request cycle. TUI should reset request-scoped display progress immediately;
 // subsequent transport progress belongs to the new cycle.
@@ -918,8 +931,9 @@ func (AgentStatusEvent) agentEvent() {}
 // optimistically marks that input in flight; this event retires the marker when
 // the message becomes a queued next attempt or is rejected outright.
 type SubAgentInputDeliveryEvent struct {
-	AgentID string
-	Status  string // SubAgentInputDeliveryQueued or SubAgentInputDeliveryFailed
+	AgentID   string
+	RequestID string
+	Status    string // SubAgentInputDeliveryQueued or SubAgentInputDeliveryFailed
 }
 
 func (SubAgentInputDeliveryEvent) agentEvent() {}

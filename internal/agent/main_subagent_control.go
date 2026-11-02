@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -1186,8 +1187,12 @@ func (a *MainAgent) handleSubAgentSendMessageEvent(evt Event) {
 		a.respondPausedFollowup(payload, tools.TaskHandle{}, payload.Ctx.Err())
 		return
 	}
-	if a.pause.restored && a.sessionExecutionPaused() {
-		a.queuePausedFollowup(payload)
+	if a.sessionExecutionPaused() {
+		if a.pause.restored {
+			a.queuePausedFollowup(payload)
+			return
+		}
+		a.respondPausedFollowup(payload, tools.TaskHandle{}, &executiongate.ErrSessionPaused{})
 		return
 	}
 	if rec := a.taskRecordByTaskID(payload.TaskID); rec != nil && rec.ExternalSession != nil {
@@ -1197,6 +1202,11 @@ func (a *MainAgent) handleSubAgentSendMessageEvent(evt Event) {
 				return
 			}
 		}
+	} else if len(payload.Parts) > 0 && payload.Reply == nil && payload.CallerAgentID == "" && payload.CallerTaskID == "" {
+		// A paused follow-up may reach the owner loop after admission reopens.
+		// Keep its parts and receipt instead of falling through to text delivery.
+		a.SendUserMessageWithPartsToTarget(ConversationTarget{TaskID: payload.TaskID}, payload.Parts, payload.RequestID)
+		return
 	}
 	handle, err := a.sendMessageToSubAgentNow(payload.CallerAgentID, payload.CallerTaskID, payload.TaskID, payload.Message, payload.Kind)
 	a.respondPausedFollowup(payload, handle, err)

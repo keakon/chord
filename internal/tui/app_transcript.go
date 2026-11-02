@@ -924,14 +924,15 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					}
 				} else {
 					userBlock = &Block{
-						ID:         *nextID,
-						Type:       BlockUser,
-						Content:    content,
-						FileRefs:   fileRefsFromParts(msg.Parts),
-						ImageCount: imgCount,
-						ImageParts: imagePartsFromContentParts(msg.Parts),
-						PDFNames:   pdfNamesFromContentParts(msg.Parts),
-						MsgIndex:   msgIdx,
+						ID:             *nextID,
+						Type:           BlockUser,
+						Content:        content,
+						FileRefs:       fileRefsFromParts(msg.Parts),
+						ImageCount:     imgCount,
+						ImageParts:     imagePartsFromContentParts(msg.Parts),
+						PDFNames:       pdfNamesFromContentParts(msg.Parts),
+						MsgIndex:       msgIdx,
+						InputRequestID: msg.InputRequestID,
 					}
 				}
 			}

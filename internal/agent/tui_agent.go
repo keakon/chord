@@ -56,6 +56,7 @@ type ConversationTarget struct {
 type TargetedConversationController interface {
 	GetMessagesForTarget(target ConversationTarget) []message.Message
 	SendUserMessageToTarget(target ConversationTarget, content string)
+	SendUserMessageWithPartsToTarget(target ConversationTarget, parts []message.ContentPart, requestID string)
 	ContinueFromContextForTarget(target ConversationTarget)
 }
 

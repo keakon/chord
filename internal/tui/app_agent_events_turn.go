@@ -64,6 +64,21 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	case agent.InputQueueOperationResultEvent:
 		effects.addFollowup(m.handleInputQueueResult(evt))
 		return true, effects
+	case agent.UserMessageCommittedEvent:
+		if m.inflightDraft != nil && evt.RequestID != "" &&
+			m.inflightDraft.ID == evt.RequestID &&
+			normalizeDraftAgentID(m.inflightDraft.AgentID) == normalizeDraftAgentID(evt.AgentID) {
+			m.inflightDraft.Parts = append([]message.ContentPart(nil), evt.Parts...)
+		}
+		block := m.userBlockForCommittedMessage(evt)
+		if block == nil {
+			return true, effects
+		}
+		applyCommittedUserMessageParts(block, evt.Parts)
+		m.updateViewportBlock(block)
+		m.recalcViewportSize()
+		effects.addFollowup(m.imageProtocolCmd())
+		return true, effects
 	case agent.PendingDraftConsumedEvent:
 		if evt.InputID != "" && evt.Target.RuntimeID != "" && m.agent != nil && !sameInputQueueBinding(evt.Target, m.agent.InputDeliveryTarget()) {
 			return true, effects
@@ -80,6 +95,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				break
 			}
 		}
+		draft.Parts = append([]message.ContentPart(nil), evt.Parts...)
 		if m.editingQueuedDraftID == evt.DraftID {
 			m.editingQueuedDraftID = ""
 		}
@@ -111,12 +127,16 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// message.
 		block := m.mainUserBlockForMsgIndex(msgs, msgIndex)
 		if block == nil {
-			_, imageCount := queuedDraftTextAndImageCount(draft)
+			blockParts := draft.contentParts()
+			if msgIndex >= 0 && msgIndex < len(msgs) {
+				blockParts = msgs[msgIndex].Parts
+			}
+			imageParts := imagePartsFromContentParts(blockParts)
 			fileRefs := draft.FileRefs
 			if fileRefs == nil {
 				fileRefs = fileRefsFromParts(evt.Parts)
 			}
-			block = &Block{ID: m.nextBlockID, Type: BlockUser, Content: content, AgentID: evt.AgentID, LoopAnchor: draft.LoopAnchor, ImageCount: imageCount, ImageParts: imagePartsFromContentParts(draft.contentParts()), PDFNames: pdfNamesFromContentParts(draft.contentParts()), FileRefs: fileRefs, MsgIndex: msgIndex, StartedAt: draft.QueuedAt}
+			block = &Block{ID: m.nextBlockID, Type: BlockUser, Content: content, AgentID: evt.AgentID, InputRequestID: draft.ID, LoopAnchor: draft.LoopAnchor, ImageCount: len(imageParts), ImageParts: imageParts, PDFNames: pdfNamesFromContentParts(blockParts), FileRefs: fileRefs, MsgIndex: msgIndex, StartedAt: draft.QueuedAt}
 			m.nextBlockID++
 			m.appendViewportBlock(block)
 		} else {
@@ -132,6 +152,11 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if strings.TrimSpace(d.AgentID) == "" {
 			d.AgentID = evt.AgentID
 		}
+		if msgIndex >= 0 && msgIndex < len(msgs) {
+			// Do not keep the composer's inline copy alive in the in-flight
+			// draft after the durable message has a session-owned path.
+			d.Parts = append([]message.ContentPart(nil), msgs[msgIndex].Parts...)
+		}
 		m.inflightDraft = &d
 		m.markRequestProgressBaseline(evt.AgentID)
 		m.syncVisibleMainUserBlockMsgIndexes()
@@ -141,4 +166,26 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 	default:
 		return false, effects
 	}
+}
+
+func (m *Model) userBlockForCommittedMessage(evt agent.UserMessageCommittedEvent) *Block {
+	if m.viewport == nil {
+		return nil
+	}
+	for _, block := range slices.Backward(m.viewport.blocks) {
+		if block == nil || block.Type != BlockUser || block.IsUserLocalShell() ||
+			normalizeDraftAgentID(block.AgentID) != normalizeDraftAgentID(evt.AgentID) {
+			continue
+		}
+		if evt.RequestID != "" {
+			if block.InputRequestID != evt.RequestID {
+				continue
+			}
+		} else if evt.MessageIndex < 0 || block.MsgIndex != evt.MessageIndex {
+			continue
+		}
+		block.MsgIndex = evt.MessageIndex
+		return block
+	}
+	return nil
 }

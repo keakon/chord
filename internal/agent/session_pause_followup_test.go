@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,94 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 )
+
+func TestPausedTransferFollowupRejectsWithoutReemission(t *testing.T) {
+	for _, fromAgent := range []bool{false, true} {
+		a := newTestMainAgent(t, t.TempDir())
+		a.setTaskRecords(map[string]*DurableTaskRecord{
+			"sample-task": {TaskID: "sample-task", State: string(SubAgentStateIdle), LatestInstanceID: "sample-agent", RuntimeParked: true},
+		})
+		a.executionGate = &executiongate.Gate{}
+		a.executionGate.Freeze()
+		payload := &SubAgentSendMessagePayload{
+			TaskID: "sample-task", RequestID: "request-1", Message: "Follow-up.", Kind: "follow_up",
+			Parts: []message.ContentPart{{Type: message.ContentPartImage, MimeType: "image/png", Data: []byte("image")}},
+		}
+		if fromAgent {
+			payload.Reply = make(chan subAgentControlResult, 1)
+			payload.CallerAgentID = "sample-owner"
+		}
+		a.handleSubAgentSendMessageEvent(Event{Type: EventSubAgentSendMessage, Payload: payload})
+		select {
+		case event := <-a.eventCh:
+			t.Fatalf("follow-up reemitted: %s", event.Type)
+		default:
+		}
+		if fromAgent {
+			select {
+			case result := <-payload.Reply:
+				if _, ok := errors.AsType[*executiongate.ErrSessionPaused](result.Err); !ok {
+					t.Fatalf("error = %v", result.Err)
+				}
+			default:
+				t.Fatal("frozen notify did not receive its refusal")
+			}
+		} else {
+			timer := time.NewTimer(time.Second)
+			found := false
+			for !found {
+				select {
+				case raw := <-a.Events():
+					if event, ok := raw.(SubAgentInputDeliveryEvent); ok {
+						if event.RequestID != "request-1" || event.Status != SubAgentInputDeliveryFailed {
+							t.Fatalf("delivery = %+v", event)
+						}
+						found = true
+					}
+				case <-timer.C:
+					t.Fatal("focused draft did not receive its refusal")
+				}
+			}
+			timer.Stop()
+		}
+		if len(a.pause.resumeFollowups) != 0 {
+			t.Fatal("transfer follow-up entered the restored queue")
+		}
+	}
+}
+
+func TestTargetedMultipartInputRejectsUnavailableOrSettledConversation(t *testing.T) {
+	for _, settled := range []bool{false, true} {
+		a := newTestMainAgent(t, t.TempDir())
+		if settled {
+			a.setTaskRecords(map[string]*DurableTaskRecord{
+				"sample-task": {TaskID: "sample-task", State: string(SubAgentStateCompleted), LatestInstanceID: "sample-agent"},
+			})
+		}
+		a.SendUserMessageWithPartsToTarget(ConversationTarget{TaskID: "sample-task", AgentID: "sample-agent"}, []message.ContentPart{{Type: message.ContentPartText, Text: "Follow-up."}}, "request-1")
+		select {
+		case event := <-a.eventCh:
+			t.Fatalf("input was rerouted: %s", event.Type)
+		default:
+		}
+		timer := time.NewTimer(time.Second)
+		for {
+			select {
+			case raw := <-a.Events():
+				if event, ok := raw.(SubAgentInputDeliveryEvent); ok {
+					if event.AgentID != "sample-agent" || event.RequestID != "request-1" || event.Status != SubAgentInputDeliveryFailed {
+						t.Fatalf("delivery = %+v", event)
+					}
+					timer.Stop()
+					goto received
+				}
+			case <-timer.C:
+				t.Fatal("missing rejection receipt")
+			}
+		}
+	received:
+	}
+}
 
 func TestPausedFollowupRejectsExternalTask(t *testing.T) {
 	t.Parallel()
@@ -71,7 +160,7 @@ func TestPausedTargetedFollowupSavesBeforeDispatchAndKeepsInputOrder(t *testing.
 		t.Fatal(err)
 	}
 	reply := make(chan subAgentControlResult, 1)
-	a.handleSubAgentSendMessageEvent(Event{Payload: &SubAgentSendMessagePayload{Ctx: context.Background(), TaskID: sub.taskID, Message: "New request.", Kind: "follow_up", Reply: reply, Parts: []message.ContentPart{{Type: message.ContentPartText, Text: "New request."}, {Type: message.ContentPartImage, MimeType: "image/png", ImagePath: attachmentPath}}}})
+	a.handleSubAgentSendMessageEvent(Event{Payload: &SubAgentSendMessagePayload{Ctx: context.Background(), TaskID: sub.taskID, RequestID: "request-1", Message: "New request.", Kind: "follow_up", Reply: reply, Parts: []message.ContentPart{{Type: message.ContentPartText, Text: "New request."}, {Type: message.ContentPartImage, MimeType: "image/png", ImagePath: attachmentPath}}}})
 	if requests, _ := provider.snapshot(); len(requests) != 0 {
 		t.Fatal("paused follow-up dispatched before saving")
 	}
@@ -92,6 +181,15 @@ func TestPausedTargetedFollowupSavesBeforeDispatchAndKeepsInputOrder(t *testing.
 	if err != nil || len(snapshot.Pause.PendingInputs) != 3 {
 		t.Fatalf("follow-up was not durable: snapshot=%#v err=%v", snapshot, err)
 	}
+	foundReceipt := false
+	for _, input := range snapshot.Pause.PendingInputs {
+		if input.RequestID == "request-1" {
+			foundReceipt = true
+		}
+	}
+	if !foundReceipt {
+		t.Fatal("paused checkpoint lost the submission receipt")
+	}
 	if !a.sessionExecutionPaused() {
 		t.Fatal("save worker reopened admission outside the owner loop")
 	}
@@ -111,7 +209,9 @@ func TestPausedTargetedFollowupSavesBeforeDispatchAndKeepsInputOrder(t *testing.
 	requests, _ := provider.snapshot()
 	var content strings.Builder
 	foundAttachment := false
+	foundReceipt = false
 	for _, msg := range requests[0] {
+		foundReceipt = foundReceipt || msg.InputRequestID == "request-1"
 		content.WriteString(msg.Content)
 		content.WriteByte('\n')
 		for _, part := range msg.Parts {
@@ -126,6 +226,9 @@ func TestPausedTargetedFollowupSavesBeforeDispatchAndKeepsInputOrder(t *testing.
 	}
 	if !foundAttachment {
 		t.Fatal("saved attachment did not reach the explicit follow-up request")
+	}
+	if !foundReceipt {
+		t.Fatal("restored follow-up lost the submission receipt")
 	}
 	if strings.Count(content.String(), "Earlier request.") != 1 || strings.Count(content.String(), "New request.") != 1 || strings.Index(content.String(), "Earlier request.") > strings.Index(content.String(), "New request.") {
 		t.Fatalf("pending input order or identity lost: %q", content.String())

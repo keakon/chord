@@ -55,6 +55,19 @@ func imagePartsFromContentParts(parts []message.ContentPart) []BlockImagePart {
 	return imageParts
 }
 
+// applyCommittedUserMessageParts replaces the inline copies staged with the
+// composer with the durable session paths. ImagePath stays renderable, so the
+// preview survives without holding the bytes.
+func applyCommittedUserMessageParts(block *Block, parts []message.ContentPart) {
+	if block == nil {
+		return
+	}
+	block.ImageParts = imagePartsFromContentParts(parts)
+	block.PDFNames = pdfNamesFromContentParts(parts)
+	block.ImageCount = len(block.ImageParts)
+	block.InvalidateCache()
+}
+
 // pdfNamesFromContentParts returns the display filenames of PDF parts, used to
 // render PDF attachment chips on a user block (PDFs cannot be shown inline).
 func pdfNamesFromContentParts(parts []message.ContentPart) []string {

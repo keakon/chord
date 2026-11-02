@@ -67,6 +67,11 @@ func (a *targetedConversationAgent) SendUserMessageToTarget(target agent.Convers
 	a.targetedCalls = append(a.targetedCalls, "send:"+a.targetLabel(target)+":"+content)
 }
 
+func (a *targetedConversationAgent) SendUserMessageWithPartsToTarget(target agent.ConversationTarget, parts []message.ContentPart, requestID string) {
+	a.targetedCalls = append(a.targetedCalls, "send-parts:"+a.targetLabel(target)+":"+requestID)
+	a.sentMultipart = append(a.sentMultipart, parts)
+}
+
 func (a *targetedConversationAgent) ContinueFromContextForTarget(target agent.ConversationTarget) {
 	a.targetedCalls = append(a.targetedCalls, "continue:"+a.targetLabel(target))
 }

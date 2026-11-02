@@ -155,10 +155,11 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	outC, outP := a.expandSlashCommandForModel(content, parts)
 	outC, outP = a.filterUnsupportedParts(outC, outP)
 	userMsg := message.Message{
-		InputID: inputID,
-		Role:    message.RoleUser,
-		Content: outC,
-		Parts:   outP,
+		InputID:        inputID,
+		InputRequestID: requestID,
+		Role:           message.RoleUser,
+		Content:        outC,
+		Parts:          outP,
 	}
 	a.recordCommittedUserMessage(userMsg)
 	a.stageSessionInput(pendingUserMessage{InputID: inputID, RequestID: requestID, AcceptedOrder: acceptedOrder, Content: outC, Parts: outP, FromUser: true})

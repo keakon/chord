@@ -200,9 +200,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		// that the optimistic draft stopped running. A queued message is
 		// persisted for the next attempt; showing it as in flight would leave a
 		// timer running for work that has not started.
-		if m.inflightDraftBelongsToAgent(evt.AgentID) {
-			m.inflightDraft = nil
-		}
+		effects.addFollowup(m.settleSubAgentInputDelivery(evt))
 		if evt.Status == agent.SubAgentInputDeliveryQueued {
 			effects.addFollowup(m.enqueueToast("Message queued for the next attempt", "info"))
 		}

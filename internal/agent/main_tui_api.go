@@ -211,69 +211,81 @@ func (a *MainAgent) acceptRawUserMessage(content string, parts []message.Content
 
 // SendUserMessageWithParts enqueues a multi-part user message (text + images).
 func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
-	conversation := a.focusedConversationTarget()
+	a.SendUserMessageWithPartsToTarget(a.focusedConversationTarget(), parts, "")
+}
+
+// SendUserMessageWithPartsToTarget preserves the submission identity and target
+// until the committed parts replace the TUI's optimistic attachment copies.
+func (a *MainAgent) SendUserMessageWithPartsToTarget(conversation ConversationTarget, parts []message.ContentPart, requestID string) {
 	var content strings.Builder
 	for _, part := range parts {
-		if part.Type == "text" {
+		if part.Type == message.ContentPartText {
 			content.WriteString(part.Text)
 		}
 	}
 	if IsTUILocalOnlySlashCommand(content.String()) {
-		a.sendSessionInput(content.String(), parts, "")
+		a.sendSessionInput(content.String(), parts, requestID)
 		return
 	}
-	if target, ok := a.resolveConversationTarget(conversation); ok &&
-		(target.external != nil || target.task != nil && target.task.ExternalSession != nil) {
+	target, ok := a.resolveConversationTarget(conversation)
+	if !ok {
+		a.rejectTargetedUserMessage(conversation, requestID, "Conversation is no longer available; retry the message")
+		return
+	}
+	if target.external != nil || target.task != nil && target.task.ExternalSession != nil {
 		for _, part := range parts {
-			if part.Type != "text" {
-				a.emitToTUI(ToastEvent{Message: "External subagents accept text input only", Level: "warn", AgentID: target.task.LatestInstanceID})
+			if part.Type != message.ContentPartText {
+				a.rejectTargetedUserMessage(conversation, requestID, "External subagents accept text input only")
 				return
 			}
 		}
-		a.SendUserMessageToTarget(conversation, content.String())
+		a.sendEvent(Event{Type: EventSubAgentSendMessage, Payload: &SubAgentSendMessagePayload{TaskID: target.task.TaskID, Message: content.String(), RequestID: requestID, Kind: "follow_up"}})
 		return
 	}
-	if a.sessionExecutionPaused() {
-		target, ok := a.resolveConversationTarget(a.focusedConversationTarget())
-		if ok && target.task != nil && !target.settled {
-			a.sendEvent(Event{Type: EventSubAgentSendMessage, Payload: &SubAgentSendMessagePayload{TaskID: target.task.TaskID, Message: content.String(), Parts: cloneContentParts(parts), Kind: "follow_up"}})
-			return
-		}
+	if target.settled {
+		a.rejectTargetedUserMessage(conversation, requestID, fmt.Sprintf("Task %s has finished; delegate it again to send it a follow-up", target.task.TaskID))
+		return
 	}
-	if focused := a.validFocusedSubAgent(); focused != nil {
+	if a.sessionExecutionPaused() && target.task != nil {
+		a.sendEvent(Event{Type: EventSubAgentSendMessage, Payload: &SubAgentSendMessagePayload{TaskID: target.task.TaskID, Message: content.String(), Parts: cloneContentParts(parts), RequestID: requestID, Kind: "follow_up"}})
+		return
+	}
+	if focused := target.sub; focused != nil {
 		if !a.withRegisteredSubAgent(focused, func(sub *SubAgent) bool {
 			if !a.reactivateFocusedSubAgentForManualInput(sub) {
 				return false
 			}
 			a.mailboxDeliveryPaused.Store(false)
-			return sub.InjectManualUserMessageWithParts(parts, a.drainOwnedSubAgentMailboxes(sub.instanceID))
+			return sub.InjectManualUserMessageWithParts(parts, requestID, a.drainOwnedSubAgentMailboxes(sub.instanceID))
 		}) {
-			a.emitToTUI(ToastEvent{Message: "Focused SubAgent is no longer available; retry the message", Level: "warn", AgentID: focused.instanceID})
+			a.rejectTargetedUserMessage(conversation, requestID, "Focused SubAgent is no longer available; retry the message")
 		}
 		return
 	}
-	if rec := a.focusedDurableTask(); rec != nil && !rec.RuntimeParked && isTerminalSubAgentState(SubAgentState(strings.TrimSpace(rec.State))) {
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s has finished; delegate it again to send it a follow-up", rec.TaskID), Level: "warn", AgentID: rec.LatestInstanceID})
-		return
-	}
-	if rec := a.focusedDurableTask(); rec != nil && rec.RuntimeParked {
+	if rec := target.task; target.parked && rec != nil {
 		sub, _, err := a.rehydrateTask(rec)
 		if err != nil {
-			a.emitToTUI(ToastEvent{Message: err.Error(), Level: "warn", AgentID: rec.LatestInstanceID})
+			a.rejectTargetedUserMessage(conversation, requestID, err.Error())
 			return
 		}
 		if !a.reactivateFocusedSubAgentForManualInput(sub) {
+			a.emitToTUI(SubAgentInputDeliveryEvent{AgentID: sub.instanceID, RequestID: requestID, Status: SubAgentInputDeliveryFailed})
 			return
 		}
 		if !a.enqueueRegisteredSubAgent(sub, func(current *SubAgent) bool {
 			a.mailboxDeliveryPaused.Store(false)
-			return current.InjectManualUserMessageWithParts(parts, a.drainOwnedSubAgentMailboxes(current.instanceID))
+			return current.InjectManualUserMessageWithParts(parts, requestID, a.drainOwnedSubAgentMailboxes(current.instanceID))
 		}) {
-			a.emitToTUI(ToastEvent{Message: "Rehydrated SubAgent is no longer available; retry the message", Level: "warn", AgentID: sub.instanceID})
+			a.rejectTargetedUserMessage(conversation, requestID, "Rehydrated SubAgent is no longer available; retry the message")
 		}
 		return
 	}
-	a.sendSessionInput(content.String(), parts, "")
+	a.sendSessionInput(content.String(), parts, requestID)
+}
+
+func (a *MainAgent) rejectTargetedUserMessage(target ConversationTarget, requestID, reason string) {
+	a.emitToTUI(ToastEvent{Message: reason, Level: "warn", AgentID: target.AgentID})
+	a.emitToTUI(SubAgentInputDeliveryEvent{AgentID: target.AgentID, RequestID: requestID, Status: SubAgentInputDeliveryFailed})
 }
 
 // QueueSubAgentDraft mirrors a busy local TUI draft into the agent's

@@ -100,12 +100,15 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 	requestMessages := make([]message.Message, 0, len(messages)+len(consumed))
 	requestMessages = append(requestMessages, messages[:insertionAt]...)
 	for _, item := range consumed {
+		item.msg = a.normalizeUserAttachments(item.msg)
 		a.ctxMgr.Append(item.msg)
 		requestMessages = append(requestMessages, item.msg)
 		a.recordEvidenceFromMessage(item.msg)
+		msgIndex := a.ctxMgr.MessageCount() - 1
 		if a.recoveryManager() != nil {
 			a.persistAsync(identity.MainAgentID, item.msg)
 		}
+		a.emitUserMessageCommitted(item.msg, msgIndex, "")
 		a.emitPendingDraftConsumed(item.draftID, item.msg)
 		// The pair must ride this request too: the slice was built before the
 		// consume loop, so appending only to ctxMgr would leave the model
@@ -328,15 +331,37 @@ func (a *MainAgent) normalizeUserAttachments(msg message.Message) message.Messag
 	return msg
 }
 
-func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
+func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) message.Message {
 	userMsg = a.normalizeUserAttachments(userMsg)
 	a.recordCommittedUserMessageInMemory(userMsg)
+	msgIndex := a.ctxMgr.MessageCount() - 1
 	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, userMsg)
 	}
+	a.emitUserMessageCommitted(userMsg, msgIndex, "")
 	// An explicit `/skill <name> [args]` load commits the user's line and then
 	// the skill pair, so the model sees the skill instructions in the same turn.
 	a.appendUserSkillInvocation(userMsg)
+	return userMsg
+}
+
+// emitUserMessageCommitted lets the TUI replace its live inline attachment
+// copies with the durable session paths, or release dropped input attachments.
+func (a *MainAgent) emitUserMessageCommitted(msg message.Message, msgIndex int, agentID string) {
+	if msgIndex < 0 {
+		return
+	}
+	hasBinary := false
+	for _, part := range msg.Parts {
+		if part.IsBinary() {
+			hasBinary = true
+			break
+		}
+	}
+	if !hasBinary && msg.InputRequestID == "" {
+		return
+	}
+	a.emitToTUI(UserMessageCommittedEvent{AgentID: agentID, RequestID: msg.InputRequestID, MessageIndex: msgIndex, Parts: messagePartsForTUI(msg)})
 }
 
 // recordCommittedUserMessageInMemory applies the local side effects of a user
@@ -361,7 +386,7 @@ func (a *MainAgent) pendingUserMessageToConversationMessage(p pendingUserMessage
 	}
 	outC, outP := a.expandSlashCommandForModel(content, p.Parts)
 	outC, outP = a.filterUnsupportedParts(outC, outP)
-	return message.Message{Role: message.RoleUser, InputID: p.InputID, Content: outC, Parts: outP, Kind: p.Kind}, true
+	return message.Message{Role: message.RoleUser, InputID: p.InputID, InputRequestID: p.RequestID, Content: outC, Parts: outP, Kind: p.Kind}, true
 }
 
 func messagePartsForTUI(msg message.Message) []message.ContentPart {
@@ -416,8 +441,8 @@ func (a *MainAgent) commitPendingUserMessagesWithoutTurn() {
 		if !ok {
 			continue
 		}
-		a.recordCommittedUserMessage(userMsg)
-		a.emitPendingDraftConsumed(p.DraftID, userMsg)
+		committedMsg := a.recordCommittedUserMessage(userMsg)
+		a.emitPendingDraftConsumed(p.DraftID, committedMsg)
 		committed++
 	}
 	if len(deferred) > 0 {
@@ -938,8 +963,8 @@ func (a *MainAgent) drainPendingUserMessages() {
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx
 	for _, item := range consumed {
-		a.recordCommittedUserMessage(item.msg)
-		a.emitPendingDraftConsumed(item.draftID, item.msg)
+		committed := a.recordCommittedUserMessage(item.msg)
+		a.emitPendingDraftConsumed(item.draftID, committed)
 	}
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }
@@ -960,8 +985,8 @@ func (a *MainAgent) closeCoveredPendingUserMessagesAsCancelled(pending []pending
 		if !ok {
 			continue
 		}
-		a.recordCommittedUserMessage(userMsg)
-		a.emitPendingDraftConsumed(p.DraftID, userMsg)
+		committedMsg := a.recordCommittedUserMessage(userMsg)
+		a.emitPendingDraftConsumed(p.DraftID, committedMsg)
 	}
 	log.Infof("queued user messages cancelled before their turn count=%v turn_id=%v", len(pending), turnID)
 	a.handleTurnCancelled(a.abortTurn(a.turn, true))

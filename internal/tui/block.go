@@ -215,6 +215,8 @@ type Block struct {
 	// list. Set for transcript-backed blocks; -1 for dynamically appended blocks
 	// whose source message is not yet known.
 	MsgIndex int
+	// InputRequestID links an optimistic user card to its committed submission.
+	InputRequestID string
 
 	// ThinkingBlockIndex identifies which thinking block within an assistant
 	// message this card represents. It is meaningful only for thinking blocks.
