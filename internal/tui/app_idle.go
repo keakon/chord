@@ -149,6 +149,9 @@ func (m *Model) performIdleSweep() {
 	// Drop render caches for off-screen blocks, including the derived Markdown
 	// and highlighter state that only a foreground sweep keeps.
 	m.viewport.DropOffScreenCaches()
+	// The deferred startup archive lives outside the viewport, so its previously
+	// visited windows need their own sweep.
+	m.dropStartupDeferredTranscriptHiddenCaches()
 
 	// Shrink hot budget for aggressive spill.
 	cadence := m.currentCadence()

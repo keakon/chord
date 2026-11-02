@@ -59,6 +59,26 @@ func (m *Model) maybeEnforceStartupDeferredTranscriptRetention() {
 	m.viewport.enforceHotBudget()
 }
 
+// dropStartupDeferredTranscriptHiddenCaches releases rebuildable render caches
+// for archive blocks outside the active window and its preheat halo. The
+// window and halo stay warm for scrolling; previously visited windows no longer
+// keep rendered Markdown alive. Block structure and the per-width line counts
+// in blockMeta are preserved.
+func (m *Model) dropStartupDeferredTranscriptHiddenCaches() {
+	state := m.startupDeferredTranscript
+	if state == nil || len(state.allBlocks) == 0 {
+		return
+	}
+	keepStart := max(state.windowStart-startupDeferredTranscriptPreheatHalo, 0)
+	keepEnd := min(state.windowEnd+startupDeferredTranscriptPreheatHalo, len(state.allBlocks))
+	for i, block := range state.allBlocks {
+		if i >= keepStart && i < keepEnd {
+			continue
+		}
+		block.ReleaseDerivedRenderCaches()
+	}
+}
+
 func (m *Model) logStartupDeferredTranscriptRetention(state *startupDeferredTranscriptState, blocks int) {
 	if state == nil || m.viewport == nil {
 		return
