@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 func TestPersistencePumpCloseBoundsAdmissionWait(t *testing.T) {
@@ -66,5 +71,38 @@ func TestPersistencePumpStopPreservesAcceptedWriteOrder(t *testing.T) {
 	}
 	if len(handled) != 2 || handled[0] != "first" || handled[1] != "second" {
 		t.Fatalf("accepted write order changed: %v", handled)
+	}
+}
+
+func TestPersistencePumpFailureBacklogCap(t *testing.T) {
+	pump := newPersistencePump(1)
+	manager := &recovery.RecoveryManager{}
+	other := &recovery.RecoveryManager{}
+	for range maxRetainedPersistFailures + 6 {
+		pump.rememberFailure(persistEntry{recovery: manager, agentID: "main", msg: message.Message{Content: "payload"}}, errors.New("disk full"))
+	}
+	pump.rememberFailure(persistEntry{recovery: other}, errors.New("other session failure"))
+
+	pump.failureMu.Lock()
+	retained := len(pump.failures)
+	dropped := pump.droppedFailures
+	pump.failureMu.Unlock()
+	// 70 manager failures plus 1 from another session: 7 entries were evicted
+	// from the 64-slot backlog.
+	if retained != maxRetainedPersistFailures || dropped != 7 {
+		t.Fatalf("backlog = %d (cap %d), dropped = %d, want %d/7", retained, maxRetainedPersistFailures, dropped, maxRetainedPersistFailures)
+	}
+
+	err := pump.strictError(manager)
+	if err == nil || !strings.Contains(err.Error(), "7 earlier persistence failures were dropped") {
+		t.Fatalf("strict error should report the evicted entries, got %v", err)
+	}
+	// A session with no retained failures stays clean even though the global
+	// backlog evicted entries from other sessions.
+	if err := pump.strictError(&recovery.RecoveryManager{}); err != nil {
+		t.Fatalf("healthy manager should have no strict error, got %v", err)
+	}
+	if !pump.managerFailed(manager) || pump.managerFailed(&recovery.RecoveryManager{}) {
+		t.Fatal("managerFailed should reflect only retained failures")
 	}
 }

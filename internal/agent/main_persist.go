@@ -30,17 +30,25 @@ type persistEntry struct {
 // The handler supplies per-entry writes and barriers; MainAgent owns shutdown
 // gating and tool-trace timing.
 type persistencePump struct {
-	ch            chan persistEntry
-	done          chan struct{}
-	admission     chan struct{}
-	stopping      chan struct{}
-	stopOnce      sync.Once
-	closed        chan struct{}
-	loopOnce      sync.Once
-	failureMu     sync.Mutex
-	failures      []persistFailure
-	pauseCloseErr error
+	ch              chan persistEntry
+	done            chan struct{}
+	admission       chan struct{}
+	stopping        chan struct{}
+	stopOnce        sync.Once
+	closed          chan struct{}
+	loopOnce        sync.Once
+	failureMu       sync.Mutex
+	failures        []persistFailure
+	droppedFailures int // entries evicted from the backlog cap; their outcomes stay unknown
+	pauseCloseErr   error
 }
+
+// maxRetainedPersistFailures bounds the failure backlog. It is a retry and
+// reporting ledger, not an archive: the transcript lives in the message store
+// and a checkpoint rewrite rebuilds it, so evicting the oldest entries only
+// downgrades their outcome from retriable to unknown — which strictError
+// keeps reporting instead of silently forgetting.
+const maxRetainedPersistFailures = 64
 
 type persistFailure struct {
 	entry persistEntry
@@ -53,6 +61,16 @@ func (p *persistencePump) rememberFailure(entry persistEntry, err error) {
 	}
 	p.failureMu.Lock()
 	p.failures = append(p.failures, persistFailure{entry, err})
+	if excess := len(p.failures) - maxRetainedPersistFailures; excess > 0 {
+		copy(p.failures, p.failures[excess:])
+		tail := p.failures[len(p.failures)-excess:]
+		for i := range tail {
+			// Release the retained message copies; they can be large.
+			tail[i] = persistFailure{}
+		}
+		p.failures = p.failures[:maxRetainedPersistFailures]
+		p.droppedFailures += excess
+	}
 	p.failureMu.Unlock()
 }
 
@@ -63,10 +81,15 @@ func (p *persistencePump) strictError(manager *recovery.RecoveryManager) error {
 	p.failureMu.Lock()
 	defer p.failureMu.Unlock()
 	var errs []error
+	found := false
 	for _, failure := range p.failures {
 		if failure.entry.recovery == nil || failure.entry.recovery == manager {
 			errs = append(errs, failure.err)
+			found = true
 		}
+	}
+	if found && p.droppedFailures > 0 {
+		errs = append(errs, fmt.Errorf("%d earlier persistence failures were dropped from the backlog and their outcomes are unknown", p.droppedFailures))
 	}
 	return errors.Join(errs...)
 }
