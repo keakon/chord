@@ -43,61 +43,70 @@ func TestPartDigestMemoDoesNotPinPayloads(t *testing.T) {
 
 // evictLocked bounds the cache by both entry count and resident bytes. A
 // replacement must recalculate one entry's bytes instead of double-counting
-// the previous value, and the most recent oversized entry stays.
+// the previous value.
 func TestImageLRUCacheKeepsBounds(t *testing.T) {
 	c := newImageLRUCache(2, 16)
-	c.insert("a", strings.Repeat("x", 8))
+	c.insert("a", strings.Repeat("x", 8), 0)
 	if c.bytes != 9 || c.order.Len() != 1 {
 		t.Fatalf("after insert bytes=%d len=%d, want 9/1", c.bytes, c.order.Len())
 	}
-	c.insert("a", strings.Repeat("y", 4))
-	if got, ok := c.get("a"); !ok || got != strings.Repeat("y", 4) {
+	c.insert("a", strings.Repeat("y", 4), 0)
+	if got, _, ok := c.get("a"); !ok || got != strings.Repeat("y", 4) {
 		t.Fatalf("same key replaced to %q ok=%v", got, ok)
 	}
 	if c.bytes != 5 || c.order.Len() != 1 {
 		t.Fatalf("replacement bytes=%d len=%d, want 5/1", c.bytes, c.order.Len())
 	}
-	c.insert("b", strings.Repeat("z", 10))
+	c.insert("b", strings.Repeat("z", 10), 0)
 	if c.bytes != 16 || c.order.Len() != 2 {
 		t.Fatalf("second insert bytes=%d len=%d, want 16/2", c.bytes, c.order.Len())
 	}
-	c.insert("c", strings.Repeat("d", 2))
-	if _, ok := c.get("a"); ok {
+	c.insert("c", strings.Repeat("d", 2), 0)
+	if _, _, ok := c.get("a"); ok {
 		t.Fatal("byte budget did not evict the oldest entry")
 	}
 }
 
 func TestImageLRUCacheKeepsAHitEntry(t *testing.T) {
 	c := newImageLRUCache(2, 32)
-	c.insert("a", "1")
-	c.insert("b", "2")
-	if got, ok := c.get("a"); !ok || got != "1" {
+	c.insert("a", "1", 0)
+	c.insert("b", "2", 0)
+	if got, _, ok := c.get("a"); !ok || got != "1" {
 		t.Fatalf("hit on a returned %q ok=%v", got, ok)
 	}
-	c.insert("c", strings.Repeat("3", 8))
-	if _, ok := c.get("b"); ok {
+	c.insert("c", strings.Repeat("3", 8), 0)
+	if _, _, ok := c.get("b"); ok {
 		t.Fatal("a hit must move its entry to the recent end before eviction")
 	}
 }
 
-func TestImageLRUCacheKeepsLastOversizedEntry(t *testing.T) {
+func TestImageLRUCacheBypassesOversizedEntry(t *testing.T) {
 	c := newImageLRUCache(4, 8)
-	c.insert("tiny", "x")
-	c.insert("huge", strings.Repeat("x", 40))
-	if got, ok := c.get("huge"); !ok || got == "" {
-		t.Fatal("the most recent oversized entry was evicted")
+	c.insert("tiny", "x", 0)
+	c.insert("huge", strings.Repeat("x", 40), 0)
+	if _, _, ok := c.get("huge"); ok {
+		t.Fatal("the oversized entry was cached")
 	}
-	if _, ok := c.get("tiny"); ok {
-		t.Fatal("the oversized entry did not evict older entries")
+	if got, _, ok := c.get("tiny"); !ok || got != "x" {
+		t.Fatal("bypassing an oversized entry evicted an existing entry")
+	}
+	if c.bytes != 5 || c.order.Len() != 1 {
+		t.Fatalf("after oversized insert bytes=%d len=%d, want 5/1", c.bytes, c.order.Len())
 	}
 }
 
 func TestBinaryPartDataURLDoesNotDuplicateCachedEncoding(t *testing.T) {
-	restoreImageCache := imageCache
-	restoreURLCache := imageDataURLCache
-	t.Cleanup(func() { imageCache = restoreImageCache; imageDataURLCache = restoreURLCache })
-	imageCache = newImageLRUCache(4, 1<<20)
-	imageDataURLCache = newImageLRUCache(4, 1<<20)
+	previous := imageEncodingCache
+	c := newImageLRUCache(4, 1<<20)
+	imageEncodingCache = c
+	t.Cleanup(func() {
+		c.mu.Lock()
+		if c.idleTimer != nil {
+			c.idleTimer.Stop()
+		}
+		c.mu.Unlock()
+		imageEncodingCache = previous
+	})
 
 	data := []byte("image-bytes-2")
 	digest := Digest(data)
@@ -106,13 +115,10 @@ func TestBinaryPartDataURLDoesNotDuplicateCachedEncoding(t *testing.T) {
 	if first != second {
 		t.Fatalf("same payload encoded differently: %q vs %q", first, second)
 	}
-	if imageCache.order.Len() != 0 {
-		t.Fatalf("url path inserted a second encoding: entries=%d, want 0", imageCache.order.Len())
+	if c.order.Len() != 1 {
+		t.Fatalf("encoding cache entries=%d, want 1", c.order.Len())
 	}
-	if imageDataURLCache.order.Len() != 1 {
-		t.Fatalf("url cache entries=%d, want 1", imageDataURLCache.order.Len())
-	}
-	if got, ok := imageDataURLCache.get(digest + "\x00" + "image/png"); !ok || got != first {
+	if got, _, ok := c.get(digest); !ok || got != first {
 		t.Fatalf("url cache miss or wrong value %q ok=%v", got, ok)
 	}
 }

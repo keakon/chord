@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"sync"
 	"sync/atomic"
+	"time"
 	"weak"
 )
 
@@ -17,17 +18,20 @@ import (
 // images, so a count-only cap says nothing about memory — 64 multi-MB images
 // is hundreds of MB.
 type imageLRUCache struct {
-	mu       sync.Mutex
-	capacity int
-	budget   int64
-	bytes    int64
-	order    *list.List               // front = least recently used
-	m        map[string]*list.Element // key → element holding lruEntry
+	mu        sync.Mutex
+	capacity  int
+	budget    int64
+	bytes     int64
+	order     *list.List               // front = least recently used
+	m         map[string]*list.Element // key → element holding lruEntry
+	idleTimer *time.Timer
 }
 
 type lruEntry struct {
-	key   string
-	value string
+	key          string
+	value        string
+	base64Offset int
+	lastUse      time.Time
 }
 
 func newImageLRUCache(capacity int, budget int64) *imageLRUCache {
@@ -45,17 +49,24 @@ func entryBytes(e *lruEntry) int64 {
 	return int64(len(e.key)) + int64(len(e.value))
 }
 
-func (c *imageLRUCache) get(key string) (string, bool) {
+func (c *imageLRUCache) get(key string) (string, int, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if elem, ok := c.m[key]; ok {
 		c.order.MoveToBack(elem)
-		return elem.Value.(*lruEntry).value, true
+		entry := elem.Value.(*lruEntry)
+		entry.lastUse = time.Now()
+		return entry.value, entry.base64Offset, true
 	}
-	return "", false
+	return "", 0, false
 }
 
-func (c *imageLRUCache) insert(key, value string) {
+func (c *imageLRUCache) insert(key, value string, base64Offset int) {
+	if int64(len(key))+int64(len(value)) > c.budget {
+		// Large documents are returned uncached: repeated encoding costs CPU,
+		// but retaining one must not exceed the entire resident cache budget.
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if elem, ok := c.m[key]; ok {
@@ -63,22 +74,23 @@ func (c *imageLRUCache) insert(key, value string) {
 		entry := elem.Value.(*lruEntry)
 		c.bytes -= entryBytes(entry)
 		entry.value = value
+		entry.base64Offset = base64Offset
+		entry.lastUse = time.Now()
 		c.bytes += entryBytes(entry)
 		c.evictLocked()
+		c.scheduleIdleReleaseLocked()
 		return
 	}
-	entry := &lruEntry{key: key, value: value}
+	entry := &lruEntry{key: key, value: value, base64Offset: base64Offset, lastUse: time.Now()}
 	c.m[key] = c.order.PushBack(entry)
 	c.bytes += entryBytes(entry)
 	c.evictLocked()
+	c.scheduleIdleReleaseLocked()
 }
 
-// evictLocked drops least-recently-used entries until both bounds hold. The
-// most recent insert is always kept, even when it alone exceeds the budget:
-// evicting it would make the cache a pure cost for the one image the caller is
-// currently converting.
+// evictLocked drops least-recently-used entries until both bounds hold.
 func (c *imageLRUCache) evictLocked() {
-	for c.order.Len() > 1 && (c.order.Len() > c.capacity || c.bytes > c.budget) {
+	for c.order.Len() > 0 && (c.order.Len() > c.capacity || c.bytes > c.budget) {
 		oldest := c.order.Front()
 		if oldest == nil {
 			return
@@ -90,19 +102,12 @@ func (c *imageLRUCache) evictLocked() {
 	}
 }
 
-// imageEncodingCacheBudget is the resident-byte budget of each encoding cache.
-// The two together match the 64 MiB the attachment read cache and the TUI image
-// cache each hold, so the wire layer's share of a session's image memory stays
-// comparable to theirs.
+// Both wires share one budget and one backing string per payload. A base64
+// result can borrow the suffix of a cached data URL instead of retaining a
+// second complete encoding.
 const imageEncodingCacheBudget = 32 << 20
 
-// imageCache is a package-level LRU cache for base64-encoded images.
-// Capacity of 64 entries is sufficient for typical conversation contexts.
-var imageCache = newImageLRUCache(64, imageEncodingCacheBudget)
-
-// imageDataURLCache caches the fully assembled data URL (media type included)
-// so per-request wire conversion stops re-copying multi-MB base64 strings.
-var imageDataURLCache = newImageLRUCache(64, imageEncodingCacheBudget)
+var imageEncodingCache = newImageLRUCache(64, imageEncodingCacheBudget)
 
 // partDigestMemo memoizes the SHA-256 digest per inline payload identity. The
 // same message slices are re-encoded on every request and every fallback
@@ -159,43 +164,49 @@ func Digest(data []byte) string {
 func EncodeBase64(data []byte) string {
 	key := Digest(data)
 
-	if encoded, ok := imageCache.get(key); ok {
-		return encoded
+	if value, offset, ok := imageEncodingCache.get(key); ok {
+		return value[offset:]
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
-	imageCache.insert(key, encoded)
+	imageEncodingCache.insert(key, encoded, 0)
 	return encoded
 }
 
 // DataURL assembles and caches the "data:<mime>;base64," URL the
 // OpenAI-family wires embed per image part. The concatenation copies the
-// whole multi-MB base64 string, so it is cached alongside the encoding.
+// whole multi-MB base64 string, so the URL replaces any standalone encoding.
 func DataURL(mimeType string, data []byte) string {
 	digest := Digest(data)
-	key := digest + "\x00" + mimeType
-	if url, ok := imageDataURLCache.get(key); ok {
-		return url
+	prefix := "data:" + mimeType + ";base64,"
+	value, offset, ok := imageEncodingCache.get(digest)
+	if ok && offset == len(prefix) && value[:offset] == prefix {
+		return value
 	}
-	// Reuse an encoding the Anthropic or Gemini wire already cached, but do not
-	// add one: the URL assembled below embeds the whole base64 string, so
-	// caching both would keep two copies of every image resident for the wires
-	// that only ever ask for the URL.
-	encoded, ok := imageCache.get(digest)
+	encoded := value[offset:]
 	if !ok {
 		encoded = base64.StdEncoding.EncodeToString(data)
 	}
-	url := "data:" + mimeType + ";base64," + encoded
-	imageDataURLCache.insert(key, url)
+	url := prefix + encoded
+	imageEncodingCache.insert(digest, url, len(prefix))
 	return url
 }
 
-// ResidentBytes reports the bytes currently held by the two process-wide image
-// encoding caches. Diagnostics only: it takes each cache lock briefly, so it
-// must not run on a per-request path.
+// ResidentBytes reports standalone base64 and data URL backing strings held by
+// the process-wide encoding cache. Base64 views of URLs are counted only as
+// URLs. Diagnostics only: it must not run on a per-request path.
 func ResidentBytes() (encoded, dataURL int64) {
-	encoded = imageCache.residentBytes()
-	dataURL = imageDataURLCache.residentBytes()
+	c := imageEncodingCache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for elem := c.order.Front(); elem != nil; elem = elem.Next() {
+		entry := elem.Value.(*lruEntry)
+		if entry.base64Offset == 0 {
+			encoded += entryBytes(entry)
+		} else {
+			dataURL += entryBytes(entry)
+		}
+	}
 	return encoded, dataURL
 }
 

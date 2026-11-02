@@ -86,8 +86,8 @@ func NormalizeImageBytes(ctx context.Context, data []byte, declaredMime string) 
 // is only used for diagnostics in error messages.
 //
 // The processing order is fixed: content detection, size pre-check, pixel
-// budget, full decode, pass-through check, EXIF
-// orientation, scaling, encoding, output budget.
+// budget, verified pass-through or full decode, EXIF orientation, scaling,
+// encoding, output budget.
 // Inputs that are already a conforming PNG/JPEG are returned unchanged, which
 // makes normalization idempotent; anything else is decoded and re-encoded
 // exactly once.
@@ -126,6 +126,15 @@ func NormalizeImage(ctx context.Context, data []byte, declaredMime string) (out 
 		Height:         cfg.Height,
 	}
 	needsScale := cfg.Width > MaxImageEdge || cfg.Height > MaxImageEdge
+	passThrough := orientation == 1 && !needsScale && len(data) <= MaxImageBytes &&
+		(decoder.mimeType == "image/png" || decoder.mimeType == "image/jpeg")
+	if passThrough && HasVerifiedImage(data) {
+		if err := ctx.Err(); err != nil {
+			return NormalizedImage{}, err
+		}
+		out.Data, out.MimeType = data, decoder.mimeType
+		return out, nil
+	}
 
 	// Only the pixel-heavy work is bounded: several independent entry points
 	// (a read-only tool batch can carry many view_image calls, MCP can return
@@ -154,8 +163,7 @@ func NormalizeImage(ctx context.Context, data []byte, declaredMime string) (out 
 	if decoder.mimeType == "image/png" || decoder.mimeType == "image/jpeg" {
 		rememberVerifiedImage(sha256.Sum256(data))
 	}
-	if orientation == 1 && !needsScale && len(data) <= MaxImageBytes &&
-		(decoder.mimeType == "image/png" || decoder.mimeType == "image/jpeg") {
+	if passThrough {
 		out.Data, out.MimeType = data, decoder.mimeType
 		return out, nil
 	}

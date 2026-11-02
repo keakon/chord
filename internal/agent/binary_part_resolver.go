@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/llm"
@@ -16,9 +17,10 @@ import (
 // inseparable value: the MIME type must always describe the cached bytes,
 // because normalization rewrites both together.
 type binaryPartCacheEntry struct {
-	path string
-	data []byte
-	mime string
+	path    string
+	data    []byte
+	mime    string
+	lastUse time.Time
 }
 
 // binaryPartReadCache is a bounded LRU of lazily resolved attachment payloads,
@@ -32,11 +34,12 @@ type binaryPartCacheEntry struct {
 // than by byte budget: a session with many small attachments accumulates
 // entries far past what a per-request scan should pay for.
 type binaryPartReadCache struct {
-	mu      sync.Mutex
-	entries map[string]*list.Element // path → element holding *binaryPartCacheEntry
-	order   *list.List               // front = least recently used
-	bytes   int64
-	budget  int64
+	mu        sync.Mutex
+	entries   map[string]*list.Element // path → element holding *binaryPartCacheEntry
+	order     *list.List               // front = least recently used
+	bytes     int64
+	budget    int64
+	idleTimer *time.Timer
 }
 
 const binaryPartReadCacheBudget = 64 << 20 // 64 MiB
@@ -57,7 +60,9 @@ func (c *binaryPartReadCache) get(path string) (*binaryPartCacheEntry, bool) {
 		return nil, false
 	}
 	c.order.MoveToBack(elem)
-	return elem.Value.(*binaryPartCacheEntry), true
+	entry := elem.Value.(*binaryPartCacheEntry)
+	entry.lastUse = time.Now()
+	return entry, true
 }
 
 func (c *binaryPartReadCache) put(entry *binaryPartCacheEntry) {
@@ -65,6 +70,7 @@ func (c *binaryPartReadCache) put(entry *binaryPartCacheEntry) {
 	defer c.mu.Unlock()
 	if elem, ok := c.entries[entry.path]; ok {
 		c.order.MoveToBack(elem)
+		elem.Value.(*binaryPartCacheEntry).lastUse = time.Now()
 		return
 	}
 	if int64(len(entry.data)) > c.budget {
@@ -79,6 +85,8 @@ func (c *binaryPartReadCache) put(entry *binaryPartCacheEntry) {
 	}
 	c.entries[entry.path] = c.order.PushBack(entry)
 	c.bytes += int64(len(entry.data))
+	entry.lastUse = time.Now()
+	c.scheduleIdleReleaseLocked()
 }
 
 // residentBytes reports the bytes currently held by the read cache. Diagnostics

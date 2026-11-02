@@ -3,6 +3,7 @@ package imageutil
 import (
 	"bytes"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"testing"
 )
@@ -27,5 +28,34 @@ func BenchmarkNormalizeLargeImage(b *testing.B) {
 		if _, err := NormalizeImage(b.Context(), data, "image/png"); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkNormalizeVerifiedImage(b *testing.B) {
+	for _, format := range []string{"png", "jpeg"} {
+		b.Run(format, func(b *testing.B) {
+			img := image.NewNRGBA(image.Rect(0, 0, MaxImageEdge, MaxImageEdge))
+			var buf bytes.Buffer
+			var err error
+			if format == "png" {
+				err = png.Encode(&buf, img)
+			} else {
+				err = jpeg.Encode(&buf, img, nil)
+			}
+			if err != nil {
+				b.Fatal(err)
+			}
+			data := buf.Bytes()
+			if _, err := NormalizeImage(b.Context(), data, "image/"+format); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := NormalizeImage(b.Context(), data, "image/"+format); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

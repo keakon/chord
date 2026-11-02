@@ -3,15 +3,17 @@ package llm
 import (
 	"container/list"
 	"sync"
+	"time"
 )
 
 // wireImage is the validated, provider-ready form of one image part. The bytes
 // and the MIME type are one inseparable value: the MIME type always describes
 // the cached bytes, which is how normalization rewrites them together.
 type wireImage struct {
-	key  string
-	data []byte
-	mime string
+	key     string
+	data    []byte
+	mime    string
+	lastUse time.Time
 }
 
 // wireImageCache memoizes normalized image payloads keyed by the digest of the
@@ -22,12 +24,13 @@ type wireImage struct {
 // not re-decoded on every request either. Transient I/O failures never reach
 // this cache: they surface as resolver errors before normalization runs.
 type wireImageCache struct {
-	mu      sync.Mutex
-	entries map[string]*list.Element // digest → element holding *wireImage
-	order   *list.List               // front = least recently used
-	failed  map[string]struct{}      // digest → deterministic normalization failure
-	bytes   int64
-	budget  int64
+	mu        sync.Mutex
+	entries   map[string]*list.Element // digest → element holding *wireImage
+	order     *list.List               // front = least recently used
+	failed    map[string]struct{}      // digest → deterministic normalization failure
+	bytes     int64
+	budget    int64
+	idleTimer *time.Timer
 }
 
 const (
@@ -54,7 +57,9 @@ func (c *wireImageCache) get(key string) (*wireImage, bool) {
 		return nil, false
 	}
 	c.order.MoveToBack(elem)
-	return elem.Value.(*wireImage), true
+	entry := elem.Value.(*wireImage)
+	entry.lastUse = time.Now()
+	return entry, true
 }
 
 func (c *wireImageCache) isKnownFailure(key string) bool {
@@ -86,6 +91,7 @@ func (c *wireImageCache) put(key string, data []byte, mime string) {
 	defer c.mu.Unlock()
 	if _, ok := c.entries[key]; ok {
 		c.order.MoveToBack(c.entries[key])
+		c.entries[key].Value.(*wireImage).lastUse = time.Now()
 		return
 	}
 	if cost > c.budget {
@@ -100,6 +106,8 @@ func (c *wireImageCache) put(key string, data []byte, mime string) {
 	}
 	c.entries[key] = c.order.PushBack(entry)
 	c.bytes += cost
+	entry.lastUse = time.Now()
+	c.scheduleIdleReleaseLocked()
 }
 
 // residentBytes reports the bytes currently held by the cache. Diagnostics

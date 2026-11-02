@@ -378,9 +378,8 @@ func resolveResponsesReasoningFields(effort, summary string) (string, string) {
 }
 
 // responsesBuiltBody carries the build artifacts a CompleteStream call needs
-// alongside the marshaled body: the converted input items (the WebSocket
-// transport consumes them in struct form) and the request struct itself (its
-// ClientMetadata must agree with the bytes on the wire).
+// alongside the marshaled body. HTTP only retains ClientMetadata; the converted
+// input and full request struct are needed only by the WebSocket transport.
 type responsesBuiltBody struct {
 	fullInput []responsesInputItem
 	reqBody   responsesRequest
@@ -669,7 +668,11 @@ func (r *ResponsesProvider) CompleteStream(
 		if err != nil {
 			return nil, nil, err
 		}
-		return bodyBytes, responsesBuiltBody{fullInput: fullInput, reqBody: reqBody}, nil
+		built := responsesBuiltBody{reqBody: responsesRequest{ClientMetadata: reqBody.ClientMetadata}}
+		if wsEligible {
+			built.fullInput, built.reqBody = fullInput, reqBody
+		}
+		return bodyBytes, built, nil
 	}
 
 	var bodyBytes []byte

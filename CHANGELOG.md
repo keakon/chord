@@ -69,6 +69,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Sessions with long usage histories resume faster and use less CPU while recording usage. The usage shown in the session picker can lag briefly behind a running session; ending a session brings it up to date.
 
+- Re-sending PNG/JPEG images can reuse completed validation, reducing repeated decoding and its transient memory and CPU costs without changing image bytes or dimensions.
+
+- Image and PDF inputs are stored with the session so they remain available after the source file moves or disappears, without retaining inline copies in committed conversation cards.
+
 - Redrawing a long draft in the composer no longer repeats work on every frame.
 
 - The TUI uses less CPU while idle: frames with no visible change reuse the previous render.

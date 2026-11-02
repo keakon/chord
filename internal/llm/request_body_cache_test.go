@@ -4,10 +4,12 @@ import (
 	"bytes"
 	gziplib "compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -154,7 +156,7 @@ func TestResponsesHTTPReusesCompressedBody(t *testing.T) {
 		t.Helper()
 		if _, err := impl.CompleteStream(
 			context.Background(), "test-key", "sample-model", "sample system",
-			messages, nil, 1024, RequestTuning{}, nil,
+			messages, nil, 1024, RequestTuning{SessionKey: "sample-session"}, nil,
 		); err == nil {
 			t.Fatal("expected forced server error")
 		}
@@ -163,6 +165,24 @@ func TestResponsesHTTPReusesCompressedBody(t *testing.T) {
 	call()
 	if !impl.bodyReuse.compValid || len(impl.bodyReuse.compBytes) == 0 {
 		t.Fatal("first HTTP request did not memoize compressed body")
+	}
+	built := impl.bodyReuse.extra.(responsesBuiltBody)
+	if built.fullInput != nil {
+		t.Fatal("HTTP cache retained converted input")
+	}
+	metadata := built.reqBody.ClientMetadata
+	built.reqBody.ClientMetadata = nil
+	if !reflect.DeepEqual(built.reqBody, responsesRequest{}) {
+		t.Fatal("HTTP cache retained request fields other than client metadata")
+	}
+	var wire struct {
+		ClientMetadata map[string]string `json:"client_metadata"`
+	}
+	if err := json.Unmarshal(impl.bodyReuse.cached, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if len(metadata) == 0 || !reflect.DeepEqual(metadata, wire.ClientMetadata) {
+		t.Fatalf("cached metadata = %v, want wire metadata %v", metadata, wire.ClientMetadata)
 	}
 	firstCompressed := &impl.bodyReuse.compBytes[0]
 	call()
