@@ -6,9 +6,9 @@ set -euo pipefail
 # noise. Local runs intentionally keep the Go test cache enabled by default so
 # iterative verification stays fast. For strict CI-equivalent verification, run
 # CHORD_TEST_COUNT=1 scripts/check_ci_local.sh or set GITHUB_ACTIONS=true.
-# Optional package args limit the run, e.g. scripts/check_ci_local.sh ./cmd/chord;
-# a focused run skips the whole-program deadcode gate that full runs add locally.
-# CI skips it too: the workflow gates every baseline in its own job.
+# Optional package args limit the run, e.g. scripts/check_ci_local.sh ./cmd/chord.
+# Whole-program reachability is not checked here; scripts/check_deadcode.sh owns
+# that gate, in make preflight, make ci, and the CI deadcode job.
 
 min_coverage="${MIN_COVERAGE:-80.0}"
 go_command="${CHORD_GO:-go}"
@@ -18,18 +18,8 @@ if [[ -z "${test_count}" && ("${GITHUB_ACTIONS:-}" == "true" || "${CHORD_CI_STRI
   test_count="1"
 fi
 packages=("$@")
-run_deadcode_gate=1
 if [[ ${#packages[@]} -eq 0 ]]; then
   packages=(./...)
-else
-  # A focused package set cannot evaluate whole-program reachability.
-  run_deadcode_gate=0
-fi
-# The workflow gates all three baselines in its own job. Repeating the host
-# platform pass here adds no coverage and turns one finding into two failed
-# jobs, so CI relies on that job alone.
-if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
-  run_deadcode_gate=0
 fi
 stdout_file="$(mktemp)"
 stderr_file="$(mktemp)"
@@ -128,8 +118,4 @@ else
   printf '%s\n' "${package_coverage}" >&2
   echo "coverage check failed: total ${total_coverage}% < required ${min_coverage}%" >&2
   exit 1
-fi
-
-if [[ "${run_deadcode_gate}" -eq 1 ]]; then
-  "$(dirname "${BASH_SOURCE[0]}")/check_deadcode.sh"
 fi

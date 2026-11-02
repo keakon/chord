@@ -24,8 +24,9 @@ MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/moder
 ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check resource-scripts-check
 
 # Same Go gates as .githooks/pre-push; docs checks stay in the hook because
-# they depend on the changed paths.
-preflight: fmt-check deps-check vet staticcheck gopls-check modernize-check test-fast resource-scripts-check
+# they depend on the changed paths. deadcode-check covers the host target only;
+# the other baselines stay in the CI deadcode job.
+preflight: fmt-check deps-check vet staticcheck gopls-check modernize-check deadcode-check test-fast resource-scripts-check
 
 # Release-style build: pure Go (no cgo), path-trimmed, and stripped.
 build:

@@ -37,7 +37,7 @@ This configures `core.hooksPath` to use `.githooks/` and ensures:
 
 - `pre-commit` rejects staged paths ignored by the staged repository rules
 - `pre-commit` automatically runs `goimports` and `gofmt` on staged `.go` files
-- `pre-push` runs `make preflight` (formatting, dependency, vet, staticcheck, gopls, modernize, and test gates) before pushing; its test gate goes through `make test-fast`, so it uses a memory-backed temp dir when one is available (see below)
+- `pre-push` runs `make preflight` (formatting, dependency, vet, staticcheck, gopls, modernize, deadcode, and test gates) before pushing; its test gate goes through `make test-fast`, so it uses a memory-backed temp dir when one is available (see below). Its deadcode gate covers the host target; the other baselines are checked by CI
 
 `pre-commit` refuses to format and re-stage a Go file that also has unstaged changes, because that would sweep hunks belonging to other work into the commit. When you deliberately want to commit only the staged hunks of such a file, pass the override on the command line for that one command:
 
@@ -153,7 +153,7 @@ TMPDIR=$(scripts/test_tmpdir.sh) make test-cover
 
 `make modernize-check` runs the pinned `golang.org/x/tools/go/analysis/passes/modernize` command across production and test code. Update `MODERNIZE_VERSION` in the Makefile deliberately when adopting a newer analyzer release; do not replace the pinned version with `@latest`, because new releases may add checks and fail the existing baseline.
 
-`make deadcode-check` compares the symbols that are unreachable from the production entry points against the baselines in `scripts/deadcode-baseline/`, one file per analyzed `GOOS/GOARCH`. CI checks every baseline — linux/amd64, windows/amd64, and darwin/arm64 — by pointing `GOOS`/`GOARCH` at each target from one runner; a local run analyzes the host platform unless the environment selects another. A new unreachable symbol fails the gate: remove it, or add it to the matching baseline in a dedicated commit with the platform and a reason. Removing symbols shrinks the baseline, so cleanup commits carry their own baseline updates.
+`make deadcode-check` compares the symbols that are unreachable from the production entry points against the baselines in `scripts/deadcode-baseline/`, one file per analyzed `GOOS/GOARCH`. CI checks every baseline — linux/amd64, windows/amd64, and darwin/arm64 — by pointing `GOOS`/`GOARCH` at each target from one runner; a local run analyzes the host platform unless the environment selects another. Reachability is a whole-program property, so the vet, staticcheck, and gopls gates stay silent on a symbol that only test code still references; `pre-push` runs this check for the host target, and `GOOS=windows GOARCH=amd64 make deadcode-check` covers another target. A new unreachable symbol fails the gate: remove it, or add it to the matching baseline in a dedicated commit with the platform and a reason. Removing symbols shrinks the baseline, so cleanup commits carry their own baseline updates.
 
 `make race-fast` is the local default. It delegates to
 `scripts/check_ci_race.sh`, the same entry point used by GitHub Actions, and
