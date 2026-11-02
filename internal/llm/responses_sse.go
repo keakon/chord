@@ -1456,43 +1456,25 @@ func parseResponsesEvent(data []byte, eventTypeFromLine string, diag *responsesS
 }
 
 func logResponsesSSEDecodeFailure(reader io.Reader, chunkIndex int, eventType string, data []byte, err error) {
-	attrs := []any{
-		"event_type", eventType,
-		"chunk_index", chunkIndex,
-		"data_len", len(data),
-		"data_tail", quoteASCIIBytesTail(data, 96),
-		"data_tail_hex", hexBytesTail(data, 48),
-		"error", err,
-	}
-	if diag, ok := reader.(chunkTimeoutDiagnostics); ok {
-		snap := diag.chunkTimeoutSnapshot()
-		attrs = append(attrs,
-			"chunk_timeout", snap.Timeout,
-			"timed_out", snap.TimedOut,
-			"timeout_read_returned", snap.TimeoutReadReturned,
-			"timeout_read_bytes", snap.TimeoutReadBytes,
-			"last_read_bytes", snap.LastReadBytes,
-			"last_read_err", snap.LastReadErr,
-			"total_bytes", snap.TotalBytes,
-		)
-		if !snap.LastByteAt.IsZero() {
-			attrs = append(attrs, "since_last_byte_ms", time.Since(snap.LastByteAt).Milliseconds())
-		}
-		if !snap.TimeoutFiredAt.IsZero() {
-			attrs = append(attrs, "since_timeout_ms", time.Since(snap.TimeoutFiredAt).Milliseconds())
-		}
-	}
+	attrs := append(responsesSSEDiagAttrs(reader, chunkIndex, eventType, data), "error", err)
 	log.Warnf("responses: failed to decode SSE payload %v", attrs)
 }
 
 func logResponsesSSETruncatedEvent(reader io.Reader, chunkIndex int, eventType string, data []byte, readErr error) {
+	attrs := append(responsesSSEDiagAttrs(reader, chunkIndex, eventType, data), "read_error", readErr)
+	log.Warnf("responses: SSE event ended before delimiter %v", attrs)
+}
+
+// responsesSSEDiagAttrs builds the diagnostic attributes shared by the decode
+// failure and truncated-event log paths, appending chunk-timeout observations
+// when the reader exposes them.
+func responsesSSEDiagAttrs(reader io.Reader, chunkIndex int, eventType string, data []byte) []any {
 	attrs := []any{
 		"event_type", eventType,
 		"chunk_index", chunkIndex,
 		"data_len", len(data),
 		"data_tail", quoteASCIIBytesTail(data, 96),
 		"data_tail_hex", hexBytesTail(data, 48),
-		"read_error", readErr,
 	}
 	if diag, ok := reader.(chunkTimeoutDiagnostics); ok {
 		snap := diag.chunkTimeoutSnapshot()
@@ -1512,7 +1494,7 @@ func logResponsesSSETruncatedEvent(reader io.Reader, chunkIndex int, eventType s
 			attrs = append(attrs, "since_timeout_ms", time.Since(snap.TimeoutFiredAt).Milliseconds())
 		}
 	}
-	log.Warnf("responses: SSE event ended before delimiter %v", attrs)
+	return attrs
 }
 
 func quoteASCIIBytesTail(data []byte, limit int) string {

@@ -136,6 +136,74 @@ type contentBlock struct {
 	hostedCall int
 }
 
+// appendAnthropicStreamBlock folds a finished content block into the response
+// and emits its end delta. It is shared by the content_block_stop event and
+// the EOF cleanup: the only behavioral difference is that an EOF tool_use
+// block is discarded when the response was truncated mid-arguments.
+// Redacted_thinking blocks carry their payload whole, so folding one at EOF
+// is the same operation as folding it at content_block_stop.
+func appendAnthropicStreamBlock(resp *message.Response, block *contentBlock, truncated bool, cb StreamCallback) {
+	switch block.blockType {
+	case message.StreamDeltaText:
+		text := block.text.String()
+		if text != "" {
+			if resp.Content != "" {
+				resp.Content += "\n"
+			}
+			resp.Content += text
+		}
+	case "tool_use":
+		emitToolEnd := false
+		if truncated {
+			// Output was truncated; tool call arguments are incomplete.
+			log.Warnf("discarding truncated Anthropic tool call tool=%v id=%v partial_input=%v", block.toolName, block.toolID, block.toolInput.String())
+		} else if block.toolID == "" || block.toolName == "" {
+			log.Warnf("discarding Anthropic tool call with empty id or name tool=%v id=%v", block.toolName, block.toolID)
+		} else {
+			args := json.RawMessage(block.toolInput.String())
+			if len(args) == 0 {
+				args = json.RawMessage("{}")
+			}
+			// Validate the accumulated arguments — the stream may carry
+			// malformed JSON (rare but possible), or may have been
+			// interrupted mid-argument.
+			if !json.Valid(args) {
+				log.Warnf("Anthropic tool call has invalid JSON args, replacing with error object tool=%v id=%v raw_args=%v", block.toolName, block.toolID, string(args))
+				args = json.RawMessage(MalformedArgsSentinel)
+			}
+			resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
+				ID:   cloneLongLivedLLMString(block.toolID),
+				Name: cloneLongLivedLLMString(block.toolName),
+				Args: args,
+			})
+			emitToolEnd = true
+		}
+		if emitToolEnd && cb != nil {
+			cb(message.StreamDelta{
+				Type: message.StreamDeltaToolUseEnd,
+				ToolCall: &message.ToolCallDelta{
+					ID:   block.toolID,
+					Name: block.toolName,
+				},
+			})
+		}
+	case message.StreamDeltaThinking:
+		resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{
+			Thinking:  block.thinking.String(),
+			Signature: block.signature,
+		})
+		if cb != nil {
+			cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
+		}
+	case "redacted_thinking":
+		if block.redacted != "" {
+			resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{Data: block.redacted})
+		}
+	case anthropicServerToolUseBlock:
+		applyAnthropicHostedInput(resp, block.hostedCall, block.toolInput.String())
+	}
+}
+
 func applyAnthropicSSEUsage(dst *message.TokenUsage, usage sseUsage, adoptOnlyNonZero bool) {
 	dst.InputSemanticsKnown = true
 	dst.InputIncludesCacheRead = false
@@ -390,61 +458,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				if !ok {
 					continue
 				}
-				switch block.blockType {
-				case message.StreamDeltaText:
-					text := block.text.String()
-					if text != "" {
-						if resp.Content != "" {
-							resp.Content += "\n"
-						}
-						resp.Content += text
-					}
-				case "tool_use":
-					if block.toolID == "" || block.toolName == "" {
-						log.Warnf("discarding Anthropic tool call with empty id or name tool=%v id=%v", block.toolName, block.toolID)
-						break
-					}
-					tc := message.ToolCall{
-						ID:   cloneLongLivedLLMString(block.toolID),
-						Name: cloneLongLivedLLMString(block.toolName),
-						Args: json.RawMessage(block.toolInput.String()),
-					}
-					// Default to empty object if no input was received.
-					if len(tc.Args) == 0 {
-						tc.Args = json.RawMessage("{}")
-					}
-					// Validate that the accumulated arguments are valid JSON.
-					// Even in the normal content_block_stop path, the model
-					// could produce malformed JSON (rare but possible).
-					if !json.Valid(tc.Args) {
-						log.Warnf("Anthropic tool call has invalid JSON args at content_block_stop tool=%v id=%v raw_args=%v", block.toolName, block.toolID, string(tc.Args))
-						tc.Args = json.RawMessage(MalformedArgsSentinel)
-					}
-					resp.ToolCalls = append(resp.ToolCalls, tc)
-					if cb != nil {
-						cb(message.StreamDelta{
-							Type: message.StreamDeltaToolUseEnd,
-							ToolCall: &message.ToolCallDelta{
-								ID:   block.toolID,
-								Name: block.toolName,
-							},
-						})
-					}
-				case message.StreamDeltaThinking:
-					resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{
-						Thinking:  block.thinking.String(),
-						Signature: block.signature,
-					})
-					if cb != nil {
-						cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
-					}
-				case "redacted_thinking":
-					if block.redacted != "" {
-						resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{Data: block.redacted})
-					}
-				case anthropicServerToolUseBlock:
-					applyAnthropicHostedInput(&resp, block.hostedCall, block.toolInput.String())
-				}
+				appendAnthropicStreamBlock(&resp, block, false, cb)
 				delete(blocks, ev.Index)
 
 			case "message_delta":
@@ -507,13 +521,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 	truncated := resp.StopReason == "max_tokens"
 	for idx, block := range blocks {
 		if block.blockType == message.StreamDeltaText {
-			text := block.text.String()
-			if text != "" {
-				if resp.Content != "" {
-					resp.Content += "\n"
-				}
-				resp.Content += text
-			}
+			appendAnthropicStreamBlock(&resp, block, truncated, cb)
 			delete(blocks, idx)
 		}
 	}
@@ -535,51 +543,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 	}
 
 	for idx, block := range blocks {
-		switch block.blockType {
-		case "tool_use":
-			emitToolEnd := false
-			if truncated {
-				// Output was truncated; tool call arguments are incomplete.
-				log.Warnf("discarding truncated Anthropic tool call tool=%v id=%v partial_input=%v", block.toolName, block.toolID, block.toolInput.String())
-			} else if block.toolID == "" || block.toolName == "" {
-				log.Warnf("discarding Anthropic tool call with empty id or name tool=%v id=%v", block.toolName, block.toolID)
-			} else {
-				args := json.RawMessage(block.toolInput.String())
-				if len(args) == 0 {
-					args = json.RawMessage("{}")
-				}
-				// Validate JSON — stream may have been interrupted mid-argument.
-				if !json.Valid(args) {
-					log.Warnf("Anthropic tool call has invalid JSON args, replacing with error object tool=%v id=%v raw_args=%v", block.toolName, block.toolID, string(args))
-					args = json.RawMessage(MalformedArgsSentinel)
-				}
-				resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-					ID:   cloneLongLivedLLMString(block.toolID),
-					Name: cloneLongLivedLLMString(block.toolName),
-					Args: args,
-				})
-				emitToolEnd = true
-			}
-			if emitToolEnd && cb != nil {
-				cb(message.StreamDelta{
-					Type: message.StreamDeltaToolUseEnd,
-					ToolCall: &message.ToolCallDelta{
-						ID:   block.toolID,
-						Name: block.toolName,
-					},
-				})
-			}
-		case message.StreamDeltaThinking:
-			resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{
-				Thinking:  block.thinking.String(),
-				Signature: block.signature,
-			})
-			if cb != nil {
-				cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
-			}
-		case anthropicServerToolUseBlock:
-			applyAnthropicHostedInput(&resp, block.hostedCall, block.toolInput.String())
-		}
+		appendAnthropicStreamBlock(&resp, block, truncated, cb)
 		delete(blocks, idx)
 	}
 

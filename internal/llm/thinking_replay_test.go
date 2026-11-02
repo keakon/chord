@@ -55,6 +55,49 @@ func TestAnthropicStreamCapturesRedactedThinking(t *testing.T) {
 	}
 }
 
+func TestAnthropicStreamFoldsRedactedThinkingAtEOF(t *testing.T) {
+	// A max_tokens stream cut off before message_stop: the redacted block
+	// never sees content_block_stop, so only the EOF cleanup can fold it.
+	sse := strings.Join([]string{
+		"event: message_start",
+		`data: {"type":"message_start","message":{"role":"assistant","usage":{"input_tokens":10}}}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"enc-eof"}}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hi"}}`,
+		"",
+		"event: message_delta",
+		`data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":5}}`,
+		"",
+	}, "\n")
+
+	resp, err := parseSSEStream(strings.NewReader(sse), nil, nil, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp == nil {
+		t.Fatal("expected the truncated response to be returned")
+	}
+	if len(resp.ThinkingBlocks) != 1 {
+		t.Fatalf("expected 1 thinking block, got %d", len(resp.ThinkingBlocks))
+	}
+	tb := resp.ThinkingBlocks[0]
+	if tb.Data != "enc-eof" {
+		t.Fatalf("unexpected block: %+v", tb)
+	}
+	if !tb.Replayable() {
+		t.Fatal("EOF-folded redacted block must be replayable")
+	}
+	if resp.Content != "hi" {
+		t.Fatalf("unexpected content: %q", resp.Content)
+	}
+}
+
 func TestAnthropicHistoryReplaysRedactedThinking(t *testing.T) {
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "go"},
