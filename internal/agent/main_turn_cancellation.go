@@ -214,9 +214,21 @@ func (a *MainAgent) resumeAfterPreservedStreamInterruption(turnID uint64, cause 
 	if a.turn == nil || turnID == 0 || a.turn.ID != turnID {
 		return false
 	}
+	previousPartialLen := a.turn.preservedPartialLen
 	if !a.savePartialAssistantMsgForTurn(a.turn) {
 		// Nothing visible was streamed before the interruption, so there is no
 		// partial reply to resume; fall through to ordinary error handling.
+		return false
+	}
+	// The loop's documented "no new visible text" end condition. The partial
+	// length is the progress proxy: a continuation that did not stream more
+	// visible text than the previous save means the upstream truncation is
+	// deterministic at this output length, so restarting would re-bill the
+	// whole input for the same bytes. Fall through to ordinary error
+	// handling; the saved partial stays on screen and the turn ends with the
+	// interruption error.
+	if previousPartialLen > 0 && a.turn.preservedPartialLen <= previousPartialLen {
+		log.Warnf("preserved stream interruption produced no new visible text; ending continuation loop turn_id=%v previous_len=%v interrupted_len=%v error=%v", turnID, previousPartialLen, a.turn.preservedPartialLen, cause)
 		return false
 	}
 	log.Infof("resuming turn after preserved stream interruption turn_id=%v error=%v", turnID, cause)

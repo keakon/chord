@@ -362,14 +362,16 @@ func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationMessage(t *testing.T
 // continuation message, and no explanatory terminal error is emitted. The
 // client cools the failed key on each interruption, so the restarts wait out
 // cooldowns and rotate keys or fallback models rather than firing
-// back-to-back; the round count itself is not the stop condition.
+// back-to-back. The round count itself is not the stop condition — only an
+// interruption that produces no new visible text ends the loop, so each round
+// here streams a longer partial to keep making progress.
 func TestHandleAgentErrorAutoContinueIsUnbounded(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 
 	for round := 1; round <= 4; round++ {
-		a.turn.appendPartialText(fmt.Sprintf("round %d partial reply", round))
+		a.turn.appendPartialText(fmt.Sprintf("round %d partial reply %s", round, strings.Repeat("x", round)))
 		a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
 		a.flushPersist()
 

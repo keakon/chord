@@ -822,6 +822,7 @@ func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
+	turn.preservedPartialLen = len(text)
 	msg := message.Message{
 		Role:            "assistant",
 		FileLinkBaseDir: a.effectiveToolBaseDir(),

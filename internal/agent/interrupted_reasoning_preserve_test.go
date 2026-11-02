@@ -204,3 +204,37 @@ func TestTurnAppendDrainPartialResponsesOutput(t *testing.T) {
 	}
 	nilTurn.appendPartialResponsesOutput(message.ResponsesOutputItem{Type: "reasoning"})
 }
+
+func TestResumeAfterPreservedStreamInterruptionStopsWithoutNewText(t *testing.T) {
+	cm := ctxmgr.NewManager(10000, 0)
+	a := &MainAgent{ctxMgr: cm}
+	turn := &Turn{ID: 7}
+	a.turn = turn
+
+	turn.appendPartialText("first partial body")
+	if !a.savePartialAssistantMsgForTurn(turn) {
+		t.Fatal("expected the first partial to be saved")
+	}
+	if turn.preservedPartialLen != len("first partial body") {
+		t.Fatalf("preservedPartialLen = %d, want %d", turn.preservedPartialLen, len("first partial body"))
+	}
+
+	// An interruption whose streamed text is not longer than the previous
+	// save ends the continuation loop instead of restarting the request; the
+	// short continuation stays saved so the record matches what was on screen.
+	turn.appendPartialText("short")
+	if a.resumeAfterPreservedStreamInterruption(7, &llm.InterruptedResponseError{}) {
+		t.Fatal("an interruption with no new visible text must not resume")
+	}
+	saved := cm.Snapshot()
+	if len(saved) != 2 || saved[1].Content != "short" {
+		t.Fatalf("saved messages = %+v, want the stalled continuation kept on record", saved)
+	}
+
+	// An equal-length save refuses the same way as a shorter one: the gate
+	// compares against the previous save (5 bytes), so 5 bytes again stalls.
+	turn.appendPartialText("short")
+	if a.resumeAfterPreservedStreamInterruption(7, &llm.InterruptedResponseError{}) {
+		t.Fatal("an equal-length interruption must not resume")
+	}
+}

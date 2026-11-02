@@ -27,6 +27,12 @@ type Turn struct {
 	questionRequestScope      string
 	ID                        uint64
 	Epoch                     uint64
+	// preservedPartialLen is the byte length of the partial assistant text
+	// savePartialAssistantMsgForTurn last saved within this turn. The
+	// preserved-interruption continuation loop compares consecutive saves so
+	// it can end when an upstream truncation stops producing new visible
+	// text, as the InterruptedResponseError contract requires.
+	preservedPartialLen int
 	// LLMResponsesState is the turn-scoped sticky-routing state for the
 	// Responses/Codex transport. It is created when a turn starts, shared by
 	// every LLM request in that turn (main, compaction, replay), and dropped

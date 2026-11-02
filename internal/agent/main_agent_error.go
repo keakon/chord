@@ -62,9 +62,11 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		// ever throwing away produced text; the client cools the interrupted
 		// key before escalating so repeated interruptions rotate keys and
 		// fallback models and wait out cooldowns rather than restarting
-		// back-to-back. When nothing visible was streamed, this falls through
-		// to ordinary error handling below — which then discards nothing,
-		// since the partial text has already been drained and saved.
+		// back-to-back. When nothing visible was streamed, or the new partial
+		// does not stream more visible text than the previous save this turn,
+		// this falls through to ordinary error handling below — which then
+		// discards nothing, since the partial text has already been drained
+		// and saved.
 		if a.turn != nil && !llm.IsNativeToolError(err) && llm.IsPreservableStreamInterruption(err) {
 			if a.resumeAfterPreservedStreamInterruption(evt.TurnID, err) {
 				return

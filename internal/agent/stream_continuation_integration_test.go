@@ -346,8 +346,8 @@ func TestConsecutiveResumesKeepEveryPartialAndOneContinuationEach(t *testing.T) 
 	a, provider, providerCfg := newContinuationTestAgent(t, config.ProviderTypeMessages,
 		[]string{"key-a", "key-b"},
 		truncatedReply("part one"),
-		truncatedReply("part two"),
-		truncatedReply("part three"),
+		truncatedReply("part two plus"),
+		truncatedReply("part three ending"),
 		completedReply("the ending"),
 	)
 
