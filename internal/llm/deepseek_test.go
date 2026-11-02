@@ -222,9 +222,29 @@ func TestDeepSeekReplayRejectionDoesNotWeakenRequest(t *testing.T) {
 		ToolCalls: []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
 	}, {Role: message.RoleTool, ToolCallID: "call-1", Content: "result"}}
 	tuning := RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingEffort: "max"}}
-	result, _, err := client.completeStreamTarget(context.Background(), streamRetryTarget{
-		provider: cfg, impl: impl, modelID: "deepseek-flash", maxTokens: 2048, tuning: tuning,
-	}, 0, history, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0, func() error { return nil }, nil, "", nil)
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx: context.Background(),
+		target: streamRetryTarget{
+			provider: cfg, impl: impl, modelID: "deepseek-flash", maxTokens: 2048, tuning: tuning,
+		},
+		round:            0,
+		messages:         history,
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err == nil && result.lastErr == nil {
 		t.Fatal("expected original replay rejection")
 	}

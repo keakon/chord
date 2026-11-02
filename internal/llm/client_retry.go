@@ -343,27 +343,27 @@ func (c *Client) completeStreamWithRetry(
 					messages = updatedMessages
 				}
 			}
-			targetResult, updatedLastInputTokens, targetErr := c.completeStreamTarget(
-				ctx,
-				t,
-				round,
-				messages,
-				tools,
-				mcpDeclarations,
-				cb,
-				fallbackEnabled,
-				fallbackModels,
-				pendingRoundWait,
-				ti < len(targets)-1,
-				status,
-				systemPrompt,
-				outputCapSetting,
-				lastInputTokens,
-				abortIfCancelled,
-				oversizeSeen,
-				pendingRollback,
-				prepareAttempt,
-			)
+			targetResult, updatedLastInputTokens, targetErr := c.completeStreamTarget(streamTargetAttempt{
+				ctx:              ctx,
+				target:           t,
+				round:            round,
+				messages:         messages,
+				tools:            tools,
+				mcpDeclarations:  mcpDeclarations,
+				cb:               cb,
+				fallbackEnabled:  fallbackEnabled,
+				fallbackModels:   fallbackModels,
+				currentRoundWait: pendingRoundWait,
+				hasNextTarget:    ti < len(targets)-1,
+				status:           status,
+				systemPrompt:     systemPrompt,
+				outputCapSetting: outputCapSetting,
+				lastInputTokens:  lastInputTokens,
+				abortIfCancelled: abortIfCancelled,
+				oversizeSeen:     oversizeSeen,
+				pendingRollback:  pendingRollback,
+				prepareAttempt:   prepareAttempt,
+			})
 			// Collect the target's cache entries before branching: a failed
 			// target may have cached a body on the way to its error.
 			bodyCachePins = append(bodyCachePins, targetResult.bodyCachePins...)

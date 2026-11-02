@@ -256,12 +256,27 @@ func TestCompleteStreamRetriesReplayEvidenceEchoWithReinforcedContinuation(t *te
 	client := NewClient(cfg, impl, "gpt-5.6-sol", 1024, "")
 	strict := modelcompat.ReplayCompatStrict
 	var deltas []message.StreamDelta
-	result, _, err := client.completeStreamTarget(
-		context.Background(),
-		streamRetryTarget{provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 1024, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{ReplayCompat: &strict}},
-		0, strictCurrentTurnReplayMessages(), nil, nil, func(delta message.StreamDelta) { deltas = append(deltas, delta) }, false, nil, roundCoolingWait{}, false,
-		&CallStatus{}, "", 0, 0, func() error { return nil }, nil, "", nil,
-	)
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx:              context.Background(),
+		target:           streamRetryTarget{provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 1024, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{ReplayCompat: &strict}},
+		round:            0,
+		messages:         strictCurrentTurnReplayMessages(),
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               func(delta message.StreamDelta) { deltas = append(deltas, delta) },
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil {
 		t.Fatalf("completeStreamTarget error = %v", err)
 	}
@@ -726,22 +741,38 @@ func TestCompleteStreamTargetPassesReplayCompatibleTuning(t *testing.T) {
 	}, []string{"key"})
 	impl := &replayRejectingProvider{}
 	client := NewClient(cfg, impl, "sample-model", 1024, "")
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx: context.Background(),
+		target: streamRetryTarget{
 			provider: cfg, impl: impl, modelID: "sample-model", maxTokens: 1024,
 			contextLimit: 128000, inputLimit: 128000, isFallback: true,
 			tuning: tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "sample-model"}),
 		},
-		0, []message.Message{
+		round: 0,
+		messages: []message.Message{
 			{
 				Role:       message.RoleAssistant,
 				ToolCalls:  []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
 				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		}, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
-		func() error { return nil }, nil, "", nil,
-	)
+		},
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want success", result, err)
 	}
@@ -764,22 +795,38 @@ func TestCompleteStreamTargetKeepsReasoningEffortWithCompat(t *testing.T) {
 	}, []string{"key"})
 	impl := &replayRejectingProvider{}
 	client := NewClient(cfg, impl, "test-model", 1024, "")
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx: context.Background(),
+		target: streamRetryTarget{
 			provider: cfg, impl: impl, modelID: "test-model", maxTokens: 1024,
 			contextLimit: 128000, inputLimit: 128000, isFallback: true,
 			tuning: tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "test-model"}),
 		},
-		0, []message.Message{
+		round: 0,
+		messages: []message.Message{
 			{
 				Role:       message.RoleAssistant,
 				ToolCalls:  []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
 				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		}, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
-		func() error { return nil }, nil, "", nil,
-	)
+		},
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want success", result, err)
 	}
@@ -800,13 +847,15 @@ func TestCompleteStreamStrictlyTextifiesRejectedForeignToolTrajectory(t *testing
 		rejectionMessage: "The `reasoning_content` in the thinking mode must be passed back to the API.",
 	}
 	client := NewClient(cfg, impl, "sample-model", 1024, "")
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx: context.Background(),
+		target: streamRetryTarget{
 			provider: cfg, impl: impl, modelID: "sample-model", maxTokens: 1024,
 			contextLimit: 128000, inputLimit: 128000, isFallback: true,
 			tuning: tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "sample-model"}),
 		},
-		0, []message.Message{
+		round: 0,
+		messages: []message.Message{
 			{
 				Role:       message.RoleAssistant,
 				Content:    "checking file",
@@ -814,9 +863,23 @@ func TestCompleteStreamStrictlyTextifiesRejectedForeignToolTrajectory(t *testing
 				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		}, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
-		func() error { return nil }, nil, "", nil,
-	)
+		},
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want strict replay success", result, err)
 	}
@@ -869,14 +932,30 @@ func TestReplayLadderKeepsMCPDeclarationsInlinedForPlainTarget(t *testing.T) {
 	}
 	tools := []message.ToolDefinition{{Name: "read", Description: "read files"}}
 
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx: context.Background(),
+		target: streamRetryTarget{
 			provider: cfg, impl: impl, modelID: "sample-model", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, tools, declarations, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0,
-		func() error { return nil }, nil, "", nil,
-	)
+		round:            0,
+		messages:         messages,
+		tools:            tools,
+		mcpDeclarations:  declarations,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "sys",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want success after replay degradation", result, err)
 	}
@@ -941,15 +1020,31 @@ func TestCompleteStreamCompactionReplayFloorUsesPortableShape(t *testing.T) {
 	impl := &replayRejectingProvider{}
 	client := NewClient(cfg, impl, "gpt-5.6-sol", 4096, "sys")
 	level := modelcompat.ReplayCompatSynthesized
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx: context.Background(),
+		target: streamRetryTarget{
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 			tuning: RequestTuning{ReplayCompat: &level},
 		},
-		0, crossProviderReplayMessages(), nil, nil, nil, false, nil, roundCoolingWait{}, false,
-		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "", nil,
-	)
+		round:            0,
+		messages:         crossProviderReplayMessages(),
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "sys",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want success", result, err)
 	}
@@ -983,14 +1078,30 @@ func TestCompleteStreamAmbiguousFailureRetriesUnchangedWithoutPersistingReplayLe
 			messages := crossProviderReplayMessages()
 			messages[1].Provenance.ProviderID = cfg.Name()
 			messages[1].Provenance.ModelID = "gpt-5.6-sol"
-			result, _, err := client.completeStreamTarget(
-				context.Background(), streamRetryTarget{
+			result, _, err := client.completeStreamTarget(streamTargetAttempt{
+				ctx: context.Background(),
+				target: streamRetryTarget{
 					provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 					contextLimit: 128000, inputLimit: 128000,
 				},
-				0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false,
-				&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "", nil,
-			)
+				round:            0,
+				messages:         messages,
+				tools:            nil,
+				mcpDeclarations:  nil,
+				cb:               nil,
+				fallbackEnabled:  false,
+				fallbackModels:   nil,
+				currentRoundWait: roundCoolingWait{},
+				hasNextTarget:    false,
+				status:           &CallStatus{},
+				systemPrompt:     "sys",
+				outputCapSetting: 0,
+				lastInputTokens:  0,
+				abortIfCancelled: func() error { return nil },
+				oversizeSeen:     nil,
+				pendingRollback:  "",
+				prepareAttempt:   nil,
+			})
 			if err != nil || result.resp == nil {
 				t.Fatalf("completeStreamTarget = (%+v, %v), want recovery after ambiguous failure", result, err)
 			}
@@ -1022,14 +1133,30 @@ func TestCompleteStreamAmbiguousFailureProbeIsRequestScoped(t *testing.T) {
 	messages := crossProviderReplayMessages()
 	messages[1].Provenance.ProviderID = cfg.Name()
 	messages[1].Provenance.ModelID = "gpt-5.6-sol"
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx: context.Background(),
+		target: streamRetryTarget{
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false,
-		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "", nil,
-	)
+		round:            0,
+		messages:         messages,
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "sys",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want request-scoped probe recovery", result, err)
 	}
@@ -1060,14 +1187,30 @@ func TestCompleteStreamProbesRelayWrappedParam400WithReplaySensitiveInput(t *tes
 	messages := crossProviderReplayMessages()
 	messages[1].Provenance.ProviderID = cfg.Name()
 	messages[1].Provenance.ModelID = "gpt-5.6-sol"
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx: context.Background(),
+		target: streamRetryTarget{
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false,
-		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "", nil,
-	)
+		round:            0,
+		messages:         messages,
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "sys",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want relay-wrapped replay probe recovery", result, err)
 	}
@@ -1097,14 +1240,30 @@ func TestCompleteStreamOfficialParam400DoesNotProbe(t *testing.T) {
 	messages := crossProviderReplayMessages()
 	messages[1].Provenance.ProviderID = cfg.Name()
 	messages[1].Provenance.ModelID = "gpt-5.6-sol"
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx: context.Background(),
+		target: streamRetryTarget{
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false,
-		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "", nil,
-	)
+		round:            0,
+		messages:         messages,
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "sys",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v), want the official 400 to stay terminal", result.resp, err)
 	}
@@ -1128,10 +1287,27 @@ func TestCompleteStreamSkipsEquivalentReplayLevelBeforeStrict(t *testing.T) {
 		},
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"},
 	}
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "sample-reasoner", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "", nil,
-	)
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx:              context.Background(),
+		target:           streamRetryTarget{provider: cfg, impl: impl, modelID: "sample-reasoner", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
+		round:            0,
+		messages:         messages,
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "sys",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
 	}
@@ -1167,10 +1343,27 @@ func TestCompleteStreamSkipsEquivalentReplayLevelWithInlinedMCPDeclarations(t *t
 		message.NewSystemToolsMessage(declarations),
 	}
 	tools := []message.ToolDefinition{{Name: "read", Description: "read files"}}
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "sample-reasoner", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, tools, declarations, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "", nil,
-	)
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx:              context.Background(),
+		target:           streamRetryTarget{provider: cfg, impl: impl, modelID: "sample-reasoner", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
+		round:            0,
+		messages:         messages,
+		tools:            tools,
+		mcpDeclarations:  declarations,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "sys",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
 	}
@@ -1206,10 +1399,27 @@ func TestCompleteStreamRecoversAnthropicPrefixBindingRejection(t *testing.T) {
 		},
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"},
 	}
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "claude-x", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "", nil,
-	)
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx:              context.Background(),
+		target:           streamRetryTarget{provider: cfg, impl: impl, modelID: "claude-x", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
+		round:            0,
+		messages:         messages,
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "sys",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
 	}
@@ -1256,10 +1466,27 @@ func TestCompleteStreamDegradesConvertedUnsignedThinkingWithoutTextLeak(t *testi
 		},
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"},
 	}
-	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "glm-5.2", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "", nil,
-	)
+	result, _, err := client.completeStreamTarget(streamTargetAttempt{
+		ctx:              context.Background(),
+		target:           streamRetryTarget{provider: cfg, impl: impl, modelID: "glm-5.2", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
+		round:            0,
+		messages:         messages,
+		tools:            nil,
+		mcpDeclarations:  nil,
+		cb:               nil,
+		fallbackEnabled:  false,
+		fallbackModels:   nil,
+		currentRoundWait: roundCoolingWait{},
+		hasNextTarget:    false,
+		status:           &CallStatus{},
+		systemPrompt:     "sys",
+		outputCapSetting: 0,
+		lastInputTokens:  0,
+		abortIfCancelled: func() error { return nil },
+		oversizeSeen:     nil,
+		pendingRollback:  "",
+		prepareAttempt:   nil,
+	})
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
 	}
@@ -1385,14 +1612,30 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 				rejectionMessage: tc.err.Message,
 			}
 			client := NewClient(cfg, impl, tc.modelID, 4096, "sys")
-			result, _, err := client.completeStreamTarget(
-				context.Background(), streamRetryTarget{
+			result, _, err := client.completeStreamTarget(streamTargetAttempt{
+				ctx: context.Background(),
+				target: streamRetryTarget{
 					provider: cfg, impl: impl, modelID: tc.modelID, maxTokens: 4096,
 					contextLimit: 128000, inputLimit: 128000, tuning: tc.tuning,
 				},
-				0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0,
-				func() error { return nil }, nil, "", nil,
-			)
+				round:            0,
+				messages:         messages,
+				tools:            nil,
+				mcpDeclarations:  nil,
+				cb:               nil,
+				fallbackEnabled:  false,
+				fallbackModels:   nil,
+				currentRoundWait: roundCoolingWait{},
+				hasNextTarget:    false,
+				status:           &CallStatus{},
+				systemPrompt:     "sys",
+				outputCapSetting: 0,
+				lastInputTokens:  0,
+				abortIfCancelled: func() error { return nil },
+				oversizeSeen:     nil,
+				pendingRollback:  "",
+				prepareAttempt:   nil,
+			})
 			if err != nil || result.resp == nil {
 				t.Fatalf("completeStreamTarget = (%+v, %v), want success after replay degradation", result, err)
 			}

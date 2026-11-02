@@ -35,6 +35,53 @@ type streamTargetAttemptResult struct {
 	bodyCachePins []bodyCachePin
 }
 
+// handleKeyCooldown marks the failed key's cooldown and reports it, then
+// applies the exit checks shared by the invisible and visible failure paths.
+// giveUp is true when the caller must stop: the turn was cancelled (outErr
+// set) or a terminal API error leaves no retriable path after the cooldown.
+// Otherwise the caller proceeds with the cooldown outcome; calling
+// MarkRecovering for the rotation key stays with the caller because the
+// invisible path reaches it only after the retriable classification.
+func (c *Client) handleKeyCooldown(
+	ctx context.Context,
+	t streamRetryTarget,
+	apiKey string,
+	cb StreamCallback,
+	err error,
+	lastErr error,
+	status *CallStatus,
+	abortIfCancelled func() error,
+	afterVisible bool,
+) (cooldownResult markKeyCooldownResult, keyForRotationCooldown string, giveUp bool, outErr error) {
+	cooldownResult = markKeyCooldown(ctx, t.provider, apiKey, t.modelID, lastErr)
+	if err := abortIfCancelled(); err != nil {
+		return cooldownResult, "", true, err
+	}
+	emitKeyCooldownDeltas(cb, cooldownResult)
+	if cb != nil {
+		// The overlay reached the user through this callback; a later
+		// request must not replay it from the pending queue.
+		t.provider.markKeyCooldownCauseDeltasEmitted(lastErr)
+	}
+	if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
+		if afterVisible {
+			log.Errorf("terminal API error after visible output, giving up provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
+		} else {
+			log.Errorf("terminal API error, giving up provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
+		}
+		markTerminalCooldownCauseReported(cb, t.provider, err)
+		return cooldownResult, "", true, err
+	}
+	keyForRotationCooldown = apiKey
+	if cooldownResult.refreshedKey != "" {
+		keyForRotationCooldown = cooldownResult.refreshedKey
+	}
+	if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
+		status.FallbackReason = classifyFallbackReason(err)
+	}
+	return cooldownResult, keyForRotationCooldown, false, nil
+}
+
 func (r *streamTargetAttemptResult) setLastErr(provider *ProviderConfig, err error) {
 	r.lastErr = err
 	if err == nil {
@@ -44,27 +91,55 @@ func (r *streamTargetAttemptResult) setLastErr(provider *ProviderConfig, err err
 	r.lastErrProvider = provider
 }
 
-func (c *Client) completeStreamTarget(
-	ctx context.Context,
-	t streamRetryTarget,
-	round int,
-	messages []message.Message,
-	tools []message.ToolDefinition,
-	mcpDeclarations []message.ToolDefinition,
-	cb StreamCallback,
-	fallbackEnabled bool,
-	fallbackModels []FallbackModel,
-	currentRoundWait roundCoolingWait,
-	hasNextTarget bool,
-	status *CallStatus,
-	systemPrompt string,
-	outputCapSetting int,
-	lastInputTokens int,
-	abortIfCancelled func() error,
-	oversizeSeen *oversizeRegistry,
-	pendingRollbackIn string,
-	prepareAttempt func(context.Context, RequestAttempt) (context.Context, error),
-) (result streamTargetAttemptResult, finalLastInputTokens int, outErr error) {
+// streamTargetAttempt bundles the inputs of one completeStreamTarget call.
+// The call site fills it by name, so same-typed adjacent parameters (tools
+// and mcpDeclarations, the two message slices) can no longer be transposed
+// silently at the seam.
+type streamTargetAttempt struct {
+	ctx              context.Context
+	target           streamRetryTarget
+	round            int
+	messages         []message.Message
+	tools            []message.ToolDefinition
+	mcpDeclarations  []message.ToolDefinition
+	cb               StreamCallback
+	fallbackEnabled  bool
+	fallbackModels   []FallbackModel
+	currentRoundWait roundCoolingWait
+	hasNextTarget    bool
+	status           *CallStatus
+	systemPrompt     string
+	outputCapSetting int
+	lastInputTokens  int
+	abortIfCancelled func() error
+	oversizeSeen     *oversizeRegistry
+	pendingRollback  string
+	prepareAttempt   func(context.Context, RequestAttempt) (context.Context, error)
+}
+
+func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTargetAttemptResult, finalLastInputTokens int, outErr error) {
+	// Bind the packed inputs to the names the rotation body reads; the struct
+	// exists only at the caller seam, so the body keeps working on plain
+	// locals instead of field accesses.
+	ctx := a.ctx
+	t := a.target
+	round := a.round
+	messages := a.messages
+	tools := a.tools
+	mcpDeclarations := a.mcpDeclarations
+	cb := a.cb
+	fallbackEnabled := a.fallbackEnabled
+	fallbackModels := a.fallbackModels
+	currentRoundWait := a.currentRoundWait
+	hasNextTarget := a.hasNextTarget
+	status := a.status
+	systemPrompt := a.systemPrompt
+	outputCapSetting := a.outputCapSetting
+	lastInputTokens := a.lastInputTokens
+	abortIfCancelled := a.abortIfCancelled
+	oversizeSeen := a.oversizeSeen
+	pendingRollbackIn := a.pendingRollback
+	prepareAttempt := a.prepareAttempt
 	result = streamTargetAttemptResult{}
 	// pendingRollback carries the rollback reason while preserved partial
 	// output from an earlier attempt is still on screen. It stays armed until
@@ -506,29 +581,11 @@ func (c *Client) completeStreamTarget(
 		}
 		if !visibleStarted {
 			fallbackEligible := shouldFallback(err)
-			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, t.modelID, result.lastErr)
-			if err := abortIfCancelled(); err != nil {
-				return result, lastInputTokens, err
-			}
-			emitKeyCooldownDeltas(cb, cooldownResult)
-			if cb != nil {
-				// The overlay reached the user through this callback; a later
-				// request must not replay it from the pending queue.
-				t.provider.markKeyCooldownCauseDeltasEmitted(result.lastErr)
-			}
-			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
-				log.Errorf("terminal API error, giving up provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
-				markTerminalCooldownCauseReported(cb, t.provider, err)
-				return result, lastInputTokens, err
+			cooldownResult, keyForRotationCooldown, giveUp, cooldownErr := c.handleKeyCooldown(ctx, t, apiKey, cb, err, result.lastErr, status, abortIfCancelled, false)
+			if giveUp {
+				return result, lastInputTokens, cooldownErr
 			}
 			cooldownApplied := cooldownResult.cooldownApplied
-			keyForRotationCooldown := apiKey
-			if cooldownResult.refreshedKey != "" {
-				keyForRotationCooldown = cooldownResult.refreshedKey
-			}
-			if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
-				status.FallbackReason = classifyFallbackReason(err)
-			}
 			retriable := isRetriable(err)
 			apiErrPtr, ok := errors.AsType[*APIError](err)
 			if ok && apiErrPtr != nil {
@@ -593,27 +650,9 @@ func (c *Client) completeStreamTarget(
 		}
 
 		if isAuthAPIStatusError(err) || isRateLimitAPIStatusError(err) || serverDirectedRetryCooldown(t.provider, err) > 0 {
-			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, t.modelID, result.lastErr)
-			if err := abortIfCancelled(); err != nil {
-				return result, lastInputTokens, err
-			}
-			emitKeyCooldownDeltas(cb, cooldownResult)
-			if cb != nil {
-				// The overlay reached the user through this callback; a later
-				// request must not replay it from the pending queue.
-				t.provider.markKeyCooldownCauseDeltasEmitted(result.lastErr)
-			}
-			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
-				log.Errorf("terminal API error after visible output, giving up provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
-				markTerminalCooldownCauseReported(cb, t.provider, err)
-				return result, lastInputTokens, err
-			}
-			keyForRotationCooldown := apiKey
-			if cooldownResult.refreshedKey != "" {
-				keyForRotationCooldown = cooldownResult.refreshedKey
-			}
-			if status != nil && !t.isFallback && shouldFallback(err) && status.FallbackReason == "" {
-				status.FallbackReason = classifyFallbackReason(err)
+			cooldownResult, keyForRotationCooldown, giveUp, cooldownErr := c.handleKeyCooldown(ctx, t, apiKey, cb, err, result.lastErr, status, abortIfCancelled, true)
+			if giveUp {
+				return result, lastInputTokens, cooldownErr
 			}
 			if !cooldownResult.cooldownApplied && keyForRotationCooldown != "" {
 				t.provider.MarkRecovering(keyForRotationCooldown)
