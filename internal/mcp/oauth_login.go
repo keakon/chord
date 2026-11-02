@@ -24,6 +24,28 @@ type LoginResult struct {
 	Validation      ProbeResult
 }
 
+// Login runs the full OAuth 2.0 authorization-code flow with PKCE for one
+// target:
+//
+//  0. Shortcut (no Reauth): probe the existing credential; a ready or
+//     refreshable token is kept when valid and no extra scopes are required,
+//     so a routine login is a no-op unless the token is broken.
+//  1. Setup: discover the authorization-server metadata, generate the PKCE
+//     pair, and start the local callback listener before any user round-trip.
+//  2. Client registration: reuse a registration whose issuer, redirect URI
+//     and secret still match the discovered metadata; otherwise register and
+//     persist it — as the live registration when the slot has no token yet,
+//     or as a pending registration that only replaces the old one at commit
+//     time, so a half-finished login cannot break a working credential.
+//  3. Authorization: build the authorization URL (scopes = configured ∪
+//     previously requested ∪ server-advertised ∪ pending scope requirements,
+//     plus offline_access when supported) and wait for the browser callback.
+//  4. Exchange: swap the authorization code for tokens.
+//  5. Commit: replace the slot atomically. The auth-generation check aborts
+//     the commit when another flow re-bound the slot meanwhile; the in-service
+//     login record is re-validated so a closed service or a superseded login
+//     cannot land tokens.
+//  6. Validate: probe the saved credential before reporting success.
 func (s *AuthService) Login(ctx context.Context, t Target, options LoginOptions, progress func(LoginProgress)) (result LoginResult, err error) {
 	if !managedAuth(t) {
 		return result, authError(ErrorAuthRequired)
@@ -115,6 +137,9 @@ func (s *AuthService) Login(ctx context.Context, t Target, options LoginOptions,
 	}
 	defer listener.Close()
 	emit(OperationRegistering, "")
+	// A pending registration from an earlier unfinished login only stays
+	// valid for the same issuer and the slot generation it was created under;
+	// anything else falls back to the committed registration.
 	registration := previous.PendingRegistration
 	if registration == nil || registration.Issuer != metadata.Issuer || registration.AuthGeneration != generation {
 		registration = previous.Registration
@@ -134,9 +159,13 @@ func (s *AuthService) Login(ctx context.Context, t Target, options LoginOptions,
 				return err
 			}
 			if slot.Token == nil {
+				// No working token: the new registration can take over live.
 				registration.AuthGeneration = 0
 				slot.Registration = registration
 			} else {
+				// A working token exists: stage the registration as pending so
+				// the old one keeps serving refreshes until the new tokens
+				// commit; the commit path swaps it in.
 				registration.AuthGeneration = generation
 				slot.PendingRegistration = registration
 			}
@@ -213,9 +242,14 @@ func (s *AuthService) Login(ctx context.Context, t Target, options LoginOptions,
 	emit(OperationCommitting, "")
 	err = s.store.UpdateLocked(finishCtx, t, func(tx *CredentialTransaction) error {
 		slot := fileSlot(tx.File, t)
+		// The generation check aborts when another flow re-bound the slot
+		// while the user was away at the authorization server.
 		if slot == nil || slot.AuthGeneration != generation || generation == math.MaxUint64 {
 			return authError(ErrorIdentityChanged)
 		}
+		// Only a still-registered, still-running login whose target has not
+		// been reconfigured may commit; WithoutCancel lets the store write
+		// finish even if the caller cancels mid-commit.
 		s.mu.Lock()
 		valid := s.logins[key] == op && opCtx.Err() == nil && !s.closed && s.targetCurrentLocked(t)
 		if valid {
