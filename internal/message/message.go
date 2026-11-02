@@ -229,6 +229,9 @@ func (a *ToolArgsAudit) Clone() *ToolArgsAudit {
 // KindQuestionState identifies a local-only durable question fact.
 const KindQuestionState = "question_state"
 
+// KindLSPReview records completed LSP review counts without model content.
+const KindLSPReview = "lsp_review"
+
 // KindQuestionResult identifies a decision the runtime recorded for a question
 // outside the tool result that asked it: an asynchronous answer, or a default
 // the system adopted on the user's behalf. Such a message is delivered to the
@@ -427,7 +430,7 @@ func IsUserAuthored(msg Message) bool {
 		return false
 	}
 	switch msg.Kind {
-	case KindDirectoryInstructions, KindDirectoryInstructionProjection, KindSkillDiscovery, KindQuestionState, KindQuestionResult, KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice, KindLSPFollowup:
+	case KindDirectoryInstructions, KindDirectoryInstructionProjection, KindSkillDiscovery, KindQuestionState, KindQuestionResult, KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice, KindLSPFollowup, KindLSPReview:
 		return false
 	case KindTurnOverlay:
 		// Request-scoped runtime hints ride the request tail as user-role

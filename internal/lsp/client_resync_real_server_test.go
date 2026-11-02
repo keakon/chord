@@ -36,11 +36,8 @@ func TestManagerResyncFileWithRealGopls(t *testing.T) {
 
 	// Warm-up write: gopls opens the document with the on-disk text.
 	mgr.AfterFileWriteToolResult(ctx, path, string(content), "wrote main.go", true, WatchedFileChanged, "")
-	mgr.clientsMu.RLock()
-	_, ok := mgr.clientForPathLocked(path)
-	mgr.clientsMu.RUnlock()
-	if !ok {
-		t.Fatal("no gopls client is serving the written file")
+	if _, ok := mgr.waitForClientForPath(ctx, path, time.Minute); !ok {
+		t.Fatalf("no gopls client is serving the written file: %v", formattedStartFailures(mgr, path))
 	}
 
 	resynced := strings.Replace(string(content), "missingSymbolBeforeResync", "missingSymbolAfterResync", 1)

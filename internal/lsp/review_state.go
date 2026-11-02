@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/x/powernap/pkg/lsp/protocol"
+
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
 )
@@ -205,6 +207,42 @@ func (m *Manager) recordReviewSnapshot(path string) {
 	m.notifySidebarChanged()
 }
 
+func frozenReviewSnapshots(path string, frozen map[string][]Diagnostic) []message.LSPReview {
+	out := make([]message.LSPReview, 0, len(frozen))
+	for server, diagnostics := range frozen {
+		review := message.LSPReview{Path: path, ServerID: server}
+		for _, d := range diagnostics {
+			switch d.Severity {
+			case int(protocol.SeverityError):
+				review.Errors++
+			case int(protocol.SeverityWarning):
+				review.Warnings++
+			}
+		}
+		out = append(out, review)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ServerID < out[j].ServerID })
+	return out
+}
+
+func (m *Manager) recordDeliveredReviews(reviews []message.LSPReview) {
+	if len(reviews) == 0 {
+		return
+	}
+	m.diagMu.Lock()
+	if m.reviewByServer == nil {
+		m.reviewByServer = make(map[string]map[string]reviewCounts)
+	}
+	for _, review := range reviews {
+		if m.reviewByServer[review.ServerID] == nil {
+			m.reviewByServer[review.ServerID] = make(map[string]reviewCounts)
+		}
+		m.reviewByServer[review.ServerID][review.Path] = reviewCounts{errors: review.Errors, warnings: review.Warnings, reviewedAt: time.Now()}
+	}
+	m.diagMu.Unlock()
+	m.notifySidebarChanged()
+}
+
 // reviewServerIDsForPathLocked returns the servers whose latest post-write review
 // should be snapshotted for path. m.diagMu must be held. It intentionally includes
 // servers with an existing review for path even when their current diagnostics are
@@ -356,9 +394,6 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 			calls[tc.ID] = info
 		}
 	}
-	if len(calls) == 0 {
-		return nil
-	}
 	byKey := make(map[string]ReviewedFileSnapshot)
 	deletePaths := func(paths []string) {
 		if len(paths) == 0 {
@@ -398,7 +433,7 @@ func RebuildReviewSnapshotsFromMessages(msgs []message.Message) []ReviewedFileSn
 		storeReview(review.Path, review)
 	}
 	for _, msg := range msgs {
-		if msg.Kind == message.KindLSPFollowup {
+		if msg.Kind == message.KindLSPFollowup || msg.Kind == message.KindLSPReview {
 			for _, review := range msg.LSPReviews {
 				storeFollowupReview(review)
 			}

@@ -94,11 +94,14 @@ type clientKey struct {
 // era at launch time: Stop cancels that era, so ctx.Err() != nil reports "a
 // Stop began after this launch was spawned", which forbids registering the
 // finished client into the stopped manager. done is closed when the launch
-// goroutine exits, letting Stop wait for in-flight launches to settle.
+// goroutine exits, letting Stop wait for in-flight launches to settle. ready
+// is closed at the same moment: it is the readiness event post-write client
+// waits sleep on, replacing polling.
 type startEntry struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
+	ready  chan struct{}
 }
 
 // Manager manages multiple LSP clients and aggregates diagnostics.
@@ -130,6 +133,31 @@ type Manager struct {
 	// It is kept separate so the two maps stay coherent under one lock while
 	// starting keeps its boolean presence semantics.
 	launches map[clientKey]*startEntry
+
+	// admittedAt records when each client was admitted (its launch finished
+	// and the client registered). A write to a client admitted within
+	// warmupGrace keeps the cold-start budget: readiness does not imply the
+	// first workspace load and analysis pass have completed. Every launch is
+	// recorded, whatever started it. Guarded by clientsMu; entries are
+	// removed when the client is evicted, pruned as dead, or Stop clears the
+	// registry. The timestamps feed budget selection only, never diagnostics
+	// ownership.
+	admittedAt map[clientKey]time.Time
+
+	// pendingSyncs holds writes whose language-server client did not appear
+	// within the client-wait budget. When such a client is admitted, the
+	// entries it covers are re-synchronized (watched-file change, didChange,
+	// didSave) and their diagnostics follow with the next request; without
+	// this, a cold first write into a slow-launching server would never get
+	// diagnostics: the file was never opened, so the workspace-load publish
+	// carries no version to claim. A later write to the same path replaces
+	// the entry. Guarded by pendingSyncMu.
+	pendingSyncMu sync.Mutex
+	pendingSyncs  map[string]pendingSync
+	// A drain synchronizes its whole batch before arming watches; another
+	// drain must not advance those clients' generations in between.
+	pendingResyncMu sync.Mutex
+	syncTasks       map[chan struct{}]context.CancelFunc
 
 	// startEra is the context era in-flight launches run under. Stop cancels
 	// the current era and clears it, so every launch that began before the
@@ -233,6 +261,8 @@ func NewManager(cfg *config.Config, projectRoot string, broadcast BroadcastFunc)
 		clients:               make(map[clientKey]*Client),
 		starting:              make(map[clientKey]bool),
 		launches:              make(map[clientKey]*startEntry),
+		admittedAt:            make(map[clientKey]time.Time),
+		pendingSyncs:          make(map[string]pendingSync),
 		waiters:               make(map[string][]chan diagnosticsEvent),
 		startFail:             make(map[clientKey]string),
 		diagByServer:          make(map[clientKey]map[string]diagCounts),
@@ -459,16 +489,14 @@ func (m *Manager) Start(ctx context.Context, path string) {
 		if m.starting[key] {
 			continue
 		}
-		if m.startEra == nil {
-			// A Stop cleared the era; create a fresh one so launches after
-			// the stop run on a live context (idle-unload reload).
-			m.startEra, m.cancelStartEra = context.WithCancel(context.Background())
+		m.ensureStartEraLocked()
+		if m.maintenanceDone == nil {
 			m.maintenanceDone = make(chan struct{})
 			go m.maintainFiles(m.startEra, m.maintenanceDone)
 		}
 		m.starting[key] = true
 		entryCtx, cancel := context.WithCancel(m.startEra)
-		entry := &startEntry{ctx: entryCtx, cancel: cancel, done: make(chan struct{})}
+		entry := &startEntry{ctx: entryCtx, cancel: cancel, done: make(chan struct{}), ready: make(chan struct{})}
 		m.launches[key] = entry
 		toStart = append(toStart, struct {
 			key   clientKey
@@ -493,10 +521,17 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 			entry.cancel()
 		}
 		m.clientsMu.Lock()
+		if m.clients[key] == nil {
+			m.clearPendingSyncsForLaunch(key)
+		}
 		delete(m.starting, key)
 		delete(m.launches, key)
 		m.clientsMu.Unlock()
 		close(entry.done)
+		// The readiness event fires on every exit path: a registered client,
+		// a failed launch, a refused registration. A waiter re-checks the
+		// registry after waking and exits on its own when nothing appeared.
+		close(entry.ready)
 	}()
 
 	// Run the handshake on a context cancelled by either the requesting turn
@@ -584,6 +619,11 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 		}
 	}
 	m.notifySidebarChanged()
+	m.clientsMu.Lock()
+	if entry.ctx.Err() == nil {
+		m.startPendingResyncLocked()
+	}
+	m.clientsMu.Unlock()
 }
 
 // admitStartedClientLocked registers the finished client under key unless a
@@ -599,6 +639,14 @@ func (m *Manager) admitStartedClientLocked(key clientKey, entry *startEntry, cli
 		return nil, nil, false
 	}
 	m.clients[key] = client
+	// Every admitted launch records its admission time, whatever started it:
+	// a plain write's Start and a racing launch for the same root are equally
+	// "not warm yet", and distinguishing initiators would leave exactly those
+	// racing admissions drawing the warm budget mid-load.
+	if m.admittedAt == nil {
+		m.admittedAt = make(map[clientKey]time.Time)
+	}
+	m.admittedAt[key] = time.Now()
 	closeMe, survivors = m.evictExcessClientsLocked()
 	return closeMe, survivors, true
 }
@@ -764,6 +812,7 @@ func (m *Manager) evictExcessClientsLocked() (closeMe []*Client, survivors map[s
 		for _, key := range keys[:cut] {
 			closeMe = append(closeMe, m.clients[key])
 			delete(m.clients, key)
+			delete(m.admittedAt, key)
 		}
 		if survivors == nil {
 			survivors = make(map[string][]*Client, 1)
@@ -1000,6 +1049,30 @@ func (m *Manager) hasPendingStartForPathLocked(path string) bool {
 	return false
 }
 
+// pendingLaunchReadyForPath returns the readiness channel of one launch that
+// is still starting for the workspace root serving path. A nil channel means
+// the pending state changed between the caller's check and this lookup; the
+// caller re-checks instead of waiting.
+func (m *Manager) pendingLaunchReadyForPath(path string) <-chan struct{} {
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
+	for key := range m.starting {
+		srvCfg, ok := m.cfg.LSP[key.name]
+		if !ok || srvCfg.Disabled {
+			continue
+		}
+		if root, ok := m.serverRootForPath(key.name, srvCfg, path); ok && root == key.root {
+			if _, registered := m.clients[key]; registered {
+				continue
+			}
+			if entry := m.launches[key]; entry != nil {
+				return entry.ready
+			}
+		}
+	}
+	return nil
+}
+
 func (m *Manager) waitForClientForPath(ctx context.Context, path string, timeout time.Duration) (*Client, bool) {
 	if !m.HasServerForPath(path) {
 		return nil, false
@@ -1037,8 +1110,6 @@ func (m *Manager) waitForClientForPath(ctx context.Context, path string, timeout
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
 
 	for {
 		if c, ok, pending := check(); ok {
@@ -1046,13 +1117,20 @@ func (m *Manager) waitForClientForPath(ctx context.Context, path string, timeout
 		} else if !pending {
 			return nil, false
 		}
-
+		ready := m.pendingLaunchReadyForPath(path)
+		if ready == nil {
+			// The launch settled between the check and the lookup; re-evaluate
+			// instead of waiting out the timeout.
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return nil, false
 		case <-timer.C:
 			return nil, false
-		case <-ticker.C:
+		case <-ready:
+			// The launch finished one way or another; the next check resolves
+			// readiness against the settled registry.
 		}
 	}
 }
@@ -1316,6 +1394,13 @@ type diagnosticsWaitRequest struct {
 	// publish and all of them are listed here; later same-version publishes
 	// are picked up by the late-diagnostics watch instead.
 	immediateServers map[string]bool
+	// unversionedServers lists immediate servers that never echo document
+	// versions (typescript-language-server). For them a publish received
+	// after the sync is the version check, so an unversioned publish confirms
+	// the wait. Servers that do version their publishes must not confirm on
+	// one: an unversioned publish describes an unopened-document snapshot,
+	// not the synced version.
+	unversionedServers map[string]bool
 }
 
 // immediateWaitComplete records ev and reports whether the wait may return
@@ -1324,7 +1409,8 @@ func (req diagnosticsWaitRequest) immediateWaitComplete(ev diagnosticsEvent, con
 	if len(req.serverVersions) == 0 || len(req.immediateServers) == 0 {
 		return false
 	}
-	if ev.version != 0 && req.immediateServers[ev.serverID] {
+	if (ev.version != 0 && req.immediateServers[ev.serverID]) ||
+		(ev.version == 0 && req.unversionedServers[ev.serverID]) {
 		confirmed[ev.serverID] = struct{}{}
 	}
 	for name := range req.serverVersions {
@@ -1414,6 +1500,9 @@ func diagnosticsEventFresh(ev diagnosticsEvent, req diagnosticsWaitRequest) bool
 		if !ok || ev.version != 0 && ev.version != want {
 			return false
 		}
+		if ev.version == 0 && req.immediateServers[ev.serverID] && !req.unversionedServers[ev.serverID] {
+			return false
+		}
 	}
 	if !req.after.IsZero() && ev.version == 0 && ev.receivedAt.Before(req.after) {
 		return false
@@ -1477,11 +1566,23 @@ func (m *Manager) Stop(ctx context.Context) {
 	m.clientsMu.Lock()
 	maintenanceDone := m.maintenanceDone
 	m.maintenanceDone = nil
+	syncTasks := make([]chan struct{}, 0, len(m.syncTasks))
+	for done, cancel := range m.syncTasks {
+		cancel()
+		syncTasks = append(syncTasks, done)
+	}
 	if m.cancelStartEra != nil {
 		m.cancelStartEra()
 		m.startEra = nil
 		m.cancelStartEra = nil
 	}
+	// Admission times and parked re-syncs describe the current registry; a
+	// stopped manager has none. The next Start records both from scratch, so
+	// an idle unload is followed by an honest cold start.
+	m.admittedAt = make(map[clientKey]time.Time)
+	m.pendingSyncMu.Lock()
+	m.pendingSyncs = make(map[string]pendingSync)
+	m.pendingSyncMu.Unlock()
 	inflight := make([]*startEntry, 0, len(m.launches))
 	for _, entry := range m.launches {
 		inflight = append(inflight, entry)
@@ -1497,6 +1598,12 @@ func (m *Manager) Stop(ctx context.Context) {
 	}
 	m.clientsMu.Unlock()
 
+	if len(syncTasks) > 0 {
+		for _, c := range closing {
+			c.client.transportFailed.Store(true)
+			c.client.Kill()
+		}
+	}
 	if maintenanceDone != nil {
 		select {
 		case <-maintenanceDone:
@@ -1506,6 +1613,12 @@ func (m *Manager) Stop(ctx context.Context) {
 	for _, c := range closing {
 		if err := c.client.Close(ctx); err != nil {
 			log.Warnf("lsp: stop client name=%v root=%v error=%v", c.key.name, c.key.root, err)
+		}
+	}
+	for _, done := range syncTasks {
+		select {
+		case <-done:
+		case <-ctx.Done():
 		}
 	}
 

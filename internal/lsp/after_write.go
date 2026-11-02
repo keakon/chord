@@ -15,9 +15,47 @@ import (
 	"github.com/keakon/chord/internal/identity"
 )
 
+// diagnosticsWaitTimeout is the warm-start diagnostics wait: the configured
+// default when diagnostics.lsp.wait_timeout_ms is unset (see
+// configuredDiagnosticsWait).
 const diagnosticsWaitTimeout = 3 * time.Second
+
+// coldStartWriteBudget is the total wall-clock budget one cold-start write
+// spends on everything after the write itself: the client wait, the content
+// sync, and the diagnostics wait. It is an experiment parameter — the initial
+// value exists to keep cold starts from blocking for the full first workspace
+// analysis, not to maximize the chance the wait catches that analysis;
+// whatever the wait misses, the late watch delivers with the next request.
+const coldStartWriteBudget = 2500 * time.Millisecond
+
+// coldStartDiagnosticsWaitTimeout is the Python semantic backend's cold-start
+// diagnostics wait. It is a wait budget only, decoupled from the client wait,
+// because a timeout there falls back to the Ruff quick backend instead of a
+// late watch.
 const coldStartDiagnosticsWaitTimeout = 8 * time.Second
+
+// warmupGrace is how long after a client's admission a write to it still gets
+// the cold-start total budget. Client readiness means the handshake finished,
+// not that the first workspace load and analysis pass have; a write landing
+// inside this window would otherwise draw the warm budget while the server is
+// still doing the work that makes it warm.
+const warmupGrace = 8 * time.Second
+
 const diagnosticsSettleDuration = 300 * time.Millisecond
+
+// configuredDiagnosticsWait returns the warm-start diagnostics wait: the
+// configured value when valid, the built-in default otherwise. The loader
+// already resets invalid values to unset; the check here keeps a hand-built
+// config from turning the wait off by accident.
+func configuredDiagnosticsWait(cfg *config.Config) time.Duration {
+	if cfg == nil || cfg.Diagnostics.LSP.WaitTimeoutMS == nil {
+		return diagnosticsWaitTimeout
+	}
+	if ms := *cfg.Diagnostics.LSP.WaitTimeoutMS; ms > 0 {
+		return time.Duration(ms) * time.Millisecond
+	}
+	return diagnosticsWaitTimeout
+}
 
 var (
 	afterWriteHasReadyClient = func(m *Manager, path string) bool {
@@ -64,6 +102,24 @@ type afterWritePrepared struct {
 	waiter        chan diagnosticsEvent
 	waitTimeout   time.Duration
 	writerAgentID string
+	// began is when the write's after-write pipeline started: the write's own
+	// pipeline for single-file results, the batch start for batch results. The
+	// cold-start total budget counts from it.
+	began time.Time
+	// watchGenerations is what the late watch registers with: sync.generations
+	// for single-file writes, refreshed by the batch after its last sync.
+	watchGenerations map[clientKey]uint64
+	// coldStart and grace record which budget the wait used and why: coldStart
+	// comes from beginAfterFileWrite, grace marks a warm client admitted
+	// within warmupGrace that still draws the cold budget.
+	coldStart bool
+	grace     bool
+	// clientWait and syncTime decompose the pipeline for the breakdown log.
+	clientWait time.Duration
+	syncTime   time.Duration
+	// batchSize is set by the batch pipeline (0 for single-file writes).
+	batchSize int
+	afterSeq  uint64
 	// wait reports whether the diagnostics wait should run: false when the
 	// write has no server coverage, its server start failed, or every owning
 	// server missed the content sync.
@@ -75,31 +131,55 @@ type afterWritePrepared struct {
 
 // beginAfterFileWrite runs the first step of the after-write pipeline: drop
 // exited clients so Start relaunches them, record whether this write needs a
-// cold start, and launch the owning servers. Batch callers run it for every
-// file before any client wait, so all servers start (in parallel) and every
-// cold file is recognized before a sibling's wait makes the server look warm.
-func (m *Manager) beginAfterFileWrite(ctx context.Context, absPath, base string) (coldStart bool, baseOut string, exited []string) {
+// cold start, and launch the owning servers. The returned began stamps the
+// start of this write's pipeline: the cold-start total budget counts from it.
+// Batch callers run it for every file before any client wait, so all servers
+// start (in parallel) and every cold file is recognized before a sibling's
+// wait makes the server look warm.
+func (m *Manager) beginAfterFileWrite(ctx context.Context, absPath, base string) (coldStart bool, baseOut string, exited []string, began time.Time) {
+	began = time.Now()
 	baseOut, exited = m.appendExitedServerNotes(ctx, absPath, base)
 	coldStart = !afterWriteHasReadyClient(m, absPath)
 	afterWriteStart(m, ctx, absPath)
-	return coldStart, baseOut, exited
+	return coldStart, baseOut, exited, began
 }
 
 // prepareAfterFileWrite runs the pre-wait half of the single-file after-write
 // pipeline: client wait, waiter registration, content sync, and sync-failure
 // handling. coldStart and exited come from beginAfterFileWrite, which the
-// caller runs first.
-func (m *Manager) prepareAfterFileWrite(ctx context.Context, absPath, content, base string, changeType WatchedFileChangeType, coldStart bool, exited []string) afterWritePrepared {
+// caller runs first. A write whose client never appears within the budget
+// registers a pending re-sync, so its diagnostics follow with the next
+// request once the server is up instead of never.
+func (m *Manager) prepareAfterFileWrite(ctx context.Context, absPath, content, base string, changeType WatchedFileChangeType, coldStart bool, exited []string, began time.Time) afterWritePrepared {
 	// Start is asynchronous, so wait briefly for the matching client to appear
-	// before treating the first post-write sync as a startup failure.
-	if _, ok := afterWriteWaitForClient(m, ctx, absPath, afterWriteClientWaitTimeout); !ok {
+	// before treating the first post-write sync as a startup failure. A cold
+	// start draws from the write's total budget, not its own timeout.
+	clientWait := afterWriteClientWaitTimeout
+	if coldStart {
+		if remaining := coldStartWriteBudget - time.Since(began); remaining < clientWait {
+			clientWait = max(remaining, 0)
+		}
+	}
+	waitStart := time.Now()
+	_, ok := afterWriteWaitForClient(m, ctx, absPath, clientWait)
+	clientWaitSpent := time.Since(waitStart)
+	if !ok {
+		if ctx.Err() == nil {
+			m.registerPendingSync(absPath, content, changeType, identity.AgentIDFromContext(ctx))
+		}
 		return afterWritePrepared{
 			path:       absPath,
 			base:       m.appendStartFailureNotes(ctx, absPath, base, exited),
+			began:      began,
+			clientWait: clientWaitSpent,
+			coldStart:  coldStart,
+			grace:      !coldStart && m.clientAdmittedWithin(absPath, warmupGrace),
 			skipStatus: unavailableStatus(ctx, FileWriteStatusStartFailed),
 		}
 	}
-	return m.prepareReadyAfterFileWrite(ctx, absPath, content, base, changeType, coldStart)
+	prepared := m.prepareReadyAfterFileWrite(ctx, absPath, content, base, changeType, coldStart, began)
+	prepared.clientWait = clientWaitSpent
+	return prepared
 }
 
 // prepareReadyAfterFileWrite runs the pre-wait half after the caller has
@@ -107,17 +187,31 @@ func (m *Manager) prepareAfterFileWrite(ctx context.Context, absPath, content, b
 // didChange so a fast server's publish is never missed; batch callers run the
 // client waits concurrently and call this serially so all content syncs reach
 // the server as one analysis unit.
-func (m *Manager) prepareReadyAfterFileWrite(ctx context.Context, absPath, content, base string, changeType WatchedFileChangeType, coldStart bool) afterWritePrepared {
-	prepared := afterWritePrepared{path: absPath, base: base, writerAgentID: identity.AgentIDFromContext(ctx)}
+func (m *Manager) prepareReadyAfterFileWrite(ctx context.Context, absPath, content, base string, changeType WatchedFileChangeType, coldStart bool, began time.Time) afterWritePrepared {
+	if ctx.Err() == nil && afterWriteHasReadyClient(m, absPath) && m.hasStartingOwner(absPath) {
+		m.registerPendingSync(absPath, content, changeType, identity.AgentIDFromContext(ctx))
+	}
+	prepared := afterWritePrepared{path: absPath, base: base, writerAgentID: identity.AgentIDFromContext(ctx), began: began, coldStart: coldStart}
 	prepared.waiter = m.PrepareWaiter(absPath)
+	prepared.afterSeq = m.currentLatePublishSeq()
+	syncStart := time.Now()
 	prepared.sync = m.syncAfterWrite(ctx, absPath, content, changeType, true)
+	prepared.syncTime = time.Since(syncStart)
+	prepared.watchGenerations = prepared.sync.generations
 	prepared.base, prepared.wait = m.settleAfterWriteSyncFailure(ctx, absPath, prepared.waiter, prepared.sync, prepared.base)
 	if !prepared.wait {
 		prepared.skipStatus = unavailableStatus(ctx, FileWriteStatusSyncFailed)
 	}
-	prepared.waitTimeout = diagnosticsWaitTimeout
-	if coldStart {
-		prepared.waitTimeout = coldStartDiagnosticsWaitTimeout
+	// A client admitted within warmupGrace draws the cold total budget even
+	// though the write itself is warm: the handshake may be done, but the
+	// first workspace load and analysis pass it will publish against can
+	// still be running.
+	prepared.waitTimeout = configuredDiagnosticsWait(m.cfg)
+	prepared.grace = !coldStart && m.clientAdmittedWithin(absPath, warmupGrace)
+	if coldStart || prepared.grace {
+		if remaining := coldStartWriteBudget - time.Since(began); remaining < prepared.waitTimeout {
+			prepared.waitTimeout = max(remaining, 0)
+		}
 	}
 	return prepared
 }
@@ -126,9 +220,12 @@ func (m *Manager) prepareReadyAfterFileWrite(ctx context.Context, absPath, conte
 // for a prepared write: fresh diagnostics, sync confirmation, timeout notes,
 // and the review snapshot. It returns the tool-result string with this file's
 // diagnostics appended after base, plus whether those diagnostics describe
-// this write.
+// this write. A wait that times out still registers the late-diagnostics
+// watch, so the analysis the server finishes later is claimed by the next
+// request instead of being lost.
 func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *afterWritePrepared, includeOtherFiles bool, displayBaseDir string) FileWriteResult {
 	if !prepared.wait {
+		m.logAfterWriteBreakdown(prepared, prepared.skipStatus, false, false, 0)
 		return FileWriteResult{
 			Output: prepared.base,
 			Status: prepared.skipStatus,
@@ -136,26 +233,45 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 		}
 	}
 
-	req := diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.after, immediateServers: m.immediateDiagnosticsServers(prepared.sync.serverVersions)}
+	if prepared.coldStart || prepared.grace {
+		prepared.waitTimeout = min(prepared.waitTimeout, max(coldStartWriteBudget-time.Since(prepared.began), 0))
+	}
+	req := diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.after, immediateServers: m.immediateDiagnosticsServers(prepared.sync.serverVersions), unversionedServers: m.unversionedDiagnosticsServers(prepared.sync.serverVersions)}
+	diagWaitStart := time.Now()
 	_, notified, lastSeq, baseline := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, req, prepared.waitTimeout)
-	if notified && len(prepared.sync.serverErrors) == 0 {
+	diagWait := time.Since(diagWaitStart)
+	if notified && prepared.sync.token.confirmable {
 		m.confirmDiagnosticsSync(prepared.sync.token)
 	}
-	if notified && ctx.Err() == nil {
-		m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, prepared.sync.generations, baseline, lastSeq, prepared.writerAgentID)
+	lateWatch := false
+	if ctx.Err() == nil && prepared.sync.token.confirmable {
+		lateWatch = m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, prepared.watchGenerations, baseline, lastSeq, prepared.writerAgentID, prepared.sync.token)
 	}
 	if !notified && ctx.Err() == nil {
 		// A timeout is logged every time; the model hears about the first one
 		// per session so an empty result is never mistaken for a clean one.
 		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", prepared.path, prepared.waitTimeout)
-		prepared.base = m.appendTimeoutNote(prepared.path, prepared.base, prepared.waitTimeout)
+		prepared.base = m.appendDeferredDiagnosticsNote(prepared.path, prepared.base, prepared.waitTimeout)
 	}
+	status := unavailableStatus(ctx, FileWriteStatusTimeout)
+	if notified {
+		status = synchronizedFileWrite("", prepared.sync).Status
+	}
+	m.logAfterWriteBreakdown(prepared, status, notified, lateWatch, diagWait)
 
-	m.recordReviewSnapshot(prepared.path)
+	if notified {
+		m.recordReviewSnapshot(prepared.path)
+	}
 	result := synchronizedFileWrite("", prepared.sync)
 	states := map[string]FileWriteDiagnosticsState{prepared.path: {FailedServers: result.FailedServers}}
 	byPath := m.diagnosticsForWritePaths([]string{prepared.path}, states)
 	out := m.appendFileDiagnosticsToToolOutput(prepared.base, prepared.path, includeOtherFiles, nil, config.DiagnosticOutputConfig{}, displayBaseDir, byPath)
+	if !notified && len(byPath[prepared.path]) > 0 {
+		// The diagnostics the result carries were published for an earlier
+		// version of the file; say so instead of implying they verified this
+		// write.
+		out = annotateLastKnownDiagnostics(out)
+	}
 	if notified {
 		result.Output = out
 		return result
@@ -164,6 +280,25 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 		return unavailableFileWrite(ctx, out, FileWriteStatusTimeout)
 	}
 	return timeoutFileWrite(out, prepared.waitTimeout)
+}
+
+// logAfterWriteBreakdown records one write's after-write decomposition: the
+// budget decision and the split of the total into client wait, sync, and
+// diagnostics wait. These fields are the fixed metrics for budget tuning and
+// real-session review, so the format stays stable.
+func (m *Manager) logAfterWriteBreakdown(prepared *afterWritePrepared, status FileWriteStatus, notified, lateWatch bool, diagWait time.Duration) {
+	batch := ""
+	if prepared.batchSize > 0 {
+		batch = fmt.Sprintf(" batch_size=%v batch_elapsed_ms=%v", prepared.batchSize, time.Since(prepared.began).Milliseconds())
+	}
+	totalBudget := configuredDiagnosticsWait(m.cfg)
+	if prepared.coldStart || prepared.grace {
+		totalBudget = coldStartWriteBudget
+	}
+	log.Debugf("lsp: after-write diagnostics breakdown path=%v cold=%v grace=%v status=%v client_wait_ms=%v sync_ms=%v diag_wait_ms=%v budget_ms=%v total_budget_ms=%v total_ms=%v notified=%v late_watch=%v servers=%v failed_servers=%v%v",
+		prepared.path, prepared.coldStart, prepared.grace, status,
+		prepared.clientWait.Milliseconds(), prepared.syncTime.Milliseconds(), diagWait.Milliseconds(),
+		prepared.waitTimeout.Milliseconds(), totalBudget.Milliseconds(), time.Since(prepared.began).Milliseconds(), notified, lateWatch, len(prepared.sync.serverVersions), len(prepared.sync.serverErrors), batch)
 }
 
 // AfterFileWriteToolResult runs the LSP pipeline after Write/Edit succeeds: Start, DidChange,
@@ -187,9 +322,42 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 		return base
 	}
 
-	coldStart, base, exited := m.beginAfterFileWrite(ctx, absPath, base)
-	prepared := m.prepareAfterFileWrite(ctx, absPath, content, base, changeType, coldStart, exited)
+	coldStart, base, exited, began := m.beginAfterFileWrite(ctx, absPath, base)
+	var prepared afterWritePrepared
+	bounded := coldStart || m.clientAdmittedWithin(absPath, warmupGrace)
+	if !m.runWritePreparation(ctx, began, bounded, func(taskCtx context.Context) {
+		prepared = m.prepareAfterFileWrite(taskCtx, absPath, content, base, changeType, coldStart, exited, began)
+	}, func(taskCtx context.Context) {
+		m.detachPreparedWrite(taskCtx, &prepared, identity.AgentIDFromContext(ctx))
+	}) {
+		return m.coldWriteBudgetResult(ctx, absPath, base).Output
+	}
 	return m.awaitPreparedAfterFileWrite(ctx, &prepared, includeOtherFiles, displayBaseDir).Output
+}
+
+// publishesOncePerVersion reports whether the server publishes one final
+// diagnostic set per document version, so a settle window after the first
+// matching publish would only delay the result. The list is built from
+// real-server probes (TestRealServerPublishesPerVersion): gopls publishes its
+// full analysis only after its own internal delay, well outside any settle
+// window. A server that publishes several passes per version
+// must keep the settle window, because the wait cannot know its first
+// snapshot is transient.
+func publishesOncePerVersion(name string, cfg config.LSPServerConfig) bool {
+	return isGoplsServer(name, cfg)
+}
+
+// publishesUnversioned reports servers whose publishDiagnostics never echo
+// the document version. TypeScript can publish syntax and semantic results
+// separately without a version, so it retains the settle window. For it the
+// freshness filter — received after the
+// sync — is the version check. A server that versions its publishes must
+// never confirm an immediate wait on an unversioned publish: gopls emits one
+// for the unopened-document snapshot while the workspace is still loading,
+// and consuming it as the synced version's result would report stale
+// diagnostics as fresh.
+func publishesUnversioned(name string, cfg config.LSPServerConfig) bool {
+	return isTypeScriptServer(name, cfg)
 }
 
 // immediateDiagnosticsServers returns the synced servers whose first publish for
@@ -202,7 +370,28 @@ func (m *Manager) immediateDiagnosticsServers(serverVersions map[string]int32) m
 	var out map[string]bool
 	for name := range serverVersions {
 		cfg, ok := m.cfg.LSP[name]
-		if !ok || !isGoplsServer(name, cfg) {
+		if !ok || !publishesOncePerVersion(name, cfg) {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]bool, len(serverVersions))
+		}
+		out[name] = true
+	}
+	return out
+}
+
+// unversionedDiagnosticsServers returns the synced servers whose
+// publishes never carry a document version (see
+// diagnosticsWaitRequest.unversionedServers).
+func (m *Manager) unversionedDiagnosticsServers(serverVersions map[string]int32) map[string]bool {
+	if m == nil || m.cfg == nil || len(serverVersions) == 0 {
+		return nil
+	}
+	var out map[string]bool
+	for name := range serverVersions {
+		cfg, ok := m.cfg.LSP[name]
+		if !ok || !publishesUnversioned(name, cfg) {
 			continue
 		}
 		if out == nil {
@@ -222,10 +411,11 @@ func (m *Manager) logLSPServiceNote(path, msg string) {
 
 // LSP degradation kinds that get one model-facing line per server per session.
 const (
-	lspDegradationStart   = "start"
-	lspDegradationExited  = "exited"
-	lspDegradationTimeout = "timeout"
-	lspDegradationSync    = "sync"
+	lspDegradationStart    = "start"
+	lspDegradationExited   = "exited"
+	lspDegradationTimeout  = "timeout"
+	lspDegradationDeferred = "deferred"
+	lspDegradationSync     = "sync"
 )
 
 // lspDegradationNotePrefix opens every model-facing degradation line, so
@@ -256,7 +446,10 @@ func (m *Manager) appendStartFailureNotes(ctx context.Context, absPath, base str
 			continue
 		}
 		if info.starting {
-			base = appendLSPDegradationNote(base, formatLSPDegradationNote(info.key.name, info.msg))
+			// The server is about to serve this file, and the write was
+			// re-registered for a re-sync at admission: the diagnostics are
+			// deferred, not lost.
+			base = appendLSPDegradationNote(base, formatLSPDegradationNote(info.key.name, info.msg+"; diagnostics follow with the next request once the server is up"))
 			continue
 		}
 		base = appendLSPDegradationNote(base, m.noteLSPDegradationForPath(absPath, lspDegradationStart, info.key.name, info.msg))
@@ -279,11 +472,21 @@ func (m *Manager) appendExitedServerNotes(ctx context.Context, absPath, base str
 	return base, exited
 }
 
-// appendTimeoutNote reports a diagnostics wait that ran out. The wait covers
-// every server that owns the file, so the line names none of them and is
-// reported once per workspace per session.
+// appendTimeoutNote reports a diagnostics wait that ran out on the Python
+// semantic path, where a timeout falls back to the quick backend rather than a
+// late watch. The wait covers every server that owns the file, so the line
+// names none of them and is reported once per workspace per session.
 func (m *Manager) appendTimeoutNote(path, base string, waitTimeout time.Duration) string {
 	return appendLSPDegradationNote(base, m.noteLSPDegradationForPath(path, lspDegradationTimeout, "", fmt.Sprintf("no diagnostics within %s", waitTimeout)))
+}
+
+// appendDeferredDiagnosticsNote reports a diagnostics wait that ran out on the
+// generic path, where the write's late watch catches the analysis the server
+// finishes later. It uses its own degradation kind so it neither suppresses
+// nor is suppressed by the Python path's timeout note, and is reported once
+// per workspace per session.
+func (m *Manager) appendDeferredDiagnosticsNote(path, base string, waitTimeout time.Duration) string {
+	return appendLSPDegradationNote(base, m.noteLSPDegradationForPath(path, lspDegradationDeferred, "", diagnosticsWaitDetail(waitTimeout)+"; eligible versioned diagnostics may follow with the next request"))
 }
 
 // DegradationNotes returns the degradation lines AfterFileWriteToolResult

@@ -37,7 +37,7 @@ func TestAfterWritePartialSyncRemainsAttributedAfterNoteDeduplication(t *testing
 				if semantic {
 					result = m.afterWriteLSPToolResult(context.Background(), path, "package main", "", false, nil, WatchedFileChanged, "")
 				} else {
-					prepared := m.prepareReadyAfterFileWrite(context.Background(), path, "package main", "", WatchedFileChanged, false)
+					prepared := m.prepareReadyAfterFileWrite(context.Background(), path, "package main", "", WatchedFileChanged, false, time.Now())
 					result = m.awaitPreparedAfterFileWrite(context.Background(), &prepared, false, "")
 				}
 				if result.Status != FileWriteStatusPartial || !strings.Contains(result.Detail, "gopls: notification rejected") {
@@ -82,7 +82,7 @@ func TestPartialWriteExcludesFailedServerCache(t *testing.T) {
 			if semantic {
 				result = m.afterWriteLSPToolResult(context.Background(), path, "package main", "written", false, nil, WatchedFileChanged, "")
 			} else {
-				prepared := m.prepareReadyAfterFileWrite(context.Background(), path, "package main", "written", WatchedFileChanged, false)
+				prepared := m.prepareReadyAfterFileWrite(context.Background(), path, "package main", "written", WatchedFileChanged, false, time.Now())
 				result = m.awaitPreparedAfterFileWrite(context.Background(), &prepared, false, "")
 			}
 			if !strings.Contains(result.Output, "current diagnostic") || strings.Contains(result.Output, "stale diagnostic") {

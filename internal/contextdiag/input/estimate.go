@@ -267,7 +267,7 @@ func estimateDiagnosticInput(b *diagnosticBudgetState, system string, msgs []mes
 			category, kind, label = contextdiag.Instructions, contextdiag.Instructions, "instructions"
 		case message.KindBackgroundResult:
 			category, kind, label = contextdiag.ToolResults, contextdiag.Tool, "background"
-		case message.KindQuestionState:
+		case message.KindQuestionState, message.KindLSPReview:
 			e.limitation("local_state_in_projection")
 			continue
 		case "", message.KindThinkingReplayPrefix:

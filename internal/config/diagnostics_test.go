@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -26,6 +27,74 @@ func TestDefaultDiagnosticsConfig(t *testing.T) {
 	}
 	if got := py.Output.MaxTotalDiagnostics; got != 10 {
 		t.Fatalf("max total diagnostics = %d, want 10", got)
+	}
+	if cfg.Diagnostics.LSP.WaitTimeoutMS != nil {
+		t.Fatalf("lsp wait timeout = %v, want unset", *cfg.Diagnostics.LSP.WaitTimeoutMS)
+	}
+}
+
+func TestLoadConfigFromPathParsesLSPWaitTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ms   int
+	}{
+		{name: "1500", ms: 1500},
+		{name: "1000", ms: 1000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			content := "diagnostics:\n  lsp:\n    wait_timeout_ms: " + strconv.Itoa(tc.ms) + "\n"
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			cfg, err := LoadConfigFromPath(path)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			if cfg.Diagnostics.LSP.WaitTimeoutMS == nil || *cfg.Diagnostics.LSP.WaitTimeoutMS != tc.ms {
+				t.Fatalf("lsp wait timeout = %v, want %d", cfg.Diagnostics.LSP.WaitTimeoutMS, tc.ms)
+			}
+		})
+	}
+}
+
+func TestLoadConfigFromPathResetsInvalidLSPWaitTimeout(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{name: "zero", yaml: "diagnostics:\n  lsp:\n    wait_timeout_ms: 0\n"},
+		{name: "negative", yaml: "diagnostics:\n  lsp:\n    wait_timeout_ms: -5\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			cfg, err := LoadConfigFromPath(path)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			if cfg.Diagnostics.LSP.WaitTimeoutMS != nil {
+				t.Fatalf("lsp wait timeout = %v, want reset to unset", *cfg.Diagnostics.LSP.WaitTimeoutMS)
+			}
+		})
+	}
+}
+
+func TestCollectDiagnosticIssuesReportsInvalidLSPWaitTimeout(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Diagnostics.LSP.WaitTimeoutMS = new(0)
+	issues := collectDiagnosticsConfigIssues(cfg)
+	found := false
+	for _, issue := range issues {
+		if issue == "diagnostics.lsp.wait_timeout_ms must be > 0" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("issues = %v, want diagnostics.lsp.wait_timeout_ms must be > 0", issues)
 	}
 }
 

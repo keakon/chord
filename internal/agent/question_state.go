@@ -1088,7 +1088,7 @@ func filterQuestionStateMessages(messages []message.Message) []message.Message {
 	// a full request-surface copy on every request.
 	hasQuestionState := false
 	for i := range messages {
-		if messages[i].Kind == message.KindQuestionState {
+		if messages[i].Kind == message.KindQuestionState || messages[i].Kind == message.KindLSPReview {
 			hasQuestionState = true
 			break
 		}
@@ -1098,7 +1098,7 @@ func filterQuestionStateMessages(messages []message.Message) []message.Message {
 	}
 	visible := make([]message.Message, 0, len(messages))
 	for _, msg := range messages {
-		if msg.Kind != message.KindQuestionState {
+		if msg.Kind != message.KindQuestionState && msg.Kind != message.KindLSPReview {
 			visible = append(visible, msg)
 		}
 	}

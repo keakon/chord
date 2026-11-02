@@ -10,7 +10,7 @@ import (
 // lspFollowupLead opens every late-diagnostics follow-up. The diagnostics are
 // not in the earlier tool results, so the model is told where they came from
 // and which rules apply instead of guessing.
-const lspFollowupLead = "LSP diagnostics arrived after the tool results of recent file edits were returned (a later analysis pass of the language server). They are not in those tool results. Apply the LSP diagnostic follow-up rules to them."
+const lspFollowupLead = "LSP diagnostics that a language server published after the tool results of recent file edits were returned (a later analysis pass, or the first pass after a write did not wait for a cold server). They are not in those tool results. Apply the LSP diagnostic follow-up rules to them."
 
 // lspFollowupBackscanMessages bounds how far back the request assembly looks
 // for recently written paths. Late watches expire on their own; this bound
@@ -56,7 +56,7 @@ func pendingLSPFollowup(source LSPFollowupSource, scan func(func(*message.Messag
 	}
 	items := source.Pending(paths, baseDir, agentID)
 	text := formatLSPFollowup(items)
-	if text == "" {
+	if len(items) == 0 {
 		return nil
 	}
 	return &lspFollowup{text: text, items: items}
@@ -89,7 +89,7 @@ func (a *MainAgent) buildLSPFollowupOverlay() (message.Message, bool) {
 	a.stagedLSPFollowupMu.Lock()
 	a.stagedLSPFollowup = followup
 	a.stagedLSPFollowupMu.Unlock()
-	return followup.overlay(), true
+	return followup.overlay(), followup.text != ""
 }
 
 // emitStagedLSPFollowup persists the follow-up the dispatched request carried
@@ -113,24 +113,35 @@ func (a *MainAgent) emitStagedLSPFollowup() {
 	for _, item := range staged.items {
 		reviews = append(reviews, item.Reviews...)
 	}
-	msg := message.Message{Role: message.RoleUser, Kind: message.KindLSPFollowup, Content: message.SystemReminderOverlayText(staged.text), LSPReviews: reviews}
+	msg := staged.message(reviews)
 	messageIndex := a.ctxMgr.MessageCount()
 	a.ctxMgr.Append(msg)
 	ackLSPFollowupItems(staged.items)
 	text := staged.text
 	enqueued := a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 		if err != nil {
-			a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex)
+			if staged.text != "" {
+				a.noteOverlayAppendPersistFailure(msg, identity.MainAgentID, messageIndex)
+			}
 			a.notePersistenceFailure(err)
 			return
 		}
-		a.emitToTUI(LSPFollowupEvent{Message: text, MessageIndex: messageIndex})
+		if text != "" {
+			a.emitToTUI(LSPFollowupEvent{Message: text, MessageIndex: messageIndex})
+		}
 	})
-	if !enqueued {
+	if !enqueued && text != "" {
 		// No persistence channel: the in-memory row remains the request's
 		// record, so emit the card now instead of leaving it pending forever.
 		a.emitToTUI(LSPFollowupEvent{Message: text, MessageIndex: messageIndex})
 	}
+}
+
+func (f *lspFollowup) message(reviews []message.LSPReview) message.Message {
+	if f.text == "" {
+		return message.Message{Role: message.RoleSystem, Kind: message.KindLSPReview, LSPReviews: reviews}
+	}
+	return message.Message{Role: message.RoleUser, Kind: message.KindLSPFollowup, Content: message.SystemReminderOverlayText(f.text), LSPReviews: reviews}
 }
 
 func ackLSPFollowupItems(items []LSPFollowupItem) {

@@ -403,3 +403,43 @@ func TestAfterFileWriteToolResultDidSaveFollowsServerCapability(t *testing.T) {
 		})
 	}
 }
+
+// TestAfterFileWriteTimeoutLabelsCachedDiagnostics guards the honesty rule: a
+// timed-out write that still shows the file's cached diagnostics must say they
+// may predate the edit, so an unchanged diagnostic block is never read as
+// verification of the write that just timed out.
+func TestAfterFileWriteTimeoutLabelsCachedDiagnostics(t *testing.T) {
+	mgr, path, client := newAfterWriteTestManager(t)
+	uri := protocol.DocumentURI(client.pathToURI(path))
+	client.diagnostics[uri] = []protocol.Diagnostic{
+		{
+			Severity: protocol.SeverityError,
+			Range:    protocol.Range{Start: protocol.Position{Line: 2}},
+			Message:  "cached type error",
+		},
+	}
+
+	origAwait := afterWriteAwaitWaiter
+	t.Cleanup(func() { afterWriteAwaitWaiter = origAwait })
+	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+		return nil, false, 0, nil
+	}
+
+	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
+	if !strings.Contains(out, "cached type error") {
+		t.Fatalf("timeout output should carry the cached diagnostics: %q", out)
+	}
+	if !strings.Contains(out, "\nshowing last known diagnostics (may predate this edit):\n") {
+		t.Fatalf("timeout output should label the cached diagnostics: %q", out)
+	}
+}
+
+// TestTimeoutFileWriteDetailMentionsFollowup pins the batch Detail wording: a
+// timed-out file is followed by whatever the late watch catches, and the
+// model is told so.
+func TestTimeoutFileWriteDetailMentionsFollowup(t *testing.T) {
+	got := timeoutFileWrite("out", 3*time.Second)
+	if !strings.Contains(got.Detail, "eligible versioned diagnostics may follow with the next request") {
+		t.Fatalf("timeout Detail = %q, want the follow-up wording", got.Detail)
+	}
+}

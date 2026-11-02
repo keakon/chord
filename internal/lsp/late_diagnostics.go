@@ -50,6 +50,11 @@ type lateWatch struct {
 	// generations captures each client's sync before its didChange was sent,
 	// not when the wait or watch finishes. A racing sync invalidates its share.
 	generations map[clientKey]uint64
+	// token is the sync token whose wait registered this watch. A confirmable
+	// token lets the claim re-run the freshness confirmation for a wait that
+	// timed out: the path stays stale until a pending late publish is about
+	// to be delivered. Tokens from partially failed syncs never arrive here.
+	token diagnosticSyncToken
 	// baseline holds every diagnostic the path had when the wait returned
 	// plus every diagnostic already delivered as late; only identities outside
 	// it are reported.
@@ -91,7 +96,7 @@ type LateDiagnostics struct {
 	// Lines holds the rendered diagnostic lines, selected by the same output
 	// policy as the write's tool result.
 	Lines string
-	// Reviews are the file's current per-server review counts.
+	// Reviews are counts from the matching frozen per-server publishes.
 	Reviews []message.LSPReview
 
 	seq            uint64
@@ -134,14 +139,18 @@ func (m *Manager) diagnosticBaselineByServer(path string, serverVersions map[str
 	return baseline
 }
 
-// watchLateDiagnostics starts following path after a successful diagnostics
-// wait. afterSeq is the publish sequence the wait consumed; publishes newer
-// than it were already recorded and are replayed here, so a same-version
-// publish that raced this registration is not lost. baseline is the set the
-// wait itself observed; the current cache may already contain a later publish.
-func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]int32, generations map[clientKey]uint64, baseline map[diagnosticIdentity]struct{}, afterSeq uint64, writerAgentID string) {
-	if m == nil || len(serverVersions) == 0 {
-		return
+// watchLateDiagnostics starts following path after its after-write wait
+// returned — whether that wait saw a publish or timed out. afterSeq is the
+// publish sequence the wait consumed; publishes newer than it were already
+// recorded and are replayed here, so a same-version publish that raced this
+// registration is not lost. baseline is the set the wait itself observed; the
+// current cache may already contain a later publish. token must be
+// confirmable: a sync whose notifications partially failed cannot have its
+// path claimed later, because no publish can prove which content the missing
+// server analyzed. It reports whether a watch was registered.
+func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]int32, generations map[clientKey]uint64, baseline map[diagnosticIdentity]struct{}, afterSeq uint64, writerAgentID string, token diagnosticSyncToken) bool {
+	if m == nil || len(serverVersions) == 0 || !token.confirmable {
+		return false
 	}
 	path = normalizeWaiterPath(path)
 	if baseline == nil {
@@ -171,6 +180,7 @@ func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]in
 		versions:      versions,
 		writerAgentID: writerAgentID,
 		generations:   maps.Clone(generations),
+		token:         token,
 		baseline:      baseline,
 		frozen:        make(map[string][]Diagnostic, len(versions)),
 		registered:    now,
@@ -192,7 +202,7 @@ func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]in
 	if len(watch.versions) == 0 {
 		delete(m.lateWatches, path)
 		delete(m.latePublishes, path)
-		return
+		return false
 	}
 	for _, publish := range m.latePublishes[path] {
 		if publish.seq <= afterSeq || publish.receivedAt.After(watch.deadline) {
@@ -212,6 +222,23 @@ func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]in
 	// The watch now owns these entries; a later watch is concerned only with
 	// publishes after its own wait.
 	delete(m.latePublishes, path)
+	return true
+}
+
+// batchWatchGenerations replaces each listed client's generation with its
+// last sequence produced by the batch, keeping only clients in the map. A
+// batch of writes registers its watches only after its last sync, so the
+// watches must carry the sequence the client has by then — every earlier
+// file's didChange advanced the shared client's sequence.
+func batchWatchGenerations(generations, final map[clientKey]uint64) map[clientKey]uint64 {
+	if len(generations) == 0 {
+		return nil
+	}
+	out := make(map[clientKey]uint64, len(generations))
+	for key := range generations {
+		out[key] = final[key]
+	}
+	return out
 }
 
 // dropLateDiagnostics forgets path's watch: a new synchronization of the file
@@ -375,8 +402,9 @@ func (m *Manager) clearLatePending(path string, seq, lateGen uint64) {
 
 // PendingLateDiagnostics reports late diagnostics for the given written paths
 // without consuming them; AckLateDiagnostics consumes what was delivered.
-// A path is reported only when a new error or warning appeared; information
-// and hint findings ride along with one but never trigger a report. Findings
+// Diagnostic text is reported only when a new error or warning appeared;
+// otherwise a review-only item preserves the matching publish's counts.
+// Information and hint findings ride along but never trigger text. Findings
 // already delivered for the file, at any position or version, are left out.
 // Paths whose diagnostics went stale (the file changed on disk after Chord
 // synced it) are skipped.
@@ -391,6 +419,7 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 		baseline map[diagnosticIdentity]struct{}
 		reported map[lateFindingKey]struct{}
 		frozen   map[string][]Diagnostic
+		token    diagnosticSyncToken
 	}
 	var candidates []candidate
 	seen := make(map[string]struct{}, len(paths))
@@ -429,7 +458,7 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 			reported[key] = struct{}{}
 		}
 		frozen := maps.Clone(watch.frozen)
-		candidates = append(candidates, candidate{path: path, seq: watch.seq, lateGen: watch.lateGen, baseline: baseline, reported: reported, frozen: frozen})
+		candidates = append(candidates, candidate{path: path, seq: watch.seq, lateGen: watch.lateGen, baseline: baseline, reported: reported, frozen: frozen, token: watch.token})
 	}
 	m.lateMu.Unlock()
 	if len(candidates) == 0 {
@@ -439,6 +468,16 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 
 	var out []LateDiagnostics
 	for _, c := range candidates {
+		// A claim re-runs the sync confirmation before the freshness check.
+		// This is what lets a timed-out wait deliver later: its path was left
+		// stale by the sync, and only a publish that is about to be claimed —
+		// with the file's mtime unchanged and no newer sync — proves the
+		// cached content still describes the write. The confirm is idempotent
+		// and re-validates generation and mtime, so a new write's sync or an
+		// external edit keeps the path stale.
+		if c.token.path != "" && c.token.confirmable {
+			m.confirmDiagnosticsSync(c.token)
+		}
 		m.diagMu.Lock()
 		fresh := m.diagnosticsFreshLocked(c.path)
 		reportedIdentities := maps.Clone(m.reportedByPath[c.path])
@@ -483,7 +522,7 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 			}
 		}
 		if !blocking {
-			m.clearLatePending(c.path, c.seq, c.lateGen)
+			out = append(out, LateDiagnostics{Path: c.path, DisplayPath: displayDiagnosticPath(c.path, displayBaseDir), Reviews: frozenReviewSnapshots(c.path, c.frozen), seq: c.seq, lateGen: c.lateGen})
 			continue
 		}
 		selected, omitted := selectDiagnosticsByOutput(added, m.DiagnosticOutputConfigForPath(c.path), nil)
@@ -499,7 +538,7 @@ func (m *Manager) PendingLateDiagnostics(paths []string, displayBaseDir, agentID
 			Path:           c.path,
 			DisplayPath:    displayDiagnosticPath(c.path, displayBaseDir),
 			Lines:          lines,
-			Reviews:        m.currentReviewSnapshots(c.path),
+			Reviews:        frozenReviewSnapshots(c.path, c.frozen),
 			seq:            c.seq,
 			lateGen:        c.lateGen,
 			findingServers: make(map[lateFindingKey]map[string]struct{}, len(selected)),
@@ -543,7 +582,6 @@ func (m *Manager) AckLateDiagnostics(delivered []LateDiagnostics) {
 	}
 	m.diagMu.Unlock()
 	m.lateMu.Lock()
-	defer m.lateMu.Unlock()
 	for _, item := range delivered {
 		if m.lateReported == nil {
 			m.lateReported = make(map[string]map[lateFindingKey]map[string]struct{})
@@ -573,6 +611,14 @@ func (m *Manager) AckLateDiagnostics(delivered []LateDiagnostics) {
 		if watch.lateGen == item.lateGen {
 			watch.pending = false
 		}
+	}
+	m.lateMu.Unlock()
+	// The delivered findings are the first review evidence for a write whose
+	// diagnostics wait timed out; record them for the sidebar now. The wait
+	// itself skipped its snapshot so pre-write counts never posed as a
+	// completed review.
+	for _, item := range delivered {
+		m.recordDeliveredReviews(item.Reviews)
 	}
 }
 

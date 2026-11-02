@@ -627,6 +627,10 @@ func (c *Client) DidChange(ctx context.Context, path string, content string) (in
 	path = normalizeWaiterPath(path)
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
+	return c.didChangeLocked(ctx, path, content)
+}
+
+func (c *Client) didChangeLocked(ctx context.Context, path string, content string) (int32, error) {
 	if c.closed {
 		return 0, nil
 	}

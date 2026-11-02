@@ -74,7 +74,7 @@ func (a *MainAgent) directoryCandidateInputs(history []message.Message) director
 	if a.pendingThinkingReplayPrefix != nil {
 		in.overlays = append(in.overlays, a.pendingThinkingReplayPrefix.Clone())
 	}
-	if followup := pendingLSPFollowup(a.lspFollowupSource, a.ctxMgr.ScanBackward, a.workDir(), a.instanceID); followup != nil {
+	if followup := pendingLSPFollowup(a.lspFollowupSource, a.ctxMgr.ScanBackward, a.workDir(), a.instanceID); followup != nil && followup.text != "" {
 		in.overlays = append(in.overlays, followup.overlay())
 	}
 	// The request may refresh checkpoint files immediately before dispatch.
@@ -93,7 +93,7 @@ func (s *SubAgent) directoryCandidateInputs(_ []message.Message) directoryCandid
 	if p := s.cachedSessionReminderContent.Load(); p != nil && *p != "" {
 		in.overlays = append(in.overlays, message.Message{Role: message.RoleUser, Content: *p})
 	}
-	if followup := pendingLSPFollowup(s.lspFollowupSource, s.ctxMgr.ScanBackward, s.effectiveToolBaseDir(), s.instanceID); followup != nil {
+	if followup := pendingLSPFollowup(s.lspFollowupSource, s.ctxMgr.ScanBackward, s.effectiveToolBaseDir(), s.instanceID); followup != nil && followup.text != "" {
 		in.overlays = append(in.overlays, followup.overlay())
 	}
 	return in

@@ -27,6 +27,7 @@ func (m *Manager) pruneExitedClientsForPath(ctx context.Context, path string) []
 			return
 		}
 		delete(m.clients, key)
+		delete(m.admittedAt, key)
 		dead = append(dead, c)
 		names = append(names, key.name)
 	})

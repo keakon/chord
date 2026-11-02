@@ -25,6 +25,10 @@ func isPyrightServer(name string, cfg config.LSPServerConfig) bool {
 	return matchesServerIdentity(name, cfg.Command, "pyright", "pyright-langserver", "basedpyright", "basedpyright-langserver")
 }
 
+func isTypeScriptServer(name string, cfg config.LSPServerConfig) bool {
+	return matchesServerIdentity(name, cfg.Command, "typescript", "typescript-language-server")
+}
+
 func effectiveRootMarkers(name string, cfg config.LSPServerConfig) []string {
 	if len(cfg.RootMarkers) > 0 {
 		return cfg.RootMarkers
@@ -35,7 +39,7 @@ func effectiveRootMarkers(name string, cfg config.LSPServerConfig) []string {
 	if isPyrightServer(name, cfg) {
 		return []string{"pyrightconfig.json", "pyproject.toml", "requirements.txt"}
 	}
-	if matchesServerIdentity(name, cfg.Command, "typescript", "typescript-language-server") {
+	if isTypeScriptServer(name, cfg) {
 		return []string{"tsconfig.json", "jsconfig.json", "package.json"}
 	}
 	return nil

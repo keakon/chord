@@ -131,6 +131,9 @@ func (m *Manager) pruneMissingRoots(ctx context.Context) {
 			removedRoots = append(removedRoots, key.root)
 		}
 		delete(m.clients, key)
+		// The admission time dies with the client: a re-admission records a
+		// fresh one, and a stale entry would outlive the instance it described.
+		delete(m.admittedAt, key)
 		closed = append(closed, client)
 		survivors[key.name] = nil
 	}

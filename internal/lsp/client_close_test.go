@@ -613,7 +613,7 @@ func TestManagerStopPreventsInFlightStartFromRegistering(t *testing.T) {
 	cancelEra() // a Stop cancelled this launch's era
 	fake := &fakePowernapClient{}
 	lateClient := &Client{client: fake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
-	entry := &startEntry{ctx: era, done: make(chan struct{})}
+	entry := &startEntry{ctx: era, done: make(chan struct{}), ready: make(chan struct{})}
 
 	mgr.clientsMu.Lock()
 	closeMe, _, admitted := mgr.admitStartedClientLocked(key, entry, lateClient)
@@ -666,7 +666,7 @@ func TestManagerStopSuppressesStartFailFromStoppedLaunch(t *testing.T) {
 	// server command makes the launch fail fast inside startServer.
 	era, cancelEra := context.WithCancel(context.Background())
 	cancelEra()
-	entry := &startEntry{ctx: era, done: make(chan struct{})}
+	entry := &startEntry{ctx: era, done: make(chan struct{}), ready: make(chan struct{})}
 	mgr.clientsMu.Lock()
 	mgr.starting[key] = true
 	mgr.launches[key] = entry

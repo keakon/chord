@@ -25,8 +25,14 @@ func TestFileMaintenanceRealGopls(t *testing.T) {
 	}
 	m.MarkTouched(path)
 	m.AfterFileWriteToolResult(ctx, path, string(content), "written", true, WatchedFileChanged, "")
-	if !hasDiagnosticMessage(m.Diagnostics(path), "missingBeforeChange") {
-		t.Fatal("initial diagnostic missing")
+	// The cold-start budget may return before gopls's first analysis pass; the
+	// cache must hold the diagnostic once the publish lands.
+	for !hasDiagnosticMessage(m.Diagnostics(path), "missingBeforeChange") {
+		select {
+		case <-ctx.Done():
+			t.Fatal("initial diagnostic missing", ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 	// Atomic replacement must release the old overlay and publish disk diagnostics.
 	replacement := path + ".new"

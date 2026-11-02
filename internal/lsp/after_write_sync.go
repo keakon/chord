@@ -30,7 +30,9 @@ type afterWriteSync struct {
 // the workspace file-change notification (when notifyWatched), then didChange
 // and didSave. Every failure is logged and attributed to its server in the
 // returned sync, because a server that missed a notification cannot publish
-// diagnostics that verify this write.
+// diagnostics that verify this write. The pending-write resync
+// (resyncAfterWait) mirrors this sequence with a buffer-ownership rule; when
+// this sequence gains a step, check that one too.
 func (m *Manager) syncAfterWrite(ctx context.Context, absPath, content string, changeType pnprotocol.FileChangeType, notifyWatched bool) afterWriteSync {
 	sync := afterWriteSync{serverErrors: make(map[string]error)}
 	m.dropLateDiagnostics(absPath)
@@ -53,10 +55,20 @@ func (m *Manager) syncAfterWrite(ctx context.Context, absPath, content string, c
 		mergeServerErrors(sync.serverErrors, errs)
 		m.logLSPServiceNote(absPath, "Failed to notify language server about the saved file: "+formatServerErrors(errs))
 	}
+	finalizeAfterWriteSync(&sync)
+	return sync
+}
+
+// finalizeAfterWriteSync excludes servers that missed any notification from
+// the synced versions and stamps the fail-closed confirmable flag: the token
+// may clear the path's stale flag only when every notification succeeded, so
+// a server that missed one can never bless diagnostics for older content as
+// current. Every after-write sync sequence must end with this.
+func finalizeAfterWriteSync(sync *afterWriteSync) {
 	for name := range sync.serverErrors {
 		delete(sync.serverVersions, name)
 	}
-	return sync
+	sync.token.confirmable = len(sync.serverErrors) == 0
 }
 
 // mergeServerErrors records each server's first failed notification: the sync

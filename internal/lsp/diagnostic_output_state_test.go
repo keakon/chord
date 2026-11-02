@@ -167,6 +167,7 @@ func TestStaleDiagnosticsRequireFreshSyncConfirmation(t *testing.T) {
 	}
 
 	token := mgr.beginDiagnosticsSync(other)
+	token.confirmable = true // the simulated sync delivered every notification
 	publishTestDiagnostics(mgr, key, uri, client, 3, diag)
 	mgr.confirmDiagnosticsSync(token)
 	fresh := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
@@ -214,6 +215,7 @@ func TestEditDoesNotRepeatAlreadyReportedDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := mgr.beginDiagnosticsSync(other)
+	token.confirmable = true // the simulated sync delivered every notification
 	publishTestDiagnostics(mgr, key, uri, client, 2, diag)
 	mgr.confirmDiagnosticsSync(token)
 
@@ -274,5 +276,27 @@ func TestRestoreReportedDiagnosticsSuppressesAlreadyShownLines(t *testing.T) {
 	after := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(after, diag.Message) {
 		t.Fatalf("after = %q, want no repeat of a diagnostic the transcript already showed", after)
+	}
+}
+
+// TestUnconfirmableTokenKeepsStale pins the fail-closed half of the sync
+// confirmation: a token from a partially failed sync must not clear the
+// path's stale flag no matter what was published afterwards, because a
+// server that missed a notification can still publish diagnostics for older
+// content.
+func TestUnconfirmableTokenKeepsStale(t *testing.T) {
+	mgr, _, other, key, uri, client := newDiagnosticOutputTestManager(t)
+	diag := testProtocolDiagnostic("unconfirmed error", 0)
+	publishTestDiagnostics(mgr, key, uri, client, 1, diag)
+
+	token := mgr.beginDiagnosticsSync(other) // confirmable stays false
+	publishTestDiagnostics(mgr, key, uri, client, 2, diag)
+	mgr.confirmDiagnosticsSync(token)
+
+	mgr.diagMu.Lock()
+	stale := mgr.diagState[other].stale
+	mgr.diagMu.Unlock()
+	if !stale {
+		t.Fatal("an unconfirmable token cleared the path's stale flag")
 	}
 }

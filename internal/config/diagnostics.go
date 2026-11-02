@@ -16,6 +16,18 @@ const (
 type DiagnosticsConfig struct {
 	Enabled *bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Python  PythonDiagnosticsConfig `json:"python" yaml:"python"`
+	LSP     LSPDiagnosticsConfig    `json:"lsp" yaml:"lsp"`
+}
+
+// LSPDiagnosticsConfig controls the generic (non-Python) LSP after-write wait.
+type LSPDiagnosticsConfig struct {
+	// WaitTimeoutMS bounds how long a warm-start file write waits for its
+	// language server's diagnostics. nil uses the built-in default. Cold
+	// starts derive their shorter total budget from it rather than taking it
+	// verbatim. Must be > 0: a write that should effectively not wait
+	// configures a small positive value (100-500ms), because 0 would disable
+	// the wait entirely.
+	WaitTimeoutMS *int `json:"wait_timeout_ms,omitempty" yaml:"wait_timeout_ms,omitempty"`
 }
 
 // PythonDiagnosticsConfig controls Python-specific post-tool diagnostics.
@@ -101,6 +113,9 @@ func collectDiagnosticIssues(cfg *Config) []diagnosticIssue {
 	}
 	var issues []diagnosticIssue
 	py := cfg.Diagnostics.Python
+	if wait := cfg.Diagnostics.LSP.WaitTimeoutMS; wait != nil && *wait <= 0 {
+		issues = append(issues, diagnosticIssue{Path: "diagnostics.lsp.wait_timeout_ms", Message: "diagnostics.lsp.wait_timeout_ms must be > 0"})
+	}
 	issues = append(issues, diagnosticBackendIssues("diagnostics.python.semantic_backend", py.SemanticBackend, DiagnosticBackendTypeLSP)...)
 	issues = append(issues, diagnosticBackendIssues("diagnostics.python.quick_backend", py.QuickBackend, DiagnosticBackendTypeCommand)...)
 	lf := py.LargeFile
@@ -155,6 +170,9 @@ func collectDiagnosticsConfigIssues(cfg *Config) []string {
 func resetInvalidDiagnosticsFields(d *DiagnosticsConfig) {
 	if d == nil {
 		return
+	}
+	if wait := d.LSP.WaitTimeoutMS; wait != nil && *wait <= 0 {
+		d.LSP.WaitTimeoutMS = nil
 	}
 	py := &d.Python
 	if t := strings.TrimSpace(py.SemanticBackend.Type); t != "" && t != DiagnosticBackendTypeLSP {

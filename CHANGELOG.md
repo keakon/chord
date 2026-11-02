@@ -99,7 +99,11 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Model-driven compaction is on by default: the main agent registers the `compact_context` tool without configuration, so a session nearing its compaction line gets the model's wrap-up and a durable checkpoint before the runtime's summary-based compaction runs. Set `context.compaction.model_driven: false` to keep compaction fully runtime-owned.
 
-- Editing a Go file returns about 300 ms sooner: Chord no longer waits for a second gopls publish once gopls has reported diagnostics for the version it just received.
+- Editing a Go file returns about 300 ms sooner once gopls reports diagnostics for the written version. Other servers retain the settling window.
+
+- Non-Python writes that start a language server, or reach it within 8 seconds of startup, return within about 2.5 seconds. Unfinished synchronization continues in the background. Versioned diagnostics can follow with the next request within 15 seconds, provided the file is unchanged and the server has not synchronized another file; unversioned results, including TypeScript, cannot follow this way. Timed-out results label cached diagnostics as possibly predating the edit.
+
+- `diagnostics.lsp.wait_timeout_ms` (default `3000`, global-only) bounds how long a file edit waits for diagnostics from a running language server on non-Python files.
 
 - Batch `edit` calls accept a trailing line-ending difference the same way a single replacement does, so an entry that misses only by its final newline no longer rejects the whole batch and costs another round trip.
 

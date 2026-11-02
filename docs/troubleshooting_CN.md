@@ -215,10 +215,11 @@ Chord 会在会话空闲时主动卸载空闲的 LSP / MCP 运行时资源，以
 - 检查 `lsp` 配置格式是否正确
 - 确认目标文件类型与 `file_types` 是否匹配
 - 检查是否通过 `diagnostics.enabled: false` 关闭了工具后诊断
-- 如果工具结果里出现 `LSP diagnostics unavailable for this edit (<server>[: <detail>]); do not treat this edit as verified.`，说明 Chord 没能拿到诊断：括号里的 server 未启动、仍在启动、或已退出正在重启，或者等待窗口内没有任何 server 发布诊断（冷启动等待更长，此时括号里是 `language server: no diagnostics within …`）。原因见括号里的细节或日志。启动失败和退出按服务器与工作区去重，等待超时按工作区去重，每会话最多提示一行；仍在启动的 server 在就绪前每次编辑都会提示。
-- 一次编辑多个文件时，没能拿到诊断的文件还会在 `Diagnostics:` 块里单独标出：`<path>: diagnostics unavailable (<原因>)`；该文件如果有旧诊断，会放在 `showing last known diagnostics:` 之后，不再当成这次编辑的新结果。只编辑一个文件时保持紧凑格式，靠上面的会话提示判断。
+- 工具结果出现 `LSP diagnostics unavailable for this edit (<server>[: <detail>]); do not treat this edit as verified.` 时，查看括号里的原因或日志，区分启动、连接、同步失败和等待预算耗尽。启动失败和退出按服务与工作区去重，等待超时按工作区去重，每会话提示一次。仍在启动的服务在就绪前每次编辑都会提示；所需服务就绪后，Chord 会同步文件内容。
+- 等待结束或后台同步完成后，被写版本有 15 秒补送窗口，诊断可随下一次请求送达，前提是文件未变，同一服务之后也没有同步其他文件。TypeScript 等不提供文档版本的服务无法补送这类结果。超时本身不代表编辑已验证；需要确认结果而迟迟没有当前诊断时，运行构建或检查命令。
+- 一次编辑多个文件时，没能拿到诊断的文件会在 `Diagnostics:` 块里单独标出：`<path>: diagnostics unavailable (<原因>)`。缓存诊断放在 `showing last known diagnostics:` 之后。只编辑一个文件时使用上面的会话提示。
 
-文件同步通知失败时，Chord 会说明诊断不可用并跳过等待，不把旧诊断当成本次验证结果。确认连接断开后，会移除对应服务器实例及无其他实例提供的旧诊断，下一次写文件时会重新启动服务器。取消请求或普通协议错误本身不会被判定为断连。
+文件同步通知失败时，Chord 不会用该服务的诊断验证编辑，但仍会等待同步成功的其他服务；全部失败才跳过等待。确认连接断开后，Chord 会移除对应实例及无其他实例提供的旧诊断，下次写文件时重新启动服务。取消请求或普通协议错误本身不代表连接断开。
 
 Go 的 `No packages found for open file` 可能是包加载失败的后果，应先检查 LSP 日志，而不是修改模块路径。如果日志出现 `too many open files`，且配置了 `lsp.gopls.options.gopls.fileWatcher`，删掉这项让 gopls 回到默认的 `off`，再重启受影响的会话。macOS 上对大型工作区使用 `fsnotify` 可能耗尽文件描述符，`poll` 同样会遍历工作区里的每个目录。文件编辑成功不代表 LSP 已完成诊断。
 

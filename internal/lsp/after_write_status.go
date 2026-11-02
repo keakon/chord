@@ -128,6 +128,16 @@ func timeoutFileWrite(output string, timeout time.Duration) FileWriteResult {
 	return FileWriteResult{
 		Output: output,
 		Status: FileWriteStatusTimeout,
-		Detail: fmt.Sprintf("no diagnostics within %v", timeout),
+		// The write's late watch catches whatever the server publishes for
+		// this version after the wait gave up; say so, or an unverified file
+		// looks like a dead end.
+		Detail: diagnosticsWaitDetail(timeout) + "; eligible versioned diagnostics may follow with the next request",
 	}
+}
+
+func diagnosticsWaitDetail(timeout time.Duration) string {
+	if timeout <= 0 {
+		return "diagnostics wait budget exhausted"
+	}
+	return fmt.Sprintf("no diagnostics within %v", max(timeout.Round(100*time.Millisecond), 100*time.Millisecond))
 }

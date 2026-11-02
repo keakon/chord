@@ -204,6 +204,23 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	return b.String()
 }
 
+// lastKnownDiagnosticsAnnotation labels diagnostics a timed-out write still
+// shows: the cached set describes an earlier version of the file, not the
+// write that just failed to wait.
+const lastKnownDiagnosticsAnnotation = "showing last known diagnostics (may predate this edit):"
+
+// annotateLastKnownDiagnostics inserts the last-known label right under the
+// Diagnostics: header of a single-file tool result. A result without a
+// diagnostics section is returned unchanged.
+func annotateLastKnownDiagnostics(out string) string {
+	idx := strings.Index(out, DiagnosticsSectionMarker)
+	if idx < 0 {
+		return out
+	}
+	at := idx + len(DiagnosticsSectionMarker)
+	return out[:at] + lastKnownDiagnosticsAnnotation + "\n" + out[at:]
+}
+
 func (m *Manager) diagnosticsForWritePaths(paths []string, states map[string]FileWriteDiagnosticsState) map[string][]Diagnostic {
 	merged, byServer := m.diagnosticsForPathsGrouped(paths)
 	for path, state := range states {

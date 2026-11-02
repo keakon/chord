@@ -1506,6 +1506,31 @@ diagnostics:
 
 `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加诊断文本的长度，并按错误/警告优先于 info/hint 的顺序展示。完整字段表见[配置字段速查表](#配置字段速查表)。
 
+### 其他语言的诊断等待
+
+Python 之外的文件类型，只要配置了对应的语言服务，Chord 都会在写入后等待该服务的诊断并追加到工具结果里。等多久取决于服务是否已在运行：
+
+- 服务已在运行：等 `diagnostics.lsp.wait_timeout_ms`（默认 `3000`）。
+- 这次写入需要启动服务，或服务启动尚未满 8 秒：连接、同步和诊断等待共用约 2.5 秒前台预算。到点后仍在进行的同步会在后台完成。`wait_timeout_ms` 只限制其中的诊断等待，不缩短连接和同步时间。
+
+等待结束或后台同步完成后，Chord 会为被写版本保留 15 秒补送窗口。窗口内的诊断可随下一次请求送达，前提是同一服务之后没有同步其他文件，且文件仍匹配该版本。TypeScript 等不提供文档版本的服务无法补送这类结果；Chord 会在首次等待时为 TypeScript 保留短暂的稳定窗口。超时结果中的缓存诊断会标注「可能是编辑前的旧结果」。补送的带版本结果即使没有问题，也会更新文件已保存的审查计数。
+
+`diagnostics.lsp.wait_timeout_ms` 只接受全局配置，Chord 会忽略项目配置中的同名键。值必须为正数；想基本不等诊断，可配 `100`–`500`。
+
+冷启动的负担可以靠减少服务要加载的内容来降低。对 gopls，大仓库有两个配置杠杆：
+
+```yaml
+lsp:
+  gopls:
+    command: gopls
+    args: ["-remote=auto"]          # 跨会话共享一个 daemon 进程
+    file_types: [".go"]
+    init_options:
+      directoryFilters: ["-vendor", "-testdata"]  # 让 gopls 跳过无需分析的目录
+```
+
+`-remote=auto` 让 gopls 以 daemon 方式常驻，后续会话复用热进程；它不会缩短首次 workspace 加载。`directoryFilters` 才能缩短它——把目录排除出分析范围。两者都是 gopls 的上游功能，Chord 只负责透传。
+
 工具结果里追加的诊断包含编辑文件自身的问题，以及与任一编辑文件同目录的其他文件缓存问题（Go 按目录编译包，workspace 诊断会覆盖被诊断包里的所有文件）。同一个其他文件诊断每个会话只附加一次：该诊断从服务器发布集合中消失后，问题再次出现才会重新报告。
 
 后续编辑也不会重复：已经告知过模型的问题再复述一遍只是浪费上下文，因此仍然存在的诊断保持抑制，只报告发生变化的部分。而被修复掉的问题（被其他 agent 改好、被复制覆盖、或被 `git checkout` 还原）不会继续从缓存里报出来：文件一旦与诊断计算时的内容不再一致，缓存诊断就先被扣下；等服务器发布的集合里不再包含它，就彻底丢弃。
@@ -1545,7 +1570,7 @@ chord doctor models --pool thinking
 | `model_pools`           | `map[name][]ref`      | —                               | global / project         | 可复用的命名模型池，元素为完整 `provider/model[@variant]` ref。见 [模型池](#模型池)。           |
 | `thinking_translation`  | object                | 关闭（`max_chars: 1000`）        | global / project         | 可选的 thinking / reasoning 卡片附加翻译预览。需要 `target_language` 和 `model_pool`；失败只跳过受影响的 thinking block。 |
 | `context`               | object                | 见下文                          | global / project         | `compaction`（上下文压缩）和 `reduction`（上下文剪裁）两项配置。见[上下文管理](./context-management_CN.md)。 |
-| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global / project         | `edit`、`apply_patch` 或 `write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和剪裁窗口。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
+| `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global                   | `edit`、`apply_patch` 或 `write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和剪裁窗口。`diagnostics.lsp.wait_timeout_ms`（默认 `3000`）限制非 Python 文件在已运行语言服务上的诊断等待；冷启动用更短的固定总预算，没等到的诊断随下一次请求补送。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
 | `question_timeout` | int（秒） | `0`（无限等待） | 全局 / 项目 | 仅 optional 问题获得入口后无回答关闭为 `no_response`；介入后永久停用。必要确认不受影响。 |

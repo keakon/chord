@@ -195,12 +195,29 @@ func TestExternalCheckoutsRealGopls(t *testing.T) {
 		}
 		manager.MarkTouched(item.path)
 		out := manager.AfterFileWriteToolResult(ctx, item.path, string(content), "written", true, WatchedFileChanged, base)
-		if !strings.Contains(out, item.symbol) {
-			t.Fatalf("write %s did not report its error: %s", item.path, out)
+		reported := out
+		// A cold root may exhaust the write budget before gopls's first
+		// analysis pass; the diagnostics then follow with the next request.
+		if !strings.Contains(reported, item.symbol) {
+			deadline := time.Now().Add(30 * time.Second)
+			for {
+				for _, late := range manager.PendingLateDiagnostics([]string{item.path}, base, "") {
+					if strings.Contains(late.Lines, item.symbol) {
+						reported += "\n" + late.Lines
+					}
+				}
+				if strings.Contains(reported, item.symbol) {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("write %s never reported its error: %s", item.path, out)
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
 		for _, other := range []string{"missingFirst", "missingSecond", "missingThird"} {
-			if other != item.symbol && strings.Contains(out, other) {
-				t.Fatalf("foreign diagnostic in %s: %s", item.path, out)
+			if other != item.symbol && strings.Contains(reported, other) {
+				t.Fatalf("foreign diagnostic in %s: %s", item.path, reported)
 			}
 		}
 	}

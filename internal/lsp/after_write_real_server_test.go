@@ -48,11 +48,9 @@ func TestAfterFileWriteToolResultSendsDidSaveToRealGopls(t *testing.T) {
 	// trip below runs against an initialized server and a hot diagnostics path.
 	mgr.AfterFileWriteToolResult(ctx, path, string(content), "wrote main.go", true, WatchedFileChanged, "")
 
-	mgr.clientsMu.RLock()
-	client, ok := mgr.clientForPathLocked(path)
-	mgr.clientsMu.RUnlock()
+	client, ok := mgr.waitForClientForPath(ctx, path, time.Minute)
 	if !ok {
-		t.Fatal("no gopls client is serving the written file")
+		t.Fatalf("no gopls client is serving the written file: %v", formattedStartFailures(mgr, path))
 	}
 	if _, requested := client.client.SaveOptions(); !requested {
 		t.Fatal("gopls declared no save capability; the didSave gate would never open")

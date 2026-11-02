@@ -1764,6 +1764,31 @@ diagnostics:
 
 `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes how much appended diagnostics text is shown, prioritizing errors and warnings before info and hints. See the [Configuration cheatsheet](#configuration-cheatsheet) for the full field list.
 
+### Waiting for diagnostics on other languages
+
+For every other file type a configured language server covers, Chord waits briefly for that server's diagnostics after each write and appends them to the tool result. How long it waits depends on whether the server is already running:
+
+- A running server gets `diagnostics.lsp.wait_timeout_ms` (default `3000`).
+- A write that starts a server, or reaches one within 8 seconds of startup, has a total foreground budget of about 2.5 seconds for connection, synchronization and diagnostics. Synchronization that is still in progress finishes in the background. `wait_timeout_ms` caps the diagnostics portion of that budget; it does not shorten connection or synchronization time.
+
+After the wait or background synchronization completes, Chord keeps a 15-second follow-up window for the written version. Diagnostics within that window can reach the next request, provided the same server has not since synchronized another file and the file still matches that version. Servers that omit document versions, including TypeScript, cannot supply these follow-ups; TypeScript results use a short settling period during the initial wait. A timed-out result labels cached diagnostics as possibly predating the edit. Clean versioned follow-ups also update the file's saved review counts.
+
+`diagnostics.lsp.wait_timeout_ms` is a global-only key: it is read from the global config and ignored in project config. It accepts any positive value; `0` is rejected, so a write that should effectively not wait configures a small value such as `100`–`500`.
+
+Cold workspace starts get cheaper when the server has less to load. For gopls, two config levers help large checkouts:
+
+```yaml
+lsp:
+  gopls:
+    command: gopls
+    args: ["-remote=auto"]          # share one daemon across sessions
+    file_types: [".go"]
+    init_options:
+      directoryFilters: ["-vendor", "-testdata"]  # skip directories gopls need not analyze
+```
+
+`-remote=auto` runs gopls as a daemon so later sessions reuse a warm process; it does not shrink the first workspace load. `directoryFilters` does, by keeping directories out of the analysis. Both are gopls features documented upstream; Chord only forwards them.
+
 Diagnostics appended to the tool result cover the edited files' own problems, plus cached problems from *other* files in the same directory as an edited file (Go packages are compiled per directory, and workspace diagnostics cover every file in a diagnosed package). Each other-file diagnostic is attached only once per session: the same problem is not repeated in later tool results until that diagnostic disappears from the server's published set, after which a reappearing problem is reported again.
 
 Later edits do not repeat it either: a problem the model already has costs context to restate, so a surviving diagnostic stays suppressed and only changes are reported. A problem that was fixed (by another agent, a file copy, or a `git checkout` restore) stops being reported instead of being served from cache: the cached diagnostics are withheld as soon as the file no longer matches what they were computed from, and they are dropped once the server publishes without them.
@@ -1803,7 +1828,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `model_pools`           | `map[name][]ref`      | —                                | global / project         | Reusable named pools of full `provider/model[@variant]` refs. See [Model pools](#model-pools-selecting-providermodel). |
 | `thinking_translation`  | object                | disabled (`max_chars: 1000`)     | global / project         | Optional appended translation preview for thinking / reasoning cards. Requires `target_language` and `model_pool`; failures only skip the affected thinking block. |
 | `context`               | object                | see below                        | global / project         | `compaction` and `reduction` settings. See [Context compaction](./context-management.md#context-compaction) and [Context reduction](./context-management.md#context-reduction). |
-| `diagnostics`           | object                | enabled (Python LSP + Ruff fallback) | global / project     | Post-tool diagnostics appended to `edit`, `apply_patch`, or `write` results. `diagnostics.python.semantic_backend` is the primary LSP server (default `pyright`); `diagnostics.python.quick_backend` is a one-shot fallback (default `ruff check`). `diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` controls when large files use the quick backend, and `run_semantic_when_quick_unavailable: true` forces semantic diagnostics when the quick backend is missing. `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes the appended diagnostics text. Diagnostics are shown by severity priority (errors/warnings first, then info/hints if slots remain). Set `diagnostics.enabled: false` to skip the whole pipeline. |
+| `diagnostics`           | object                | enabled (Python LSP + Ruff fallback) | global              | Post-tool diagnostics appended to `edit`, `apply_patch`, or `write` results. `diagnostics.python.semantic_backend` is the primary LSP server (default `pyright`); `diagnostics.python.quick_backend` is a one-shot fallback (default `ruff check`). `diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` controls when large files use the quick backend, and `run_semantic_when_quick_unavailable: true` forces semantic diagnostics when the quick backend is missing. `diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` shapes the appended diagnostics text. `diagnostics.lsp.wait_timeout_ms` (default `3000`) bounds the diagnostics wait on a running language server for non-Python files; a cold start uses one shorter fixed total budget, and whatever the wait misses follows with the next request. Diagnostics are shown by severity priority (errors/warnings first, then info/hints if slots remain). Set `diagnostics.enabled: false` to skip the whole pipeline. |
 | `skills`                | object                | empty                            | global / project         | `paths: [...]` — additional skill directories beyond the defaults.                                                       |
 | `confirm_timeout`       | int (seconds)         | `0` (no timeout)                 | global / project         | Timeout for confirmation dialogs in TUI; `0` means wait forever.                                                         |
 | `question_timeout` | int (seconds) | `0` (no timeout) | global / project | Closes only optional questions as `no_response` after an answer entry is available. Interaction permanently cancels the timer; required decisions are unaffected. |

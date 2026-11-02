@@ -770,7 +770,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 	toolIDToBlock := make(map[string]*Block)
 
 	for msgIdx, msg := range msgs {
-		if msg.Kind == message.KindQuestionState || msg.Kind == message.KindDirectoryInstructions || msg.Kind == message.KindSkillDiscovery {
+		if msg.Kind == message.KindQuestionState || msg.Kind == message.KindLSPReview || msg.Kind == message.KindDirectoryInstructions || msg.Kind == message.KindSkillDiscovery {
 			continue
 		}
 		if block := questionTranscriptBlock(msg, *nextID); block != nil {

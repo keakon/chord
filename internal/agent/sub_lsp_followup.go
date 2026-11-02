@@ -35,7 +35,7 @@ func (s *SubAgent) buildLSPFollowupOverlay() (message.Message, bool) {
 	s.stagedLSPFollowupMu.Lock()
 	s.stagedLSPFollowup = followup
 	s.stagedLSPFollowupMu.Unlock()
-	return followup.overlay(), true
+	return followup.overlay(), followup.text != ""
 }
 
 // emitStagedLSPFollowup persists the follow-up the dispatched request carried
@@ -57,16 +57,13 @@ func (s *SubAgent) emitStagedLSPFollowup() {
 	for _, item := range staged.items {
 		reviews = append(reviews, item.Reviews...)
 	}
-	msg := message.Message{
-		Role:       message.RoleUser,
-		Kind:       message.KindLSPFollowup,
-		Content:    message.SystemReminderOverlayText(staged.text),
-		LSPReviews: reviews,
-	}
+	msg := staged.message(reviews)
 	messageIndex := s.ctxMgr.MessageCount()
 	s.ctxMgr.Append(msg)
 	ackLSPFollowupItems(staged.items)
-	s.deferLSPFollowup(messageIndex)
+	if staged.text != "" {
+		s.deferLSPFollowup(messageIndex)
+	}
 	s.persistMessageAsync(msg, "LSP follow-up", func() {
 		s.flushDeferredLSPFollowupsThrough(messageIndex)
 	})

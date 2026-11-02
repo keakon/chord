@@ -24,7 +24,7 @@ func (c *Client) recordSyncedContent(path, content string) {
 	if c.syncedFiles == nil {
 		c.syncedFiles = make(map[string]syncedFile)
 	}
-	c.syncedFiles[path] = syncedFile{info: info, used: time.Now()}
+	c.syncedFiles[path] = syncedFile{info: info, used: time.Now(), version: c.openFiles[path]}
 	c.openFilesMu.Unlock()
 }
 
@@ -83,4 +83,14 @@ func (c *Client) resyncFileIfChanged(ctx context.Context, path, content string, 
 	}
 	c.recordSyncedContent(path, content)
 	return true, nil
+}
+
+func (c *Client) syncedDocumentVersion(path string) int32 {
+	if c == nil {
+		return 0
+	}
+	path = normalizeWaiterPath(path)
+	c.openFilesMu.Lock()
+	defer c.openFilesMu.Unlock()
+	return c.syncedFiles[path].version
 }

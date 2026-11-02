@@ -110,6 +110,12 @@ type diagnosticSyncToken struct {
 	path       string
 	mtime      time.Time
 	generation uint64
+	// confirmable reports whether the sync that produced this token delivered
+	// every notification it attempted. A token from a partially failed sync
+	// must never clear the path's stale flag: a server that missed a
+	// notification can still publish diagnostics for older content. The zero
+	// value fails closed.
+	confirmable bool
 }
 
 // beginDiagnosticsSync marks path stale until AwaitFreshWaiter confirms a
@@ -137,9 +143,10 @@ func (m *Manager) beginDiagnosticsSync(path string) diagnosticSyncToken {
 
 // confirmDiagnosticsSync makes a path eligible for future other-file output
 // only when this write's fresh publish arrived and the file has not changed on
-// disk since synchronization began.
+// disk since synchronization began. Tokens from partially failed syncs are
+// refused outright: their path stays stale until a fully successful sync.
 func (m *Manager) confirmDiagnosticsSync(token diagnosticSyncToken) {
-	if m == nil || token.path == "" {
+	if m == nil || token.path == "" || !token.confirmable {
 		return
 	}
 	info, err := os.Stat(token.path)

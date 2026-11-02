@@ -1,7 +1,9 @@
 package lsp
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -9,9 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/logtest"
 )
 
 // restoreAfterWriteHooks snapshots the after-write pipeline test hooks and
@@ -280,9 +285,11 @@ func TestAfterFileWritesToolResultWaitsForClientsConcurrently(t *testing.T) {
 
 // TestAfterFileWritesToolResultGivesEveryFileTheColdStartBudget guards the
 // batch cold-start contract: every file of a batch that starts a cold server
-// waits with the cold-start diagnostics budget, not only the first one — the
-// servers start before any client wait, so a sibling's wait finishing the
-// start must not make a later file of the same batch look warm.
+// waits with the cold-start total budget, not only the first one — the servers
+// start before any client wait, so a sibling's wait finishing the start must
+// not make a later file of the same batch look warm. The budget is the total
+// wall clock the batch spends (client wait + sync + diagnostics wait), so each
+// file's diagnostics wait is what remains of it.
 func TestAfterFileWritesToolResultGivesEveryFileTheColdStartBudget(t *testing.T) {
 	mgr, alpha, beta := newBatchTestManager(t)
 
@@ -292,6 +299,9 @@ func TestAfterFileWritesToolResultGivesEveryFileTheColdStartBudget(t *testing.T)
 		// The server finishes starting during the first file's client wait, so
 		// per-file readiness would see every later file as warm.
 		ready.Store(true)
+		if timeout > coldStartWriteBudget {
+			t.Errorf("client wait timeout %v exceeds the cold-start total budget", timeout)
+		}
 		return mgr.clients[testKey(mgr, "gopls")], true
 	}
 	var mu sync.Mutex
@@ -310,8 +320,13 @@ func TestAfterFileWritesToolResultGivesEveryFileTheColdStartBudget(t *testing.T)
 	mu.Lock()
 	defer mu.Unlock()
 	for _, path := range []string{alpha, beta} {
-		if got := timeouts[path]; got != coldStartDiagnosticsWaitTimeout {
-			t.Fatalf("diagnostics wait timeout for %s = %v, want cold-start budget %v", path, got, coldStartDiagnosticsWaitTimeout)
+		// Both files draw from the same batch-start budget; the immediate
+		// client wait leaves nearly all of it for the diagnostics wait, so a
+		// wide lower bound keeps the assertion timing-tolerant while still
+		// proving the wait is the remainder of the total budget, not the warm
+		// default and not the old 8s cold wait.
+		if got := timeouts[path]; got <= 2*time.Second || got > coldStartWriteBudget {
+			t.Fatalf("diagnostics wait timeout for %s = %v, want the remainder of the %v cold-start total budget", path, got, coldStartWriteBudget)
 		}
 	}
 }
@@ -339,5 +354,168 @@ func TestAfterFileWritesToolResultSkipsFilesWithoutServer(t *testing.T) {
 	}
 	if starts != 0 {
 		t.Fatalf("serverless file must not start any server, starts=%d", starts)
+	}
+}
+
+// TestAfterFileWritesBatchRegistersWatchForEveryFile guards the batch watch
+// contract: every file of a same-root batch must register a late-diagnostics
+// watch with the client generations the batch's last sync produced. The files
+// share one client, and each file's didChange advances that client's sync
+// sequence, so a watch carrying the generations captured during its own
+// preparation would be pruned at registration and only the last-synced file
+// could ever claim a late publish — notified and timed-out writes alike.
+func TestAfterFileWritesBatchRegistersWatchForEveryFile(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		notified bool
+	}{{"notified", true}, {"timed out", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr, alpha, beta := newBatchTestManager(t)
+			for _, path := range []string{alpha, beta} {
+				if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			var mu sync.Mutex
+			versions := make(map[string]int32)
+			origDidChange := afterWriteDidChange
+			t.Cleanup(func() { afterWriteDidChange = origDidChange })
+			afterWriteDidChange = func(m *Manager, ctx context.Context, path, content string) (map[string]int32, map[clientKey]uint64, map[string]error) {
+				v, g, errs := m.didChangeVersions(ctx, path, content)
+				mu.Lock()
+				if version, ok := v["gopls"]; ok {
+					versions[path] = version
+				}
+				mu.Unlock()
+				return v, g, errs
+			}
+			afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+				return nil, tc.notified, 0, nil
+			}
+
+			results := mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
+				{Path: alpha, Content: "package main\n", ChangeType: WatchedFileChanged},
+				{Path: beta, Content: "package main\n", ChangeType: WatchedFileChanged},
+			}, "")
+			for _, path := range []string{alpha, beta} {
+				if got := results[path].Status; got != FileWriteStatusReported && got != FileWriteStatusTimeout {
+					t.Fatalf("result status for %s = %v, want reported or timeout", path, got)
+				}
+			}
+
+			mgr.lateMu.Lock()
+			_, alphaWatched := mgr.lateWatches[alpha]
+			_, betaWatched := mgr.lateWatches[beta]
+			mgr.lateMu.Unlock()
+			if !alphaWatched || !betaWatched {
+				t.Fatalf("watches after batch = alpha:%v beta:%v, want both", alphaWatched, betaWatched)
+			}
+
+			publish := func(path string, version int32, message string) {
+				uri := protocol.DocumentURI("file://" + filepath.ToSlash(path))
+				client := mgr.clients[testKey(mgr, "gopls")]
+				diags := []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: message}}
+				client.diagnosticsMu.Lock()
+				client.diagnostics[uri] = diags
+				client.diagnosticsMu.Unlock()
+				mgr.onDiagnostics(testKey(mgr, "gopls"), nil)(string(uri), uriToPath(string(uri)), nil, "", diags, version)
+			}
+			mu.Lock()
+			publish(alpha, versions[alpha], "alpha analyzer finding")
+			publish(beta, versions[beta], "beta analyzer finding")
+			mu.Unlock()
+
+			got := mgr.PendingLateDiagnostics([]string{alpha, beta}, "", "")
+			if len(got) != 2 {
+				t.Fatalf("pending = %+v, want one entry per file", got)
+			}
+			for _, item := range got {
+				switch item.Path {
+				case alpha:
+					if !strings.Contains(item.Lines, "alpha analyzer finding") {
+						t.Fatalf("alpha lines = %q", item.Lines)
+					}
+				case beta:
+					if !strings.Contains(item.Lines, "beta analyzer finding") {
+						t.Fatalf("beta lines = %q", item.Lines)
+					}
+				default:
+					t.Fatalf("unexpected pending path %v", item.Path)
+				}
+			}
+
+			// A sync outside the batch invalidates the batch's watches. Dropping
+			// alpha's is direct; beta's dies with the client-level generation
+			// the shared client's sync sequence advanced — the accepted
+			// limitation of client-level invalidation, which keeps a publish
+			// from an older client state from ever posing as current.
+			if err := os.WriteFile(alpha, []byte("package main\n\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			mgr.syncAfterWrite(context.Background(), alpha, "package main\n\n", WatchedFileChanged, true)
+			mu.Lock()
+			publish(alpha, versions[alpha], "alpha second finding")
+			publish(beta, versions[beta], "beta second finding")
+			mu.Unlock()
+			got = mgr.PendingLateDiagnostics([]string{alpha, beta}, "", "")
+			if len(got) != 0 {
+				t.Fatalf("pending after an out-of-batch sync = %+v, want none", got)
+			}
+		})
+	}
+}
+
+// syncLogBuffer is a log capture target safe for the batch pipeline's
+// concurrent diagnostics waits, which each log their own breakdown line.
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncLogBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncLogBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// TestAfterFileWritesToolResultLogsBatchClientWait guards the breakdown log's
+// client_wait_ms for batch writes: the wait runs in the parallel phase before
+// the prepare pass rebuilds each entry's prepared struct, so storing the
+// duration on that struct directly would be overwritten and every batch line
+// would report a zero client wait.
+func TestAfterFileWritesToolResultLogsBatchClientWait(t *testing.T) {
+	mgr, alpha, beta := newBatchTestManager(t)
+
+	logs := &syncLogBuffer{}
+	log.SetDefaultLogger(logtest.NewLogger(logs, golog.DebugLevel))
+	t.Cleanup(func() { log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel)) })
+
+	origWaitForClient := afterWriteWaitForClient
+	afterWriteWaitForClient = func(m *Manager, ctx context.Context, path string, timeout time.Duration) (*Client, bool) {
+		time.Sleep(10 * time.Millisecond)
+		return origWaitForClient(m, ctx, path, timeout)
+	}
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+		return nil, true, 0, nil
+	}
+
+	mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
+		{Path: alpha, Content: "package main\n", ChangeType: WatchedFileChanged},
+		{Path: beta, Content: "package main\n", ChangeType: WatchedFileChanged},
+	}, "")
+
+	out := logs.String()
+	if !strings.Contains(out, "after-write diagnostics breakdown") {
+		t.Fatalf("breakdown log missing:\n%s", out)
+	}
+	if strings.Contains(out, "client_wait_ms=0") {
+		t.Fatalf("batch breakdown reports a zero client wait:\n%s", out)
 	}
 }

@@ -11,8 +11,9 @@ import (
 // syncedFile describes the disk snapshot corresponding to an open overlay.
 // File identity catches atomic replacements even when timestamps are preserved.
 type syncedFile struct {
-	info os.FileInfo
-	used time.Time
+	info    os.FileInfo
+	used    time.Time
+	version int32
 }
 
 func sameDiskFile(a, b os.FileInfo) bool {
