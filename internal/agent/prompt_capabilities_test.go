@@ -147,13 +147,33 @@ delegate: allow
 	for _, want := range []string{
 		"## SubAgent Workflow",
 		"prefer `notify` on the existing task instead of creating a new delegate",
+		"Write a self-contained description for a fresh-context worker",
+		"add a length limit only when useful",
+		"include known commands and acceptance criteria",
+		"label assumptions, and do not prescribe an unverified fix",
+		"Delegate bounded investigation and local fixes",
+		"keep overall synthesis, cross-task decisions, and final acceptance with the owner",
+		"only when known, not as prerequisites to delegation",
 		"Dispatch tasks in parallel only when their work is independent",
+		"attribute them to that worker, and label progress as progress",
+		"Never fabricate or predict unreported outcomes, even after a progress message",
+		"report its observed task state",
+		"do not present waiting, blocked, failed, or cancelled work as running",
 		"After choosing substantial independent work to delegate",
 		"Continue independent work that cannot conflict with it",
 		"Until you receive an escalation, a completion, or a clear error/blocked signal from a worker, do not take over implementation just because a SubAgent is briefly quiet",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in subagent workflow block, got %q", want, got)
+		}
+	}
+	for _, unwanted := range []string{
+		"Never delegate understanding",
+		"Until a worker's own completion, failure, or progress message arrives",
+		"say it is still running instead of predicting its outcome",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("unexpected delegation restriction %q in %q", unwanted, got)
 		}
 	}
 }

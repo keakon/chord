@@ -39,7 +39,12 @@ func delegationStrategyPromptLines(visible map[string]struct{}) string {
 	sb.WriteString("- For a genuinely new objective with low overlap and a separately trackable result, prefer a new ")
 	sb.WriteString(delegate)
 	sb.WriteString(" instead of overloading an existing worker.\n")
+	sb.WriteString("- Write a self-contained description for a fresh-context worker: the goal and why it matters, relevant context and constraints, known paths and prior attempts, and the expected deliverable and report format; add a length limit only when useful.\n")
+	sb.WriteString("- For verification work, include known commands and acceptance criteria; for investigation, give the question and boundaries, label assumptions, and do not prescribe an unverified fix.\n")
+	sb.WriteString("- Delegate bounded investigation and local fixes when they can be evaluated independently; keep overall synthesis, cross-task decisions, and final acceptance with the owner. Provide files, lines, and proposed changes only when known, not as prerequisites to delegation.\n")
 	sb.WriteString("- Dispatch tasks in parallel only when their work is independent; do not run parallel SubAgents that are likely to edit the same file or tightly coupled targets.\n")
+	sb.WriteString("- Only relay results or messages actually received from a worker, attribute them to that worker, and label progress as progress. Never fabricate or predict unreported outcomes, even after a progress message.\n")
+	sb.WriteString("- When asked about a worker, report its observed task state; do not present waiting, blocked, failed, or cancelled work as running or infer an outcome from silence.\n")
 	return sb.String()
 }
 

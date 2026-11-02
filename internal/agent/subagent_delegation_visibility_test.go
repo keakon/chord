@@ -188,7 +188,16 @@ func TestSubAgentSystemPromptIncludesDelegationStrategyWhenNested(t *testing.T) 
 		"## Nested Delegation",
 		"prefer `notify` on the existing task instead of creating a new delegate",
 		"prefer a new `delegate` instead of overloading an existing worker",
+		"Write a self-contained description for a fresh-context worker",
+		"include known commands and acceptance criteria",
+		"Delegate bounded investigation and local fixes",
+		"keep overall synthesis, cross-task decisions, and final acceptance with the owner",
+		"only when known, not as prerequisites to delegation",
 		"Dispatch tasks in parallel only when their work is independent",
+		"attribute them to that worker, and label progress as progress",
+		"Never fabricate or predict unreported outcomes, even after a progress message",
+		"report its observed task state",
+		"do not present waiting, blocked, failed, or cancelled work as running",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("nested SubAgent system prompt missing %q", want)

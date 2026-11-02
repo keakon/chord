@@ -675,15 +675,16 @@ func (w *externalWorker) terminateForSessionSwitch(reason string) {
 }
 
 func (w *externalWorker) finishSuccess(text string) {
+	summary := strings.TrimSpace(text)
+	if summary == "" {
+		summary = w.lastAssistantText()
+	}
+	if summary == "" {
+		w.finishFailure(fmt.Errorf("external agent finished without a completion report"))
+		return
+	}
 	w.finishOnce.Do(func() {
 		w.finished.Store(true)
-		summary := strings.TrimSpace(text)
-		if summary == "" {
-			summary = w.lastAssistantText()
-		}
-		if summary == "" {
-			summary = "external agent completed without a text result"
-		}
 		w.setState(SubAgentStateCompleted, summary)
 		envelope := w.externalCompletionEnvelope(summary)
 		w.persistExternalTerminalSettlement(envelope)

@@ -90,3 +90,25 @@ func TestDelegateToolDescriptionKeepsUsageSemantics(t *testing.T) {
 		}
 	}
 }
+
+func TestDelegateToolDescriptionParameterPointsAtBriefGuidance(t *testing.T) {
+	params := NewDelegateTool(taskTestCreator{}).Parameters()
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("parameters properties = %#v, want map", params["properties"])
+	}
+	descParam, ok := props["description"].(map[string]any)
+	if !ok {
+		t.Fatalf("description parameter = %#v, want map", props["description"])
+	}
+	desc, _ := descParam["description"].(string)
+	for _, want := range []string{
+		"Be specific about what needs to be done",
+		"include target files when known and relevant",
+		"defines what a self-contained brief must include",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description parameter missing %q in %q", want, desc)
+		}
+	}
+}

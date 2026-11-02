@@ -428,11 +428,11 @@ done
 		t.Fatalf("sendMessageToSubAgentNow: %v", err)
 	}
 	record := driveExternalTask(t, a, handle.TaskID)
-	if record.State != string(SubAgentStateCompleted) {
-		t.Fatalf("task state = %q, want completed", record.State)
+	if record.State != string(SubAgentStateFailed) {
+		t.Fatalf("task state = %q, want failed for the empty second turn", record.State)
 	}
-	if record.LastSummary == "first turn" {
-		t.Fatal("second turn reused the previous turn's assistant text")
+	if !strings.Contains(record.LastSummary, "without a completion report") || record.LastCompletion != nil {
+		t.Fatalf("empty second turn reused an earlier completion: summary=%q completion=%+v", record.LastSummary, record.LastCompletion)
 	}
 }
 

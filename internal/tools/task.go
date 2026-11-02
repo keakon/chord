@@ -120,7 +120,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"description": map[string]any{
 				"type":        "string",
-				"description": "Detailed task description and requirements for the SubAgent. Be specific about what needs to be done, which files to modify, and any constraints.",
+				"description": "Detailed task description and requirements for the SubAgent. Be specific about what needs to be done and any constraints; include target files when known and relevant. The delegation workflow in your system prompt defines what a self-contained brief must include; follow it.",
 			},
 			"plan_task_ref": map[string]any{
 				"type":        "string",
