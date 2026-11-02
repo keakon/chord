@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
@@ -12,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/keakon/golog/log"
@@ -73,15 +73,25 @@ type DumpTokenUsage struct {
 
 // DumpWriter writes LLM dump files to a directory.
 type DumpWriter struct {
-	dir string
-	seq atomic.Uint64
-	mu  sync.Mutex // serialise directory updates/creation
+	dir  string
+	seq  uint64
+	dirs map[string]*dumpDirState
+	mu   sync.Mutex // serialise directory updates/creation and sequence allocation
+}
+
+// dumpDirState tracks the sequence high-water mark for one dump directory.
+// The high-water mark includes writes that reserved a sequence but have not
+// published yet, so switching directories cannot rewind the allocator below
+// an in-flight write and reuse its filename.
+type dumpDirState struct {
+	high    uint64
+	pending uint64
 }
 
 // NewDumpWriter creates a DumpWriter that writes JSON files to dir.
 // The directory is created lazily on the first Write call.
 func NewDumpWriter(dir string) *DumpWriter {
-	w := &DumpWriter{}
+	w := &DumpWriter{dirs: make(map[string]*dumpDirState)}
 	w.SetDir(dir)
 	return w
 }
@@ -91,9 +101,20 @@ func (w *DumpWriter) SetDir(dir string) {
 	if w == nil {
 		return
 	}
+	dir = strings.TrimSpace(dir)
 	w.mu.Lock()
-	w.dir = strings.TrimSpace(dir)
-	w.seq.Store(nextDumpSequenceForDir(w.dir) - 1)
+	oldDir := w.dir
+	w.dir = dir
+	next := nextDumpSequenceForDir(dir)
+	if state := w.dirs[dir]; state != nil && state.high >= next {
+		next = state.high + 1
+	}
+	w.seq = next - 1
+	if oldDir != dir {
+		if state := w.dirs[oldDir]; state != nil && state.pending == 0 {
+			delete(w.dirs, oldDir)
+		}
+	}
 	w.mu.Unlock()
 }
 
@@ -126,8 +147,54 @@ func nextDumpSequenceForDir(dir string) uint64 {
 	return maxSeq + 1
 }
 
+// reserveSeq creates the current dump directory if needed and reserves the
+// next sequence for it. The caller must call releaseSeq when the write ends.
+func (w *DumpWriter) reserveSeq() (string, uint64, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	dir := w.dir
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", 0, fmt.Errorf("create dump dir: %w", err)
+	}
+	if w.dirs == nil {
+		w.dirs = make(map[string]*dumpDirState)
+	}
+	state := w.dirs[dir]
+	if state == nil {
+		state = &dumpDirState{}
+		w.dirs[dir] = state
+	}
+	w.seq++
+	seq := w.seq
+	if seq > state.high {
+		state.high = seq
+	}
+	state.pending++
+	return dir, seq, nil
+}
+
+func (w *DumpWriter) releaseSeq(dir string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	state := w.dirs[dir]
+	if state == nil {
+		return
+	}
+	if state.pending > 0 {
+		state.pending--
+	}
+	if state.pending == 0 && dir != w.dir {
+		delete(w.dirs, dir)
+	}
+}
+
 // Write persists a dump to a JSON file.
 // File naming: {seq}_{timestamp}_{sanitized-provider}_{sanitized-model}.json
+//
+// The dump is encoded field by field so a large request body or chunk list is
+// never duplicated as one encoded document. RequestBody is written as-is when
+// it is already valid JSON; asynchronous callers must copy it before starting
+// the write because Write does not retain or mutate the bytes.
 func (w *DumpWriter) Write(dump *LLMDump) error {
 	if dump == nil {
 		return fmt.Errorf("dump is nil")
@@ -136,18 +203,13 @@ func (w *DumpWriter) Write(dump *LLMDump) error {
 	if err != nil {
 		return fmt.Errorf("normalize dump request body: %w", err)
 	}
-	dumpToWrite := *dump
-	dumpToWrite.RequestBody = requestBody
-	dumpToWrite.RequestHeaders = dumpRequestHeaders(dump.RequestHeaders)
+	requestHeaders := dumpRequestHeaders(dump.RequestHeaders)
 
-	w.mu.Lock()
-	dir := w.dir
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		w.mu.Unlock()
-		return fmt.Errorf("create dump dir: %w", err)
+	dir, seq, err := w.reserveSeq()
+	if err != nil {
+		return err
 	}
-	seq := w.seq.Add(1)
-	w.mu.Unlock()
+	defer w.releaseSeq(dir)
 
 	ts := time.Now().Format("20060102_150405")
 	filename := fmt.Sprintf(
@@ -159,17 +221,201 @@ func (w *DumpWriter) Write(dump *LLMDump) error {
 	)
 	path := filepath.Join(dir, filename)
 
-	data, err := json.MarshalIndent(&dumpToWrite, "", "  ")
+	// Publish by rename so a failed or interrupted write never leaves a partial
+	// .json file that looks complete.
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		return fmt.Errorf("marshal dump: %w", err)
+		return fmt.Errorf("create dump temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	bw := bufio.NewWriterSize(tmp, 64<<10)
+	size, err := writeDumpJSON(bw, dump, requestBody, requestHeaders)
+	if err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write dump: %w", err)
+	}
+	if err := bw.Flush(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("flush dump: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close dump: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("publish dump file: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write dump file: %w", err)
-	}
-
-	log.Debugf("LLM dump written path=%v size=%v provider=%v model=%v", path, len(data), dump.Provider, dump.Model)
+	log.Debugf("LLM dump written path=%v size=%v provider=%v model=%v", path, size, dump.Provider, dump.Model)
 	return nil
+}
+
+type dumpCountingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (w *dumpCountingWriter) Write(p []byte) (int, error) {
+	n, err := w.w.Write(p)
+	w.n += int64(n)
+	return n, err
+}
+
+func (w *dumpCountingWriter) WriteString(s string) (int, error) {
+	n, err := io.WriteString(w.w, s)
+	w.n += int64(n)
+	return n, err
+}
+
+type dumpJSONWriter struct {
+	w          io.Writer
+	err        error
+	wroteField bool
+	chunkBuf   bytes.Buffer
+	chunkEnc   *json.Encoder
+}
+
+func (w *dumpJSONWriter) writeString(s string) {
+	if w.err != nil {
+		return
+	}
+	_, w.err = io.WriteString(w.w, s)
+}
+
+func (w *dumpJSONWriter) writeBytes(p []byte) {
+	if w.err != nil {
+		return
+	}
+	_, w.err = w.w.Write(p)
+}
+
+func (w *dumpJSONWriter) beginField(name string) {
+	if w.err != nil {
+		return
+	}
+	if w.wroteField {
+		w.writeString(",")
+	} else {
+		w.wroteField = true
+	}
+	w.writeString("\n  ")
+	nameJSON, err := json.Marshal(name)
+	if err != nil {
+		w.err = err
+		return
+	}
+	w.writeBytes(nameJSON)
+	w.writeString(": ")
+}
+
+func (w *dumpJSONWriter) field(name string, value any) {
+	if w.err != nil {
+		return
+	}
+	w.beginField(name)
+	if w.err != nil {
+		return
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		w.err = err
+		return
+	}
+	w.writeBytes(data)
+}
+
+func (w *dumpJSONWriter) rawField(name string, value []byte) {
+	if w.err != nil {
+		return
+	}
+	w.beginField(name)
+	if w.err != nil {
+		return
+	}
+	if len(value) == 0 {
+		w.writeString("null")
+		return
+	}
+	w.writeBytes(value)
+}
+
+func (w *dumpJSONWriter) stringArrayField(name string, values []string) {
+	if w.err != nil {
+		return
+	}
+	w.beginField(name)
+	if w.err != nil {
+		return
+	}
+	if values == nil {
+		w.writeString("null")
+		return
+	}
+	w.writeString("[")
+	for i, value := range values {
+		if w.err != nil {
+			return
+		}
+		if i > 0 {
+			w.writeString(",")
+		}
+		w.writeString("\n    ")
+		// Reuse one encoder and buffer so each chunk is not copied into a fresh
+		// []byte. Encoder appends a newline; drop it to keep the array layout.
+		if w.chunkEnc == nil {
+			w.chunkEnc = json.NewEncoder(&w.chunkBuf)
+		}
+		w.chunkBuf.Reset()
+		if err := w.chunkEnc.Encode(value); err != nil {
+			w.err = err
+			return
+		}
+		data := w.chunkBuf.Bytes()
+		if n := len(data); n > 0 && data[n-1] == '\n' {
+			data = data[:n-1]
+		}
+		w.writeBytes(data)
+	}
+	if len(values) > 0 {
+		w.writeString("\n  ")
+	}
+	w.writeString("]")
+}
+
+func writeDumpJSON(out io.Writer, dump *LLMDump, requestBody json.RawMessage, requestHeaders http.Header) (int64, error) {
+	counter := &dumpCountingWriter{w: out}
+	w := &dumpJSONWriter{w: counter}
+	w.writeString("{")
+	w.field("timestamp", dump.Timestamp)
+	w.field("provider", dump.Provider)
+	w.field("model", dump.Model)
+	w.rawField("request_body", requestBody)
+	if len(requestHeaders) > 0 {
+		w.field("request_headers", requestHeaders)
+	}
+	if dump.HTTPStatus != 0 {
+		w.field("http_status", dump.HTTPStatus)
+	}
+	if len(dump.HTTPHeaders) > 0 {
+		w.field("http_headers", dump.HTTPHeaders)
+	}
+	if dump.HTTPBody != "" {
+		w.field("http_body", dump.HTTPBody)
+	}
+	w.stringArrayField("sse_chunks", dump.SSEChunks)
+	if dump.Response != nil {
+		w.field("response", dump.Response)
+	}
+	if dump.Recovery != nil {
+		w.field("recovery", dump.Recovery)
+	}
+	if dump.Error != "" {
+		w.field("error", dump.Error)
+	}
+	w.field("duration_ms", dump.DurationMS)
+	w.writeString("\n}\n")
+	return counter.n, w.err
 }
 
 func sanitizeDumpNamePart(s string) string {
@@ -202,8 +448,9 @@ func normalizeDumpRequestBody(body json.RawMessage) (json.RawMessage, error) {
 	if len(body) == 0 {
 		return nil, nil
 	}
+	// Valid JSON is returned without copying; the dump writer only reads it.
 	if json.Valid(body) {
-		return append(json.RawMessage(nil), body...), nil
+		return body, nil
 	}
 	decoded, err := tryGunzip(body)
 	if err != nil {
