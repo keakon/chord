@@ -306,19 +306,7 @@ func (r *RecoveryManager) persistBinaryParts(msg message.Message, durable bool) 
 		if !p.IsBinary() || len(p.Data) == 0 || p.ImagePath != "" {
 			continue
 		}
-		ext := ".bin"
-		switch p.MimeType {
-		case "image/png":
-			ext = ".png"
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		case "application/pdf":
-			ext = ".pdf"
-		}
+		ext := attachmentExt(p.MimeType)
 		fileName := fmt.Sprintf("%d-%d%s", time.Now().UnixNano(), i, ext)
 		filePath := filepath.Join(r.imagesDir(), fileName)
 		write := privatefs.WriteFile

@@ -191,6 +191,7 @@ func (a *MainAgent) handleAppendContext(evt Event) {
 		return
 	}
 	msg.Role = "user"
+	msg = a.normalizeUserAttachments(msg)
 	if nativeMessagesTurnPending(a.ctxMgr) {
 		msg.Parts = cloneContentParts(msg.Parts)
 		a.pendingNativeContextAppends = append(a.pendingNativeContextAppends, msg)

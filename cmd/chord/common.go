@@ -912,6 +912,18 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		}
 	}
 
+	// Startup-only attachment repair. Every in-memory message has just been
+	// loaded from a durable record, so a file in images/ that no record
+	// mentions is genuinely orphaned. The grace period covers an attachment
+	// that has been written but whose message is not committed yet; the sweep
+	// also refuses to run unless this process owns the session lock. Failures
+	// are logged, never fatal: a stale file is not worth refusing to start.
+	if sweep, sweepErr := recovery.SweepOrphanAttachments(ac.SessionDir, time.Now(), time.Hour); sweepErr != nil {
+		log.Debugf("attachment sweep skipped session_dir=%v error=%v", ac.SessionDir, sweepErr)
+	} else if len(sweep.Removed) > 0 {
+		log.Infof("removed orphan attachments session_dir=%v count=%v bytes=%v", ac.SessionDir, len(sweep.Removed), sweep.Bytes)
+	}
+
 	// Register delegate-control tools only when at least one subagent-mode agent is available.
 	if ac.MainAgent.HasAvailableSubAgents() {
 		ac.Registry.Register(tools.NewDelegateTool(ac.MainAgent))

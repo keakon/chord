@@ -190,7 +190,7 @@ func (a *MainAgent) commitNextRequestInputsToTranscriptUntil(persistDeadline <-c
 	}
 	committed := make([]committedInput, 0, len(pending))
 	for _, input := range pending {
-		userMsg := message.Message{Role: message.RoleUser, InputID: input.InputID, InputRequestID: input.RequestID, Content: input.Content, Parts: cloneContentParts(input.Parts)}
+		userMsg := a.normalizeUserAttachments(message.Message{Role: message.RoleUser, InputID: input.InputID, InputRequestID: input.RequestID, Content: input.Content, Parts: cloneContentParts(input.Parts)})
 		if err := owner.manager.PersistMessageDurable(identity.MainAgentID, userMsg); err != nil {
 			log.Warnf("failed to persist committed next-request input error=%v", err)
 			return

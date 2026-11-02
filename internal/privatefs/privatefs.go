@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"syscall"
+
+	"github.com/keakon/chord/internal/atomicfile"
 )
 
 const (
@@ -220,4 +222,29 @@ func splitPath(path string) []string {
 		parts[left], parts[right] = parts[right], parts[left]
 	}
 	return parts
+}
+
+// WriteFileAtomic writes data through a temporary file in the target directory
+// and renames it into place, so a crash or a concurrent reader never observes a
+// truncated file. It applies the same root confinement, symlink rejection and
+// private permissions as WriteFile.
+//
+// Unlike WriteFile, the file is synced before the rename; callers that need the
+// rename itself to survive a crash must still sync the directory afterwards
+// (SyncDir).
+func WriteFileAtomic(root, path string, data []byte) error {
+	if err := EnsureDir(root, filepath.Dir(path)); err != nil {
+		return err
+	}
+	if _, err := relativePath(root, path); err != nil {
+		return err
+	}
+	if info, err := Stat(root, path); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("private file %q is not a regular file", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return atomicfile.Replace(path, data, FileMode)
 }

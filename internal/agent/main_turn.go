@@ -303,7 +303,33 @@ func pendingUserMessageText(p pendingUserMessage) string {
 	return sb.String()
 }
 
+// normalizeUserAttachments re-homes inline attachment bytes into session-owned
+// files before the message becomes durable, so ctxmgr, the JSONL record and the
+// TUI all reference the same path instead of holding separate copies of the
+// bytes. It must run at the commit boundary (after the input's target is known),
+// not when the input is merely queued.
+//
+// Best effort: with no recovery manager or on a write error the message is
+// returned unchanged with Data intact, because Data is then the only copy.
+func (a *MainAgent) normalizeUserAttachments(msg message.Message) message.Message {
+	if a == nil || len(msg.Parts) == 0 {
+		return msg
+	}
+	manager := a.recoveryManager()
+	if manager == nil {
+		return msg
+	}
+	parts, err := manager.NormalizeAttachmentParts(msg.Parts)
+	if err != nil {
+		log.Warnf("keeping inline attachment data: %v", err)
+		return msg
+	}
+	msg.Parts = parts
+	return msg
+}
+
 func (a *MainAgent) recordCommittedUserMessage(userMsg message.Message) {
+	userMsg = a.normalizeUserAttachments(userMsg)
 	a.recordCommittedUserMessageInMemory(userMsg)
 	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, userMsg)

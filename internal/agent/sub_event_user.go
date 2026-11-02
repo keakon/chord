@@ -27,16 +27,24 @@ func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 	msg := message.Message{InputID: input.InputID, Role: "user", Content: content, Mailbox: input.Mailbox, Kind: input.Kind}
 	if input.InputID != "" {
 		input.Stage = recovery.PendingInputStageTranscriptStaged
-		s.stagedPauseInputs = append(s.stagedPauseInputs, clonePauseInput(input))
 	}
-	if input.Stage == recovery.PendingInputStageTranscriptStaged && s.pauseInputAlreadyAppended(input.InputID) {
+	alreadyAppended := input.Stage == recovery.PendingInputStageTranscriptStaged && s.pauseInputAlreadyAppended(input.InputID)
+	if len(input.Parts) > 0 {
+		msg.Parts = cloneContentParts(input.Parts)
+	}
+	if alreadyAppended {
+		if input.InputID != "" {
+			s.stagedPauseInputs = append(s.stagedPauseInputs, clonePauseInput(input))
+		}
 		return
+	}
+	msg.Parts = s.normalizeUserAttachmentParts(msg.Parts)
+	input.Parts = cloneContentParts(msg.Parts)
+	if input.InputID != "" {
+		s.stagedPauseInputs = append(s.stagedPauseInputs, clonePauseInput(input))
 	}
 	if input.Mailbox != nil && msg.Kind == "" {
 		msg.Kind = message.KindSubAgentMailbox
-	}
-	if len(input.Parts) > 0 {
-		msg.Parts = cloneContentParts(input.Parts)
 	}
 	msg.Content, msg.Parts = s.filterUnsupportedParts(msg.Content, msg.Parts)
 
@@ -242,6 +250,7 @@ func (s *SubAgent) appendContextOnly(msg message.Message) {
 	}
 	ackID := strings.TrimSpace(msg.MailboxAckID)
 	msg.Role = "user"
+	msg.Parts = s.normalizeUserAttachmentParts(msg.Parts)
 	messageIndex := s.ctxMgr.MessageCount()
 	s.ctxMgr.Append(msg)
 	persistMsg := msg
@@ -268,6 +277,22 @@ func (s *SubAgent) appendContextOnly(msg message.Message) {
 			s.parent.emitToTUI(MailboxTranscriptAppendedEvent{Message: msg, TargetAgentID: s.instanceID, MessageIndex: messageIndex})
 		}
 	})
+}
+
+func (s *SubAgent) normalizeUserAttachmentParts(parts []message.ContentPart) []message.ContentPart {
+	if len(parts) == 0 {
+		return parts
+	}
+	manager := s.recoveryManager()
+	if manager == nil {
+		return parts
+	}
+	normalized, err := manager.NormalizeAttachmentParts(parts)
+	if err != nil {
+		log.Warnf("SubAgent keeping inline attachment data agent=%v error=%v", s.instanceID, err)
+		return parts
+	}
+	return normalized
 }
 
 func (s *SubAgent) filterUnsupportedParts(content string, parts []message.ContentPart) (string, []message.ContentPart) {
