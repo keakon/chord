@@ -3,8 +3,10 @@ package sessionimport
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -892,13 +894,7 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 		for callID, tc := range turn.ToolCalls {
 			ordered = append(ordered, orderedItem{kind: codexOrderedKindToolCall, order: tc.SourceOrder, callID: callID})
 		}
-		for i := 0; i < len(ordered); i++ {
-			for j := i + 1; j < len(ordered); j++ {
-				if ordered[j].order < ordered[i].order {
-					ordered[i], ordered[j] = ordered[j], ordered[i]
-				}
-			}
-		}
+		slices.SortStableFunc(ordered, func(a, b orderedItem) int { return cmp.Compare(a.order, b.order) })
 
 		for _, item := range ordered {
 			switch item.kind {
@@ -1043,13 +1039,7 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 		for callID, tr := range turn.ToolResults {
 			orphaned = append(orphaned, orphanResult{callID: callID, order: tr.SourceOrder})
 		}
-		for i := 0; i < len(orphaned); i++ {
-			for j := i + 1; j < len(orphaned); j++ {
-				if orphaned[j].order < orphaned[i].order {
-					orphaned[i], orphaned[j] = orphaned[j], orphaned[i]
-				}
-			}
-		}
+		slices.SortStableFunc(orphaned, func(a, b orphanResult) int { return cmp.Compare(a.order, b.order) })
 		for _, orphan := range orphaned {
 			out = append(out, codexOrphanedToolResultFallback(turn.ToolResults[orphan.callID]))
 			report.MissingToolDeclarations++
