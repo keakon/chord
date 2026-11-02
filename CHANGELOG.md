@@ -153,6 +153,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - WebFetch checks permission rules before following each HTTP redirect, so an allowed URL cannot redirect a fetch to a denied target. Redirect targets requiring confirmation stop the fetch unless YOLO relaxes the rule; resolved connection IPs remain unchecked.
 
+- `chord auth clean` no longer displays an access token when a credential has no account identity fields. It uses the provider and credential position as the fallback label.
+
 - The context summary card labels a manually triggered model summary as `MANUAL` instead of `AUTO`. Automatic model summaries keep `AUTO`, model-driven checkpoints keep `MODEL-DRIVEN`, and degraded checkpoints keep `FALLBACK` / `TRUNCATED`.
 
 - `apply_patch` accepts a context-only update hunk as a no-op anchor instead of rejecting it. Codex's grammar already allows such hunks, and models often use one to pin a section before a later change; the hunk must still match the current file, and an empty `@@` hunk is rejected with its start line.

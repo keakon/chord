@@ -47,9 +47,8 @@ func (e RemovedOAuthCredentialEntry) DisplayName() string {
 	if accountID := strings.TrimSpace(e.AccountID); accountID != "" {
 		return accountID
 	}
-	if access := strings.TrimSpace(e.Access); access != "" {
-		return access
-	}
+	// The access token is a secret: it must never surface as a display name,
+	// so the fallback stays a positional label.
 	return fmt.Sprintf("%s[%d]", strings.TrimSpace(e.Provider), e.CredentialIndex)
 }
 
