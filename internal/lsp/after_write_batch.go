@@ -16,9 +16,10 @@ type FileWrite struct {
 }
 
 // AfterFileWritesToolResult runs the after-write pipeline for every file one
-// multi-file tool call changed and returns one result string per input path,
-// keyed by the path exactly as the caller passed it. Each string has the shape
-// AfterFileWriteToolResult produces for that write alone with base "".
+// multi-file tool call changed and returns one result per input path, keyed by
+// the path exactly as the caller passed it. Each Output has the shape
+// AfterFileWriteToolResult produces for that write alone with base ""; Status
+// reports whether its diagnostics describe this write.
 //
 // The pipeline runs in phases. First every covered file's servers are started
 // and its cold-start state recorded, before any client wait can make a still
@@ -32,7 +33,7 @@ type FileWrite struct {
 // a claim about how many times the server computes. Python files keep their
 // per-file backend, which runs serially on its own goroutine so it never delays
 // another file's sync. Files no server covers stay skipped.
-func (m *Manager) AfterFileWritesToolResult(ctx context.Context, writes []FileWrite, displayBaseDir string) map[string]string {
+func (m *Manager) AfterFileWritesToolResult(ctx context.Context, writes []FileWrite, displayBaseDir string) map[string]FileWriteResult {
 	if m == nil || len(writes) == 0 {
 		return nil
 	}
@@ -49,7 +50,7 @@ func (m *Manager) AfterFileWritesToolResult(ctx context.Context, writes []FileWr
 		clientReady bool
 		prepared    afterWritePrepared
 		await       bool
-		result      string
+		result      FileWriteResult
 	}
 	batch := make(map[string]*batchWrite, len(writes))
 	var pythonEntries []*batchWrite
@@ -68,6 +69,7 @@ func (m *Manager) AfterFileWritesToolResult(ctx context.Context, writes []FileWr
 		}
 		// Unassociated file type: skip LSP entirely (no Start, no note).
 		if !m.HasServerForPath(normalized) {
+			entry.result = FileWriteResult{Status: FileWriteStatusNoServer}
 			continue
 		}
 		entry.coldStart, entry.base, entry.exited = m.beginAfterFileWrite(ctx, normalized, "")
@@ -105,7 +107,12 @@ func (m *Manager) AfterFileWritesToolResult(ctx context.Context, writes []FileWr
 			continue
 		}
 		if !entry.clientReady {
-			entry.prepared = afterWritePrepared{path: entry.path, base: m.appendStartFailureNotes(ctx, entry.path, entry.base, entry.exited)}
+			status := unavailableStatus(ctx, FileWriteStatusStartFailed)
+			entry.prepared = afterWritePrepared{
+				path:       entry.path,
+				base:       m.appendStartFailureNotes(ctx, entry.path, entry.base, entry.exited),
+				skipStatus: status,
+			}
 			continue
 		}
 		entry.prepared = m.prepareReadyAfterFileWrite(ctx, entry.path, entry.write.Content, entry.base, entry.write.ChangeType, entry.coldStart)
@@ -125,7 +132,7 @@ func (m *Manager) AfterFileWritesToolResult(ctx context.Context, writes []FileWr
 	wg.Wait()
 	pythonWG.Wait()
 
-	results := make(map[string]string, len(batch))
+	results := make(map[string]FileWriteResult, len(batch))
 	for _, entry := range batch {
 		results[entry.key] = entry.result
 	}

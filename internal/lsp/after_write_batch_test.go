@@ -96,8 +96,8 @@ func TestAfterFileWritesToolResultSyncsAllFilesBeforeWaiting(t *testing.T) {
 		{Path: beta, Content: "package main\n", ChangeType: WatchedFileChanged},
 	}, "")
 	for _, path := range []string{alpha, beta} {
-		if got := results[path]; strings.Contains(got, "LSP diagnostics unavailable") {
-			t.Fatalf("result for %s carries a degradation note: %q", path, got)
+		if got := results[path]; strings.Contains(got.Output, "LSP diagnostics unavailable") || got.Status != FileWriteStatusReported {
+			t.Fatalf("result for %s carries a degradation note: %+v", path, got)
 		}
 	}
 	mu.Lock()
@@ -161,11 +161,14 @@ func TestAfterFileWritesToolResultMatchesSingleFilePipeline(t *testing.T) {
 		{Path: alpha, Content: "package main\n", ChangeType: WatchedFileChanged},
 	}, "")
 	single := mgr.AfterFileWriteToolResult(ctx, alpha, "package main\n", "", false, WatchedFileChanged, "")
-	if batch[alpha] != single {
-		t.Fatalf("batch result %q != single-file result %q", batch[alpha], single)
+	if batch[alpha].Output != single {
+		t.Fatalf("batch result %q != single-file result %q", batch[alpha].Output, single)
 	}
-	if !strings.Contains(batch[alpha], "undeclared name: sample") {
-		t.Fatalf("batch result should carry the cached diagnostic: %q", batch[alpha])
+	if batch[alpha].Status != FileWriteStatusReported {
+		t.Fatalf("batch result status = %v, want %v", batch[alpha].Status, FileWriteStatusReported)
+	}
+	if !strings.Contains(batch[alpha].Output, "undeclared name: sample") {
+		t.Fatalf("batch result should carry the cached diagnostic: %q", batch[alpha].Output)
 	}
 }
 
@@ -181,8 +184,11 @@ func TestAfterFileWritesToolResultAppendsTimeoutNote(t *testing.T) {
 	results := mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
 		{Path: alpha, Content: "package main\n", ChangeType: WatchedFileChanged},
 	}, "")
-	if !strings.Contains(results[alpha], "no diagnostics within") {
-		t.Fatalf("timeout note missing from result: %q", results[alpha])
+	if !strings.Contains(results[alpha].Output, "no diagnostics within") {
+		t.Fatalf("timeout note missing from result: %q", results[alpha].Output)
+	}
+	if results[alpha].Status != FileWriteStatusTimeout {
+		t.Fatalf("result status = %v, want %v", results[alpha].Status, FileWriteStatusTimeout)
 	}
 }
 
@@ -208,7 +214,10 @@ func TestAfterFileWritesToolResultReportsStartFailure(t *testing.T) {
 		if !ok {
 			t.Fatalf("batch result missing for %s", path)
 		}
-		if strings.Contains(result, "LSP diagnostics unavailable") {
+		if result.Status != FileWriteStatusStartFailed {
+			t.Fatalf("result status for %s = %v, want %v", path, result.Status, FileWriteStatusStartFailed)
+		}
+		if strings.Contains(result.Output, "LSP diagnostics unavailable") {
 			noted++
 		}
 	}
@@ -235,7 +244,7 @@ func TestAfterFileWritesToolResultWaitsForClientsConcurrently(t *testing.T) {
 		return nil, true, 0, nil
 	}
 
-	done := make(chan map[string]string, 1)
+	done := make(chan map[string]FileWriteResult, 1)
 	go func() {
 		done <- mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
 			{Path: alpha, Content: "package main\n", ChangeType: WatchedFileChanged},
@@ -321,11 +330,12 @@ func TestAfterFileWritesToolResultSkipsFilesWithoutServer(t *testing.T) {
 		m.Start(ctx, path)
 	}
 
+	notesPath := filepath.Join(root, "notes.txt")
 	results := mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
-		{Path: filepath.Join(root, "notes.txt"), Content: "hello\n", ChangeType: WatchedFileCreated},
+		{Path: notesPath, Content: "hello\n", ChangeType: WatchedFileCreated},
 	}, "")
-	if got := results[filepath.Join(root, "notes.txt")]; got != "" {
-		t.Fatalf("serverless file should produce an empty result, got %q", got)
+	if got := results[notesPath]; got.Output != "" || got.Status != FileWriteStatusNoServer {
+		t.Fatalf("serverless file result = %+v, want empty output with %v status", got, FileWriteStatusNoServer)
 	}
 	if starts != 0 {
 		t.Fatalf("serverless file must not start any server, starts=%d", starts)

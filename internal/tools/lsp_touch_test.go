@@ -228,6 +228,13 @@ func TestApplyPatchToolKeepsLSPDegradationNote(t *testing.T) {
 	if len(notes) != 1 || !strings.Contains(notes[0], "sample-lsp") {
 		t.Fatalf("apply_patch result = %q, want exactly one degradation note naming sample-lsp", out)
 	}
+	// The session note names no file, so the multi-file result must attribute
+	// the missing diagnostics for every file whose wait failed.
+	for _, name := range []string{"a.go", "b.go"} {
+		if !strings.Contains(out, name+": diagnostics unavailable (language server unavailable).") {
+			t.Fatalf("apply_patch result = %q, want %s named as unverified", out, name)
+		}
+	}
 }
 
 func lspTestDirectory(t *testing.T) string {

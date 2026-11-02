@@ -51,7 +51,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsUsesSharedLimitAndFileLabels(t 
 		pathA: {{Severity: 1, Line: 0, Col: 0, Message: "a"}},
 		pathB: {{Severity: 2, Line: 1, Col: 1, Message: "b"}},
 	}
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, nil, "")
 	if !strings.Contains(out, pathA+":\n[E] 1:1 a") || !strings.Contains(out, pathB+":\n[W] 2:2 b") {
 		t.Fatalf("batch output = %q", out)
 	}
@@ -67,7 +67,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsUsesRelativeDisplayPaths(t *tes
 		pathB: {{Severity: 2, Line: 1, Col: 1, Message: "b"}},
 	}
 
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, baseDir)
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, nil, baseDir)
 	if !strings.Contains(out, "pkg/a.go:\n[E] 1:1 a") || !strings.Contains(out, "pkg/b.go:\n[W] 2:2 b") {
 		t.Fatalf("batch output = %q, want paths relative to %s", out, baseDir)
 	}
@@ -87,7 +87,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsUsesSubdirectoryDisplayBase(t *
 		outside: {{Severity: 1, Line: 0, Message: "outside"}},
 	}
 
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{inside, outside}, false, nil, nil, extras, baseDir)
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{inside, outside}, false, nil, nil, extras, nil, baseDir)
 	if !strings.Contains(out, "internal/inside.go:\n[E] 1:1 inside") {
 		t.Fatalf("batch output = %q, want path relative to subdirectory base", out)
 	}
@@ -105,7 +105,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsUsesBatchBudget(t *testing.T) {
 			extras[path] = append(extras[path], Diagnostic{Severity: 1, Line: i, Message: path})
 		}
 	}
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", paths, false, nil, nil, extras, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", paths, false, nil, nil, extras, nil, "")
 	if got := countFormattedDiagnostics(out); got != ToolOutputMaxDiagnosticsPerBatch {
 		t.Fatalf("formatted diagnostics = %d, want batch budget %d\n%s", got, ToolOutputMaxDiagnosticsPerBatch, out)
 	}
@@ -120,7 +120,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsReportsChangesPerFile(t *testin
 	key := func(message string) []Diagnostic { return []Diagnostic{{Severity: 1, Line: 0, Message: message}} }
 	baselines := map[string][]Diagnostic{pathA: key("old"), pathB: key("gone")}
 	extras := map[string][]Diagnostic{pathA: key("new"), pathB: nil}
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, baselines, nil, extras, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, baselines, nil, extras, nil, "")
 	if !strings.Contains(out, pathA+" (1 new, 1 resolved):\n[E] 1:1 new") {
 		t.Fatalf("output = %q, want change counts in the %s block header", out, pathA)
 	}
@@ -139,9 +139,77 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsOmitsCountsWithoutBaselines(t *
 		pathA: {{Severity: 1, Line: 0, Message: "a"}},
 		pathB: {{Severity: 1, Line: 0, Message: "b"}},
 	}
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, nil, "")
 	if !strings.Contains(out, pathA+":\n[E] 1:1 a\n"+pathB+":\n[E] 1:1 b") {
 		t.Fatalf("output = %q, want compact plain path headers when no baselines are provided", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPathsNamesFilesWithoutFreshDiagnostics(t *testing.T) {
+	root := resolvedTempDir(t)
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{"gopls": {Command: "gopls", FileTypes: []string{".go"}}},
+	}, root, nil)
+	pathA := filepath.Join(root, "a.go")
+	pathB := filepath.Join(root, "b.go")
+	extras := map[string][]Diagnostic{pathA: {{Severity: 1, Line: 0, Message: "a"}}}
+	states := map[string]FileWriteDiagnosticsState{
+		pathB: {Status: FileWriteStatusTimeout, Detail: "no diagnostics within 3s"},
+	}
+
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, nil, nil, extras, states, "")
+	if !strings.Contains(out, pathA+":\n[E] 1:1 a") {
+		t.Fatalf("output = %q, want diagnostics block for %s", out, pathA)
+	}
+	if !strings.Contains(out, pathB+": diagnostics unavailable (no diagnostics within 3s).") {
+		t.Fatalf("output = %q, want the unverified file named without diagnostics", out)
+	}
+	if strings.Contains(out, pathB+":\n") {
+		t.Fatalf("output = %q, want no empty diagnostics block for %s", out, pathB)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPathsLabelsCachedDiagnosticsAfterFailure(t *testing.T) {
+	root := resolvedTempDir(t)
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{"gopls": {Command: "gopls", FileTypes: []string{".go"}}},
+	}, root, nil)
+	pathA := filepath.Join(root, "a.go")
+	pathB := filepath.Join(root, "b.go")
+	extras := map[string][]Diagnostic{
+		pathA: {{Severity: 1, Line: 0, Message: "fresh"}},
+		pathB: {{Severity: 2, Line: 3, Message: "stale"}},
+	}
+	baselines := map[string][]Diagnostic{pathA: nil, pathB: nil}
+	states := map[string]FileWriteDiagnosticsState{
+		pathB: {Status: FileWriteStatusSyncFailed, Detail: "file synchronization failed"},
+	}
+
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB}, false, baselines, nil, extras, states, "")
+	if !strings.Contains(out, pathA+" (1 new, 0 resolved):\n[E] 1:1 fresh") {
+		t.Fatalf("output = %q, want the verified file to keep its change counts", out)
+	}
+	if !strings.Contains(out, pathB+": diagnostics unavailable (file synchronization failed); showing last known diagnostics:\n[W] 4:1 stale") {
+		t.Fatalf("output = %q, want cached diagnostics labelled as last known", out)
+	}
+}
+
+func TestAppendLSPDiagnosticsToToolOutputForPathsIgnoresStatesForSingleFile(t *testing.T) {
+	root := resolvedTempDir(t)
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{"gopls": {Command: "gopls", FileTypes: []string{".go"}}},
+	}, root, nil)
+	pathA := filepath.Join(root, "a.go")
+	states := map[string]FileWriteDiagnosticsState{
+		pathA: {Status: FileWriteStatusStartFailed, Detail: "language server unavailable"},
+	}
+
+	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA}, false, nil, nil, nil, states, ""); out != "Applied patch" {
+		t.Fatalf("output = %q, want single-file results to keep the compact format", out)
+	}
+	extras := map[string][]Diagnostic{pathA: {{Severity: 1, Line: 0, Message: "a"}}}
+	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA}, false, nil, nil, extras, states, ""); out != "Applied patch\n\nDiagnostics:\n[E] 1:1 a" {
+		t.Fatalf("output = %q, want single-file results to keep the compact format", out)
 	}
 }
 
@@ -549,7 +617,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_SkipsCachedDiagnosticsWithoutS
 	// No LSP server covers the edited .md file and no direct backend
 	// diagnostics were produced, so cached diagnostics from other files must
 	// not be attached to this tool result.
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if out != "Applied patch" {
 		t.Fatalf("output = %q, want base unchanged", out)
 	}
@@ -570,7 +638,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_KeepsCachedDiagnosticsWithServ
 	}}
 	mgr.clientsMu.Unlock()
 
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(out, "LSP diagnostics in other files:") || !strings.Contains(out, "cached error") {
 		t.Fatalf("output = %q, want cached other-file diagnostics attached", out)
 	}
@@ -613,7 +681,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_OtherFileOutsidePrimaryDirAndU
 	// pkg_b/other.go is neither in the edited file's directory nor touched
 	// this session, so its cached diagnostic must not be attached: editing
 	// internal/agent must not surface diagnostics from internal/tui.
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(out, "unrelated package error") {
 		t.Fatalf("output = %q, want unrelated other-file diagnostic skipped", out)
 	}
@@ -634,11 +702,11 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsEachDiagnosticOnce(t *t
 	}}
 	mgr.clientsMu.Unlock()
 
-	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(first, "cached error") {
 		t.Fatalf("first output = %q, want cached other-file diagnostic attached", first)
 	}
-	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(second, "cached error") {
 		t.Fatalf("second output = %q, want repeated diagnostic suppressed", second)
 	}
@@ -663,7 +731,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsAgainAfterCleanRepublis
 	}}
 	mgr.clientsMu.Unlock()
 
-	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(first, "cached error") {
 		t.Fatalf("first output = %q, want cached other-file diagnostic attached", first)
 	}
@@ -682,7 +750,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsAgainAfterCleanRepublis
 	client.diagnostics[uri] = reappeared
 	client.diagnosticsMu.Unlock()
 	publish("file://"+filepath.ToSlash(other), normalizeWaiterPath(other), nil, "", reappeared, 3)
-	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(second, "cached error") {
 		t.Fatalf("second output = %q, want diagnostic reported again after clean republish", second)
 	}
@@ -710,7 +778,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_SkipsDiagnosticsForFileChanged
 	}}
 	mgr.clientsMu.Unlock()
 
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(out, "cached error") {
 		t.Fatalf("output = %q, want stale diagnostic skipped for file changed on disk", out)
 	}

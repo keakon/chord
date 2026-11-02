@@ -52,14 +52,14 @@ func TestResetReportedDiagnosticsStartsNewSessionWindow(t *testing.T) {
 	diag := testProtocolDiagnostic("cached error", 0)
 	publishTestDiagnostics(mgr, key, uri, client, 1, diag)
 
-	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
-	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
+	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(first, diag.Message) || strings.Contains(second, diag.Message) {
 		t.Fatalf("first = %q, second = %q; want one report per session", first, second)
 	}
 
 	mgr.ResetReportedDiagnostics()
-	third := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	third := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(third, diag.Message) {
 		t.Fatalf("third = %q, want diagnostic reported in new session window", third)
 	}
@@ -70,14 +70,14 @@ func TestResolvedDiagnosticCanReappearWhileAnotherRemains(t *testing.T) {
 	a := testProtocolDiagnostic("error a", 0)
 	b := testProtocolDiagnostic("error b", 1)
 	publishTestDiagnostics(mgr, key, uri, client, 1, a, b)
-	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(first, a.Message) || !strings.Contains(first, b.Message) {
 		t.Fatalf("first = %q, want both diagnostics", first)
 	}
 
 	publishTestDiagnostics(mgr, key, uri, client, 2, b)
 	publishTestDiagnostics(mgr, key, uri, client, 3, a, b)
-	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(second, a.Message) || strings.Contains(second, b.Message) {
 		t.Fatalf("second = %q, want only reappeared diagnostic a", second)
 	}
@@ -92,11 +92,11 @@ func TestCleanPublishFromOneServerDoesNotClearAnotherServer(t *testing.T) {
 	otherDiag := testProtocolDiagnostic("other error", 1)
 	publishTestDiagnostics(mgr, goplsKey, uri, client, 1, goplsDiag)
 	publishTestDiagnostics(mgr, otherKey, uri, otherClient, 1, otherDiag)
-	_ = mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	_ = mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 
 	publishTestDiagnostics(mgr, goplsKey, uri, client, 2)
 	mgr.ResetReportedDiagnostics()
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(out, goplsDiag.Message) || !strings.Contains(out, otherDiag.Message) {
 		t.Fatalf("output = %q, want only surviving server diagnostic", out)
 	}
@@ -110,7 +110,7 @@ func TestDeletedOtherFileDiagnosticsStaySuppressed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(out, diag.Message) {
 		t.Fatalf("output = %q, want diagnostic for deleted file suppressed", out)
 	}
@@ -127,7 +127,7 @@ func TestConcurrentOtherFileReservationReportsOnce(t *testing.T) {
 	for range 2 {
 		wg.Go(func() {
 			<-start
-			outputs <- mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+			outputs <- mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 		})
 	}
 	close(start)
@@ -154,14 +154,14 @@ func TestStaleDiagnosticsRequireFreshSyncConfirmation(t *testing.T) {
 	if err := os.Chtimes(other, oldTime, oldTime); err != nil {
 		t.Fatal(err)
 	}
-	stale := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	stale := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(stale, diag.Message) {
 		t.Fatalf("stale output = %q, want external change suppressed", stale)
 	}
 
 	// A delayed publish by itself cannot bless stale diagnostics.
 	publishTestDiagnostics(mgr, key, uri, client, 2, diag)
-	delayed := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	delayed := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(delayed, diag.Message) {
 		t.Fatalf("delayed output = %q, want stale path still suppressed", delayed)
 	}
@@ -169,7 +169,7 @@ func TestStaleDiagnosticsRequireFreshSyncConfirmation(t *testing.T) {
 	token := mgr.beginDiagnosticsSync(other)
 	publishTestDiagnostics(mgr, key, uri, client, 3, diag)
 	mgr.confirmDiagnosticsSync(token)
-	fresh := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	fresh := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(fresh, diag.Message) {
 		t.Fatalf("fresh output = %q, want diagnostic after confirmed sync", fresh)
 	}
@@ -186,7 +186,7 @@ func TestCleanPublishAfterExternalChangeDoesNotBlessLaterStaleDiagnostic(t *test
 	}
 	publishTestDiagnostics(mgr, key, uri, client, 2)
 	publishTestDiagnostics(mgr, key, uri, client, 3, diag)
-	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(out, diag.Message) {
 		t.Fatalf("output = %q, want stale diagnostic suppressed after unconfirmed clean publish", out)
 	}
@@ -200,8 +200,8 @@ func TestEditDoesNotRepeatAlreadyReportedDiagnostic(t *testing.T) {
 	diag := testProtocolDiagnostic("still broken", 0)
 	publishTestDiagnostics(mgr, key, uri, client, 1, diag)
 
-	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
-	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	first := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
+	second := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(first, diag.Message) || strings.Contains(second, diag.Message) {
 		t.Fatalf("first = %q, second = %q; want one report while the file is unchanged", first, second)
 	}
@@ -217,7 +217,7 @@ func TestEditDoesNotRepeatAlreadyReportedDiagnostic(t *testing.T) {
 	publishTestDiagnostics(mgr, key, uri, client, 2, diag)
 	mgr.confirmDiagnosticsSync(token)
 
-	third := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	third := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(third, diag.Message) {
 		t.Fatalf("third = %q, want no repeat of a surviving problem after an edit", third)
 	}
@@ -230,7 +230,7 @@ func TestFixedDiagnosticStopsBeingReported(t *testing.T) {
 	mgr, edited, other, key, uri, client := newDiagnosticOutputTestManager(t)
 	diag := testProtocolDiagnostic("broken", 0)
 	publishTestDiagnostics(mgr, key, uri, client, 1, diag)
-	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, ""); !strings.Contains(out, diag.Message) {
+	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, ""); !strings.Contains(out, diag.Message) {
 		t.Fatalf("out = %q, want the problem reported once", out)
 	}
 
@@ -241,13 +241,13 @@ func TestFixedDiagnosticStopsBeingReported(t *testing.T) {
 	if err := os.WriteFile(other, []byte("package sample\n// fixed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, ""); strings.Contains(out, diag.Message) {
+	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, ""); strings.Contains(out, diag.Message) {
 		t.Fatalf("out = %q, want a stale cached diagnostic withheld after an external change", out)
 	}
 
 	// The server confirms the fix by publishing an empty set.
 	publishTestDiagnostics(mgr, key, uri, client, 2)
-	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, ""); strings.Contains(out, diag.Message) {
+	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, ""); strings.Contains(out, diag.Message) {
 		t.Fatalf("out = %q, want the fixed problem gone for good", out)
 	}
 }
@@ -257,7 +257,7 @@ func TestRestoreReportedDiagnosticsSuppressesAlreadyShownLines(t *testing.T) {
 	diag := testProtocolDiagnostic("cached error", 0)
 	publishTestDiagnostics(mgr, key, uri, client, 1, diag)
 
-	shown := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	shown := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if !strings.Contains(shown, diag.Message) {
 		t.Fatalf("shown = %q, want the diagnostic rendered once", shown)
 	}
@@ -271,7 +271,7 @@ func TestRestoreReportedDiagnosticsSuppressesAlreadyShownLines(t *testing.T) {
 	}
 	mgr.RestoreReportedDiagnostics(reported)
 
-	after := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, "")
+	after := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{edited}, true, nil, nil, nil, nil, "")
 	if strings.Contains(after, diag.Message) {
 		t.Fatalf("after = %q, want no repeat of a diagnostic the transcript already showed", after)
 	}

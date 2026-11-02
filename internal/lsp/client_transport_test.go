@@ -453,8 +453,11 @@ func TestPythonSemanticDisconnectSkipsWaitAndRecoversNextOperation(t *testing.T)
 	if waits != 0 || len(mgr.clients) != 0 || fake.kills != 1 {
 		t.Fatalf("waits=%d clients=%d kills=%d", waits, len(mgr.clients), fake.kills)
 	}
-	if strings.Contains(out, "stale diagnostic") || !strings.Contains(out, "connection lost") {
-		t.Fatalf("output = %s", out)
+	if out.Status != FileWriteStatusSyncFailed {
+		t.Fatalf("status = %v, want %v", out.Status, FileWriteStatusSyncFailed)
+	}
+	if strings.Contains(out.Output, "stale diagnostic") || !strings.Contains(out.Output, "connection lost") {
+		t.Fatalf("output = %s", out.Output)
 	}
 	if len(mgr.waiters[path]) != 0 {
 		t.Fatal("failed write left a diagnostics waiter")

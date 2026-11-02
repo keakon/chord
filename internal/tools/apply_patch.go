@@ -799,15 +799,19 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 	// per-file waits overlap instead of queuing behind each other.
 	results := t.LSP.AfterFileWritesToolResult(ctx, writes, t.BaseDir)
 	var reviewedPaths []string
+	states := make(map[string]lsp.FileWriteDiagnosticsState, len(paths))
 	for _, path := range paths {
 		write := finalWrites[path]
 		result := results[write.path]
-		if parsed := lsp.ParseToolOutputDiagnostics(result); len(parsed) > 0 {
+		if parsed := lsp.ParseToolOutputDiagnostics(result.Output); len(parsed) > 0 {
 			extras[path] = parsed
+		}
+		if result.Status != lsp.FileWriteStatusReported {
+			states[path] = lsp.FileWriteDiagnosticsState{Status: result.Status, Detail: result.Detail, FailedServers: result.FailedServers}
 		}
 		// Degradation lines are reported once per session, so the one this
 		// write produced must reach the patch result or it is lost for good.
-		for _, note := range lsp.DegradationNotes(result) {
+		for _, note := range lsp.DegradationNotes(result.Output) {
 			if !slices.Contains(notes, note) {
 				notes = append(notes, note)
 			}
@@ -815,7 +819,7 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 		reviewedPaths = append(reviewedPaths, write.path)
 	}
 	slices.Sort(reviewedPaths)
-	out = t.LSP.AppendLSPDiagnosticsToToolOutputForPaths(out, reviewedPaths, true, baselines, outputs, extras, t.BaseDir)
+	out = t.LSP.AppendLSPDiagnosticsToToolOutputForPaths(out, reviewedPaths, true, baselines, outputs, extras, states, t.BaseDir)
 	if len(notes) > 0 {
 		out += "\n\n" + strings.Join(notes, "\n")
 	}

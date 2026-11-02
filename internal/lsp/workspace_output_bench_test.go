@@ -39,7 +39,7 @@ func BenchmarkLSPWorkspaceOutput(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				_ = m.AppendLSPDiagnosticsToToolOutputForPaths("written", []string{primary}, true, nil, nil, nil, root)
+				_ = m.AppendLSPDiagnosticsToToolOutputForPaths("written", []string{primary}, true, nil, nil, nil, nil, root)
 			}
 		})
 	}

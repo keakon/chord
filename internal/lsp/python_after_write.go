@@ -12,7 +12,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 )
 
-func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, displayBaseDir string) string {
+func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, displayBaseDir string) FileWriteResult {
 	pyCfg := m.cfg.Diagnostics.Python
 	metrics := measureContent(content)
 	availability := diagnosticBackendAvailability{
@@ -26,18 +26,25 @@ func (m *Manager) afterWritePythonToolResult(ctx context.Context, absPath, conte
 	case pythonDiagnosticBackendSemantic:
 		return m.afterWriteLSPToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, displayBaseDir)
 	default:
-		return appendPythonDiagnosticsSkipped(base, selection)
+		result := unavailableFileWrite(ctx, appendPythonDiagnosticsSkipped(base, selection), FileWriteStatusBackendUnavailable)
+		if result.Status != FileWriteStatusCancelled {
+			result.Detail = "no Python diagnostics backend available"
+			if selection.Reason == "large-file-quick-unavailable" {
+				result.Detail = "large file; Ruff unavailable and semantic diagnostics skipped"
+			}
+		}
+		return result
 	}
 }
 
-func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, displayBaseDir string) string {
+func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, displayBaseDir string) FileWriteResult {
 	return m.afterWriteLSPToolResultWithWatchedNotification(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, true, displayBaseDir)
 }
 
-func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) string {
+func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) FileWriteResult {
 	// Unassociated file type: skip LSP entirely (no Start, no note).
 	if !m.HasServerForPath(absPath) {
-		return base
+		return FileWriteResult{Output: base, Status: FileWriteStatusNoServer}
 	}
 
 	base, exited := m.appendExitedServerNotes(ctx, absPath, base)
@@ -48,7 +55,7 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 	// before treating the first post-write sync as a startup failure.
 	_, ok := afterWriteWaitForClient(m, ctx, absPath, 3*time.Second)
 	if !ok {
-		return m.appendStartFailureNotes(ctx, absPath, base, exited)
+		return unavailableFileWrite(ctx, m.appendStartFailureNotes(ctx, absPath, base, exited), FileWriteStatusStartFailed)
 	}
 
 	baseline := m.currentFileDiagnostics(absPath)
@@ -57,7 +64,7 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 	sync := m.syncAfterWrite(ctx, absPath, content, changeType, notifyWatched)
 	base, wait := m.settleAfterWriteSyncFailure(ctx, absPath, waiterCh, sync, base)
 	if !wait {
-		return base
+		return unavailableFileWrite(ctx, base, FileWriteStatusSyncFailed)
 	}
 
 	waitTimeout := diagnosticsWaitTimeout
@@ -66,7 +73,7 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 	}
 
 	_, notified, _, _ := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: sync.serverVersions, after: sync.after}, waitTimeout)
-	if notified {
+	if notified && len(sync.serverErrors) == 0 {
 		m.confirmDiagnosticsSync(sync.token)
 	}
 	if !notified && ctx.Err() == nil {
@@ -87,12 +94,24 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 	}
 
 	m.recordReviewSnapshot(absPath)
-	current := m.currentFileDiagnostics(absPath)
-	out := m.appendLSPDiagnosticsToToolOutput(base, absPath, includeOtherFiles, ranges, diagnosticsOutputConfig(m.cfg, absPath), displayBaseDir)
-	return appendDiagnosticChangeSummary(out, baseline, current)
+	result := synchronizedFileWrite("", sync)
+	states := map[string]FileWriteDiagnosticsState{absPath: {FailedServers: result.FailedServers}}
+	byPath := m.diagnosticsForWritePaths([]string{absPath}, states)
+	out := m.appendFileDiagnosticsToToolOutput(base, absPath, includeOtherFiles, ranges, diagnosticsOutputConfig(m.cfg, absPath), displayBaseDir, byPath)
+	if len(sync.serverErrors) == 0 {
+		out = appendDiagnosticChangeSummary(out, baseline, byPath[absPath])
+	}
+	if notified {
+		result.Output = out
+		return result
+	}
+	if ctx.Err() != nil {
+		return unavailableFileWrite(ctx, out, FileWriteStatusTimeout)
+	}
+	return timeoutFileWrite(out, waitTimeout)
 }
 
-func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, selection pythonDiagnosticSelection, base string, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) string {
+func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, selection pythonDiagnosticSelection, base string, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) FileWriteResult {
 	watchedNotified := false
 	if notifyWatched && afterWriteHasReadyClient(m, absPath) {
 		if errs := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); len(errs) > 0 {
@@ -107,9 +126,13 @@ func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, cont
 			fallbackBase := appendRuffDiagnosticsFailure(base, selection, err) + "\nFalling back to Python semantic diagnostics."
 			return m.afterWriteLSPToolResultWithWatchedNotification(ctx, absPath, content, fallbackBase, false, ranges, changeType, !watchedNotified, displayBaseDir)
 		}
-		return appendRuffDiagnosticsFailure(base, selection, err)
+		result := unavailableFileWrite(ctx, appendRuffDiagnosticsFailure(base, selection, err), FileWriteStatusBackendUnavailable)
+		if result.Status != FileWriteStatusCancelled {
+			result.Detail = "Ruff diagnostics failed: " + err.Error()
+		}
+		return result
 	}
-	return appendRuffDiagnostics(base, diags, pyCfg.Output, ranges)
+	return reportedFileWrite(appendRuffDiagnostics(base, diags, pyCfg.Output, ranges))
 }
 
 func appendPythonDiagnosticsSkipped(base string, selection pythonDiagnosticSelection) string {

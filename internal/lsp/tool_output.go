@@ -48,14 +48,17 @@ func (m *Manager) DiagnosticOutputConfigForPath(path string) config.DiagnosticOu
 // files, so diagnostics are selected once with one shared output budget rather
 // than being appended once per file. baselines is keyed by normalized absolute
 // path and feeds the per-file "(N new, M resolved)" header counts; a nil map
-// means no baseline information and omits the counts entirely.
-func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPaths []string, includeOtherFiles bool, baselines map[string][]Diagnostic, outputs map[string]config.DiagnosticOutputConfig, extras map[string][]Diagnostic, displayBaseDir string) string {
+// means no baseline information and omits the counts entirely. states reports
+// files whose diagnostics could not be verified; when the batch has more than
+// one primary file those files are named even if they have no diagnostics.
+func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPaths []string, includeOtherFiles bool, baselines map[string][]Diagnostic, outputs map[string]config.DiagnosticOutputConfig, extras map[string][]Diagnostic, states map[string]FileWriteDiagnosticsState, displayBaseDir string) string {
 	if m == nil {
 		return base
 	}
 	baselines = normalizeDiagnosticPathMap(baselines)
 	outputs = normalizeDiagnosticPathMap(outputs)
-	byPath := m.diagnosticsForPaths(editedPaths)
+	states = normalizeDiagnosticPathMap(states)
+	byPath := m.diagnosticsForWritePaths(editedPaths, states)
 	for path, diags := range extras {
 		normalized := normalizeWaiterPath(path)
 		byPath[normalized] = append(byPath[normalized], diags...)
@@ -83,7 +86,11 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	if len(extras) == 0 {
 		covered := slices.ContainsFunc(primaryPaths, m.HasServerForPath)
 		if !covered {
-			return base
+			reportedFailure := slices.ContainsFunc(primaryPaths, func(path string) bool { return states[path].needsFileReport() })
+			if !reportedFailure {
+				return base
+			}
+			byPath = nil
 		}
 	}
 
@@ -127,9 +134,10 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		omitted += otherOmitted
 	}
 
+	multi := len(primaryPaths) > 1
 	hasBlocks := len(others) > 0
 	for _, path := range primaryPaths {
-		if len(selectedByPath[path]) > 0 {
+		if len(selectedByPath[path]) > 0 || (multi && states[path].needsFileReport()) {
 			hasBlocks = true
 			break
 		}
@@ -138,7 +146,6 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		return base
 	}
 
-	multi := len(primaryPaths) > 1
 	var b strings.Builder
 	b.WriteString(base)
 	b.WriteString(DiagnosticsSectionMarker)
@@ -151,12 +158,26 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		wroteBlock = true
 	}
 	for _, path := range primaryPaths {
+		state := states[path]
+		reportMiss := multi && state.needsFileReport()
 		var counts string
-		if multi && baselines != nil {
+		if multi && baselines != nil && !reportMiss {
 			counts = diagnosticChangeCounts(baselines[path], byPath[path])
 		}
 		diags := selectedByPath[path]
 		switch {
+		case reportMiss && state.Status == FileWriteStatusPartial:
+			header := displayDiagnosticPath(path, displayBaseDir) + ": diagnostics incomplete (" + state.reason() + ")"
+			if len(diags) > 0 {
+				writeBlock(header + "; showing available diagnostics:\n" + strings.Join(formatDiagnosticLines(diags), "\n"))
+			} else {
+				writeBlock(header + ".")
+			}
+		case reportMiss && len(diags) > 0:
+			header := displayDiagnosticPath(path, displayBaseDir) + ": diagnostics unavailable (" + state.reason() + "); showing last known diagnostics:"
+			writeBlock(header + "\n" + strings.Join(formatDiagnosticLines(diags), "\n"))
+		case reportMiss:
+			writeBlock(displayDiagnosticPath(path, displayBaseDir) + ": diagnostics unavailable (" + state.reason() + ").")
 		case len(diags) > 0 && multi:
 			header := displayDiagnosticPath(path, displayBaseDir)
 			if counts != "" {
@@ -174,13 +195,29 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		b.WriteByte('\n')
 		b.WriteString(diagnosticsOmittedLine(omitted))
 	}
-	if len(primaryPaths) == 1 && baselines != nil {
+	if len(primaryPaths) == 1 && baselines != nil && !states[primaryPaths[0]].needsFileReport() {
 		if changed := diagnosticChangeSummary(baselines[primaryPaths[0]], byPath[primaryPaths[0]]); changed != "" {
 			b.WriteByte('\n')
 			b.WriteString(changed)
 		}
 	}
 	return b.String()
+}
+
+func (m *Manager) diagnosticsForWritePaths(paths []string, states map[string]FileWriteDiagnosticsState) map[string][]Diagnostic {
+	merged, byServer := m.diagnosticsForPathsGrouped(paths)
+	for path, state := range states {
+		if len(state.FailedServers) == 0 {
+			continue
+		}
+		delete(merged, path)
+		for name, diags := range byServer[path] {
+			if !slices.Contains(state.FailedServers, name) {
+				merged[path] = append(merged[path], diags...)
+			}
+		}
+	}
+	return merged
 }
 
 func sortOtherFilePaths(paths []string, byPath map[string][]Diagnostic) {
@@ -296,15 +333,16 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 	if m == nil {
 		return base
 	}
+	return m.appendFileDiagnosticsToToolOutput(base, editedPath, includeOtherFiles, ranges, output, displayBaseDir, m.diagnosticsForPaths([]string{editedPath}))
+}
 
+func (m *Manager) appendFileDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool, ranges []EditRange, output config.DiagnosticOutputConfig, displayBaseDir string, byPath map[string][]Diagnostic) string {
 	edited, err := filepath.Abs(editedPath)
 	if err != nil {
 		edited = filepath.Clean(editedPath)
 	} else {
 		edited = normalizeWaiterPath(edited)
 	}
-
-	byPath := m.diagnosticsForPaths([]string{editedPath})
 
 	maxTotal := output.MaxTotalDiagnostics
 	if maxTotal <= 0 {

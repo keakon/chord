@@ -68,6 +68,9 @@ type afterWritePrepared struct {
 	// write has no server coverage, its server start failed, or every owning
 	// server missed the content sync.
 	wait bool
+	// skipStatus records why wait is false. The zero value is unused when the
+	// wait runs.
+	skipStatus FileWriteStatus
 }
 
 // beginAfterFileWrite runs the first step of the after-write pipeline: drop
@@ -90,7 +93,11 @@ func (m *Manager) prepareAfterFileWrite(ctx context.Context, absPath, content, b
 	// Start is asynchronous, so wait briefly for the matching client to appear
 	// before treating the first post-write sync as a startup failure.
 	if _, ok := afterWriteWaitForClient(m, ctx, absPath, afterWriteClientWaitTimeout); !ok {
-		return afterWritePrepared{path: absPath, base: m.appendStartFailureNotes(ctx, absPath, base, exited)}
+		return afterWritePrepared{
+			path:       absPath,
+			base:       m.appendStartFailureNotes(ctx, absPath, base, exited),
+			skipStatus: unavailableStatus(ctx, FileWriteStatusStartFailed),
+		}
 	}
 	return m.prepareReadyAfterFileWrite(ctx, absPath, content, base, changeType, coldStart)
 }
@@ -105,6 +112,9 @@ func (m *Manager) prepareReadyAfterFileWrite(ctx context.Context, absPath, conte
 	prepared.waiter = m.PrepareWaiter(absPath)
 	prepared.sync = m.syncAfterWrite(ctx, absPath, content, changeType, true)
 	prepared.base, prepared.wait = m.settleAfterWriteSyncFailure(ctx, absPath, prepared.waiter, prepared.sync, prepared.base)
+	if !prepared.wait {
+		prepared.skipStatus = unavailableStatus(ctx, FileWriteStatusSyncFailed)
+	}
 	prepared.waitTimeout = diagnosticsWaitTimeout
 	if coldStart {
 		prepared.waitTimeout = coldStartDiagnosticsWaitTimeout
@@ -115,15 +125,20 @@ func (m *Manager) prepareReadyAfterFileWrite(ctx context.Context, absPath, conte
 // awaitPreparedAfterFileWrite runs the wait half of the after-write pipeline
 // for a prepared write: fresh diagnostics, sync confirmation, timeout notes,
 // and the review snapshot. It returns the tool-result string with this file's
-// diagnostics appended after base.
-func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *afterWritePrepared, includeOtherFiles bool, displayBaseDir string) string {
+// diagnostics appended after base, plus whether those diagnostics describe
+// this write.
+func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *afterWritePrepared, includeOtherFiles bool, displayBaseDir string) FileWriteResult {
 	if !prepared.wait {
-		return prepared.base
+		return FileWriteResult{
+			Output: prepared.base,
+			Status: prepared.skipStatus,
+			Detail: fileWriteStatusDetail(prepared.skipStatus),
+		}
 	}
 
 	req := diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.after, immediateServers: m.immediateDiagnosticsServers(prepared.sync.serverVersions)}
 	_, notified, lastSeq, baseline := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, req, prepared.waitTimeout)
-	if notified {
+	if notified && len(prepared.sync.serverErrors) == 0 {
 		m.confirmDiagnosticsSync(prepared.sync.token)
 	}
 	if notified && ctx.Err() == nil {
@@ -137,7 +152,18 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 	}
 
 	m.recordReviewSnapshot(prepared.path)
-	return m.AppendLSPDiagnosticsToToolOutput(prepared.base, prepared.path, includeOtherFiles, displayBaseDir)
+	result := synchronizedFileWrite("", prepared.sync)
+	states := map[string]FileWriteDiagnosticsState{prepared.path: {FailedServers: result.FailedServers}}
+	byPath := m.diagnosticsForWritePaths([]string{prepared.path}, states)
+	out := m.appendFileDiagnosticsToToolOutput(prepared.base, prepared.path, includeOtherFiles, nil, config.DiagnosticOutputConfig{}, displayBaseDir, byPath)
+	if notified {
+		result.Output = out
+		return result
+	}
+	if ctx.Err() != nil {
+		return unavailableFileWrite(ctx, out, FileWriteStatusTimeout)
+	}
+	return timeoutFileWrite(out, prepared.waitTimeout)
 }
 
 // AfterFileWriteToolResult runs the LSP pipeline after Write/Edit succeeds: Start, DidChange,
@@ -154,7 +180,7 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 		if strings.HasPrefix(base, "Replaced ") {
 			ranges = EditRangesForReplacement(content, "", "", false)
 		}
-		return m.afterWritePythonToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, displayBaseDir)
+		return m.afterWritePythonToolResult(ctx, absPath, content, base, includeOtherFiles, ranges, changeType, displayBaseDir).Output
 	}
 	// Unassociated file type: skip LSP entirely (no Start, no note).
 	if !m.HasServerForPath(absPath) {
@@ -163,7 +189,7 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 
 	coldStart, base, exited := m.beginAfterFileWrite(ctx, absPath, base)
 	prepared := m.prepareAfterFileWrite(ctx, absPath, content, base, changeType, coldStart, exited)
-	return m.awaitPreparedAfterFileWrite(ctx, &prepared, includeOtherFiles, displayBaseDir)
+	return m.awaitPreparedAfterFileWrite(ctx, &prepared, includeOtherFiles, displayBaseDir).Output
 }
 
 // immediateDiagnosticsServers returns the synced servers whose first publish for
