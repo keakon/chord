@@ -126,10 +126,13 @@ web_fetch:
   "*.internal": deny         # internal domains
 ```
 
-Matching happens **before the request is sent**, against the URL the model supplied.
-It is not re-checked against the resolved connection IP, so a hostname that resolves
-to an internal address, or an HTTP redirect to one, is **not** blocked by an IP/CIDR
-rule. Treat these rules as intent-level gating, not a network sandbox.
+Matching happens **before the request is sent**, against the URL the model supplied,
+and again before following each HTTP redirect. Redirect targets must match an
+`allow` rule; an `ask` target stops the fetch unless YOLO relaxes that rule.
+IP/CIDR rules block redirect URLs that name a matching literal IP. The resolved
+connection IP is not checked, so a hostname that resolves to an internal address
+can still pass its hostname rule. Treat these rules as intent-level gating, not a
+network sandbox.
 
 ### Special permission semantics
 

@@ -27,9 +27,10 @@ type webFetchTarget struct {
 // glob so `*` and `web_*` rules apply. Returns an unfound MatchResult when
 // nothing matches.
 //
-// Enforcement is pre-fetch only: the URL the model supplied is matched as-is.
-// A domain that resolves to an internal address, or a redirect to one, is not
-// re-checked against the resolved IP.
+// Enforcement matches the URL the caller supplied as-is; the agent layer
+// re-runs this evaluation on every redirect hop before the hop is followed.
+// A domain that resolves to an internal address is not re-checked against
+// the resolved IP.
 func (rs Ruleset) EvaluateWebFetch(rawURL string) MatchResult {
 	target, parsed := parseWebFetchTarget(rawURL)
 	for _, r := range slices.Backward(rs) {

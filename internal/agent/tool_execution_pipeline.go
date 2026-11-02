@@ -204,6 +204,36 @@ func (p toolExecutionPipeline) effectivePathScope() permission.PathScope {
 	return scope
 }
 
+// withWebFetchAuthorizer installs the redirect re-check on a WebFetch call's
+// context: every hop re-runs the live ruleset so a redirect cannot reach a
+// host the pre-fetch decision never approved. It mirrors the pre-fetch
+// evaluation paths — an ask relaxed by YOLO stays reachable, while a deny or
+// an unmatched host does not — and installs nothing when permission is
+// bypassed or absent, matching the pre-fetch check that would also have been
+// skipped.
+func (p toolExecutionPipeline) withWebFetchAuthorizer(ctx context.Context) context.Context {
+	if p.bypassPermission != nil && p.bypassPermission(tools.NameWebFetch) {
+		return ctx
+	}
+	if p.currentRuleset == nil {
+		return ctx
+	}
+	if len(p.currentRuleset()) == 0 {
+		return ctx
+	}
+	return tools.WithWebFetchAuthorizer(ctx, func(rawURL string) error {
+		match := p.currentRuleset().EvaluateWebFetch(rawURL)
+		switch {
+		case match.Found && match.Rule.Action == permission.ActionAllow:
+			return nil
+		case match.Found && match.Rule.Action == permission.ActionAsk && p.yoloDowngradeAsk != nil && p.yoloDowngradeAsk(tools.NameWebFetch):
+			return nil
+		default:
+			return fmt.Errorf("redirect to %q not allowed by WebFetch permission rules", rawURL)
+		}
+	})
+}
+
 // toolActivityJournalRequired reports whether a finalized tool call needs a
 // started journal record before execution. It skips calls in the read-only
 // concurrency class, except for shell: every shell invocation is journaled
@@ -516,6 +546,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if p.imageAccessGuard != nil {
 		agentCtx = tools.WithImageAccessGuard(agentCtx, p.imageAccessGuard)
 	}
+	if tc.Name == tools.NameWebFetch {
+		agentCtx = p.withWebFetchAuthorizer(agentCtx)
+	}
 	deliverySink := &tools.DeliveryCollector{}
 	agentCtx = tools.WithDeliveryCollector(agentCtx, deliverySink)
 	agentCtx = tools.WithApprovedDeliveryTargets(agentCtx, approvedDeliveries)
@@ -768,6 +801,9 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	if p.imageAccessGuard != nil {
 		agentCtx = tools.WithImageAccessGuard(agentCtx, p.imageAccessGuard)
+	}
+	if tc.Name == tools.NameWebFetch {
+		agentCtx = p.withWebFetchAuthorizer(agentCtx)
 	}
 	imageSink := &tools.ImageCollector{}
 	agentCtx = tools.WithImageSink(agentCtx, imageSink)

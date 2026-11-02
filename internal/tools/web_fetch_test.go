@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -50,6 +51,62 @@ func TestWebFetchRejectsRedirectToUnsupportedScheme(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "redirect to non-http scheme") {
 		t.Fatalf("expected unsupported redirect scheme error, got %v", err)
 	}
+}
+
+func TestWebFetchRedirectAuthorizer(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("redirect target body"))
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer source.Close()
+
+	tool := NewWebFetchTool(webFetchTestConfig(), "")
+
+	// An authorizer that allows both endpoints lets the fetch follow through.
+	allowing := WithWebFetchAuthorizer(context.Background(), func(rawURL string) error {
+		if rawURL != source.URL && rawURL != target.URL {
+			return fmt.Errorf("redirect to %q not allowed by WebFetch permission rules", rawURL)
+		}
+		return nil
+	})
+	out, err := executeWebFetchForTestWithCtx(t, tool, allowing, map[string]any{"url": source.URL})
+	if err != nil {
+		t.Fatalf("expected allowed redirect to succeed, got %v", err)
+	}
+	mustContain(t, out, "redirect target body")
+
+	// An authorizer that rejects the redirect host stops the fetch before the
+	// hop is followed.
+	rejecting := WithWebFetchAuthorizer(context.Background(), func(rawURL string) error {
+		if rawURL == target.URL {
+			return fmt.Errorf("redirect to %q not allowed by WebFetch permission rules", rawURL)
+		}
+		return nil
+	})
+	_, err = executeWebFetchForTestWithCtx(t, tool, rejecting, map[string]any{"url": source.URL})
+	if err == nil || !strings.Contains(err.Error(), "not allowed by WebFetch permission rules") {
+		t.Fatalf("expected rejected redirect error, got %v", err)
+	}
+
+	// Without an authorizer the redirect is followed as before.
+	out, err = executeWebFetchForTestWithCtx(t, tool, context.Background(), map[string]any{"url": source.URL})
+	if err != nil {
+		t.Fatalf("expected unguarded redirect to succeed, got %v", err)
+	}
+	mustContain(t, out, "redirect target body")
+}
+
+func executeWebFetchForTestWithCtx(t *testing.T, tool WebFetchTool, ctx context.Context, args map[string]any) (string, error) {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	return tool.Execute(ctx, raw)
 }
 
 func TestWebFetchHonorsParentContextCancellation(t *testing.T) {

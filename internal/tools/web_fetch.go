@@ -289,6 +289,14 @@ func (t WebFetchTool) Execute(ctx context.Context, raw json.RawMessage) (string,
 		if scheme != "http" && scheme != "https" {
 			return fmt.Errorf("redirect to non-http scheme %q not allowed", scheme)
 		}
+		// A redirect hop is a URL the model never asked for; re-run the
+		// permission evaluation on it before following, so an allowed source
+		// cannot bounce the fetch to a host its rules never approved.
+		if authorize := WebFetchAuthorizerFromContext(ctx); authorize != nil {
+			if err := authorize(req.URL.String()); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	req, err := http.NewRequestWithContext(execCtx, http.MethodGet, a.URL, nil)

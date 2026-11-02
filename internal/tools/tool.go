@@ -212,6 +212,7 @@ const (
 	deleteAuditSinkKey
 	turnIDKey
 	jobAccessKey
+	webFetchAuthorizerKey
 )
 
 // WithAgentID returns a new context that carries the given agent ID.
@@ -278,6 +279,31 @@ func SessionDirFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// WebFetchAuthorizer re-checks a URL the WebFetch tool is about to follow
+// beyond the one it was called with, such as each hop of a redirect chain.
+// A non-nil error rejects the URL. The permission layer installs it so URLs
+// reached at runtime are held to the same evaluation as the requested one.
+type WebFetchAuthorizer func(rawURL string) error
+
+// WithWebFetchAuthorizer returns a context carrying the authorizer the
+// WebFetch tool consults for redirect hops. Without one, redirects are
+// followed as before.
+func WithWebFetchAuthorizer(ctx context.Context, authorize WebFetchAuthorizer) context.Context {
+	if authorize == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, webFetchAuthorizerKey, authorize)
+}
+
+// WebFetchAuthorizerFromContext extracts the authorizer from the context, or
+// returns nil when none is installed.
+func WebFetchAuthorizerFromContext(ctx context.Context) WebFetchAuthorizer {
+	if v, ok := ctx.Value(webFetchAuthorizerKey).(WebFetchAuthorizer); ok {
+		return v
+	}
+	return nil
 }
 
 // WithTaskID returns a new context that carries the current task ID.
