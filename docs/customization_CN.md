@@ -226,7 +226,15 @@ lsp:
 
 只想关掉个别噪音检查，不必放弃整个 staticcheck：保留 `staticcheck: true`，在 `analyses` 里把对应 analyzer 设为 `false` 就行。例如 `ST1000: false` 会去掉 staticcheck 的包注释告警，其它 staticcheck 检查照常运行；`staticcheck: false` 才是关闭整个 staticcheck 集合。gopls v0.23 没有 `checks` 选项（本机支持哪些设置可查 `gopls api-json`），老示例里的 `checks: ["all", "-ST1000"]` 写法不生效，能用的开关只有 `analyses` 里的单项设置。这些设置只在语言服务器启动时读取，改完要重启 Chord。
 
-gopls 还会把分析结果持久化到磁盘缓存，使用同一份 gopls 二进制的项目共用这份缓存：语言服务器重启后，未改动的包直接复用结果，只重算你改过的包及其依赖者。`maxFileCacheBytes` 调整的是该缓存的软上限（默认 1GB；超过 5 天未访问的条目无论预算多大都会被清掉），调大可以让更多结果跨重启保留；`env` 里的 `GOMAXPROCS` 则限制编辑后那阵多核 CPU 峰值背后的分析并行度，代价是分析墙钟时间变长。
+gopls 还会把分析结果持久化到磁盘缓存，使用同一份 gopls 二进制的项目共用这份缓存：语言服务器重启后，未改动的包直接复用结果，只重算你改过的包及其依赖者。`maxFileCacheBytes` 调整的是该缓存的软上限（默认 1GB；超过 5 天未访问的条目无论预算多大都会被清掉），调大可以让更多结果跨重启保留；`env` 里的 `GOMAXPROCS` 则限制编辑后那阵多核 CPU 峰值背后的分析并行度，代价是分析墙钟时间变长——它压的是 CPU 峰值，不是内存，别和偏紧的 `memoryLimit` 当成同一档一起调（这个组合实测过明显更差的结果，而且无法归因到单项）。
+
+常驻内存由另一条设置管：`memoryLimit` 给 gopls 进程设软内存上限（`runtime/debug.SetMemoryLimit`），大范围失效让堆短暂冲过稳态工作集时，GC 会更勤快地守住这条线，代价是 CPU。它压的是超出存活对象之外的那部分增长，压不掉存活对象本身——gopls 还在用的东西回收不了。它只接受字节数，不认 `500MB` 这类后缀。反过来，调小 `maxFileCacheBytes` 省不了内存——gopls 在内存里另有一层独立的小缓存，不受那个上限约束，它只决定磁盘上留多少条目。
+
+取值之前先量存活堆，而且要量对时刻：`gopls remote debug` 会给正在运行的 daemon 起一个 pprof 端口，`/debug/pprof/heap?gc=1` 读到的就是 GC 之后的存活堆（这条命令读的是 daemon socket 所在目录，若你会话的 `TMPDIR` 各不相同，先在同一个 shell 里导出你配置的那个 `XDG_RUNTIME_DIR`）。别只取长时间空闲之后的那个数字——冷启动首轮分析刚跑完时再量一次，分析期的瞬时存活往往是稳态的好几倍（一次实测稳态 443 MB，而分析期按 `NextGC/2` 反推有 1.9 GB）。软上限压不过这个瞬时值就只是把内存换成 GC 空转：活对象回收不掉，GC 反而在最忙的窗口反复动手——打字基准把上限压到工作集加球囊之下，每次按键 CPU 时间涨到 3.7 倍；对一个开着完整分析的大仓库设 1 GiB，每次编辑的 CPU 从 13.9 秒涨到 34.9 秒。三档够用了：
+
+- 内存宽裕：两条都不设，用 gopls 默认。
+- 长期有内存压力：只设 `memoryLimit`，取分析期瞬时存活的 1.3 倍以上。上限要明显高于稳态工作集，这是 gopls 文档自己的要求；压到瞬时值之下等于给 GC 加负担，内存一点没省。
+- 冷启动一个陌生仓库就能把机器逼到换页：`memoryLimit` 之外，再加 `env` 里的 `GOGC: "50"`。`GOGC` 管的是「存活堆长到几倍才 GC」，默认 100 就是翻倍才收，50 让 GC 在一倍半就动手——峰值里那部分滞留垃圾正是翻倍等待留下的，这条才是把峰值压下来的开关，`memoryLimit` 只是兜住病理性大范围失效的保险线。多花的 CPU 要看突发占比，别拿 `runtime/metrics` 的生命周期均值当依据（空闲时间全在分母里，0.19% 这种数字会骗人）；编辑前后各取一次 `/debug/pprof/profile`，看 `gcDrain` 从基线涨了多少——完整分析冷首轮的基线已经是 18.57%。两条是各自独立的触发线，任一先到就触发 GC，所以一起设是 Go GC 指南给的形状：程序与别的程序共享有限内存时，保留内存上限，同时把 `GOGC` 设成一个对平均情况合理的较小值。
 
 ```yaml
 lsp:
@@ -234,13 +242,16 @@ lsp:
     command: gopls
     file_types: [".go"]
     env:
-      GOMAXPROCS: "4"
+      GOGC: "50"
+      XDG_RUNTIME_DIR: /home/you/.local/state/chord/run
     options:
       gopls:
-        maxFileCacheBytes: 4000000000
+        memoryLimit: 2500000000
 ```
 
-`env` 里的条目会附加到语言服务器进程继承的环境上。其中一项与 gopls daemon 共享有关：`-remote=auto` 模式下，gopls 通过 `XDG_RUNTIME_DIR` 定位 daemon socket，未设置时回退到会话的临时目录——用不同 `TMPDIR` 启动的会话会各自起一个 daemon，临时目录被销毁重建后，运行中的 daemon 就找不到了。给 gopls 配置 `XDG_RUNTIME_DIR` 指向一个已存在的用户级目录（Linux 上是 `/run/user/<uid>`）即可跨会话共用同一个 daemon；Windows 不读这个变量，自动启动的 daemon 使用 TCP 回环地址。
+`env` 里的条目会附加到语言服务器进程继承的环境上。其中一项与 gopls daemon 共享有关：`-remote=auto` 模式下，gopls 通过 `XDG_RUNTIME_DIR` 定位 daemon socket，未设置时回退到会话的临时目录——用不同 `TMPDIR` 启动的会话会各自起一个 daemon，临时目录被销毁重建后，运行中的 daemon 就找不到了。给 gopls 配置 `XDG_RUNTIME_DIR` 指向一个已存在的用户级目录即可跨会话共用同一个 daemon：Linux 上用 `/run/user/<uid>`；macOS 没有这个目录，用自己的状态目录（如 `~/.local/state/chord/run`，先建好，Chord 不展开 `~`，这里要写绝对路径）。目录里残留过期 socket 不用手工清理：拨号失败后 gopls 会删掉它再重新拉起 daemon。Windows 不读这个变量，自动启动的 daemon 使用 TCP 回环地址。
+
+两类配置的生效时机不同：`env` 只作用于之后新起的语言服务器进程，已在运行的 gopls daemon 会带着旧环境继续跑，直到空闲退出；`memoryLimit`、`maxFileCacheBytes` 是进程级设置，随会话初始化发给 daemon，当时正在跑的那个进程也会接受。两者都要重启 Chord 才从配置文件读到新值——Chord 只在启动时读一次 LSP 配置。
 
 这种 LSP 反馈是编辑后的增量检查，不能替代 CI 中的全仓门禁。若项目要在 CI 中采用独立的 `modernize` 命令，应先清理并审查现有发现，再固定命令版本，而不是使用 `@latest`；部分建议修复（例如把 `omitempty` 改为 `omitzero`）会有意改变序列化行为，必须人工审查。
 
