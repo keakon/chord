@@ -209,12 +209,3 @@ func ResidentBytes() (encoded, dataURL int64) {
 	}
 	return encoded, dataURL
 }
-
-func (c *imageLRUCache) residentBytes() int64 {
-	if c == nil {
-		return 0
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.bytes
-}

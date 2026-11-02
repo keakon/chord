@@ -45,7 +45,10 @@ func TestImageLRUCacheExpiresOnlyIdleEntries(t *testing.T) {
 		c.insert("next", "next payload", 0)
 		time.Sleep(IdleTimeout)
 		synctest.Wait()
-		if c.residentBytes() != 0 {
+		c.mu.Lock()
+		reinserted := c.bytes
+		c.mu.Unlock()
+		if reinserted != 0 {
 			t.Fatal("reinsertion did not start a new expiry")
 		}
 	})
@@ -77,7 +80,10 @@ func TestImageLRUCacheConcurrentIdleRelease(t *testing.T) {
 		}
 		time.Sleep(IdleTimeout)
 		synctest.Wait()
-		if c.residentBytes() != 0 {
+		c.mu.Lock()
+		resident := c.bytes
+		c.mu.Unlock()
+		if resident != 0 {
 			t.Fatal("concurrent use left idle payloads resident")
 		}
 	})
