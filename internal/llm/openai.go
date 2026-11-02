@@ -73,6 +73,17 @@ func NewOpenAIProvider(provider *ProviderConfig, proxyURL string) (*OpenAIProvid
 	}, nil
 }
 
+// ReleaseBodyCache drops the cached request body built from this messages
+// slice. A Responses-shaped request is forwarded to the embedded
+// ResponsesProvider, which caches the body in its own entry, so both entries
+// must be released — the forwarded one is the large one.
+func (o *OpenAIProvider) ReleaseBodyCache(msgs *message.Message, msgsLen int) {
+	o.bodyReuse.release(msgs, msgsLen)
+	if o.responsesProvider != nil {
+		o.responsesProvider.bodyReuse.release(msgs, msgsLen)
+	}
+}
+
 // SetDumpWriter enables LLM request/response dumping for debugging.
 func (o *OpenAIProvider) SetDumpWriter(w *DumpWriter) {
 	o.dumpWriter.Store(w)

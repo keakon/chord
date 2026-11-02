@@ -335,6 +335,21 @@ type AgentForTUI interface {
 	PlanExecutor
 }
 
+// ContextMemoryReporter is an optional capability for the TUI memory breakdown.
+// It is separate from AgentForTUI because diagnostics must not become a
+// mandatory method every backend or test double has to implement.
+type ContextMemoryReporter interface {
+	// GetResidentMemoryBreakdown attributes the focused agent's resident heap
+	// bytes to categories. It is the resident accounting, not the context one:
+	// an attachment moved to the session directory still occupies context but
+	// no longer occupies the heap. It scans the live history under the read
+	// lock, so it is for debug dumps, not per-frame rendering.
+	GetResidentMemoryBreakdown() ctxmgr.MessageBytes
+	// AttachmentCacheBytes reports the resident bytes of the resolved-attachment
+	// read cache.
+	AttachmentCacheBytes() int64
+}
+
 // SkillsStateProvider is implemented by agents that can expose currently
 // available skill metadata to the TUI info panel.
 type SkillsStateProvider interface {

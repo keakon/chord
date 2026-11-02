@@ -115,6 +115,21 @@ func (c *Client) completeStreamWithRetry(
 	// deliberately keeps the partial (the turn persists it as the interrupted
 	// assistant message).
 	var pendingRollback string
+	// Every request body cached during this walk is released on the way out.
+	// The cache only has to spare the key-attempt loop inside one target a
+	// rebuild, so it must outlive a round (a later round retries the same
+	// target) but not the call: providers are shared by every client using
+	// that provider name, and keeping the entry would pin the last request's
+	// full body, its compressed copy and the whole messages backing array for
+	// as long as the provider lives.
+	var bodyCachePins []bodyCachePin
+	defer func() {
+		for _, pin := range bodyCachePins {
+			if releaser, ok := pin.impl.(BodyCacheReleaser); ok {
+				releaser.ReleaseBodyCache(pin.msgs, pin.msgsLen)
+			}
+		}
+	}()
 	defer func() {
 		if pendingRollback == "" || cb == nil || err == nil || resp != nil {
 			return
@@ -328,7 +343,7 @@ func (c *Client) completeStreamWithRetry(
 					messages = updatedMessages
 				}
 			}
-			if targetResult, updatedLastInputTokens, err := c.completeStreamTarget(
+			targetResult, updatedLastInputTokens, targetErr := c.completeStreamTarget(
 				ctx,
 				t,
 				round,
@@ -348,23 +363,27 @@ func (c *Client) completeStreamWithRetry(
 				oversizeSeen,
 				pendingRollback,
 				prepareAttempt,
-			); err != nil {
+			)
+			// Collect the target's cache entries before branching: a failed
+			// target may have cached a body on the way to its error.
+			bodyCachePins = append(bodyCachePins, targetResult.bodyCachePins...)
+			if targetErr != nil {
 				// An escalated preserved interruption carries the partial text
 				// forward: the caller saves it as the interrupted assistant
 				// message and resumes it. A pendingRollback still armed by an
 				// earlier target (a thinking-only interruption that retried
 				// silently) would make the deferred rollback above wipe that
 				// text on the way out, so disarm it here.
-				if IsPreservableStreamInterruption(err) {
+				if IsPreservableStreamInterruption(targetErr) {
 					pendingRollback = ""
 				}
-				if executiongate.IsPaused(err) {
-					return targetResult.resp, err
+				if executiongate.IsPaused(targetErr) {
+					return targetResult.resp, targetErr
 				}
-				if unknown, ok := errors.AsType[*HostedOutcomeUnknownError](err); ok {
-					return unknown.Response, err
+				if unknown, ok := errors.AsType[*HostedOutcomeUnknownError](targetErr); ok {
+					return unknown.Response, targetErr
 				}
-				return nil, err
+				return nil, targetErr
 			} else {
 				if _, repeatedEcho := errors.AsType[*ReplayEvidenceEchoError](targetResult.lastErr); repeatedEcho {
 					replayEchoRejectedTargets[replayTarget] = struct{}{}

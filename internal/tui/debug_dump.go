@@ -11,7 +11,10 @@ import (
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/buildinfo"
+	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/llm/mediacache"
 	"github.com/keakon/chord/internal/textclean"
 )
 
@@ -385,6 +388,34 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 		fmt.Fprintf(&sb, "consistency.spans_positive: %t\n", spansPositive)
 		fmt.Fprintf(&sb, "consistency.span_chain_match: %t\n", spanChainMatch)
 	}
+
+	// Every number below answers "how many bytes are held in the heap". An
+	// attachment stored in the session directory contributes nothing to
+	// ctxmgr.image_bytes even though it still occupies context: the model
+	// receives it, the process does not hold it.
+	fmt.Fprintf(&sb, "\n[memory]\n")
+	if reporter, ok := m.agent.(agent.ContextMemoryReporter); ok {
+		breakdown := reporter.GetResidentMemoryBreakdown()
+		fmt.Fprintf(&sb, "ctxmgr.text_bytes: %d\n", breakdown.Text)
+		fmt.Fprintf(&sb, "ctxmgr.image_bytes: %d\n", breakdown.Image)
+		fmt.Fprintf(&sb, "ctxmgr.pdf_bytes: %d\n", breakdown.PDF)
+		fmt.Fprintf(&sb, "ctxmgr.tool_call_bytes: %d\n", breakdown.ToolCalls)
+		fmt.Fprintf(&sb, "ctxmgr.thinking_bytes: %d\n", breakdown.Thinking)
+		fmt.Fprintf(&sb, "ctxmgr.responses_output_bytes: %d\n", breakdown.Responses)
+		fmt.Fprintf(&sb, "ctxmgr.gemini_part_bytes: %d\n", breakdown.Gemini)
+		fmt.Fprintf(&sb, "ctxmgr.total_bytes: %d\n", breakdown.Total())
+		fmt.Fprintf(&sb, "agent.attachment_cache_bytes: %d\n", reporter.AttachmentCacheBytes())
+	} else {
+		fmt.Fprintf(&sb, "agent: unavailable\n")
+	}
+	if m.viewport != nil {
+		fmt.Fprintf(&sb, "tui.hot_bytes: %d\n", m.viewport.hotBytes)
+		fmt.Fprintf(&sb, "tui.resident_bytes: %d\n", m.viewport.ResidentBytes())
+	}
+	encodedBytes, dataURLBytes := mediacache.ResidentBytes()
+	fmt.Fprintf(&sb, "llm.image_wire_cache_bytes: %d\n", llm.ImageWireCacheBytes())
+	fmt.Fprintf(&sb, "llm.image_encoding_cache_bytes: %d\n", encodedBytes)
+	fmt.Fprintf(&sb, "llm.image_data_url_cache_bytes: %d\n", dataURLBytes)
 
 	fmt.Fprintf(&sb, "\n[recent_events]\n")
 	events := m.snapshotTUIDiagnosticEvents()

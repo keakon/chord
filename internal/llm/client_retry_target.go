@@ -29,6 +29,10 @@ type streamTargetAttemptResult struct {
 	// rendered and its rollback is deferred until the retry regenerates
 	// content or the attempt chain ends; the value is the rollback reason.
 	pendingRollbackReason string
+	// bodyCachePins are the provider body-cache entries this target's attempts
+	// created. The caller releases them once the whole retry walk ends: doing
+	// it here would drop the body the key-attempt loop is still reusing.
+	bodyCachePins []bodyCachePin
 }
 
 func (r *streamTargetAttemptResult) setLastErr(provider *ProviderConfig, err error) {
@@ -68,7 +72,13 @@ func (c *Client) completeStreamTarget(
 	// rollback clears the card); every exit reports it back so the caller can
 	// arm the next attempt or discard the preserved text on terminal failure.
 	pendingRollback := pendingRollbackIn
-	defer func() { result.pendingRollbackReason = pendingRollback }()
+	// Both are reported through the named result so every early return carries
+	// them; a failed attempt may still have cached a body.
+	var bodyCachePins []bodyCachePin
+	defer func() {
+		result.pendingRollbackReason = pendingRollback
+		result.bodyCachePins = bodyCachePins
+	}()
 	if t.isFallback {
 		log.Infof("trying fallback model in retry rotation provider=%v model=%v attempt=%v", t.provider.Name(), t.modelID, round+1)
 		if cb != nil {
@@ -272,6 +282,14 @@ func (c *Client) completeStreamTarget(
 			})
 		}
 		attemptCtx = context.WithValue(attemptCtx, continuationTargetKey{}, continuationTarget{ref: modelRef, tier: t.serviceTier})
+		// Record the slice the provider will convert. It is the slice the body
+		// cache pins, and completeWithNativeTools may rewrite tools and tuning
+		// on the way down but never the messages.
+		bodyCachePins = append(bodyCachePins, bodyCachePin{
+			impl:    t.impl,
+			msgs:    sliceID(targetMessages),
+			msgsLen: len(targetMessages),
+		})
 		resp, err = completeWithNativeTools(
 			attemptCtx,
 			t.impl,

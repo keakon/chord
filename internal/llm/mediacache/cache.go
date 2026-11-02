@@ -189,3 +189,21 @@ func DataURL(mimeType string, data []byte) string {
 	imageDataURLCache.insert(key, url)
 	return url
 }
+
+// ResidentBytes reports the bytes currently held by the two process-wide image
+// encoding caches. Diagnostics only: it takes each cache lock briefly, so it
+// must not run on a per-request path.
+func ResidentBytes() (encoded, dataURL int64) {
+	encoded = imageCache.residentBytes()
+	dataURL = imageDataURLCache.residentBytes()
+	return encoded, dataURL
+}
+
+func (c *imageLRUCache) residentBytes() int64 {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bytes
+}

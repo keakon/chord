@@ -63,6 +63,12 @@ func validateGeminiAPIURL(apiURL string) error {
 	return nil
 }
 
+// ReleaseBodyCache drops the cached request body built from this messages
+// slice; see requestBodyReuse.release for why the match is slice-scoped.
+func (g *GeminiProvider) ReleaseBodyCache(msgs *message.Message, msgsLen int) {
+	g.bodyReuse.release(msgs, msgsLen)
+}
+
 // SetDumpWriter enables LLM request/response dumping for debugging.
 func (g *GeminiProvider) SetDumpWriter(w *DumpWriter) {
 	g.dumpWriter.Store(w)

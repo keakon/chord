@@ -853,37 +853,7 @@ func MessagePayloadBytes(messages []message.Message) int {
 }
 
 func messageContextBytes(messages []message.Message) int {
-	messages = message.DirectoryInstructionAccountingMessages(messages)
-	total := 0
-	for _, msg := range messages {
-		if msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 {
-			for _, item := range msg.NativeTools.Items {
-				total += len(item)
-			}
-			imageBytes, _ := nativeImageAccounting(msg.NativeTools)
-			total += imageBytes
-			continue
-		}
-		total += MessagePayloadBytes([]message.Message{msg})
-		total += len(msg.ToolCallID)
-		for _, tc := range msg.ToolCalls {
-			total += len(tc.ID) + len(tc.Name) + len(tc.Args)
-		}
-		for _, tb := range msg.ThinkingBlocks {
-			total += len(tb.Thinking) + len(tb.Signature) + len(tb.Data)
-		}
-		for _, item := range msg.ResponsesOutput {
-			total += len(item.ID) + len(item.EncryptedContent)
-			for _, summary := range item.Summary {
-				total += len(summary.Text)
-			}
-		}
-		for _, part := range msg.GeminiParts {
-			total += len(part.ThoughtSignature)
-		}
-		total += len(msg.ReasoningContent)
-	}
-	return total
+	return MessageBytesBreakdown(messages).Total()
 }
 
 // EstimateMessagesBytes returns the total byte size of a message slice using the

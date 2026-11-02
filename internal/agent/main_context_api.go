@@ -234,6 +234,41 @@ func toolDefinitionBytes(defs []message.ToolDefinition) int {
 	return total
 }
 
+// GetResidentMemoryBreakdown attributes the focused agent's resident heap bytes
+// to categories. It follows GetContextBytes' focus rules so the numbers describe
+// the same history the sidebar counts.
+//
+// This is deliberately the RESIDENT accounting, not the context accounting: an
+// attachment moved to the session directory still occupies context (the model
+// receives it) but no longer occupies the heap, and the [memory] dump exists to
+// answer the heap question.
+func (a *MainAgent) GetResidentMemoryBreakdown() ctxmgr.MessageBytes {
+	target := a.focusedAgentSnapshot()
+	if externalBackendForTarget(target) != "" {
+		return ctxmgr.MessageBytes{}
+	}
+	if target.sub != nil {
+		return target.sub.GetResidentMemoryBreakdown()
+	}
+	if target.parked || target.settled {
+		// The runtime is gone, so this task owns no heap history here. The
+		// transcript stays readable through GetContextBytes, which loads it on
+		// demand; billing that transient copy as resident would report memory
+		// the process does not keep.
+		return ctxmgr.MessageBytes{}
+	}
+	return a.ctxMgr.ResidentBytesBreakdown()
+}
+
+// AttachmentCacheBytes reports the resident bytes of the resolved-attachment
+// read cache. Diagnostics only; the cache stays bounded by its own budget.
+func (a *MainAgent) AttachmentCacheBytes() int64 {
+	if a == nil {
+		return 0
+	}
+	return a.binaryPartCache.residentBytes()
+}
+
 // KeyStats returns (healthy, total) API keys for the provider of the model the
 // sidebar shows (SubAgent when focused, else MainAgent): the in-flight request's
 // attempt target while one is running, else the next-request/confirmed ref, so

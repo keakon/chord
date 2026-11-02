@@ -12,6 +12,10 @@ import (
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
+// defaultViewportHotBytes is the hot-payload target, not a hard cap. Blocks
+// larger than 4 MiB are exempt from spilling (see blockTooLargeToSpill), so the
+// resident hot payload can settle above this value whenever such a block is in
+// the transcript.
 const defaultViewportHotBytes int64 = 32 << 20
 
 type BlockSpillRef struct {
@@ -239,6 +243,18 @@ func preserveMutableBlockState(src, dst *Block) {
 	dst.CompactionManual = src.CompactionManual
 }
 
+// estimatedHotBytes reports the unloadable hot payload: the bytes of the fields
+// spillBlock clears. It is not the block's real memory footprint — residentBytes
+// covers that. The invariant that matters is one-directional: every field
+// counted here must be released by spillBlock, otherwise v.hotBytes subtracts
+// bytes that are still held and the budget understates real usage.
+//
+// Deliberately excluded because spillBlock keeps them resident: UserLocalShellCmd,
+// DoneSummary (both feed fallbackSummary), the small ImageParts metadata
+// (FileName/ImagePath/MimeType), ImageParts[].Data, FileRefs and DeliveredFiles.
+// The last two are activation targets: a cold block is never materialized just
+// because the user pressed Enter on it, so clearing them would silently break
+// "open the delivered file" and image viewing rather than save real payload.
 func (b *Block) estimatedHotBytes() int64 {
 	if b == nil || b.spillCold {
 		return 0
@@ -250,20 +266,26 @@ func (b *Block) estimatedHotBytes() int64 {
 	total += len(b.Content)
 	total += len(b.ResultContent)
 	total += len(b.Diff)
-	total += len(b.UserLocalShellCmd)
 	total += len(b.UserLocalShellResult)
-	total += len(b.DoneSummary)
+	total += len(b.RawArgs)
+	total += len(b.ResultPayload)
+	for _, note := range b.ResultNotes {
+		total += len(note)
+	}
+	total += len(b.DoneReport)
+	total += len(b.BackgroundCopyContent)
 	for _, part := range b.ThinkingParts {
 		total += len(part)
 	}
-	for _, img := range b.ImageParts {
-		total += len(img.FileName)
-		total += len(img.ImagePath)
-		total += len(img.MimeType)
-		total += len(img.Data)
-	}
-	for _, ref := range b.FileRefs {
-		total += len(ref)
+	total += len(b.streamSettledRaw)
+	total += len(b.streamTailRaw)
+	total += len(b.streamCardHeadBody)
+	total += len(b.streamingPatchText)
+	total += len(b.patchPreviewText)
+	total += len(b.previewRenderedPatch)
+	total += len(b.streamingPatchLineStarts) * 8
+	for _, line := range b.previewRenderedLines {
+		total += len(line)
 	}
 	for _, line := range b.mdCache {
 		total += len(line)
@@ -309,6 +331,57 @@ func (b *Block) estimatedHotBytes() int64 {
 	b.hotBytesMemo = int64(total)
 	b.hotBytesMemoValid = true
 	return b.hotBytesMemo
+}
+
+// residentBytes estimates every large byte field the block still holds. It is a
+// strict superset of estimatedHotBytes: hot bytes are the part spillBlock
+// reclaims, while this total also counts the fields spillBlock leaves in place
+// (UserLocalShellCmd, DoneSummary, ImageParts, FileRefs, DeliveredFiles, the
+// spill summary, compaction history, and translated thinking). Diagnostics
+// only — the hot budget must keep using estimatedHotBytes, or it would stop
+// bounding reclaimable memory.
+func (b *Block) residentBytes() int64 {
+	if b == nil {
+		return 0
+	}
+	total := b.estimatedHotBytes()
+	total += int64(len(b.UserLocalShellCmd))
+	total += int64(len(b.DoneSummary))
+	total += int64(len(b.CompactionSummaryRaw))
+	for _, translation := range b.ThinkingTranslations {
+		total += int64(len(translation.TargetLang) + len(translation.Content) + len(translation.OriginalHash))
+	}
+	total += int64(len(b.toolArgsCacheToolName) + len(b.toolArgsCacheContent))
+	for _, key := range b.toolArgsCacheKeys {
+		total += int64(len(key))
+	}
+	for key, value := range b.toolArgsCacheVals {
+		total += int64(len(key) + len(value))
+	}
+	total += int64(len(b.toolHeaderCacheToolName) + len(b.toolHeaderCacheContent))
+	total += int64(len(b.toolHeaderCacheHeaderParams) + len(b.toolHeaderCacheHeaderMain) + len(b.toolHeaderCacheHeaderGray))
+	total += int64(len(b.toolHeaderCacheCollapsedMain) + len(b.toolHeaderCacheCollapsedGray))
+	for _, line := range b.toolHeaderCacheParamLines {
+		total += int64(len(line))
+	}
+	if b.streamContentBuilder != nil {
+		total += int64(len(b.streamContentBuilder.String()))
+	}
+	for _, img := range b.ImageParts {
+		total += int64(len(img.FileName) + len(img.ImagePath) + len(img.MimeType))
+		total += int64(len(img.Data))
+	}
+	for _, name := range b.PDFNames {
+		total += int64(len(name))
+	}
+	for _, ref := range b.FileRefs {
+		total += int64(len(ref))
+	}
+	for _, file := range b.DeliveredFiles {
+		total += int64(len(file.ID) + len(file.DisplayName) + len(file.Description) + len(file.MIME) + len(file.SHA256))
+	}
+	total += int64(len(b.spillSummary))
+	return total
 }
 
 func (b *Block) fallbackSummary() string {
@@ -362,10 +435,30 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	block.ResultContent = ""
 	block.Diff = ""
 	block.UserLocalShellResult = ""
+	block.RawArgs = ""
+	block.ResultPayload = ""
+	block.ResultNotes = nil
+	block.DoneReport = ""
+	block.BackgroundCopyContent = ""
 	block.ThinkingParts = nil
+	block.streamContentBuilder = nil
 	block.bodyVisibilityKey = ""
 	block.bodyVisibilityValid = false
 	block.InvalidateStreamingSettledCache()
+	block.thinkingStreamSettled = nil
+	block.clearApplyPatchPreviewMemo()
+	block.toolArgsCacheToolName = ""
+	block.toolArgsCacheContent = ""
+	block.toolArgsCacheKeys = nil
+	block.toolArgsCacheVals = nil
+	block.toolHeaderCacheToolName = ""
+	block.toolHeaderCacheContent = ""
+	block.toolHeaderCacheHeaderParams = ""
+	block.toolHeaderCacheHeaderMain = ""
+	block.toolHeaderCacheHeaderGray = ""
+	block.toolHeaderCacheCollapsedMain = ""
+	block.toolHeaderCacheCollapsedGray = ""
+	block.toolHeaderCacheParamLines = nil
 	block.mdCache = nil
 	block.mdCacheWidth = 0
 	block.mdCacheContent = ""

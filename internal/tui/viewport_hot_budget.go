@@ -78,6 +78,20 @@ func (v *Viewport) recomputeHotBytes() {
 	v.hotBytes = total
 }
 
+// ResidentBytes reports the estimated bytes every block still holds, whether or
+// not spill can reclaim them. It is a diagnostic counterpart to hotBytes, not a
+// budget input: hotBytes decides what to spill, this says what is actually kept.
+func (v *Viewport) ResidentBytes() int64 {
+	if v == nil {
+		return 0
+	}
+	var total int64
+	for _, block := range v.blocks {
+		total += block.residentBytes()
+	}
+	return total
+}
+
 func (v *Viewport) visibleWindowBlockIDsCachedOnly() (map[int]struct{}, bool) {
 	ids := make(map[int]struct{})
 	blocks := v.visibleBlocks()

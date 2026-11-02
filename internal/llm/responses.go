@@ -81,6 +81,12 @@ func NewResponsesProvider(provider *ProviderConfig, proxyURL string) (*Responses
 	}, nil
 }
 
+// ReleaseBodyCache drops the cached request body built from this messages
+// slice; see requestBodyReuse.release for why the match is slice-scoped.
+func (r *ResponsesProvider) ReleaseBodyCache(msgs *message.Message, msgsLen int) {
+	r.bodyReuse.release(msgs, msgsLen)
+}
+
 func (r *ResponsesProvider) SetDumpWriter(w *DumpWriter) {
 	r.dumpWriter.Store(w)
 }

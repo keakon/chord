@@ -81,6 +81,17 @@ func (c *binaryPartReadCache) put(entry *binaryPartCacheEntry) {
 	c.bytes += int64(len(entry.data))
 }
 
+// residentBytes reports the bytes currently held by the read cache. Diagnostics
+// only: it takes the cache lock, so callers must not sit on a request path.
+func (c *binaryPartReadCache) residentBytes() int64 {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bytes
+}
+
 // resolveBinaryPart loads and normalizes a persisted attachment for the wire
 // converter. The resolver is installed once per process; the paths inside a
 // part are absolute session paths, so reads need no session-dir context and

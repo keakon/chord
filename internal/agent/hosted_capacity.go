@@ -37,3 +37,13 @@ func (p hostedRequestProvider) CompleteStream(ctx context.Context, key, model, s
 	}
 	return resp, err
 }
+
+// ReleaseBodyCache forwards the optional body-cache release capability to the
+// wrapped provider. The embedded Provider interface does not declare this
+// method, so without the explicit forward the retry layer's assertion fails on
+// the wrapper and the pinned body (plus its messages slice) survives the walk.
+func (p hostedRequestProvider) ReleaseBodyCache(msgs *message.Message, msgsLen int) {
+	if releaser, ok := p.Provider.(llm.BodyCacheReleaser); ok {
+		releaser.ReleaseBodyCache(msgs, msgsLen)
+	}
+}

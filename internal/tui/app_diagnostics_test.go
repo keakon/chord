@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/ctxmgr"
 )
 
 func TestTUIDiagnosticRingBufferKeepsNewestEvents(t *testing.T) {
@@ -250,5 +252,26 @@ func TestDiagnosticsBundleShowsImmediatelyWhileAssistantStreamIsActive(t *testin
 	}
 	if streamBlock.Content != "streaming more" {
 		t.Fatalf("stream block content = %q, want updated assistant content", streamBlock.Content)
+	}
+}
+
+type memoryBreakdownAgent struct{ sessionControlAgent }
+
+func (*memoryBreakdownAgent) GetResidentMemoryBreakdown() ctxmgr.MessageBytes {
+	return ctxmgr.MessageBytes{Text: 7, Image: 11, PDF: 13}
+}
+
+func (*memoryBreakdownAgent) AttachmentCacheBytes() int64 { return 0 }
+
+func TestDiagnosticDumpIncludesPDFResidentBucket(t *testing.T) {
+	m := NewModelWithSize(&memoryBreakdownAgent{}, 80, 24)
+	_, dump, err := m.buildDiagnosticDump(time.Now(), "diagnostics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ctxmgr.text_bytes: 7", "ctxmgr.image_bytes: 11", "ctxmgr.pdf_bytes: 13", "ctxmgr.total_bytes: 31"} {
+		if !strings.Contains(dump, want) {
+			t.Fatalf("dump missing %q", want)
+		}
 	}
 }

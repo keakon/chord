@@ -101,3 +101,21 @@ func (c *wireImageCache) put(key string, data []byte, mime string) {
 	c.entries[key] = c.order.PushBack(entry)
 	c.bytes += cost
 }
+
+// residentBytes reports the bytes currently held by the cache. Diagnostics
+// only: it takes the cache lock, so callers must not sit on a hot path.
+func (c *wireImageCache) residentBytes() int64 {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bytes
+}
+
+// ImageWireCacheBytes reports the resident bytes of the process-wide normalized
+// image cache. It exists for the TUI memory breakdown; the cache stays bounded
+// by its own budget and is never persisted.
+func ImageWireCacheBytes() int64 {
+	return imageWireCache.residentBytes()
+}

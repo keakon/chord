@@ -20,9 +20,12 @@ import (
 // first element — and the caller must keep the returned pointer reachable for
 // as long as it holds the cached value. Both callers here store it in the
 // guard itself, which pins the backing array, so a freed array's address
-// cannot be recycled into a false match. (partDigestRef deliberately does the
-// opposite with a weak pointer, because that memo must not pin every payload
-// it has ever hashed.)
+// cannot be recycled into a false match. The body cache drops that reference
+// as soon as the retry walk that created it ends (requestBodyReuse.release);
+// holding it any longer would keep a whole conversation history alive in a
+// provider instance shared by every client. (partDigestRef deliberately does
+// the opposite with a weak pointer, because that memo must not pin every
+// payload it has ever hashed.)
 func sliceID[T any](s []T) *T {
 	if len(s) == 0 {
 		return nil
@@ -116,6 +119,62 @@ func (r *requestBodyReuse) bodyWithExtra(identity requestBodyIdentity, build fun
 	r.compValid = false
 	r.compBytes = nil
 	return body, extra, nil
+}
+
+// release drops the cached body when it was built from the given messages
+// slice, which unpins that slice's backing array (see sliceID).
+//
+// The match is deliberately scoped to the pinned fields instead of a whole
+// requestBodyIdentity. Provider instances are shared across clients — the
+// process caches one impl per provider name, so MainAgent, SubAgent and
+// auxiliary calls hit the same bodyReuse — and a concurrent request may
+// already have replaced this single entry. Clearing unconditionally would
+// throw away that request's body in the middle of its key-attempt loop; the
+// pointer match is what makes the release safe. It is also all a releaser can
+// prove: the other identity fields are rewritten between the client and the
+// provider (completeWithNativeTools trims tools and tuning, replay recovery
+// rebuilds the request tuning, the Responses cache key is provider-derived),
+// so reconstructing a full identity outside the provider would be a guess.
+//
+// msgs must come from sliceID, i.e. be the same value the guard holds: an
+// empty slice is represented as nil so two empty surfaces compare equal.
+func (r *requestBodyReuse) release(msgs *message.Message, msgsLen int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.valid || r.guard.msgs != msgs || r.guard.msgsLen != msgsLen {
+		return
+	}
+	r.valid = false
+	r.cached = nil
+	r.extra = nil
+	r.compValid = false
+	r.compEnc = ""
+	r.compBytes = nil
+	// Zero the guard as well: it holds the only strong reference to the
+	// messages backing array this cache keeps alive.
+	r.guard = requestBodyIdentity{}
+}
+
+// BodyCacheReleaser is the optional capability the retry layer uses to drop a
+// provider's cached request body once a whole retry walk is over. It stays out
+// of Provider on purpose: only the providers that marshal a body cache one,
+// and the retry layer must keep working with providers that do not (test
+// doubles, and any future implementation that builds bodies per attempt).
+//
+// Wrappers that delegate Provider calls must forward this method too; an
+// embedded Provider interface does not promote a capability it does not
+// declare.
+type BodyCacheReleaser interface {
+	ReleaseBodyCache(msgs *message.Message, msgsLen int)
+}
+
+// bodyCachePin names one cache entry a target created, so the retry layer can
+// release it when the walk ends. impl is the provider instance that built it;
+// msgs/msgsLen identify the entry (see requestBodyReuse.release).
+type bodyCachePin struct {
+	impl    Provider
+	msgs    *message.Message
+	msgsLen int
 }
 
 // compressBody compresses the cached body for the configured encoding,

@@ -605,6 +605,15 @@ func (s *SubAgent) GetContextBytes() int {
 	return s.ctxMgr.ContextPayloadBytes() + toolDefinitionBytes(toolDefs)
 }
 
+// GetResidentMemoryBreakdown attributes this agent's resident heap bytes to
+// categories for diagnostics. Path-only attachments count zero here.
+func (s *SubAgent) GetResidentMemoryBreakdown() ctxmgr.MessageBytes {
+	if s == nil {
+		return ctxmgr.MessageBytes{}
+	}
+	return s.ctxMgr.ResidentBytesBreakdown()
+}
+
 func (s *SubAgent) GetContextReductionStats() ContextReductionStats {
 	if s == nil {
 		return ContextReductionStats{}
