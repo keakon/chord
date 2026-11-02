@@ -123,6 +123,9 @@ permission:
     "rm *": ask
     "rmdir *": ask
     "mv *": ask
+    "dd *": ask
+    "truncate *": ask
+    "shred *": ask
     "git add *": ask
     "git checkout *": ask
     "git clean *": ask
@@ -194,6 +197,9 @@ permission:
     "rm *": ask
     "rmdir *": ask
     "mv *": ask
+    "dd *": ask
+    "truncate *": ask
+    "shred *": ask
     "git add *": ask
     "git checkout *": ask
     "git clean *": ask
@@ -284,6 +290,9 @@ permission:
     "rm *": ask
     "rmdir *": ask
     "mv *": ask
+    "dd *": ask
+    "truncate *": ask
+    "shred *": ask
     "git add *": ask
     "git checkout *": ask
     "git clean *": ask

