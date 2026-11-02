@@ -416,6 +416,10 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	fmt.Fprintf(&sb, "llm.image_wire_cache_bytes: %d\n", llm.ImageWireCacheBytes())
 	fmt.Fprintf(&sb, "llm.image_encoding_cache_bytes: %d\n", encodedBytes)
 	fmt.Fprintf(&sb, "llm.image_data_url_cache_bytes: %d\n", dataURLBytes)
+	// Non-zero at rest means a retry walk failed to release its cached request
+	// body; mid-turn it is expected to be the marshaled body plus its
+	// compressed copy.
+	fmt.Fprintf(&sb, "llm.body_cache_bytes: %d\n", llm.BodyCacheRetainedBytes())
 
 	fmt.Fprintf(&sb, "\n[recent_events]\n")
 	events := m.snapshotTUIDiagnosticEvents()

@@ -3,9 +3,30 @@ package llm
 import (
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/keakon/chord/internal/message"
 )
+
+// bodyCacheRetained is the process-wide total of bytes currently pinned in
+// provider request-body caches. Diagnostics only.
+//
+// A gauge is meaningful here — unlike a "bytes released" counter — because the
+// interesting state is "nothing is pinned between turns". It is maintained by
+// the caches themselves rather than by a provider registry, so it cannot drift
+// out of sync with what is actually held: every mutation of a cached body goes
+// through requestBodyReuse.trackRetainedLocked.
+var bodyCacheRetained atomic.Int64
+
+// BodyCacheRetainedBytes reports how many bytes provider request-body caches
+// currently hold. Between turns this is zero by construction: the entry only has
+// to survive one target's key-attempt loop, and the retry walk releases it on
+// the way out. During a request it is the marshaled body plus its compressed
+// copy, so a non-zero reading mid-turn is expected and a non-zero reading at
+// rest means a release was missed.
+func BodyCacheRetainedBytes() int64 {
+	return bodyCacheRetained.Load()
+}
 
 // sliceID identifies a slice by its backing array, for use as a cache guard.
 //
@@ -91,6 +112,22 @@ type requestBodyReuse struct {
 	compValid bool
 	compEnc   string
 	compBytes []byte
+
+	// retained is the bytes this cache last contributed to bodyCacheRetained,
+	// so trackRetainedLocked can apply a delta instead of recomputing a total
+	// that spans every provider instance.
+	retained int64
+}
+
+// trackRetainedLocked re-syncs the process-wide gauge with this cache's current
+// bytes. Callers hold r.mu; every mutation of cached/compBytes must reach it.
+func (r *requestBodyReuse) trackRetainedLocked() {
+	now := int64(len(r.cached) + len(r.compBytes))
+	if now == r.retained {
+		return
+	}
+	bodyCacheRetained.Add(now - r.retained)
+	r.retained = now
 }
 
 // body returns the cached body for identical inputs, or builds and caches it.
@@ -108,6 +145,7 @@ func (r *requestBodyReuse) body(identity requestBodyIdentity, build func() ([]by
 func (r *requestBodyReuse) bodyWithExtra(identity requestBodyIdentity, build func() ([]byte, any, error)) ([]byte, any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer r.trackRetainedLocked()
 	if r.valid && r.guard == identity {
 		return r.cached, r.extra, nil
 	}
@@ -141,6 +179,7 @@ func (r *requestBodyReuse) bodyWithExtra(identity requestBodyIdentity, build fun
 func (r *requestBodyReuse) release(msgs *message.Message, msgsLen int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer r.trackRetainedLocked()
 	if !r.valid || r.guard.msgs != msgs || r.guard.msgsLen != msgsLen {
 		return
 	}
@@ -184,6 +223,7 @@ type bodyCachePin struct {
 func (r *requestBodyReuse) compressBody(identity requestBodyIdentity, req *http.Request, bodyBytes []byte, encoding string) (*http.Request, []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer r.trackRetainedLocked()
 	if !(r.valid && r.guard == identity) {
 		return compressRequestBody(req, bodyBytes, encoding)
 	}

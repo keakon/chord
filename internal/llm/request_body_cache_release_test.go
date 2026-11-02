@@ -166,6 +166,29 @@ func (p *cachingProvider) pinnedReleaseCount() int {
 	return p.releasedPinned
 }
 
+// The gauge the [memory] dump reads must move with the cache: it is the only
+// runtime signal that a release actually happened, since a heap profile shows
+// nothing either way once the slice is gone.
+func TestBodyCacheRetainedBytesTracksCacheLifetime(t *testing.T) {
+	before := BodyCacheRetainedBytes()
+
+	var reuse requestBodyReuse
+	msgs := []message.Message{{Role: message.RoleUser, Content: "gauge"}}
+	identity := requestBodyIdentityFor("sys", msgs, nil, 128, "")
+	const body = `{"content":"gauge-body"}`
+	if _, err := reuse.body(identity, func() ([]byte, error) { return []byte(body), nil }); err != nil {
+		t.Fatalf("seed body: %v", err)
+	}
+	if got := BodyCacheRetainedBytes(); got != before+int64(len(body)) {
+		t.Fatalf("retained bytes = %d, want %d after caching %d bytes", got, before+int64(len(body)), len(body))
+	}
+
+	reuse.release(sliceID(msgs), len(msgs))
+	if got := BodyCacheRetainedBytes(); got != before {
+		t.Fatalf("retained bytes = %d, want %d after release", got, before)
+	}
+}
+
 // Two targets are tried in turn; each leaves a cached body behind, and both
 // entries must be released once the walk is over.
 func TestCompleteStreamWithRetryReleasesEveryTargetBodyCache(t *testing.T) {
@@ -178,6 +201,7 @@ func TestCompleteStreamWithRetryReleasesEveryTargetBodyCache(t *testing.T) {
 	primary.calls = []scriptedCall{{err: &APIError{StatusCode: 400, Message: "invalid_request_error: bad shape"}}}
 	fallback := &cachingProvider{recordingProvider: &recordingProvider{}}
 	fallback.calls = []scriptedCall{{err: &APIError{StatusCode: 400, Message: "invalid_request_error: bad shape"}}}
+	retainedBefore := BodyCacheRetainedBytes()
 
 	client := NewClient(primaryCfg, primary, "strict-model", 512, "sys")
 	resp, err := callCompleteStreamWithRetryForTest(
@@ -221,5 +245,8 @@ func TestCompleteStreamWithRetryReleasesEveryTargetBodyCache(t *testing.T) {
 		if got := impl.pinnedReleaseCount(); got != 1 {
 			t.Fatalf("%s released %d pinned entries, want 1", name, got)
 		}
+	}
+	if got := BodyCacheRetainedBytes(); got != retainedBefore {
+		t.Fatalf("retained bytes = %d after the walk, want %d: a target left its body pinned", got, retainedBefore)
 	}
 }

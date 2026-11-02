@@ -145,6 +145,16 @@ func TestBuildTUIDiagnosticDumpIncludesKeySections(t *testing.T) {
 		"go_version:",
 		"executable_path:",
 		"executable_mtime:",
+		// The [memory] section is what a user is told to read when checking
+		// whether attachments left the heap or a request body stayed pinned.
+		// Pin its keys here so a rename cannot silently remove them.
+		"[memory]",
+		"tui.hot_bytes:",
+		"tui.resident_bytes:",
+		"llm.body_cache_bytes:",
+		"llm.image_wire_cache_bytes:",
+		"llm.image_encoding_cache_bytes:",
+		"llm.image_data_url_cache_bytes:",
 	} {
 		if !strings.Contains(dump, want) {
 			t.Fatalf("dump missing %q\n%s", want, dump)
