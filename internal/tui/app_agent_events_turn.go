@@ -96,6 +96,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			}
 		}
 		draft.Parts = append([]message.ContentPart(nil), evt.Parts...)
+		m.maybeSetTerminalTitleFromFirstUserMessage(draft.Content, draft.Parts)
 		if m.editingQueuedDraftID == evt.DraftID {
 			m.editingQueuedDraftID = ""
 		}

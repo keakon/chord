@@ -7,6 +7,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/terminaltitle"
 )
 
@@ -243,6 +244,17 @@ func (m *Model) setTerminalTitleFromMessage(raw string) {
 	m.terminalTitleBase = deriveTerminalTitle(raw)
 	m.terminalTitleBackgroundCompletedAgentID = ""
 	m.setTerminalTitle(m.currentTitleMode())
+}
+
+// maybeSetTerminalTitleFromFirstUserMessage updates the terminal title from the
+// first user message of a session; later messages must not overwrite it. Both
+// delivery paths call it: stageDraft for direct sends, and the managed input
+// queue's PendingDraftConsumedEvent for durable queued input.
+func (m *Model) maybeSetTerminalTitleFromFirstUserMessage(content string, parts []message.ContentPart) {
+	if m == nil || m.terminalTitleBase != "" {
+		return
+	}
+	m.setTerminalTitleFromMessage(message.UserPromptPlainText(message.Message{Content: content, Parts: parts}))
 }
 
 // resetTerminalTitle resets the title to the default and writes it.

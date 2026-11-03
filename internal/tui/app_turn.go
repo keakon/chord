@@ -341,14 +341,7 @@ func (m *Model) stageDraft(draft queuedDraft) tea.Cmd {
 		d.AgentID = m.focusedAgentID
 	}
 	m.inflightDraft = &d
-	// Update terminal title from the first user message.
-	if m.terminalTitleBase == "" {
-		content := draft.Content
-		if len(draft.Parts) > 0 && draft.Parts[0].Type == message.ContentPartText {
-			content = draft.Parts[0].Text
-		}
-		m.setTerminalTitleFromMessage(content)
-	}
+	m.maybeSetTerminalTitleFromFirstUserMessage(draft.Content, draft.Parts)
 	m.syncVisibleMainUserBlockMsgIndexes()
 	return m.imageProtocolCmd()
 }
