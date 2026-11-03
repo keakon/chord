@@ -155,6 +155,13 @@ func TestBuildTUIDiagnosticDumpIncludesKeySections(t *testing.T) {
 		"llm.image_wire_cache_bytes:",
 		"llm.image_encoding_cache_bytes:",
 		"llm.image_data_url_cache_bytes:",
+		"go.heap_alloc_bytes:",
+		"go.heap_idle_bytes:",
+		"go.heap_released_bytes:",
+		"go.heap_reclaimable_bytes:",
+		"go.heap_sys_bytes:",
+		"go.num_gc:",
+		"go.gc_pause_total_ns:",
 	} {
 		if !strings.Contains(dump, want) {
 			t.Fatalf("dump missing %q\n%s", want, dump)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -420,6 +421,31 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	// body; mid-turn it is expected to be the marshaled body plus its
 	// compressed copy.
 	fmt.Fprintf(&sb, "llm.body_cache_bytes: %d\n", llm.BodyCacheRetainedBytes())
+
+	// Go runtime heap accounting separates live objects from reclaimable
+	// spans. HeapIdle-HeapReleased is what debug.FreeOSMemory can return to
+	// the OS; HeapAlloc is live heap. ReadMemStats briefly stops the world,
+	// which is acceptable for an explicit diagnostics dump.
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	fmt.Fprintf(&sb, "go.heap_alloc_bytes: %d\n", mem.HeapAlloc)
+	fmt.Fprintf(&sb, "go.heap_inuse_bytes: %d\n", mem.HeapInuse)
+	fmt.Fprintf(&sb, "go.heap_idle_bytes: %d\n", mem.HeapIdle)
+	fmt.Fprintf(&sb, "go.heap_released_bytes: %d\n", mem.HeapReleased)
+	fmt.Fprintf(&sb, "go.heap_reclaimable_bytes: %d\n", mem.HeapIdle-mem.HeapReleased)
+	fmt.Fprintf(&sb, "go.heap_sys_bytes: %d\n", mem.HeapSys)
+	fmt.Fprintf(&sb, "go.heap_objects: %d\n", mem.HeapObjects)
+	fmt.Fprintf(&sb, "go.stack_inuse_bytes: %d\n", mem.StackInuse)
+	fmt.Fprintf(&sb, "go.stack_sys_bytes: %d\n", mem.StackSys)
+	fmt.Fprintf(&sb, "go.gc_sys_bytes: %d\n", mem.GCSys)
+	fmt.Fprintf(&sb, "go.other_sys_bytes: %d\n", mem.OtherSys)
+	fmt.Fprintf(&sb, "go.sys_bytes: %d\n", mem.Sys)
+	fmt.Fprintf(&sb, "go.next_gc_bytes: %d\n", mem.NextGC)
+	fmt.Fprintf(&sb, "go.total_alloc_bytes: %d\n", mem.TotalAlloc)
+	fmt.Fprintf(&sb, "go.num_gc: %d\n", mem.NumGC)
+	fmt.Fprintf(&sb, "go.num_forced_gc: %d\n", mem.NumForcedGC)
+	fmt.Fprintf(&sb, "go.gc_pause_total_ns: %d\n", mem.PauseTotalNs)
+	fmt.Fprintf(&sb, "go.gc_cpu_fraction: %.6f\n", mem.GCCPUFraction)
 
 	fmt.Fprintf(&sb, "\n[recent_events]\n")
 	events := m.snapshotTUIDiagnosticEvents()
