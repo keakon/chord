@@ -55,7 +55,7 @@ func (s *SubAgent) userSkillsSnapshot() []*skill.Meta {
 // skillInvocationStates returns per-skill visibility and load state for the
 // TUI's focused view of this worker.
 func (s *SubAgent) skillInvocationStates() []skill.InvocationState {
-	return skillInvocationStatesFromHistory(s.ctxMgr.Snapshot(), s.skillActivationView())
+	return skillInvocationStatesFromVisibleBodies(s.ctxMgr.Snapshot(), s.skillActivationView(), 0, 0)
 }
 
 func (s *SubAgent) availableSkillsPromptBlock() string {
@@ -160,6 +160,16 @@ func (s *SubAgent) LoadSkill(name string) (*skill.Skill, error) {
 }
 
 func (s *SubAgent) HasCallableSkills() bool { return len(s.callableSkillsSnapshot()) > 0 }
+
+// HasSkillBodyInContext mirrors the main agent's duplicate-load check. Worker
+// histories have no request-level reduction, so only the turn boundary and
+// compaction checkpoints can remove a loaded body from view.
+func (s *SubAgent) HasSkillBodyInContext(digest string) bool {
+	if s == nil || s.ctxMgr == nil {
+		return false
+	}
+	return skillBodyVisibleInMessages(s.ctxMgr.Snapshot(), digest, 0, 0)
+}
 
 func (s *SubAgent) startupSkillsSnapshot() []*skill.Meta {
 	return skill.StartupForRuleset(s.callableSkillsSnapshot(), nil)

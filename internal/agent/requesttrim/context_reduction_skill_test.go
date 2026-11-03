@@ -151,6 +151,43 @@ func TestFailedSkillLoadIsNotInstructionState(t *testing.T) {
 	}
 }
 
+// A repeated marker replaces an older duplicate, and the surviving copy is the
+// newer one. For a skill the workflow identity must survive in the marker too:
+// "an identical skill output" would leave the model unable to tell which
+// workflow the later copy belongs to when several were loaded.
+func TestRepeatedSkillOutputMarkerNamesTheSkill(t *testing.T) {
+	policy := DefaultPolicy()
+	root := t.TempDir()
+	content := skillEnvelopeContent(root, skillTestBody())
+	ctx := Context{
+		ToolName:   tools.NameSkill,
+		Content:    content,
+		ToolStatus: message.ToolStatusSuccess,
+		Age:        1,
+		Repeated:   true,
+		Policy:     policy,
+	}
+	verdict := Classify(ctx)
+	if verdict.Class != requestReductionRepeated {
+		t.Fatalf("repeated skill classified as %q, want %q", verdict.Class, requestReductionRepeated)
+	}
+	reduced, rule, ok := Render(verdict.Class, ctx)
+	if !ok || rule != "repeated" {
+		t.Fatalf("reduction = (%q, %q, %v), want the repeated rule", reduced, rule, ok)
+	}
+	for _, want := range []string{"Repeated skill output omitted", "simplify-codebase"} {
+		if !strings.Contains(reduced, want) {
+			t.Fatalf("repeated skill marker lost %q: %q", want, reduced)
+		}
+	}
+
+	plain := Context{ToolName: tools.NameRead, Content: "file contents", ToolStatus: message.ToolStatusSuccess, Age: 1, Repeated: true, Policy: policy}
+	reduced, _, ok = Render(requestReductionRepeated, plain)
+	if !ok || !strings.Contains(reduced, "Repeated read output omitted") {
+		t.Fatalf("ordinary repeated marker changed: %q", reduced)
+	}
+}
+
 func TestSkillWorkflowHeadingsSkipFencedCode(t *testing.T) {
 	body := "# Title\n\n```bash\n# not a heading\nnpm run build\n```\n\n" +
 		"## Phase one\n### Nested\n####### seven hashes\n#hashtag\n\n~~~\n# also not a heading\n~~~\n"

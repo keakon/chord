@@ -32,6 +32,12 @@ type modelDrivenPreflightStats struct {
 	// "scratch" (a full reduction re-scan). Telemetry compares the estimate
 	// against the provider's own input usage to gauge both baselines.
 	CurrentSource string
+	// RetainedRecords / RetainedTokens describe the live tool records re-attached
+	// to the checkpoint (failed batches plus the active-work observation
+	// window). They are counted on the projected side, so telemetry can tell a
+	// reset that kept working state from one that archived everything.
+	RetainedRecords int
+	RetainedTokens  int
 	// CacheRebuildCost is the prompt-cache rewrite cost of the projected
 	// prefix for prompt-cache-capable sessions (rewritten-prefix tokens ×
 	// amortized write−read multiplier). Telemetry only: the low-gain gate
@@ -77,8 +83,11 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 	currentSurface = append(currentSurface, bundle.queuedUserMessages...)
 	checkpointContent, preflight := builder.render("")
 	preflight.CurrentSource = currentSource
+	retainedRecords := bundle.retainedCheckpointRecords(snapshot[:headSplit])
+	preflight.RetainedRecords = len(retainedRecords)
+	preflight.RetainedTokens = bundle.estimateTokens(retainedRecords)
 	projected := []message.Message{{Role: message.RoleUser, Content: checkpointContent, IsCompactionSummary: true}}
-	projected = append(projected, checkpointRetainedFailureRecords(snapshot[:headSplit])...)
+	projected = append(projected, retainedRecords...)
 	projected = append(projected, snapshot[headSplit:]...)
 	projected = append(projected, bundle.queuedUserMessages...)
 
@@ -111,25 +120,50 @@ func (a *MainAgent) modelDrivenLowGainPreflight(bundle modelDrivenBarrierSnapsho
 		cacheRebuildCost = modelDrivenCacheRebuildCost(projectedTokens)
 	}
 	preflight.CacheRebuildCost = cacheRebuildCost
-	if reason, skip := modelDrivenLowGainCheck(currentTokens, saved); skip {
+	if reason, skip := modelDrivenLowGainCheck(currentTokens, saved, builder.coverage()); skip {
 		return reason, true, preflight
 	}
 	return "", false, preflight
 }
 
-// modelDrivenLowGainCheck applies the fixed low-gain gates to a savings
-// estimate and returns the skip reason when either gate fails. Both the
+// modelDrivenCheckpointCoverage counts the resumable state a checkpoint
+// externalizes beyond its own summary text. The low-gain gate protects
+// continuity, so a checkpoint that points at working-state files and either
+// cites archived evidence or leaves open issues to resume has already carried
+// most of what the relative size gate protects; the raw head is still archived
+// and readable.
+type modelDrivenCheckpointCoverage struct {
+	StateFiles   int
+	EvidenceRefs int
+	OpenIssues   int
+}
+
+// sufficient reports whether the checkpoint externalizes enough state to pass
+// the relative low-gain gate. The absolute token floor still applies: a reset
+// that saves almost nothing is not worth the durable rewrite and prompt-cache
+// rebuild no matter how well the state is covered.
+func (c modelDrivenCheckpointCoverage) sufficient() bool {
+	return c.StateFiles > 0 && (c.EvidenceRefs > 0 || c.OpenIssues > 0)
+}
+
+// modelDrivenLowGainCheck applies the low-gain gates to a savings estimate and
+// returns the skip reason when the reset should not be applied. Both the
 // pre-export preflight and the post-export re-check share it so the refined
-// checkpoint cannot be approved on a stale estimate. The gates compare raw
-// surface savings only: the prompt-cache rebuild cost is recorded on the
-// preflight stats for telemetry but deliberately NOT subtracted here, so the
-// gate keeps a pure surface semantics (the one-off cache rewrite of a kept
-// prefix is a per-provider billing weight, not a token the model attends to);
-// whether cache rebuilds systematically eat the gains is answered by the
-// cost telemetry instead of being pre-decided inside the gate.
-func modelDrivenLowGainCheck(currentTokens, saved int) (string, bool) {
-	if saved < modelDrivenLowGainMinTokens || saved < int(float64(currentTokens)*modelDrivenLowGainMinRatio) {
+// checkpoint cannot be approved on a stale estimate. The absolute floor always
+// applies; the relative gate is waived for a checkpoint with sufficient state
+// coverage (see modelDrivenCheckpointCoverage). The gates compare raw surface
+// savings only: the prompt-cache rebuild cost is recorded on the preflight
+// stats for telemetry but deliberately NOT subtracted here, so the gate keeps
+// a pure surface semantics (the one-off cache rewrite of a kept prefix is a
+// per-provider billing weight, not a token the model attends to); whether cache
+// rebuilds systematically eat the gains is answered by the cost telemetry
+// instead of being pre-decided inside the gate.
+func modelDrivenLowGainCheck(currentTokens, saved int, coverage modelDrivenCheckpointCoverage) (string, bool) {
+	if saved < modelDrivenLowGainMinTokens {
 		return fmt.Sprintf("projected savings %d tokens is below the low-gain gate (%d tokens and %d%% of the prepared surface)", saved, modelDrivenLowGainMinTokens, int(modelDrivenLowGainMinRatio*100)), true
+	}
+	if saved < int(float64(currentTokens)*modelDrivenLowGainMinRatio) && !coverage.sufficient() {
+		return fmt.Sprintf("projected savings %d tokens is below the low-gain gate (%d tokens and %d%% of the prepared surface) and the checkpoint registers no state file with evidence or open issues to resume from", saved, modelDrivenLowGainMinTokens, int(modelDrivenLowGainMinRatio*100)), true
 	}
 	return "", false
 }

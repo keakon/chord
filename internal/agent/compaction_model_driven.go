@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -42,8 +44,10 @@ type modelDrivenCheckpointRequest struct {
 
 // requestAcceptedToolResult is the canonical compact_context success text. It
 // deliberately says "accepted", not "applied": a crash between acceptance and
-// apply must not let the restored transcript read as a successful reset.
-const requestAcceptedToolResult = "Context checkpoint request accepted. No reset has occurred yet; only a later model-driven context checkpoint confirms successful application."
+// apply must not let the restored transcript read as a successful reset. The
+// state_files note repeats the tool contract at the only point the model reads
+// on the critical path: paths are references, never verified.
+const requestAcceptedToolResult = "Context checkpoint request accepted. No reset has occurred yet; only a later model-driven context checkpoint confirms successful application. state_files are recorded as model-declared references; the tool did not read or verify them."
 
 const (
 	// compactionSummaryModeModelDriven is the stable summary-mode marker for
@@ -214,6 +218,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 		a.stageCompletionCandidatePromptDelivered = false
 	}
 	a.recordCompactionLifecycleEvent("accepted", diagnostic)
+	log.Infof("model-driven checkpoint request accepted call_id=%v state_files=%v evidence_refs=%v open_issues=%v", callID, len(args.StateFiles), len(args.EvidenceRefs), len(args.OpenIssues))
 	// The model called compact_context in this window:
 	// whatever the attempt settles to, the reminder nudge has been answered,
 	// so the sticky reminder stops re-attaching until a fresh window resets

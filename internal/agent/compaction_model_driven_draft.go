@@ -206,12 +206,13 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	preflight.AnchorBytes = contentStats.AnchorBytes
 	preflight.HistoryMapBytes = contentStats.HistoryMapBytes
 	preflight.ContinuationTokens = contentStats.ContinuationTokens
-	// Failed tool batches of the current turn stay live: the archival profile
-	// drops every record of the head, so without them the failure would be
-	// readable only as the card's excerpt and could no longer be forked.
-	retainedFailures := checkpointRetainedFailureRecords(headSnapshot)
+	// Live tool records of the current turn stay re-attached: failed batches
+	// always (without them the failure would be readable only as the card's
+	// excerpt and could no longer be forked), plus a bounded recent-observation
+	// window while the continuation still has runtime-visible work to resume.
+	retainedRecords := bundle.retainedCheckpointRecords(headSnapshot)
 	projected := []message.Message{{Role: message.RoleUser, Content: checkpointContent, IsCompactionSummary: true}}
-	projected = append(projected, retainedFailures...)
+	projected = append(projected, retainedRecords...)
 	projected = append(projected, snapshot[headSplit:]...)
 	projected = append(projected, bundle.queuedUserMessages...)
 	projectedTokens := bundle.estimateTokens(projected) + bundle.postResetFixedRequestTokens + modelDrivenPostResetOverlayTokens
@@ -222,7 +223,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	if preflight.CurrentTokens > 0 {
 		preflight.SavedRatioPct = saved * 100 / preflight.CurrentTokens
 	}
-	if reason, skip := modelDrivenLowGainCheck(preflight.CurrentTokens, saved); skip {
+	if reason, skip := modelDrivenLowGainCheck(preflight.CurrentTokens, saved, checkpointBuilder.coverage()); skip {
 		return modelDrivenSkipDraft(planID, target, reason, modelDrivenSkipReasonLowGain, bundle.currentRequestBatch, &preflight), nil
 	}
 	contextSummaryMsg := message.Message{
@@ -233,9 +234,9 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		CompactionRequestSources: checkpointBuilder.requestSources,
 	}
 
-	newMessages := make([]message.Message, 0, 1+len(retainedFailures))
+	newMessages := make([]message.Message, 0, 1+len(retainedRecords))
 	newMessages = append(newMessages, contextSummaryMsg)
-	newMessages = append(newMessages, retainedFailures...)
+	newMessages = append(newMessages, retainedRecords...)
 	historyCommitted = true
 	return &compactionDraft{
 		PlanID:                     planID,

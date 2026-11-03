@@ -142,7 +142,9 @@ func deduplicateRetainedRecentRequest(body, request string) string {
 		retained = retained[:pos] + suffix
 		offset = pos
 	}
-	if strings.TrimSpace(strings.TrimPrefix(retained, retainedRecentMessagesHeading)) == "" {
+	rest := strings.TrimSpace(strings.TrimPrefix(retained, retainedRecentMessagesHeading))
+	rest = strings.TrimSpace(strings.TrimPrefix(rest, retainedRecentAuthorityNote))
+	if rest == "" {
 		return body[:start] + body[end:]
 	}
 	return body[:start] + retained + body[end:]

@@ -74,10 +74,18 @@ func TestCheckpointSkillsSectionRecordsArchivedInvocations(t *testing.T) {
 		checkpointSkillsHeading,
 		"- code-review",
 		"- dataviz",
-		"no longer in context",
+		"not the instruction text",
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("section missing %q:\n%s", want, section)
+		}
+	}
+	// The fact is a record of the archived conversation, not an assertion about
+	// the live context: after a reload the body is visible again, and wording
+	// such as "no longer in context" would send the model into a second load.
+	for _, stale := range []string{"no longer in context", "instructions themselves are gone"} {
+		if strings.Contains(section, stale) {
+			t.Errorf("section must not assert a live-context state (%q):\n%s", stale, section)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -339,6 +340,156 @@ func TestSelectCheckpointRetainedRecentBlocksBudgetPrefersNewerOverCheckpointReq
 	}
 	if !blocks[2].truncated || blocks[2].text != "aaaaa" {
 		t.Fatalf("oldest user must be truncated to the remaining budget, got %+v", blocks[2])
+	}
+}
+
+// testCheckpointContent builds a minimal checkpoint body with an authoritative
+// Current User Request section plus an optional rendered retained section.
+func testCheckpointContent(request, retained string) string {
+	body := checkpointfmt.CurrentUserRequestHeading + "\n" +
+		modelDrivenCurrentUserRequestSection(fallbackAnchor{Kind: "user_request", Label: latestUserRequestLabel, Text: request})
+	if retained != "" {
+		body += "\n\n" + retained
+	}
+	return body
+}
+
+func TestParseCheckpointRetainedUserBlocksRoundTripsRenderedSection(t *testing.T) {
+	head := []message.Message{
+		{Role: message.RoleUser, Content: "first instruction"},
+		{Role: message.RoleAssistant, Content: "working"},
+		{Role: message.RoleUser, Content: "second instruction\nwith a second line"},
+		{Role: message.RoleAssistant, Content: "partial reply", StopReason: "interrupted"},
+	}
+	section := renderCheckpointRetainedRecentMessages(head, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	if !strings.Contains(section, retainedRecentAuthorityNote) ||
+		!strings.Contains(section, checkpointfmt.CurrentUserRequestHeading) {
+		t.Fatalf("rendered section lacks the authority note:\n%s", section)
+	}
+	blocks := parseCheckpointRetainedUserBlocks(section)
+	if len(blocks) != 2 {
+		t.Fatalf("parsed %d blocks, want the two user messages only: %+v", len(blocks), blocks)
+	}
+	if blocks[0].text != "first instruction" || blocks[1].text != "second instruction\nwith a second line" {
+		t.Fatalf("parsed blocks = %+v, want chronological user texts", blocks)
+	}
+	if blocks[0].truncated || blocks[1].truncated {
+		t.Fatalf("whole blocks must not be marked truncated: %+v", blocks)
+	}
+}
+
+func TestParseCheckpointRetainedUserBlocksRestoresTruncationMarker(t *testing.T) {
+	head := []message.Message{
+		{Role: message.RoleUser, Content: "abcdefghij"},
+		{Role: message.RoleUser, Content: "klmnopqrst"},
+	}
+	section := renderCheckpointRetainedRecentMessages(head, compactRetainRecentUserMessages, 15, estimatorTokensPerChar)
+	blocks := parseCheckpointRetainedUserBlocks(section)
+	if len(blocks) != 2 {
+		t.Fatalf("parsed %d blocks, want 2: %+v", len(blocks), blocks)
+	}
+	if blocks[0].text != "abcde" || !blocks[0].truncated {
+		t.Fatalf("oldest block = %+v, want the truncated prefix", blocks[0])
+	}
+	if blocks[1].text != "klmnopqrst" || blocks[1].truncated {
+		t.Fatalf("newest block = %+v, want the whole message", blocks[1])
+	}
+}
+
+func TestSelectCheckpointRetainedRecentBlocksCarriesPriorUserBlocks(t *testing.T) {
+	priorRetained := renderCheckpointRetainedRecentMessages([]message.Message{
+		{Role: message.RoleUser, Content: "Keep the public API stable."},
+		{Role: message.RoleUser, Content: "Add the metrics endpoint."},
+	}, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	prior := testCheckpointContent("Add the metrics endpoint.", priorRetained)
+	if request, ok := checkpointRequestText(prior); !ok || request != "Add the metrics endpoint." {
+		t.Fatalf("fixture checkpoint request = %q, ok = %v", request, ok)
+	}
+	head := []message.Message{
+		{Role: message.RoleUser, Content: prior, IsCompactionSummary: true},
+		{Role: message.RoleAssistant, Content: "implementing"},
+		{Role: message.RoleUser, Content: "Also update the docs."},
+	}
+	blocks := selectCheckpointRetainedRecentBlocks(head, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	if len(blocks) != 2 {
+		t.Fatalf("retained %d blocks, want the current message plus one carried block: %+v", len(blocks), blocks)
+	}
+	// Newest first: the current head message, then the carried instruction. The
+	// prior checkpoint's own copy of the authoritative request is dropped so the
+	// next checkpoint does not render one instruction twice.
+	if blocks[0].text != "Also update the docs." || blocks[1].text != "Keep the public API stable." {
+		t.Fatalf("blocks = %+v, want [Also update the docs., Keep the public API stable.]", blocks)
+	}
+	section := renderCheckpointRetainedRecentMessages(head, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	carriedAt := strings.Index(section, "> Keep the public API stable.")
+	newestAt := strings.Index(section, "> Also update the docs.")
+	if carriedAt < 0 || newestAt < 0 || carriedAt > newestAt {
+		t.Fatalf("carried block must render chronologically before the newest message:\n%s", section)
+	}
+	if strings.Contains(section, "> Add the metrics endpoint.") {
+		t.Fatalf("authoritative request must not be repeated in the retained section:\n%s", section)
+	}
+}
+
+func TestSelectCheckpointRetainedRecentBlocksCarriesOnlyPriorUserBlocks(t *testing.T) {
+	cc := message.ToolCall{ID: "cc-1", Name: tools.NameCompactContext}
+	priorRetained := renderCheckpointRetainedRecentMessages([]message.Message{
+		{Role: message.RoleUser, Content: "Keep the public API stable."},
+		{Role: message.RoleAssistant, Content: "Analysis behind the checkpoint request.", ToolCalls: []message.ToolCall{cc}},
+		{Role: message.RoleAssistant, Content: "partial reply", StopReason: "interrupted"},
+	}, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	if !strings.Contains(priorRetained, retainedCheckpointRequestLabel) || !strings.Contains(priorRetained, retainedInterruptedAssistantLabel) {
+		t.Fatalf("fixture must retain both assistant labels:\n%s", priorRetained)
+	}
+	head := []message.Message{
+		{Role: message.RoleUser, Content: testCheckpointContent("request", priorRetained), IsCompactionSummary: true},
+		{Role: message.RoleAssistant, Content: "continuing"},
+	}
+	blocks := selectCheckpointRetainedRecentBlocks(head, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	if len(blocks) != 1 || blocks[0].text != "Keep the public API stable." {
+		t.Fatalf("carried blocks = %+v, want the prior user message only", blocks)
+	}
+}
+
+func TestSelectCheckpointRetainedRecentBlocksCapsCarriedUsers(t *testing.T) {
+	priorRetained := renderCheckpointRetainedRecentMessages([]message.Message{
+		{Role: message.RoleUser, Content: "oldest carried"},
+		{Role: message.RoleUser, Content: "middle carried"},
+		{Role: message.RoleUser, Content: "newest carried"},
+	}, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	head := []message.Message{
+		{Role: message.RoleUser, Content: testCheckpointContent("request", priorRetained), IsCompactionSummary: true},
+		{Role: message.RoleAssistant, Content: "continuing"},
+		{Role: message.RoleUser, Content: "current turn"},
+	}
+	blocks := selectCheckpointRetainedRecentBlocks(head, 2, 1<<20, estimatorTokensPerChar)
+	if len(blocks) != 2 {
+		t.Fatalf("retained %d blocks, want the user cap to stop the carry: %+v", len(blocks), blocks)
+	}
+	if blocks[0].text != "current turn" || blocks[1].text != "newest carried" {
+		t.Fatalf("blocks = %+v, want [current turn, newest carried]", blocks)
+	}
+}
+
+func TestSelectCheckpointRetainedRecentBlocksTruncatesCarriedBlockToBudget(t *testing.T) {
+	priorRetained := renderCheckpointRetainedRecentMessages([]message.Message{
+		{Role: message.RoleUser, Content: strings.Repeat("z", 20)},
+	}, compactRetainRecentUserMessages, 1<<20, estimatorTokensPerChar)
+	head := []message.Message{
+		{Role: message.RoleUser, Content: testCheckpointContent("request", priorRetained), IsCompactionSummary: true},
+		{Role: message.RoleAssistant, Content: "continuing"},
+		{Role: message.RoleUser, Content: "newest"},
+	}
+	blocks := selectCheckpointRetainedRecentBlocks(head, compactRetainRecentUserMessages, 10, estimatorTokensPerChar)
+	if len(blocks) != 2 {
+		t.Fatalf("retained %d blocks, want the newest message plus a truncated carried block: %+v", len(blocks), blocks)
+	}
+	if blocks[1].text != "zzzz" || !blocks[1].truncated {
+		t.Fatalf("carried block = %+v, want the truncated prefix `zzzz`", blocks[1])
+	}
+	section := renderCheckpointRetainedRecentMessages(head, compactRetainRecentUserMessages, 10, estimatorTokensPerChar)
+	if !strings.Contains(section, "> zzzz\n> "+retainedRecentTruncationMarker) {
+		t.Fatalf("carried truncation must be marked in the rendered section:\n%s", section)
 	}
 }
 

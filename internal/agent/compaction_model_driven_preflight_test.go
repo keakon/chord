@@ -333,29 +333,60 @@ func TestModelDrivenIntervalRejectionNotCooldownBlocked(t *testing.T) {
 }
 
 func TestModelDrivenLowGainCheckComparesRawSavings(t *testing.T) {
+	noCoverage := modelDrivenCheckpointCoverage{}
 	// The gates compare raw surface savings; the cache rebuild charge is a
 	// per-provider billing weight recorded for telemetry, never subtracted
 	// here, so a cacheable session is not pre-denied inside the gate.
-	if reason, skip := modelDrivenLowGainCheck(10000, 5000); skip {
+	if reason, skip := modelDrivenLowGainCheck(10000, 5000, noCoverage); skip {
 		t.Fatalf("raw savings above the gate must pass, got reason %q", reason)
 	}
 	// Savings that would have fallen below the floor only after subtracting a
 	// 4000-token rebuild charge still pass: the cost no longer gates.
-	if reason, skip := modelDrivenLowGainCheck(10000, 5000); skip {
+	if reason, skip := modelDrivenLowGainCheck(10000, 5000, noCoverage); skip {
 		t.Fatalf("savings unaffected by the (telemetry-only) rebuild cost must pass, got reason %q", reason)
 	}
 	// The absolute floor still applies to raw savings.
-	if reason, skip := modelDrivenLowGainCheck(10000, 1000); !skip {
+	if reason, skip := modelDrivenLowGainCheck(10000, 1000, noCoverage); !skip {
 		t.Fatal("raw savings below the absolute floor must skip")
 	} else if !strings.Contains(reason, "below the low-gain gate") {
 		t.Fatalf("floor skip reason must mention the gate, got %q", reason)
 	}
 	// The 10% relative gate applies to the raw savings against the current
 	// prepared surface.
-	if reason, skip := modelDrivenLowGainCheck(100000, 4000); !skip {
+	if reason, skip := modelDrivenLowGainCheck(100000, 4000, noCoverage); !skip {
 		t.Fatalf("raw savings below 10%% of the prepared surface must skip, got %q", reason)
 	} else if !strings.Contains(reason, "below the low-gain gate") {
 		t.Fatalf("relative-gate skip reason must mention the gate, got %q", reason)
+	}
+}
+
+func TestModelDrivenLowGainCheckStateCoverageRelaxesRelativeGate(t *testing.T) {
+	// Below 10% of a large prepared surface, a checkpoint that externalizes
+	// its working state still passes: the raw head is archived and readable,
+	// and the state file plus a resume signal carry the continuity the size
+	// gate protects.
+	covered := modelDrivenCheckpointCoverage{StateFiles: 1, OpenIssues: 1}
+	if reason, skip := modelDrivenLowGainCheck(100000, 4000, covered); skip {
+		t.Fatalf("covered low-gain checkpoint must pass the relative gate, got %q", reason)
+	}
+	// Evidence references count the same way as open issues.
+	if reason, skip := modelDrivenLowGainCheck(100000, 4000, modelDrivenCheckpointCoverage{StateFiles: 2, EvidenceRefs: 3}); skip {
+		t.Fatalf("covered low-gain checkpoint with evidence refs must pass, got %q", reason)
+	}
+	// A state file without evidence or open issues is not enough: nothing
+	// tells the continuation what to resume from.
+	if reason, skip := modelDrivenLowGainCheck(100000, 4000, modelDrivenCheckpointCoverage{StateFiles: 1}); !skip {
+		t.Fatalf("uncovered low-gain checkpoint must still skip, got %q", reason)
+	}
+	// Open issues without an externalized state file are not enough either:
+	// the details the reset archives would exist only in the archive.
+	if reason, skip := modelDrivenLowGainCheck(100000, 4000, modelDrivenCheckpointCoverage{OpenIssues: 1, EvidenceRefs: 2}); !skip {
+		t.Fatalf("low-gain checkpoint without a state file must still skip, got %q", reason)
+	}
+	// Coverage never waives the absolute floor: a reset that saves almost
+	// nothing is not worth the durable rewrite and prompt-cache rebuild.
+	if reason, skip := modelDrivenLowGainCheck(100000, 1000, covered); !skip {
+		t.Fatalf("covered checkpoint below the absolute floor must skip, got %q", reason)
 	}
 }
 

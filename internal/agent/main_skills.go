@@ -68,7 +68,8 @@ func (a *MainAgent) userSkillsSnapshot() []*skill.Meta {
 // agent. The catalog is the complete discovered set so the TUI selector can
 // explain a skill the role's ruleset denies instead of silently omitting it.
 func (a *MainAgent) skillInvocationStates() []skill.InvocationState {
-	return skillInvocationStatesFromHistory(a.ctxMgr.Snapshot(), a.skillActivationView())
+	messages := a.ctxMgr.Snapshot()
+	return skillInvocationStatesFromVisibleBodies(messages, a.skillActivationView(), a.currentRequestBatch(messages), a.contextReductionPolicy().StaleAgeTurns)
 }
 
 func (a *MainAgent) CallableSkills() []*skill.Meta { return a.callableSkillsSnapshot() }
@@ -289,6 +290,18 @@ func (a *MainAgent) loadedSkillsSnapshot() []*skill.Meta {
 }
 
 func (a *MainAgent) HasCallableSkills() bool { return len(a.callableSkillsSnapshot()) > 0 }
+
+// HasSkillBodyInContext reports whether the skill tool may answer a reload
+// with the short "already loaded" envelope. The durable snapshot is the right
+// source: requesttrim never edits it, and the batch age check below accounts
+// for the copies that reduction would replace on the next request.
+func (a *MainAgent) HasSkillBodyInContext(digest string) bool {
+	if a == nil || a.ctxMgr == nil {
+		return false
+	}
+	messages := a.ctxMgr.Snapshot()
+	return skillBodyVisibleInMessages(messages, digest, a.currentRequestBatch(messages), a.contextReductionPolicy().StaleAgeTurns)
+}
 
 func (a *MainAgent) startupSkillsSnapshot() []*skill.Meta {
 	return skill.StartupForRuleset(a.callableSkillsSnapshot(), nil)

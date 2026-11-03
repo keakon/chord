@@ -922,7 +922,14 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	a.emitToTUI(SessionRestoredEvent{PreserveRequestActivity: true, PreserveComposerState: true})
 
 	tokensAfterApply := estimateMessagesTokens(a.ctxMgr, compactedMessages)
-	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v tokens_before=%v tokens_after=%v tokens_reclaimed=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit, tokensBeforeApply, tokensAfterApply, max(tokensBeforeApply-tokensAfterApply, 0))
+	modelDrivenSavedTokens, modelDrivenSavedRatioPct, retainedRecords, retainedTokens := 0, 0, 0, 0
+	if d.ModelDrivenPreflight != nil {
+		modelDrivenSavedTokens = d.ModelDrivenPreflight.SavedTokens
+		modelDrivenSavedRatioPct = d.ModelDrivenPreflight.SavedRatioPct
+		retainedRecords = d.ModelDrivenPreflight.RetainedRecords
+		retainedTokens = d.ModelDrivenPreflight.RetainedTokens
+	}
+	log.Infof("context compacted (async) mode=%v summary_mode=%v backend=%v profile=%v model=%v history_path=%v backup_path=%v archived_messages=%v evidence_artifacts=%v head_split=%v tokens_before=%v tokens_after=%v tokens_reclaimed=%v model_driven_saved_tokens=%v model_driven_saved_ratio_pct=%v retained_records=%v retained_tokens=%v", modeLabel, d.SummaryMode, d.Backend, d.Profile, d.ModelRef, d.AbsHistoryPath, backupPath, d.ArchivedCount, d.EvidenceArtifacts, headSplit, tokensBeforeApply, tokensAfterApply, max(tokensBeforeApply-tokensAfterApply, 0), modelDrivenSavedTokens, modelDrivenSavedRatioPct, retainedRecords, retainedTokens)
 	if _, err := a.fireHook(a.parentCtx, hook.OnAfterCompress, 0, map[string]any{
 		"message_count":      a.ctxMgr.MessageCount(),
 		"context_tokens":     a.ctxMgr.LastTotalContextTokens(),

@@ -43,8 +43,11 @@ const (
 	// checkpointSkillsFact and checkpointSkillsReloadHint introduce the names
 	// the model can still load; the reload hint is dropped when none of them is
 	// loadable, so the section never asks for a call that would be refused.
-	checkpointSkillsFact       = "Loaded during the archived conversation; the instructions themselves are no longer in context, only these names."
-	checkpointSkillsReloadHint = "Call `skill` again with one of them when the continuation still has to follow that workflow — do not assume the content from the name."
+	// Both state historical facts only: a later reload puts the body back in
+	// context, and a checkpoint assertion written as current state ("no longer
+	// in context") would then be stale guidance that triggers a second load.
+	checkpointSkillsFact       = "The archived conversation loaded these skills; compaction kept their names, not the instruction text."
+	checkpointSkillsReloadHint = "Call `skill` again when the continuation still has to follow that workflow and its instructions are not already earlier in this conversation — do not assume the content from the name."
 	// checkpointSkillsNotLoadableLabel introduces the names the model cannot
 	// load now, for the same three reasons the model face excludes a skill. They
 	// stay in the record — the continuation may still be following their
@@ -230,10 +233,11 @@ func checkpointModelLoadable(skills []*skill.Meta) func(string) bool {
 
 // renderCheckpointSkillsSection renders the section, or "" when the archived
 // head loaded no skills. The wording has to keep the model from reading the
-// list as instructions that are still in effect: the instructions themselves
-// are gone, so re-invoking is how it gets a workflow back — and a name the
-// model cannot load is listed apart, with its own recovery paths, instead of
-// inviting the refused call.
+// list as instructions that are still in effect: it records what the archived
+// conversation did, and re-invoking is how a continuation gets the workflow
+// back — without asserting that the body is absent now, because a reload may
+// already have restored it. A name the model cannot load is listed apart, with
+// its own recovery paths, instead of inviting the refused call.
 func renderCheckpointSkillsSection(names []string, omitted int, modelLoadable func(string) bool) string {
 	if len(names) == 0 {
 		return ""

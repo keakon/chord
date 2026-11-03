@@ -57,8 +57,9 @@ context:
 
 压缩后的摘要称为 checkpoint。它保留任务目标、关键进展和会话约束，并附上历史归档索引；需要核对原话时，可以读取对应的 `history-N.md`。
 
-- 继续执行的压缩会尽量保留最近的完整对话，最多六轮，预算仍约为上下文窗口的 5%。单轮过大时保留能装下的安全后缀，不拆开工具调用和结果。显式选择 `archival` 时不保留这个原始尾部。
-- 摘要内还会原样保留最近归档的用户消息，受 `retain_recent_tokens` 约束，默认预算为 4096 个估计 token；与当前请求完全相同的重复消息会改写为一条去重说明。被中断的回复或模型主动压缩前的相关正文，也可随保留内容一起进入后续上下文。
+- 继续执行的压缩会尽量保留最近的完整对话，最多六轮，预算仍约为上下文窗口的 5%。单轮过大时保留能装下的安全后缀，不拆开工具调用和结果。显式选择 `archival` 时不保留这个原始尾部；model-driven checkpoint 改为保留一个更小的工具观测窗口（见下一条）。
+- 摘要内还会原样保留最近归档的用户消息，受 `retain_recent_tokens` 约束，默认预算为 4096 个估计 token；与当前请求完全相同的重复消息只渲染一次。该段会说明这些引用属于历史上下文，不是新指令：`## Current User Request` 始终是权威版本，引用里也可能比截断后的请求摘录包含更多文字。同一会话再次压缩时，这些保留的用户消息会继续带进新 checkpoint，钉住的指令因此能跨多轮压缩延续，而不是只扛过一次重置。被中断的回复或模型主动压缩前的相关正文，只在产生该 checkpoint 的那一段对话内保留。
+- model-driven checkpoint 在后续仍有可见工作时保留一个有界的最近工具观测窗口：排队中的用户输入、未完成 todo、运行中的 SubAgent、未结束的后台任务，或近期的压力证据。窗口取最新一到两个完整工具批次，上限约 2048 个估计 token；成功结果保留正文，装不下的批只保留调用参数和省略标记，更早的批次留在归档里。失败的工具批次不受是否有活可干影响，总会在各自预算内重新挂回，让后续能处理仍需修复的失败。
 - 会话约束会随压缩保留；超过容量时优先保留最早和最近的条目。新指令取代旧约束时，旧条目会标记为已被取代。
 - 摘要不能覆盖你最新的消息或完成拒绝理由。发生冲突时，当前任务状态、磁盘文件和可核对的工具结果优先于摘要。恢复上下文所用的关键文件会从磁盘重新读取。
 
@@ -74,7 +75,7 @@ context:
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 | `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；等于或高于 threshold 的 reminder 不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本就携带上阈值通知。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
 | `model_driven` | 布尔 | `true` | 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，随后在同一 turn 的压缩上下文上继续：主 agent 在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求；SubAgent 在工具批次收口时同步应用。工具同样以 worker 变体对 SubAgent 可用——schema 收缩（去掉证据字段、跨代 carry、planned 文件），必须单独调用，`state_files` 只作路径引用，工具自身不读取也不校验存在性。主 agent 上 reset 后 runtime 会重新载入登记文件与 checkpoint 关键文件的一小段头部（且仅当当前 read 权限规则允许该路径）；SubAgent 的 checkpoint 只列出路径，由模型自己读取。低收益请求会被自动跳过。设为 `false` 可让压缩完全由运行时接管。 |
-| `retain_recent_tokens` | 整数 | `4096`（内置） | 每个压缩 checkpoint 内嵌的最近真实用户消息的估计 token 预算（见上文的「保留最近消息」）；`0` 或缺省使用内置默认值，只算消息正文。需要跨压缩保住更多最近轮次就调大，想让压缩多回收上下文就调小；保留段不替代摘要，只把最新指令边界原样钉住（与当前请求完全相同的重复消息会改写为一条去重说明）。 |
+| `retain_recent_tokens` | 整数 | `4096`（内置） | 每个压缩 checkpoint 内嵌的最近真实用户消息的估计 token 预算（见上文的「保留最近消息」）；`0` 或缺省使用内置默认值。没有关闭用的取值：`0` 不等于关闭，要缩小保留窗口请设置一个较小的正整数。预算只算消息正文，从上个 checkpoint 带过来的消息同样占用这份预算。需要跨压缩保住更多最近轮次就调大，想让压缩多回收上下文就调小；保留段不替代摘要，只把最新指令边界原样钉住（与当前请求完全相同的重复消息只渲染一次）。 |
 
 按模型覆盖写在**模型定义**上（`ModelConfig.compaction`，含 `threshold` 与 `reminder` 两个子字段），可经 `model_templates` 用 `<<:` 共享；**没有** `context.compaction.models` 这张表。
 
@@ -127,7 +128,7 @@ providers:
 模型应在「用 checkpoint 替换当前历史」比继续携带历史更划算，且后续需要的事实已经充分外化时单独调用它（同一响应里不能有其他工具调用）：这些事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中（`completed` 只记录已验证的结果及验证方式，todo 列表由运行时自动快照、无需复述）。长任务中，主 agent 把可复用的细节记在任务笔记里（见[系统提示词指引](#系统提示词指引)），checkpoint 前先更新笔记并通过 `state_files` 登记。结构化参数只作简短交接：目标、已验证进展、当前阻碍、下一步，以及需要读取的笔记小节。恢复信息很少或角色没有文件写入权限时，可以全部使用结构化参数，`state_files` 留空。没有上下文压力时，剩下的提交、交接或最终回复由 agent 直接完成，不为收尾单独调用 checkpoint；存在上下文压力时，即使临近完成也要保留安全的续跑状态。checkpoint 是有成本的状态转移，不是例行保存进度。runtime 校验请求，等工具批次收口后：
 
 1. 快照对话并归档 head（不调用摘要模型，checkpoint 由确定性构造）；
-2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%）时拒绝 reset；距上次成功 apply 不足 3 个主模型请求批次时同样会跳过；
+2. 当预计收益低于保守门槛（2048 tokens 的绝对下限始终生效；占 prepared surface 的 10% 这一相对条件，在 checkpoint 同时登记了状态文件与 evidence 引用或未决问题时不再适用）时拒绝 reset；距上次成功 apply 不足 3 个主模型请求批次时同样会跳过；
 3. 原子应用 checkpoint，快照后追加的内容作为 live tail 保留，并在压缩后的上下文上继续同一 turn。
 
 checkpoint 还包含两段由运行时生成、长度受限的内容：`## Checkpoint Worklog` 记录上次 checkpoint 以来归档对话中已观察到的文件修改、带终态的 Shell 工具结果和提交记录。工具部分失败时，已经发生的文件修改仍会保留；请求执行的编辑和未开始的命令不会被记成已完成工作。`## Repository State` 记录构建时观察到的分支、HEAD 与工作区状态。两者都是历史快照，后续工具结果和当前运行状态优先。结构化参数与笔记保存任务进展、验证细节、决策、未决问题和下一步；不必仅为同步提交、TODO 状态或完成横幅单独更新笔记。
@@ -192,7 +193,7 @@ TUI 状态栏会把模型请求的 checkpoint 与 usage-driven 压缩区分开�
 
 启用 `model_driven` 且角色的权限规则不拒绝 `compact_context` 时，SubAgent 获得主 agent 同款能力的 worker 变体。变体面向委派任务：去掉证据字段（`evidence_refs`、`claim_evidence`、`claim_kinds`）、跨代 carry 字段（`retired_items`、`open_issues_complete`、`checkpoint_kind`、`stage_id`、`stage_status`）和 `planned_state_files`，描述里的「最新用户请求 / 最终回复」换成「委派任务 / 最终报告」。给已删除字段传非空值会被直接拒绝。worker 变体只改变该 SubAgent 的工具面；主 agent 的冻结 prompt 前缀与 prompt cache 不受影响。
 
-worker checkpoint 由模型的结构化参数加上确定性 checkpoint 同款的 runtime 事实（任务、Owner、最新 owner 指示、触及文件、近期失败、未决阻塞）和 skills carry 行组成，归档后在 worker 自己的事件循环上随工具批次收口同步应用——没有后台 worker，也没有 barrier。目标长度按 checkpoint 自身的估算加一小段保留尾部推导，不用固定比例；预计收益低于低收益门槛时跳过 reset，跳过原因会以一次性请求通知加 toast 告知模型。下一次 checkpoint 不合并上一次的模型字段：每轮重新声明它认为仍然成立的目标、进度与决策，更早的内容留在归档里。
+worker checkpoint 由模型的结构化参数加上确定性 checkpoint 同款的 runtime 事实（任务、Owner、最新 owner 指示、触及文件、近期失败、未决阻塞）和 skills carry 行组成，归档后在 worker 自己的事件循环上随工具批次收口同步应用——没有后台 worker，也没有 barrier。目标长度按 checkpoint 自身的估算加一小段保留尾部推导，不用固定比例；预计收益低于低收益门槛时跳过 reset，但 checkpoint 同时登记了状态文件与未决问题时，小规模重置仍可继续——2048 tokens 的绝对下限依旧生效。跳过原因会以一次性请求通知加 toast 告知模型。下一次 checkpoint 不合并上一次的模型字段：每轮重新声明它认为仍然成立的目标、进度与决策，更早的内容留在归档里。
 
 压力通知与主 agent 同构：提醒线和阈值线各在每个压缩窗口投递一条持久通知。只有提醒已经送达后越线，SubAgent 才获得同样的两个请求宽限（请求预算 95% 上限或已应答的 `compact_context` 调用会提前结束宽限）；突然越线时会发出警告并立即开始确定性压缩。每条通知都保存为持久上下文通知，并由归属发出通知的 SubAgent 的卡片展示；集成方收到的 `context_notice` 事件也通过 `target_agent_id` 标识该 SubAgent。用量用 worker 的本地 token 估算，而非 provider usage。任何压缩都会结束窗口、删除旧通知行并重建 worker 视图；`model_driven` 关闭或工具被拒绝时，SubAgent 压缩完全由运行时接管。
 

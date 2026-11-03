@@ -5,11 +5,26 @@ import (
 	"github.com/keakon/chord/internal/skill"
 )
 
+// skillInvocationStatesFromHistory reports bodies from successful invocation
+// names. Parked task snapshots strip instruction bodies by design and use the
+// invocation record as their load-state evidence.
 func skillInvocationStatesFromHistory(history []message.Message, view skillActivationView) []skill.InvocationState {
 	bodies := make(map[string]struct{})
 	for _, name := range invokedSkillNamesFromMessages(history) {
 		bodies[name] = struct{}{}
 	}
+	return skillInvocationStatesWithBodies(history, view, bodies)
+}
+
+// skillInvocationStatesFromVisibleBodies reports a body as present only while
+// a complete encoded body still survives the history window. A successful
+// name-only envelope such as "already loaded" records the invocation but not
+// the instruction text, so it must not paint the skill as loaded.
+func skillInvocationStatesFromVisibleBodies(history []message.Message, view skillActivationView, currentBatch uint64, staleAge int) []skill.InvocationState {
+	return skillInvocationStatesWithBodies(history, view, skillBodyNamesVisibleInMessages(history, currentBatch, staleAge))
+}
+
+func skillInvocationStatesWithBodies(history []message.Message, view skillActivationView, bodies map[string]struct{}) []skill.InvocationState {
 	states := skill.InvocationStates(view.Catalog, view.Ruleset, bodies)
 	earlier, _ := collectCheckpointSkillNames(history)
 	loadedEarlier := make(map[string]bool)

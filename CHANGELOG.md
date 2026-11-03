@@ -127,6 +127,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - The **SKILLS** panel and the `/skill` selector mark skill state with icons instead of text suffixes: `○` idle, `◎` path-matched or notified, `●` loaded, `↻` reload after compaction, `◌` manual-only, and `⊘` denied. Green marks a live body, amber one that needs reloading.
 
+- Calling `skill` for a body that is still visible in the conversation returns a short already-loaded envelope pointing at the earlier copy instead of appending the instructions again; a body archived or summarized by compaction is loaded in full again.
+
 - The info panel's **LSP**, **MCP**, and **SKILLS** sections now default to folded and open when they have an active language-server process, a connected MCP server, or a skill whose body is in context. Previously any configured entry expanded the section, so a session that had not connected or loaded anything yet opened with those blocks taking up the panel. **TODOS**, **CHANGED FILES**, **AGENTS**, and **JOBS** still expand as soon as their content exists, **GIT** stays folded, and a manual fold or expand sticks until the header is clicked back to the state the section would take on its own, after which it follows its content again.
 
 - AGENTS shows distinct waiting states and the current coordination request reason, with clickable task and reason rows.
@@ -152,6 +154,12 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Tool errors explain more common mistakes: `edit` names arguments escaped one level too deep, a not-found `read` path whose parent directory is missing says so and names the nearest existing directory, `grep` explains that `paths` does not expand globs, arguments wrapped in a `tool_uses` list ask for separate tool calls, and a call to an unknown tool name whose arguments fit exactly one available tool names that tool.
 
 - Sidebar subagent rows show the task's cumulative reported token usage, and external Claude Code workers add the CLI-reported cost. The count spans follow-up attempts and session restore, so a completed task keeps its number.
+
+- Model-driven checkpoints keep the newest one or two completed tool batches (about 2K estimated tokens) when the continuation still has visible work — queued user input, open todos, running SubAgents, background jobs, or recent pressure evidence — so the resumed turn can see what just ran instead of only the checkpoint's evidence excerpts. Retained user instructions also carry into the next checkpoint, so they survive more than one reset. Failed tool batches are re-attached regardless of active work.
+
+- A model-driven checkpoint that registers a state file together with evidence references or open issues is no longer skipped by the relative low-gain gate (10% of the prepared surface); the absolute 2048-token floor still rejects resets that save too little.
+
+- Retained recent messages inside a checkpoint now say they are historical quotes and that `## Current User Request` is authoritative, so a truncated request excerpt is not overridden by a fuller quoted copy. The `compact_context` result and worker checkpoint also state that `state_files` are references the tool did not read or verify.
 
 ### Fixes
 

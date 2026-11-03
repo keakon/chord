@@ -51,7 +51,7 @@ Chord discovers Skills from these directories by default:
 - `~/.config/chord/skills/`
 - additional directories configured via `skills.paths`
 
-At runtime, Chord does not preload every skill body into the system prompt. The model calls the `skill` tool to load matching skill content on demand.
+At runtime, Chord does not preload every skill body into the system prompt. The model calls the `skill` tool to load matching skill content on demand. Loading a skill again while its full body is still visible in the conversation returns a short already-loaded envelope that points at the earlier copy instead of appending the instructions a second time; a body that compaction archived or summarized is loaded in full again.
 
 In the TUI, the **SKILLS** panel lists discovered skills, one icon per row and no status text. The icon shape carries the state:
 

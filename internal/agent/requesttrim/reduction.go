@@ -413,6 +413,19 @@ func NextReviewAge(ctx Context) int {
 	return next
 }
 
+// repeatedOutputMarker names the copy that replaced an older duplicate. A
+// skill marker carries the skill name: the workflow is instruction state, and
+// "an identical skill output" leaves the model unable to tell which workflow
+// the surviving copy belongs to when several were loaded.
+func repeatedOutputMarker(ctx Context) string {
+	if isSkillInstructionResult(ctx) {
+		if name, ok := skillEnvelopeField(ctx.Content, "name"); ok {
+			return fmt.Sprintf("[Repeated skill output omitted for %s; an identical call appears later.]", name)
+		}
+	}
+	return fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", ToolNameOrUnknown(ctx.ToolName))
+}
+
 func isHighRiskToolOutput(ctx Context) bool {
 	if strings.TrimSpace(ctx.Content) == "" {
 		return false
@@ -447,7 +460,7 @@ func Render(class Class, ctx Context) (string, string, bool) {
 	var rule string
 	switch class {
 	case requestReductionRepeated:
-		reduced, rule = fmt.Sprintf("[Repeated %s output omitted; an identical call appears later.]", ToolNameOrUnknown(ctx.ToolName)), "repeated"
+		reduced, rule = repeatedOutputMarker(ctx), "repeated"
 	case requestReductionToolError:
 		reduced, rule = reduceToolErrorOutputSummary(ctx), "error"
 	case requestReductionConfirm:

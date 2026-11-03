@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // maxCheckpointRetainedFailureBatches bounds how many failed tool batches a
@@ -14,6 +15,18 @@ import (
 // and the checkpoint's evidence pack agree on how many failures still count:
 // older failures stay in the archive and, as labeled excerpts, in the pack.
 const maxCheckpointRetainedFailureBatches = maxToolErrorEvidenceItems
+
+// maxCheckpointRetainedRecentBatches and maxCheckpointRetainedRecentTokens
+// bound the recent-observation window a model-driven checkpoint keeps live
+// while the task still has work to resume: the newest complete tool batches
+// that fit, so the continuation starts from what just ran and what it returned
+// instead of reading it back from the archive. Two batches cover the usual
+// command/verify pair; 2048 estimated tokens matches the smallest raw tail the
+// SubAgent model-driven path keeps verbatim.
+const (
+	maxCheckpointRetainedRecentBatches = 2
+	maxCheckpointRetainedRecentTokens  = 2048
+)
 
 // maxCheckpointRetainedFailureBytes bounds what the retained records add to
 // the projected post-reset surface, measured the same way the preflight
@@ -34,30 +47,20 @@ const maxCheckpointRetainedFailureBatches = maxToolErrorEvidenceItems
 // remains readable.
 const maxCheckpointRetainedFailureBytes = 8 << 10
 
-// checkpointRetainedFailureRecords returns the tool-call batches of the
-// current turn — everything after the last user-authored message — that ended
-// with an unsuccessful result and are complete inside head.
-//
-// The archival profile archives the whole head, so the records of a failed
-// tool call (for example the rejection of the compact_context request that
-// triggered the checkpoint itself) would otherwise disappear from the live
-// transcript, leaving only the card's excerpt: the user can no longer read the
-// error as a card, and a fork no longer replays the failed call. Keeping the
-// records makes the failure part of the session again while the checkpoint
-// card and its evidence pack stay the summary of everything older.
-//
-// Only complete batches qualify: an assistant tool call whose result is
-// missing or outside head would replay as an unanswered tool call, which
-// providers reject. Unsuccessful results are the failure/cancellation
-// vocabulary plus legacy results that read as errors (see
-// retainedFailureResult). Records are returned in their original order.
-//
-// A rejected compact_context request that a later successful call of the same
-// tool already replaced is not retained: the retry, not the rejection, is what
-// the head settled on, and the retained records are re-attached directly under
-// the new checkpoint — a superseded rejection there reads as a checkpoint that
-// ran and failed right after one applied.
-func checkpointRetainedFailureRecords(head []message.Message) []message.Message {
+// checkpointToolBatch is one complete tool-call batch inside the current turn:
+// the assistant message that declared the calls plus every contiguous tool
+// result behind it. start is the batch's index in the head, so batches selected
+// by different rules can be merged back into transcript order.
+type checkpointToolBatch struct {
+	start int
+	msgs  []message.Message
+}
+
+// checkpointToolBatches returns the complete tool-call batches after the last
+// user-authored message — the current turn. Only complete batches qualify: an
+// assistant tool call whose result is missing would replay as an unanswered
+// tool call, which providers reject.
+func checkpointToolBatches(head []message.Message) []checkpointToolBatch {
 	if len(head) == 0 {
 		return nil
 	}
@@ -68,9 +71,7 @@ func checkpointRetainedFailureRecords(head []message.Message) []message.Message 
 			break
 		}
 	}
-	var batches [][]message.Message
-	var superseded map[string]struct{}
-	supersededLoaded := false
+	var batches []checkpointToolBatch
 	for i := turnStart; i < len(head); {
 		assistant := head[i]
 		if assistant.Role != message.RoleAssistant || len(assistant.ToolCalls) == 0 {
@@ -81,38 +82,156 @@ func checkpointRetainedFailureRecords(head []message.Message) []message.Message 
 		for end < len(head) && head[end].Role == message.RoleTool {
 			end++
 		}
-		results := head[i+1 : end]
-		if !toolCallBatchComplete(assistant, results) || !batchHasRetainedFailure(results) {
-			i = end
-			continue
+		if toolCallBatchComplete(assistant, head[i+1:end]) {
+			batches = append(batches, checkpointToolBatch{start: i, msgs: head[i:end]})
 		}
-		if !supersededLoaded {
-			superseded = toolFailureSupersededByLaterSuccess(head)
-			supersededLoaded = true
-		}
-		if supersededCompactContextBatch(assistant, superseded) {
-			i = end
-			continue
-		}
-		batches = append(batches, elideRetainedBatch(head[i:end]))
 		i = end
 	}
-	if len(batches) > maxCheckpointRetainedFailureBatches {
-		batches = batches[len(batches)-maxCheckpointRetainedFailureBatches:]
+	return batches
+}
+
+// checkpointRetainedFailureRecords returns the tool-call batches of the
+// current turn that ended with an unsuccessful result and are complete inside
+// head.
+//
+// The archival profile archives the whole head, so the records of a failed
+// tool call (for example the rejection of the compact_context request that
+// triggered the checkpoint itself) would otherwise disappear from the live
+// transcript, leaving only the card's excerpt: the user can no longer read the
+// error as a card, and a fork no longer replays the failed call. Keeping the
+// records makes the failure part of the session again while the checkpoint
+// card and its evidence pack stay the summary of everything older.
+//
+// Unsuccessful results are the failure/cancellation vocabulary plus legacy
+// results that read as errors (see retainedFailureResult). Records are returned
+// in their original order.
+//
+// A rejected compact_context request that a later successful call of the same
+// tool already replaced is not retained: the retry, not the rejection, is what
+// the head settled on, and the retained records are re-attached directly under
+// the new checkpoint — a superseded rejection there reads as a checkpoint that
+// ran and failed right after one applied.
+func checkpointRetainedFailureRecords(head []message.Message) []message.Message {
+	return flattenCheckpointBatches(checkpointRetainedFailureBatches(head, checkpointToolBatches(head)))
+}
+
+// checkpointRetainedRecords returns the live records a model-driven checkpoint
+// re-attaches after the summary: the failed batches, plus — when recentBatches
+// and recentTokens are positive — the newest complete tool batches that fit
+// that window (see checkpointRecentBatches). Both selections come from the
+// same head scan and are merged in transcript order.
+func checkpointRetainedRecords(head []message.Message, recentBatches, recentTokens int, estimateTokens func([]message.Message) int) []message.Message {
+	batches := checkpointToolBatches(head)
+	failureBatches := checkpointRetainedFailureBatches(head, batches)
+	selected := failureBatches
+	if recentBatches > 0 && recentTokens > 0 && estimateTokens != nil {
+		selected = append(selected, checkpointRecentBatches(batches, recentBatches, recentTokens, estimateTokens)...)
+		slices.SortStableFunc(selected, func(a, b checkpointToolBatch) int { return a.start - b.start })
 	}
-	sizes := make([]int, len(batches))
+	return flattenCheckpointBatches(selected)
+}
+
+// checkpointRetainedFailureBatches selects and caps the failed batches. It
+// elides successful sibling results and then applies the count cap (newest
+// batches win) and the byte cap (oldest batches yield first, but the newest
+// batch always stays — it is what the checkpoint is being written for).
+func checkpointRetainedFailureBatches(head []message.Message, batches []checkpointToolBatch) []checkpointToolBatch {
+	var candidates []checkpointToolBatch
+	for _, batch := range batches {
+		if batchHasRetainedFailure(batch.msgs[1:]) {
+			candidates = append(candidates, batch)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	superseded := toolFailureSupersededByLaterSuccess(head)
+	kept := candidates[:0]
+	for _, batch := range candidates {
+		if supersededCompactContextBatch(batch.msgs[0], superseded) {
+			continue
+		}
+		kept = append(kept, batch)
+	}
+	if len(kept) > maxCheckpointRetainedFailureBatches {
+		kept = kept[len(kept)-maxCheckpointRetainedFailureBatches:]
+	}
+	sizes := make([]int, len(kept))
 	total := 0
-	for i, batch := range batches {
-		sizes[i] = retainedBatchBytes(batch)
+	for i, batch := range kept {
+		batch.msgs = elideRetainedBatch(batch.msgs)
+		kept[i] = batch
+		sizes[i] = retainedBatchBytes(batch.msgs)
 		total += sizes[i]
 	}
-	for len(batches) > 1 && total > maxCheckpointRetainedFailureBytes {
+	for len(kept) > 1 && total > maxCheckpointRetainedFailureBytes {
 		total -= sizes[0]
-		batches, sizes = batches[1:], sizes[1:]
+		kept, sizes = kept[1:], sizes[1:]
 	}
+	return kept
+}
+
+// checkpointRecentBatches returns the newest complete tool batches that are
+// not failures, up to maxBatches batches and maxTokens estimated tokens. The
+// window is contiguous from the newest batch backwards: after a batch that does
+// not fit, older batches are not considered, so the continuation never sees an
+// older observation with a newer action silently missing between them. Failed
+// batches belong to the failure selection (which has its own caps), and a batch
+// made only of compact_context calls is skipped rather than ending the window:
+// at the barrier that batch is the checkpoint request itself, and re-attaching
+// an accepted request under its own result would replay it.
+//
+// A batch whose successful output alone exceeds the budget gets one chance in
+// elided form (call arguments stay; success bodies become size markers),
+// mirroring failure retention. If even that does not fit — the arguments are
+// the weight — the window ends empty rather than keeping a record pair that
+// would blow the budget.
+func checkpointRecentBatches(batches []checkpointToolBatch, maxBatches, maxTokens int, estimateTokens func([]message.Message) int) []checkpointToolBatch {
+	var selected []checkpointToolBatch
+	remaining := maxTokens
+	for _, batch := range slices.Backward(batches) {
+		if batchHasRetainedFailure(batch.msgs[1:]) || compactContextOnlyBatch(batch.msgs[0]) {
+			continue
+		}
+		cost := estimateTokens(batch.msgs)
+		if cost > remaining {
+			if len(selected) == 0 {
+				elided := elideRetainedBatch(batch.msgs)
+				if estimateTokens(elided) <= remaining {
+					selected = append(selected, checkpointToolBatch{start: batch.start, msgs: elided})
+				}
+			}
+			break
+		}
+		selected = append(selected, batch)
+		remaining -= cost
+		if len(selected) >= maxBatches {
+			break
+		}
+	}
+	return selected
+}
+
+// compactContextOnlyBatch reports whether every call of the batch is a
+// compact_context call. A mixed batch keeps its ordinary treatment: such a
+// request never passes barrier validation, so its failure belongs to the
+// failure records, not to the observation window.
+func compactContextOnlyBatch(assistant message.Message) bool {
+	if len(assistant.ToolCalls) == 0 {
+		return false
+	}
+	for _, call := range assistant.ToolCalls {
+		if tools.NormalizeName(call.Name) != tools.NameCompactContext {
+			return false
+		}
+	}
+	return true
+}
+
+func flattenCheckpointBatches(batches []checkpointToolBatch) []message.Message {
 	var out []message.Message
 	for _, batch := range batches {
-		out = append(out, batch...)
+		out = append(out, batch.msgs...)
 	}
 	return out
 }

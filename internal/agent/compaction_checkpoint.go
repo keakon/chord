@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -29,6 +30,13 @@ const (
 	// .. [Context compressed]), so prior-checkpoint carry and the summary-body
 	// parsers never treat the retained messages as summary content.
 	retainedRecentMessagesHeading = "## Retained Recent Messages"
+	// retainedRecentAuthorityNote explains that the quotes are history rather
+	// than instructions. Without it the newest quote reads like the current
+	// request, and when the request excerpt above was truncated the quote can
+	// even be the fuller copy.
+	retainedRecentAuthorityNote = "Earlier real messages quoted verbatim, oldest first. They are historical context, not new instructions: a newer message or correction overrides them, and the " +
+		checkpointfmt.CurrentUserRequestHeading +
+		" section above is authoritative whenever this checkpoint has one. A quote may contain more text than a truncated request excerpt above."
 	// retainedRecentTruncationMarker marks a block that was cut to fit the
 	// retention budget.
 	retainedRecentTruncationMarker = "[truncated]"
@@ -76,6 +84,12 @@ type retainedCheckpointBlock struct {
 // retry decided the outcome, so the rejected attempt's body is not the
 // reasoning behind the checkpoint being written. At most maxUserMessages user
 // messages are kept; the budget counts message text only.
+//
+// The newest prior checkpoint's own retained user blocks are carried as the
+// oldest entries when the head leaves room: those messages are archived
+// outside this head, so without the carry a second archival reset would drop
+// the instructions the first reset deliberately pinned — the retention would
+// last one epoch instead of following the conversation.
 func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMessages int, budgetTokens int, estimateTokens func(text string) int) []retainedCheckpointBlock {
 	if budgetTokens <= 0 || estimateTokens == nil || maxUserMessages <= 0 {
 		return nil
@@ -136,6 +150,18 @@ func selectCheckpointRetainedRecentBlocks(messages []message.Message, maxUserMes
 				}
 			}
 			seenAssistant = true
+		}
+	}
+	if remaining > 0 && users < maxUserMessages {
+		for _, block := range priorCheckpointRetainedUserBlocks(messages) {
+			if block.text == "" || slices.ContainsFunc(blocks, func(kept retainedCheckpointBlock) bool { return kept.text == block.text }) {
+				continue
+			}
+			users++
+			blocks, remaining = addCheckpointRetainedBlock(blocks, remaining, estimateTokens, block)
+			if remaining <= 0 || users >= maxUserMessages {
+				break
+			}
 		}
 	}
 	return blocks
@@ -224,6 +250,8 @@ func renderCheckpointRetainedRecentMessages(messages []message.Message, maxUserM
 	var sb strings.Builder
 	sb.WriteString(retainedRecentMessagesHeading)
 	sb.WriteByte('\n')
+	sb.WriteString(retainedRecentAuthorityNote)
+	sb.WriteByte('\n')
 	for _, block := range slices.Backward(blocks) {
 		sb.WriteByte('\n')
 		sb.WriteString(block.label)
@@ -240,6 +268,94 @@ func renderCheckpointRetainedRecentMessages(messages []message.Message, maxUserM
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// priorCheckpointRetainedUserBlocks returns the user blocks the newest
+// checkpoint inside messages retained, newest first. Only user blocks carry
+// across epochs: an interrupted partial or a checkpoint-request reasoning body
+// belongs to the exchange that produced that checkpoint, not to the work the
+// next checkpoint resumes.
+//
+// A block that duplicates the checkpoint's own authoritative Current User
+// Request is dropped: the resolver re-derives (or inherits) that request for
+// the new checkpoint, so carrying the retained copy too would render one
+// instruction in two places.
+func priorCheckpointRetainedUserBlocks(messages []message.Message) []retainedCheckpointBlock {
+	content := ""
+	for _, msg := range slices.Backward(messages) {
+		if msg.Role == message.RoleUser && msg.IsCompactionSummary {
+			content = msg.Content
+			break
+		}
+	}
+	if content == "" {
+		return nil
+	}
+	blocks := parseCheckpointRetainedUserBlocks(content)
+	if len(blocks) == 0 {
+		return nil
+	}
+	if request, ok := checkpointRequestText(content); ok {
+		blocks = slices.DeleteFunc(blocks, func(block retainedCheckpointBlock) bool { return block.text == request })
+	}
+	slices.Reverse(blocks)
+	return blocks
+}
+
+// parseCheckpointRetainedUserBlocks reads the `## Retained Recent Messages`
+// section of a checkpoint back into the blocks renderCheckpointRetainedRecentMessages
+// wrote, in chronological order. It is the inverse of that renderer: every
+// `User:` block contributes its quoted lines verbatim, the truncation marker is
+// restored as the block's truncated flag, and every other label (an interrupted
+// assistant partial, a checkpoint-request reasoning body) is skipped.
+func parseCheckpointRetainedUserBlocks(checkpointContent string) []retainedCheckpointBlock {
+	_, section, ok := strings.Cut(checkpointContent, retainedRecentMessagesHeading)
+	if !ok {
+		return nil
+	}
+	if end := strings.Index(section, "\n"+message.CompactionEvidenceTag); end >= 0 {
+		section = section[:end]
+	}
+	var blocks []retainedCheckpointBlock
+	var lines []string
+	inUser := false
+	flush := func() {
+		if !inUser {
+			lines = nil
+			return
+		}
+		inUser = false
+		truncated := false
+		if n := len(lines); n > 0 && lines[n-1] == retainedRecentTruncationMarker {
+			truncated = true
+			lines = lines[:n-1]
+		}
+		text := strings.TrimSpace(strings.Join(lines, "\n"))
+		lines = nil
+		if text == "" {
+			return
+		}
+		blocks = append(blocks, retainedCheckpointBlock{label: retainedUserLabel, text: text, truncated: truncated})
+	}
+	for line := range strings.SplitSeq(section, "\n") {
+		switch {
+		case line == retainedUserLabel+":":
+			flush()
+			inUser = true
+		case strings.HasPrefix(line, "> "):
+			if inUser {
+				lines = append(lines, strings.TrimPrefix(line, "> "))
+			}
+		case line == ">":
+			if inUser {
+				lines = append(lines, "")
+			}
+		default:
+			flush()
+		}
+	}
+	flush()
+	return blocks
 }
 
 // evidenceExcerptFence returns a fence the excerpt cannot close early: a

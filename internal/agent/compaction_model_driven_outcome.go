@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/keakon/golog/log"
 )
 
 // settleModelDrivenOutcome is the single settlement point for model-driven
@@ -48,6 +50,8 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 		diagnostic["anchor_bytes"] = strconv.Itoa(preflight.AnchorBytes)
 		diagnostic["history_map_bytes"] = strconv.Itoa(preflight.HistoryMapBytes)
 		diagnostic["continuation_tokens"] = strconv.Itoa(preflight.ContinuationTokens)
+		diagnostic["retained_records"] = strconv.Itoa(preflight.RetainedRecords)
+		diagnostic["retained_tokens"] = strconv.Itoa(preflight.RetainedTokens)
 		diagnostic["cache_rebuild_cost"] = strconv.Itoa(preflight.CacheRebuildCost)
 	}
 	a.recordCompactionLifecycleEvent(status, diagnostic)
@@ -65,6 +69,17 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 		evt.PlanID = strconv.FormatUint(eventPlanID, 10)
 	}
 	a.emitToTUI(evt)
+	// The analytics event is the machine record; this log line is what a
+	// session post-mortem reads first. It carries the settled status, reason
+	// and (when the worker ran a preflight) the estimate the verdict used.
+	currentTokens, projectedTokens, savedTokens, savedRatioPct := 0, 0, 0, 0
+	retainedRecords, retainedTokens := 0, 0
+	if preflight != nil {
+		currentTokens, projectedTokens = preflight.CurrentTokens, preflight.ProjectedTokens
+		savedTokens, savedRatioPct = preflight.SavedTokens, preflight.SavedRatioPct
+		retainedRecords, retainedTokens = preflight.RetainedRecords, preflight.RetainedTokens
+	}
+	log.Infof("model-driven checkpoint settled status=%v reason=%q plan_id=%v request_id=%v current_tokens=%v projected_tokens=%v saved_tokens=%v saved_ratio_pct=%v retained_records=%v retained_tokens=%v", status, a.modelDrivenSkipNotice, eventPlanID, a.modelDrivenProposal.requestID, currentTokens, projectedTokens, savedTokens, savedRatioPct, retainedRecords, retainedTokens)
 }
 
 // settleModelDrivenSkip records a model-driven policy skip (low-gain, apply

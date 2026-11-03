@@ -2,8 +2,11 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -17,6 +20,11 @@ type SkillProvider interface {
 	InvokedSkills() []*skill.Meta
 	MarkSkillInvoked(meta *skill.Meta)
 	LoadSkill(name string) (*skill.Skill, error)
+	// HasSkillBodyInContext reports whether a full skill result carrying the
+	// given body digest is still part of the request the model will see. The
+	// tool uses it to answer a repeated load with the envelope alone instead of
+	// a second copy of instructions that are already in front of the model.
+	HasSkillBodyInContext(digest string) bool
 }
 
 // SkillTool loads a skill's full instructions on demand.
@@ -178,12 +186,96 @@ func SkillCallArguments(name, args string) (json.RawMessage, error) {
 	return json.Marshal(skillArgs{Name: name, Args: args})
 }
 
+// skillBodyDigestTag identifies the full-body fingerprint every complete skill
+// result carries. It is the tool's own identity marker: requesttrim summaries
+// keep only the envelope anchors and heading outline, so a summarized copy has
+// no digest and can never be mistaken for the loaded body.
+const skillBodyDigestTag = "body_sha256"
+
+// skillBodyDigest fingerprints everything a full skill result shows the model:
+// the envelope identity, the placeholder-expanded body, and the resource
+// warning block. Two loads that render different bytes get different digests,
+// so a load for another root or another `${CHORD_SKILL_ARGS}` substitution
+// always returns the fresh body instead of the earlier one.
+func skillBodyDigest(name, location, root, args, warning, expandedContent string) string {
+	h := sha256.New()
+	for _, part := range []string{name, location, root, args, warning, expandedContent} {
+		_, _ = io.WriteString(h, part)
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// SkillResultBodyDigest reads the fingerprint out of a complete skill result.
+// It reports false for anything that is not a full body — a summarized copy, a
+// short "already loaded" result, or a failed load.
+func SkillResultBodyDigest(result string) (string, bool) {
+	value, ok := skillResultField(result, skillBodyDigestTag)
+	if !ok || len(value) != sha256.Size*2 {
+		return "", false
+	}
+	return value, true
+}
+
+// skillResultField reads one field out of a skill result envelope. The
+// envelope's fields precede the body, so the first occurrence is the field; a
+// body that mentions the same tag later is left alone.
+func skillResultField(result, tag string) (string, bool) {
+	_, rest, ok := strings.Cut(result, "<"+tag+">")
+	if !ok {
+		return "", false
+	}
+	value, _, ok := strings.Cut(rest, "</"+tag+">")
+	if !ok {
+		return "", false
+	}
+	value = strings.TrimSpace(value)
+	return value, value != ""
+}
+
 // FormatSkillInvocationResult renders the tool result of a skill load: the
 // envelope the model reads, including the declared-resource warning block. The
 // model path and the user's explicit load both go through it, so both origins
 // produce one identical result shape — that equivalence is what lets restore,
 // compaction and the TUI treat a user-triggered load exactly like a model call.
 func FormatSkillInvocationResult(sk *skill.Skill, args string) string {
+	if sk == nil {
+		return ""
+	}
+	warning := SkillDeclaredResourceWarningBlock(sk.RootDir, sk.Meta.Resources)
+	expandedContent := substituteSkillPlaceholders(sk.Content, sk.RootDir, args)
+	digest := skillBodyDigest(sk.Name, sk.Location, sk.RootDir, strings.TrimSpace(args), warning, expandedContent)
+	var sb strings.Builder
+	sb.WriteString("<skill>\n")
+	fmt.Fprintf(&sb, "<name>%s</name>\n", sk.Name)
+	fmt.Fprintf(&sb, "<path>%s</path>\n", sk.Location)
+	fmt.Fprintf(&sb, "<root>%s</root>\n", sk.RootDir)
+	fmt.Fprintf(&sb, "<relative_paths_base>%s</relative_paths_base>\n", sk.RootDir)
+	fmt.Fprintf(&sb, "<%s>%s</%s>\n", skillBodyDigestTag, digest, skillBodyDigestTag)
+	if strings.TrimSpace(args) != "" {
+		fmt.Fprintf(&sb, "<args>%s</args>\n", args)
+	}
+	fmt.Fprintf(&sb, "<notes>%s</notes>\n", skillInvocationNotes)
+	sb.WriteString("\n")
+	if warning != "" {
+		sb.WriteString(warning)
+		sb.WriteString("\n")
+	}
+	sb.WriteString(expandedContent)
+	if !strings.HasSuffix(expandedContent, "\n") {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("</skill>")
+	return sb.String()
+}
+
+// FormatSkillAlreadyLoadedResult renders the answer to a load whose identical
+// body is still in the request face: the envelope anchors keep the workflow's
+// paths resolvable, while the body stays the earlier copy. It deliberately
+// carries no body digest — a digest would make this result look like a full
+// body to a later visibility check, and repeated-output detection would then
+// collapse the real copy as the duplicate.
+func FormatSkillAlreadyLoadedResult(sk *skill.Skill, args string) string {
 	if sk == nil {
 		return ""
 	}
@@ -196,20 +288,12 @@ func FormatSkillInvocationResult(sk *skill.Skill, args string) string {
 	if strings.TrimSpace(args) != "" {
 		fmt.Fprintf(&sb, "<args>%s</args>\n", args)
 	}
-	fmt.Fprintf(&sb, "<notes>%s</notes>\n", skillInvocationNotes)
-	sb.WriteString("\n")
-	if warning := SkillDeclaredResourceWarningBlock(sk.RootDir, sk.Meta.Resources); warning != "" {
-		sb.WriteString(warning)
-		sb.WriteString("\n")
-	}
-	expandedContent := substituteSkillPlaceholders(sk.Content, sk.RootDir, args)
-	sb.WriteString(expandedContent)
-	if !strings.HasSuffix(expandedContent, "\n") {
-		sb.WriteString("\n")
-	}
+	fmt.Fprintf(&sb, "<already_loaded>%s</already_loaded>\n", skillAlreadyLoadedNote)
 	sb.WriteString("</skill>")
 	return sb.String()
 }
+
+const skillAlreadyLoadedNote = "The full instructions were already loaded earlier in this conversation and are still visible; use that copy instead of loading them again."
 
 const skillInvocationNotes = "Relative paths from the skill content resolve against <root>. Read referenced files only when needed; do not guess other entry points if the skill already provides one."
 
@@ -353,8 +437,10 @@ func (t SkillTool) Execute(_ context.Context, raw json.RawMessage) (string, erro
 	if err != nil {
 		return "", err
 	}
-	if t.provider != nil {
-		t.provider.MarkSkillInvoked(&sk.Meta)
+	t.provider.MarkSkillInvoked(&sk.Meta)
+	rendered := FormatSkillInvocationResult(sk, a.Args)
+	if digest, ok := SkillResultBodyDigest(rendered); ok && t.provider.HasSkillBodyInContext(digest) {
+		return FormatSkillAlreadyLoadedResult(sk, a.Args), nil
 	}
-	return FormatSkillInvocationResult(sk, a.Args), nil
+	return rendered, nil
 }

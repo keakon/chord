@@ -157,7 +157,12 @@ func (s *SubAgent) applyModelDrivenCheckpoint(req *subModelDrivenRequest) {
 	target := modelDrivenCheckpointTarget(messages, req.CallID)
 	projected := target + checkpointTokens
 	savings := estimated - projected
-	if _, skip := modelDrivenLowGainCheck(estimated, savings); skip {
+	coverage := modelDrivenCheckpointCoverage{
+		StateFiles:   len(req.Args.StateFiles),
+		EvidenceRefs: len(req.Args.EvidenceRefs),
+		OpenIssues:   len(req.Args.OpenIssues),
+	}
+	if _, skip := modelDrivenLowGainCheck(estimated, savings, coverage); skip {
 		s.settleModelDrivenSkip(fmt.Sprintf(subModelDrivenSkipLowGain, savings, modelDrivenLowGainMinTokens, int(modelDrivenLowGainMinRatio*100)))
 		return
 	}
@@ -268,7 +273,7 @@ func (c subModelDrivenCheckpointContent) build(removed int, archiveRef string) s
 		b.WriteString("none")
 	} else {
 		b.WriteString(strings.Join(c.args.StateFiles, ", "))
-		b.WriteString(" (read these before relying on their contents)")
+		b.WriteString(" (model-declared references; existence is not verified — read these before relying on their contents)")
 	}
 	b.WriteByte('\n')
 	b.WriteString(subAgentCheckpointSkillsPrefix)

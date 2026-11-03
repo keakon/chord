@@ -36,7 +36,7 @@ import (
 const (
 	subAgentCheckpointSkillsPrefix       = "- Skills loaded earlier: "
 	subAgentCheckpointOmittedNamesPrefix = "- Omitted skill names carried: "
-	subAgentCheckpointSkillsHint         = " (instructions may have been removed above; call `skill` again when a workflow still applies)"
+	subAgentCheckpointSkillsHint         = " (archived out of the compressed history; call `skill` again when a workflow still applies and its instructions are not already earlier in this conversation)"
 	subAgentCheckpointNotLoadablePrefix  = "- Skills not loadable by you: "
 	subAgentCheckpointNotLoadableHint    = " (cannot be re-loaded by you; the archived history holds their instructions)"
 )

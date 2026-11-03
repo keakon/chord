@@ -747,5 +747,5 @@ func (t CompactContextTool) Execute(_ context.Context, raw json.RawMessage) (str
 	if _, err := t.validator.ParseCompactContextArgs(raw); err != nil {
 		return "", err
 	}
-	return "Context checkpoint request accepted. No reset has occurred yet; only a later model-driven context checkpoint confirms successful application.", nil
+	return "Context checkpoint request accepted. No reset has occurred yet; only a later model-driven context checkpoint confirms successful application. state_files are recorded as model-declared references; the tool did not read or verify them.", nil
 }

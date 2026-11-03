@@ -78,8 +78,9 @@ Without `model_pool`, compaction uses the current agent's model pool. To use a d
 
 The compacted summary is called a checkpoint. It preserves goals, key progress, and session constraints, with an index of history archives. Read the corresponding `history-N.md` when you need the original wording.
 
-- Continuation compaction tries to preserve recent complete turns, up to the latest six, within about 5% of the context window. If a turn is too large, it keeps a safe suffix without splitting tool calls from their results. An explicit `archival` profile does not keep this raw tail.
-- The checkpoint also retains recent archived user messages verbatim within `retain_recent_tokens`, whose default budget is 4096 estimated tokens; a retained message that exactly repeats the current request is summarized as a duplicate instead. Interrupted replies or relevant assistant text preceding model-driven compaction can also be retained.
+- Continuation compaction tries to preserve recent complete turns, up to the latest six, within about 5% of the context window. If a turn is too large, it keeps a safe suffix without splitting tool calls from their results. An explicit `archival` profile does not keep this raw tail; model-driven checkpoints keep a smaller tool-observation window instead (next bullet).
+- The checkpoint also retains recent archived user messages verbatim within `retain_recent_tokens`, whose default budget is 4096 estimated tokens; a retained message that exactly repeats the current request is rendered once. The section introduces the quotes as historical context, not new instructions: `## Current User Request` stays authoritative, and a quote can contain more text than a truncated request excerpt. Retained user messages are carried into the next checkpoint as well when the same session compacts again, so pinned instructions follow the conversation instead of surviving a single reset. Interrupted replies or relevant assistant text preceding model-driven compaction can be retained for the exchange that produced the checkpoint.
+- A model-driven checkpoint keeps a bounded recent tool-observation window while the continuation still has visible work: queued user input, open todos, running SubAgents, unfinished background jobs, or recent pressure evidence. The window is the newest one or two complete tool batches, up to about 2048 estimated tokens; successful results keep their bodies, a batch too large to fit keeps only its call arguments plus an elision marker, and older batches stay in the archive. Failed tool batches are re-attached regardless of active work, within their own bound, so the continuation can act on a failure it still has to fix.
 - Session constraints carry forward. When capacity is exceeded, the earliest and most recent entries take priority. Superseded constraints are marked when newer instructions replace them.
 - A summary cannot override your latest message or completion rejection. Current task state, files on disk, and verifiable tool results take precedence over conflicting summary text. Key files used to restore context are read from disk again.
 
@@ -95,7 +96,7 @@ Verbatim retention is bounded, and summaries can miss details. Put important req
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
 | `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` (the default) derives the line as `min(0.60, threshold × 0.90)`; a fraction in `(0,1]` sets it explicitly; `-1` disables the pressure reminder while keeping automatic compaction on (per model as well). A reminder below the threshold fires when usage reaches it (`min(reminder, threshold)` — whichever line comes first); one at or above the threshold does not fire separately, because usage only reaches it on requests that already crossed the threshold, which carry the upper-threshold notice instead. `threshold: 0` disables both. Any other value (negative, above `1`, or NaN/±Inf) is rejected with a warning and falls back to the derived default. |
 | `model_driven` | bool | `true` | Expose the `compact_context` tool so the model can request a durable context checkpoint once it has externalized its working state (written it into files or structured arguments). The checkpoint is built deterministically without a summarization model call and continues the same turn on the compacted context: on the main agent it applies at a tool-batch barrier that pauses the next main-model request, on a SubAgent it applies synchronously when the tool batch closes. The tool is also available to SubAgents as a worker variant with a reduced schema (no evidence fields, no cross-generation carry, no planned files), must be called alone, and references `state_files` paths without reading or verifying them. On the main agent, after the reset the runtime re-loads a bounded head of the registered files and of the checkpoint's key files, and only when the current read permission rule allows the path; a SubAgent's checkpoint lists the paths for the model to read itself. Low-gain requests are skipped automatically. Set `false` to keep compaction fully runtime-owned. |
-| `retain_recent_tokens` | int | `4096` (built-in) | Estimated-token budget for the newest real user messages kept verbatim inside every compaction checkpoint (see [Retained recent messages](#retained-recent-messages)); `0` or omitted uses the built-in default. Only the message text counts toward the budget. Set it higher to keep more of the latest turns across a compaction, or lower to reclaim more context; the retained section never replaces the summary — it pins the newest instruction boundary verbatim (an exact repeat of the current request is summarized as a duplicate). |
+| `retain_recent_tokens` | int | `4096` (built-in) | Estimated-token budget for the newest real user messages kept verbatim inside every compaction checkpoint (see [Retained recent messages](#retained-recent-messages)); `0` or omitted uses the built-in default. There is no disable value: `0` is not "off", so set a small positive value to shrink the retained window. Only the message text counts toward the budget, and messages carried from the previous checkpoint consume the same budget. Set it higher to keep more of the latest turns across a compaction, or lower to reclaim more context; the retained section never replaces the summary — it pins the newest instruction boundary verbatim (an exact repeat of the current request is rendered once). |
 
 Per-model overrides live on the model definition (`ModelConfig.compaction`,
 with `threshold` and `reminder` subfields), so `model_templates` can share them
@@ -198,7 +199,9 @@ For long tasks, the main agent keeps reusable details in task notes (see [System
 1. snapshots the conversation and archives the head (no summarization model
    call; the checkpoint is deterministic),
 2. refuses the reset when the projected savings are below a conservative
-   low-gain gate (2048 tokens and 10% of the prepared surface), or when fewer than three
+   low-gain gate (the 2048-token floor always applies; the 10%-of-prepared-surface
+   part is waived when the checkpoint registers a state file together with
+   evidence references or open issues to resume from), or when fewer than three
    main-model requests have passed since the last applied checkpoint,
 3. applies the checkpoint atomically, preserves anything appended after the
    snapshot as a live tail, and continues the same turn on the compacted
@@ -324,7 +327,9 @@ skills-carry line, then archived and applied synchronously on the worker's own
 event loop when the tool batch closes — no background worker, no barrier. The
 target size follows the checkpoint's own estimate plus a small retained tail,
 never a fixed ratio; a projected saving below the low-gain gate skips the
-reset, and the skip reason reaches the model as a one-shot request notice plus
+reset, except that a checkpoint naming a state file together with open issues
+keeps a small reset eligible — the 2048-token floor still applies. The skip
+reason reaches the model as a one-shot request notice plus
 a toast. A second checkpoint does not merge the previous checkpoint's
 model-authored fields: each round re-states the objective, progress and
 decisions it considers current, and everything earlier stays recoverable in

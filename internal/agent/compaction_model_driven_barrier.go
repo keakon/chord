@@ -115,6 +115,31 @@ func (b modelDrivenBarrierSnapshot) estimateTokens(messages []message.Message) i
 	return ctxmgr.EstimateMessagesTokensWithRatio(messages, b.calibratedRatio)
 }
 
+// recentWorkActive reports whether the continuation still has work the runtime
+// can see: open todos, live SubAgents, unfinished background objects, recent
+// pressure evidence, or user input queued while the checkpoint is being built.
+// It decides whether the checkpoint keeps a recent tool-observation window; a
+// pure archival reset (task settled, nothing running) does not.
+func (b modelDrivenBarrierSnapshot) recentWorkActive() bool {
+	return len(b.queuedUserMessages) > 0 ||
+		hasOpenTodosForCompaction(b.todos) ||
+		hasActiveSubAgentsForCompaction(b.subAgents) ||
+		hasActiveBackgroundObjectsForCompaction(b.backgroundObjects) ||
+		hasContinuationPressureEvidence(b.evidenceItems)
+}
+
+// retainedCheckpointRecords returns the live tool records this checkpoint
+// re-attaches: failures always, plus a bounded recent-observation window while
+// recentWorkActive. head is the archived head; every record has to stay inside
+// it, since the archive is where the rest of the history goes.
+func (b modelDrivenBarrierSnapshot) retainedCheckpointRecords(head []message.Message) []message.Message {
+	recentBatches, recentTokens := 0, 0
+	if b.recentWorkActive() {
+		recentBatches, recentTokens = maxCheckpointRetainedRecentBatches, maxCheckpointRetainedRecentTokens
+	}
+	return checkpointRetainedRecords(head, recentBatches, recentTokens, b.estimateTokens)
+}
+
 // ------------------------------------------------------------------ barrier ---
 
 // maybeStartModelDrivenBarrier is called at the tool-batch end, after batch
@@ -171,6 +196,7 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 		return false
 	}
 	planID, target := a.nextCompactionPlan()
+	log.Debugf("model-driven checkpoint barrier start plan_id=%v request_id=%v messages=%v batch=%v work_active=%v queued_inputs=%v", planID, req.ToolCallID, len(bundle.snapshot), bundle.currentRequestBatch, bundle.recentWorkActive(), len(bundle.queuedUserMessages))
 	continuation := continuationPlan{
 		kind:      compactionResumeModelDriven,
 		turnID:    a.turn.ID,

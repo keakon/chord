@@ -181,6 +181,8 @@ func (a *MainAgent) recordCompactionAppliedAnalyticsEvent(d *compactionDraft, he
 		diagnostic["anchor_bytes"] = strconv.Itoa(preflight.AnchorBytes)
 		diagnostic["history_map_bytes"] = strconv.Itoa(preflight.HistoryMapBytes)
 		diagnostic["continuation_tokens"] = strconv.Itoa(preflight.ContinuationTokens)
+		diagnostic["retained_records"] = strconv.Itoa(preflight.RetainedRecords)
+		diagnostic["retained_tokens"] = strconv.Itoa(preflight.RetainedTokens)
 		diagnostic["cache_rebuild_cost"] = strconv.Itoa(preflight.CacheRebuildCost)
 		diagnostic["post_apply_evidence_candidates"] = strconv.Itoa(a.evidence.len())
 		valid, invalidated := 0, 0

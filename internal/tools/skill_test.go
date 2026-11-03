@@ -12,8 +12,9 @@ import (
 )
 
 type skillProviderStub struct {
-	list   []*skill.Meta
-	loaded map[string]*skill.Skill
+	list           []*skill.Meta
+	loaded         map[string]*skill.Skill
+	visibleDigests map[string]bool
 }
 
 func (s skillProviderStub) HasCallableSkills() bool {
@@ -37,6 +38,10 @@ func (s skillProviderStub) InvokedSkills() []*skill.Meta {
 }
 
 func (s skillProviderStub) MarkSkillInvoked(meta *skill.Meta) {}
+
+func (s skillProviderStub) HasSkillBodyInContext(digest string) bool {
+	return s.visibleDigests[digest]
+}
 
 func TestSkillToolIsAvailableRequiresListableSkills(t *testing.T) {
 	tests := []struct {
@@ -253,5 +258,84 @@ func TestSkillListingOversizedFirstName(t *testing.T) {
 	body, _, _ := strings.Cut(listing, "Additional available skill names:")
 	if len(body) > SkillListingMaxTotalBytes || !strings.Contains(body, `"small"`) {
 		t.Fatal("first oversized item bypassed budget or hid later item")
+	}
+}
+
+func digestTestSkill(root string) *skill.Skill {
+	return &skill.Skill{
+		Name:     "go-expert",
+		Location: root + "/SKILL.md",
+		RootDir:  root,
+		Content:  "Run `${CHORD_SKILL_DIR}/scripts/check.sh` with `${CHORD_SKILL_ARGS}`.\n",
+	}
+}
+
+func TestSkillResultDigestIdentifiesFullBodies(t *testing.T) {
+	root := t.TempDir()
+	sk := digestTestSkill(root)
+	full := FormatSkillInvocationResult(sk, "--fast")
+	digest, ok := SkillResultBodyDigest(full)
+	if !ok || digest == "" {
+		t.Fatalf("full result should carry a body digest: %q", full)
+	}
+
+	same := FormatSkillInvocationResult(digestTestSkill(root), "--fast")
+	if got, _ := SkillResultBodyDigest(same); got != digest {
+		t.Fatalf("identical renderings should share the digest: %q != %q", got, digest)
+	}
+	// Different args change the placeholder expansion, and a different root
+	// changes where relative references resolve: neither may reuse the body.
+	for _, other := range []string{
+		FormatSkillInvocationResult(sk, "--slow"),
+		FormatSkillInvocationResult(digestTestSkill(t.TempDir()), "--fast"),
+	} {
+		if got, _ := SkillResultBodyDigest(other); got == digest {
+			t.Fatalf("different rendering kept the digest %q", got)
+		}
+	}
+	if _, ok := SkillResultBodyDigest(FormatSkillAlreadyLoadedResult(sk, "--fast")); ok {
+		t.Fatal("the short already-loaded result must not look like a full body")
+	}
+}
+
+func TestSkillToolExecuteShortCircuitsWhenIdenticalBodyIsVisible(t *testing.T) {
+	root := t.TempDir()
+	sk := digestTestSkill(root)
+	digest, ok := SkillResultBodyDigest(FormatSkillInvocationResult(sk, ""))
+	if !ok {
+		t.Fatal("fixture result has no digest")
+	}
+	tool := NewSkillTool(skillProviderStub{
+		loaded:         map[string]*skill.Skill{"go-expert": sk},
+		visibleDigests: map[string]bool{digest: true},
+	})
+
+	got, err := tool.Execute(context.Background(), []byte(`{"name":"go-expert"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(got, "<already_loaded>") {
+		t.Fatalf("visible identical body should short-circuit, got %q", got)
+	}
+	if strings.Contains(got, "<body_sha256>") {
+		t.Fatalf("short result must not carry a body digest: %q", got)
+	}
+	for _, want := range []string{"<name>go-expert</name>", "<root>" + root + "</root>", "<relative_paths_base>" + root + "</relative_paths_base>"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("short result missing %q in %q", want, got)
+		}
+	}
+	if strings.Contains(got, "scripts/check.sh") {
+		t.Fatalf("short result must not repeat the body: %q", got)
+	}
+
+	// The digest belongs to one exact rendering: a call with different args
+	// expands the placeholders differently and must return the fresh body.
+	got, err = tool.Execute(context.Background(), []byte(`{"name":"go-expert","args":"--fast"}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(got, "<already_loaded>") || !strings.Contains(got, "scripts/check.sh") {
+		t.Fatalf("different args must return the full body, got %q", got)
 	}
 }

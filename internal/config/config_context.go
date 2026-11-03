@@ -195,8 +195,9 @@ type CompactionConfig struct {
 	// user messages (plus a dangling interrupted assistant reply) kept
 	// verbatim inside every compaction checkpoint, so the continuation can
 	// pick up the latest work boundary without re-reading the archived
-	// history. Zero (or omitted) uses the built-in default; only the message
-	// text counts toward the budget.
+	// history. Zero (or omitted) uses the built-in default; there is no
+	// disable value. Only the message text counts toward the budget, and
+	// blocks carried from the previous checkpoint consume the same budget.
 	RetainRecentTokens int `json:"retain_recent_tokens,omitempty" yaml:"retain_recent_tokens,omitempty"`
 }
 

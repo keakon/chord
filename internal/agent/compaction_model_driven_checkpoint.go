@@ -77,6 +77,18 @@ func (a *MainAgent) newModelDrivenCheckpointBuilder(ctx context.Context, bundle 
 	}
 }
 
+// coverage reports how much resumable state the submission externalizes. It
+// feeds the low-gain gate: the relative size gate is waived only when the
+// checkpoint points at working-state files and still carries something to
+// resume from.
+func (b *modelDrivenCheckpointBuilder) coverage() modelDrivenCheckpointCoverage {
+	return modelDrivenCheckpointCoverage{
+		StateFiles:   len(b.req.Args.StateFiles),
+		EvidenceRefs: len(b.req.Args.EvidenceRefs),
+		OpenIssues:   len(b.req.Args.OpenIssues),
+	}
+}
+
 // render renders the deterministic checkpoint the way it will appear in the
 // transcript: the summary sections wrapped in the canonical checkpoint
 // envelope (header, archived history map, evidence artifact) plus the
