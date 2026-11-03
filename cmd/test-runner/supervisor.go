@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/keakon/chord/internal/buildcache"
 	"github.com/keakon/chord/internal/externalsupervisor"
 )
 
@@ -18,7 +19,7 @@ import (
 // lifecycle supervisor proves group teardown; these pipes also detect children
 // that escaped the group but still hold inherited stdout or stderr.
 func supervise(args []string) int {
-	if len(args) != 2 || !filepath.IsAbs(args[0]) || !externalsupervisor.ValidRunID(args[1]) {
+	if len(args) != 3 || !filepath.IsAbs(args[0]) || !externalsupervisor.ValidRunID(args[1]) || !filepath.IsAbs(args[2]) {
 		return 1
 	}
 	if _, err := syscall.Setsid(); err != nil {
@@ -48,6 +49,10 @@ func supervise(args []string) int {
 	}
 	receipt, err := externalsupervisor.LoadReceipt(dir, id)
 	if err != nil || !receipt.Cleanup.Proven {
+		return 1
+	}
+	cache, err := buildcache.Open(args[2])
+	if err != nil || cache.End(id) != nil {
 		return 1
 	}
 	// Publish last: a recovery process may remove the directory immediately

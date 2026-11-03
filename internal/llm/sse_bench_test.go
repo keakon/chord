@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -539,7 +538,7 @@ func loadSSEBenchCorpora() (map[string]sseBenchCorpus, error) {
 }
 
 func buildSSEBenchCorpora() (map[string]sseBenchCorpus, error) {
-	dumpsDir := filepath.Join(repoRootFromThisFile(), ".chord", "llm_dumps")
+	dumpsDir := filepath.Join("..", "..", ".chord", "llm_dumps")
 	entries, err := os.ReadDir(dumpsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -708,12 +707,4 @@ func reconstructSSEBenchmarkBody(provider string, chunks []string) ([]byte, erro
 		return nil, fmt.Errorf("unsupported provider %q", provider)
 	}
 	return buf.Bytes(), nil
-}
-
-func repoRootFromThisFile() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "."
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }

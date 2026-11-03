@@ -50,7 +50,7 @@ deps-check:
 	./scripts/check_deps.sh
 
 test:
-	$(GO) test -count=1 $(PKGS)
+	@CHORD_GO='$(GO)' bash scripts/run_tests.sh --default-temp $(GO) test -count=1 $(PKGS)
 
 # Opt-in speed-up: run the tests with a memory-backed temp dir when one is
 # available, otherwise fall back to the default temp dir. See
@@ -66,7 +66,7 @@ stress:
 	CHORD_GO='$(GO)' ./scripts/check_ci_stress.sh
 
 race:
-	./scripts/check_ci_race.sh $(PKGS)
+	CHORD_GO='$(GO)' ./scripts/check_ci_race.sh $(PKGS)
 
 # Local race gate: same script and checks as CI, with a memory-backed temp dir
 # when one is available. Use `make race` to reproduce the default-temp path.

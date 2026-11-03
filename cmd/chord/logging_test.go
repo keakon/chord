@@ -299,11 +299,10 @@ func TestWriteStartupStderrNoticeUsesProvidedLogPath(t *testing.T) {
 }
 
 func TestChordCodeUsesGologForLogging(t *testing.T) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	for _, dir := range []string{"cmd", "internal"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
 			if err != nil {

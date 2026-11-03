@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/keakon/chord/internal/buildcache"
 	"github.com/keakon/chord/internal/externalsupervisor"
 )
 
@@ -28,6 +30,10 @@ func main() {
 }
 
 func runMain(args []string) int {
+	defaultTemp := len(args) > 0 && args[0] == "--default-temp"
+	if defaultTemp {
+		args = args[1:]
+	}
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: test-runner command [args...]")
 		return 2
@@ -35,19 +41,27 @@ func runMain(args []string) int {
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
-	resolver := exec.Command("./scripts/test_tmpdir.sh")
-	resolver.Stderr = os.Stderr
-	output, err := resolver.Output()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "test-runner: resolve temporary directory:", err)
-		return 1
+	var base string
+	if !defaultTemp {
+		resolver := exec.Command("./scripts/test_tmpdir.sh")
+		resolver.Stderr = os.Stderr
+		output, err := resolver.Output()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "test-runner: resolve temporary directory:", err)
+			return 1
+		}
+		base = strings.TrimSpace(string(output))
 	}
-	base := strings.TrimSpace(string(output))
 	if base == "" {
 		base = os.TempDir()
 	}
-	code, cleaned := runCommand(base, args, signals, os.Stdout, os.Stderr)
-	if cleaned {
+	cacheBase, err := os.UserCacheDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "test-runner: resolve cache directory:", err)
+		return 1
+	}
+	code, cleaned := runCommand(base, filepath.Join(cacheBase, "chord", "build-cache"), args, signals, os.Stdout, os.Stderr)
+	if cleaned && !defaultTemp {
 		release := exec.Command("./scripts/test_tmpdir.sh", "--release", base)
 		release.Stderr = os.Stderr
 		if err := release.Run(); err != nil {
@@ -60,14 +74,34 @@ func runMain(args []string) int {
 	return code
 }
 
-func runCommand(base string, args []string, signals <-chan os.Signal, stdout, stderr io.Writer) (code int, cleaned bool) {
+func runCommand(base, cacheRoot string, args []string, signals <-chan os.Signal, stdout, stderr io.Writer) (code int, cleaned bool) {
 	run, err := newRun(base, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "test-runner:", err)
 		return 1, false
 	}
 	defer run.lock.Close()
+	cache, err := buildcache.Open(cacheRoot)
+	if err != nil {
+		fmt.Fprintln(stderr, "test-runner:", err)
+		return 1, run.remove() == nil
+	}
+	if err := cache.Begin(run.id); err != nil {
+		fmt.Fprintln(stderr, "test-runner:", err)
+		return 1, run.remove() == nil
+	}
+	defer func() {
+		record := filepath.Join(cacheRoot, "users", run.id)
+		if _, err := os.Lstat(record); err == nil {
+			fmt.Fprintf(stderr, "test-runner: retained cache usage record %s; automatic eviction remains blocked; verify command cleanup before removing the record\n", record)
+		}
+		trimBuildCache(cache, stderr)
+	}()
 	remove := func() bool {
+		if err := cache.End(run.id); err != nil {
+			fmt.Fprintln(stderr, "test-runner:", err)
+			return false
+		}
 		if removeErr := run.remove(); removeErr != nil {
 			fmt.Fprintf(stderr, "test-runner: retained %s: %v\n", run.dir, removeErr)
 			return false
@@ -86,10 +120,10 @@ func runCommand(base string, args []string, signals <-chan os.Signal, stdout, st
 	}
 	fmt.Fprintf(stdout, "test-runner: TMPDIR=%s\n", run.work())
 	sup, err := externalsupervisor.Start(externalsupervisor.Config{
-		Command: []string{self, externalsupervisor.CommandName, run.dir, run.id},
+		Command: []string{self, externalsupervisor.CommandName, run.dir, run.id, cacheRoot},
 		RunID:   run.id, ReceiptDir: run.dir, KillGrace: cleanupGrace,
 		Child: externalsupervisor.ChildSpec{
-			Command: args[0], Args: args[1:], Env: testEnvironment(run.work()),
+			Command: args[0], Args: args[1:], Env: testEnvironment(run.work(), cache.Dir()),
 		},
 	})
 	if err != nil {
@@ -182,7 +216,7 @@ func signalCode(sig os.Signal) int {
 	return 1
 }
 
-func testEnvironment(work string) []string {
+func testEnvironment(work, cacheDir string) []string {
 	env := os.Environ()
 	for _, key := range []string{"TMPDIR", "TMP", "TEMP", "GOTMPDIR"} {
 		env = slices.DeleteFunc(env, func(entry string) bool {
@@ -190,5 +224,29 @@ func testEnvironment(work string) []string {
 		})
 		env = append(env, key+"="+work)
 	}
+	for key, value := range map[string]string{
+		"GOCACHE": cacheDir, "GOCACHEPROG": "", "CHORD_TEST_RUNNER_ACTIVE": "1",
+	} {
+		env = slices.DeleteFunc(env, func(entry string) bool {
+			return strings.HasPrefix(entry, key+"=")
+		})
+		env = append(env, key+"="+value)
+	}
 	return env
+}
+
+func trimBuildCache(cache *buildcache.Cache, diagnostics io.Writer) {
+	result, err := cache.Trim(time.Now())
+	switch {
+	case err != nil:
+		fmt.Fprintln(diagnostics, "test-runner: cache cleanup deferred:", err)
+	case result.Users > 0:
+		fmt.Fprintf(diagnostics, "test-runner: cache trim skipped: %d registered cache user(s)\n", result.Users)
+	case result.Removed > 0:
+		fmt.Fprintf(diagnostics, "test-runner: cache reclaimed %.2f GiB (%d files), %.2f GiB retained\n",
+			float64(result.Before-result.After)/(1<<30), result.Removed, float64(result.After)/(1<<30))
+	}
+	if result.OverBudget {
+		fmt.Fprintln(diagnostics, "test-runner: cache remains above 30 GiB; recent entries are protected")
+	}
 }

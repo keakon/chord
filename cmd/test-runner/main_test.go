@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 		case "runner-fixture":
 			signals := make(chan os.Signal, 2)
 			signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-			code, _ := runCommand(os.Args[2], os.Args[3:], signals, os.Stdout, os.Stderr)
+			code, _ := runCommand(os.Args[2], filepath.Join(os.Args[2], "cache"), os.Args[3:], signals, os.Stdout, os.Stderr)
 			os.Exit(code)
 		case "child-fixture":
 			os.Exit(childFixture(os.Args[2:]))
@@ -248,6 +248,7 @@ func TestKilledRunnerRecoveredWithoutTouchingActiveRun(t *testing.T) {
 	}
 	_ = waitCommand(t, first)
 	awaitFile(t, filepath.Join(runDir, readyFile))
+	assertCacheUsers(t, base, 1)
 	third := runnerCommand(t, base, os.Args[0], "child-fixture", "success")
 	if output, err := third.CombinedOutput(); err != nil {
 		t.Fatalf("recovery failed: %v: %s", err, output)
@@ -291,6 +292,10 @@ func TestEscapedWriterRetainsDirectory(t *testing.T) {
 	if dir == "" || !strings.Contains(output.String(), "retained") {
 		t.Fatalf("missing retained directory diagnostic: %s", output.String())
 	}
+	record := filepath.Join(base, "cache", "users", strings.TrimPrefix(filepath.Base(dir), "run-"))
+	if !strings.Contains(output.String(), record) || !strings.Contains(output.String(), "verify command cleanup before removing the record") {
+		t.Fatalf("missing cache usage recovery diagnostic: %s", output.String())
+	}
 	if _, err := os.Stat(filepath.Join(dir, readyFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("escaped writer produced cleanup proof: %v", err)
 	}
@@ -302,6 +307,7 @@ func TestEscapedWriterRetainsDirectory(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("unproven run removed: %v", err)
 	}
+	assertCacheUsers(t, base, 1)
 }
 
 func TestTimeoutCleanup(t *testing.T) {
@@ -390,6 +396,7 @@ func commandCode(err error) int {
 
 func assertNoRuns(t *testing.T, base string) {
 	t.Helper()
+	assertCacheUsers(t, base, 0)
 	entries, err := os.ReadDir(filepath.Join(base, runsDirectory))
 	if err != nil {
 		t.Fatal(err)

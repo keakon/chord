@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${CHORD_TEST_RUNNER_ACTIVE:-}" != 1 ]]; then
+  exec bash "$(dirname "$0")/run_tests.sh" --default-temp "$0" "$@"
+fi
+
 # Run the same coverage test shape as CI, but also enforce that successful test
 # output stays free of interactive prompts, runtime logs, and cold-cache download
 # noise. Local runs intentionally keep the Go test cache enabled by default so

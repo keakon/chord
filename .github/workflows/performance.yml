@@ -63,10 +63,27 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Go
+        id: setup-go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Locate managed Go build cache
+        id: managed-cache
+        shell: bash
+        run: |
+          cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/chord/build-cache"
+          mkdir -p -m 700 "$cache_root"
+          printf 'path=%s/go-build\n' "$cache_root" >> "$GITHUB_OUTPUT"
+
+      - name: Cache managed Go build outputs
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.managed-cache.outputs.path }}
+          key: chord-go-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            chord-go-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ github.job }}-
 
       - name: Run runtime benchmark smoke
         env:

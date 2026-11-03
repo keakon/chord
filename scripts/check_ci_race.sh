@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${CHORD_TEST_RUNNER_ACTIVE:-}" != 1 ]]; then
+  exec bash "$(dirname "$0")/run_tests.sh" --default-temp "$0" "$@"
+fi
+
 # Run the same race-detector test shape as CI, while capturing output and
 # enforcing the same no-log-leak contract as the coverage parity script.
 # Optional package args limit the run, e.g. scripts/check_ci_race.sh ./cmd/chord.
