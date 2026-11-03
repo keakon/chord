@@ -706,6 +706,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 		status    message.ToolResultStatus
 		want      []string
 		wantOrder []string
+		notWant   []string
 	}{
 		{
 			name:     "write error",
@@ -730,7 +731,8 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			args:     json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`),
 			content:  "Deleted (1):\n- /tmp/obsolete.go",
 			status:   message.ToolStatusSuccess,
-			want:     []string{"delete /tmp/obsolete.go (remove obsolete file)", "Deleted /tmp/obsolete.go"},
+			want:     []string{"delete /tmp/obsolete.go (remove obsolete file)"},
+			notWant:  []string{"Deleted /tmp/obsolete.go"},
 		},
 	}
 
@@ -755,6 +757,11 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			for _, want := range tt.want {
 				if !strings.Contains(plain, want) {
 					t.Fatalf("restored %s render missing %q; got:\n%s", tt.toolName, want, plain)
+				}
+			}
+			for _, unwanted := range tt.notWant {
+				if strings.Contains(plain, unwanted) {
+					t.Fatalf("restored %s render kept redundant %q; got:\n%s", tt.toolName, unwanted, plain)
 				}
 			}
 			last := -1
@@ -852,8 +859,8 @@ func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) 
 	if !strings.Contains(joined, "remove obsolete file") {
 		t.Fatalf("expected restored Delete header to show reason; got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "Deleted /tmp/obsolete.go") {
-		t.Fatalf("expected restored Delete block to show compact success summary; got:\n%s", joined)
+	if strings.Contains(joined, "Deleted /tmp/obsolete.go") {
+		t.Fatalf("expected restored Delete block to drop the per-path row the header already names; got:\n%s", joined)
 	}
 	if block.PersistedDuration != 1234*time.Millisecond {
 		t.Fatalf("PersistedDuration = %v, want 1234ms", block.PersistedDuration)

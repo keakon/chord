@@ -307,9 +307,13 @@ func TestDeleteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 		displayWorkingDir: wd,
 	}
 	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(joined, "delete internal/tui/obsolete.go (remove obsolete file)") ||
-		!strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
-		t.Fatalf("expected the relative path in the header and below; got:\n%s", joined)
+	if !strings.Contains(joined, "delete internal/tui/obsolete.go (remove obsolete file)") {
+		t.Fatalf("expected the relative path in the header; got:\n%s", joined)
+	}
+	// A single deleted file is already named in the header, so the card drops
+	// the per-path outcome row instead of repeating the same path.
+	if strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
+		t.Fatalf("did not expect the delete card to repeat the path below the header; got:\n%s", joined)
 	}
 	if strings.Contains(joined, abs) {
 		t.Fatalf("did not expect delete header to show absolute path; got:\n%s", joined)
@@ -330,9 +334,66 @@ func TestDeleteHeaderShowsFilePath(t *testing.T) {
 	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	// The paths are the subject of a delete, so they lead the header and the
 	// reason joins the option group beside them.
-	if !strings.Contains(joined, "delete internal/tui/obsolete.go (remove obsolete file)") ||
-		!strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
-		t.Fatalf("expected the path in the header and the per-path outcome below; got:\n%s", joined)
+	if !strings.Contains(joined, "delete internal/tui/obsolete.go (remove obsolete file)") {
+		t.Fatalf("expected the path in the header; got:\n%s", joined)
+	}
+	// One deleted file is already named in the header, so the card drops the
+	// per-path outcome row instead of repeating the same path.
+	if strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
+		t.Fatalf("did not expect the delete card to repeat the path below the header; got:\n%s", joined)
+	}
+}
+
+// TestDeleteCardListsPathsOnlyWhenTheHeaderCannotNameThem pins the delete
+// card to the rule the patch cards already follow: the header leads with the
+// subject, so a single target needs no per-path row, while several targets
+// (or a partial outcome) still name every path in the body.
+func TestDeleteCardListsPathsOnlyWhenTheHeaderCannotNameThem(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	cases := []struct {
+		name    string
+		args    string
+		result  string
+		status  message.ToolResultStatus
+		want    []string
+		notWant []string
+	}{
+		{
+			name:    "single file drops the repeated row",
+			args:    `{"paths":["internal/tui/obsolete.go"],"reason":"remove obsolete file"}`,
+			result:  "Delete completed.\n\nDeleted (1):\n- internal/tui/obsolete.go",
+			want:    []string{"delete internal/tui/obsolete.go (remove obsolete file)"},
+			notWant: []string{"Deleted internal/tui/obsolete.go"},
+		},
+		{
+			name:   "several files keep the list",
+			args:   `{"paths":["internal/tui/a.go","internal/tui/b.go"],"reason":"cleanup"}`,
+			result: "Delete completed.\n\nDeleted (2):\n- internal/tui/a.go\n- internal/tui/b.go",
+			want:   []string{"delete 2 files (cleanup)", "Deleted (2)", "internal/tui/a.go", "internal/tui/b.go"},
+		},
+		{
+			name:   "partial outcome keeps every row",
+			args:   `{"paths":["internal/tui/a.go","internal/tui/b.go"],"reason":"cleanup"}`,
+			result: "Delete stopped after an execution error.\n\nDeleted (1):\n- internal/tui/a.go\n\nFailed (1):\n- internal/tui/b.go — permission denied",
+			status: message.ToolStatusError,
+			want:   []string{"Deleted internal/tui/a.go", "Failed internal/tui/b.go"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			block := outcomeCardFixture(tools.NameDelete, c.args, c.result, c.status)
+			joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
+			for _, want := range c.want {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("expected delete card to contain %q; got:\n%s", want, joined)
+				}
+			}
+			for _, unwanted := range c.notWant {
+				if strings.Contains(joined, unwanted) {
+					t.Fatalf("expected delete card to drop %q; got:\n%s", unwanted, joined)
+				}
+			}
+		})
 	}
 }
 
