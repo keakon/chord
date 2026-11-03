@@ -374,7 +374,7 @@ func TestExecuteSearchStartsFromFocusedBlock(t *testing.T) {
 	m.focusedBlockID = 2
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("grep")
+	applyTestCmd(t, &m, m.executeSearchAgainstCurrentTranscript("grep"))
 
 	if m.search.State.Current != 1 {
 		t.Fatalf("search current = %d, want 1 for focused block anchor", m.search.State.Current)
@@ -398,7 +398,7 @@ func TestExecuteSearchStartsFromViewportTopWhenNoFocusedBlock(t *testing.T) {
 	}
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("grep")
+	applyTestCmd(t, &m, m.executeSearchAgainstCurrentTranscript("grep"))
 
 	if m.search.State.Current != 1 {
 		t.Fatalf("search current = %d, want 1 for viewport-top anchor", m.search.State.Current)

@@ -160,3 +160,41 @@ func (v *Viewport) RestoreHotBudget() {
 	v.maxHotBytes = baseBudget
 	v.markHotBudgetNeedsEnforcement()
 }
+
+// SpillOffScreenOversizedBlocksBatch forces at most maxBlocks (or maxBytes) of
+// the blocks blockTooLargeToSpill exempts out to the spill store. The active
+// path keeps them resident so scroll-back never pays a full reload of a
+// multi-hundred-KB card; background idle is where that trade flips, because
+// nothing is scrolling and the memory is worth more than the next hydration.
+// Callers must re-run while more is true instead of doing all work in one
+// Update.
+func (v *Viewport) SpillOffScreenOversizedBlocksBatch(maxBlocks int, maxBytes int64) (spilled int, more bool) {
+	if v == nil || v.spill == nil || maxBlocks <= 0 {
+		return 0, false
+	}
+	visible := v.visibleWindowBlockIDs()
+	var bytes int64
+	for _, block := range v.blocks {
+		if !v.blockTooLargeToSpill(block) {
+			continue
+		}
+		if !v.hotBudgetSpillable(block, visible, true) {
+			continue
+		}
+		size := block.estimatedHotBytes()
+		if maxBytes > 0 && size > maxBytes {
+			// A block above the whole batch ceiling can never fit this path;
+			// leave it resident rather than letting one write exceed the cap.
+			continue
+		}
+		if spilled >= maxBlocks || (maxBytes > 0 && bytes >= maxBytes) {
+			return spilled, true
+		}
+		if !v.spillBlockForIdle(block) {
+			continue
+		}
+		spilled++
+		bytes += size
+	}
+	return spilled, false
+}

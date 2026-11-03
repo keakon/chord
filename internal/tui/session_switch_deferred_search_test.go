@@ -38,7 +38,7 @@ func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.
 	}
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("needle line")
+	applyTestCmd(t, &m, m.executeSearchAgainstCurrentTranscript("needle line"))
 	match, ok := m.search.State.CurrentMatch()
 	if !ok {
 		t.Fatal("search should find tool-call content")
@@ -116,7 +116,7 @@ func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(
 	}
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("needle output")
+	applyTestCmd(t, &m, m.executeSearchAgainstCurrentTranscript("needle output"))
 	match, ok := m.search.State.CurrentMatch()
 	if !ok {
 		t.Fatal("search should find cold compact tool output")
@@ -163,7 +163,7 @@ func TestDeferredStartupTranscriptSearchSkipsInvisibleThinkingBlocks(t *testing.
 	}
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("needle-output.go")
+	applyTestCmd(t, &m, m.executeSearchAgainstCurrentTranscript("needle-output.go"))
 	match, ok := m.search.State.CurrentMatch()
 	if !ok {
 		t.Fatal("search should find edit tool content")
@@ -206,7 +206,7 @@ func TestDeferredStartupTranscriptSearchSkipsDiagnosticArtifactBlocks(t *testing
 	}
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("find")
+	applyTestCmd(t, &m, m.executeSearchAgainstCurrentTranscript("find"))
 	match, ok := m.search.State.CurrentMatch()
 	if !ok {
 		t.Fatal("search should find non-diagnostic match")
@@ -254,7 +254,7 @@ func TestDeferredStartupTranscriptSearchRevealExpandsCompactToolOutput(t *testin
 	}
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("needle output")
+	applyTestCmd(t, &m, m.executeSearchAgainstCurrentTranscript("needle output"))
 	match, ok := m.search.State.CurrentMatch()
 	if !ok {
 		t.Fatal("search should find compact tool output")
@@ -487,6 +487,9 @@ func TestDeferredStartupTranscriptMetadataSupportsSearchAndDirectoryAfterSpill(t
 	matches := m.deferredStartupTranscriptSearch("message-020")
 	if len(matches) != 1 || matches[0].BlockID != state.blockMeta[20].BlockID {
 		t.Fatalf("deferred search matches = %#v, want single hit for message-020", matches)
+	}
+	if !state.allBlocks[20].spillCold {
+		t.Fatal("search hydrated a matching cold archive block")
 	}
 	entries := m.deferredStartupTranscriptDirectoryEntries()
 	if len(entries) != len(messages) {

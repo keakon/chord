@@ -27,9 +27,8 @@ func TestSessionRestoredRebuildSchedulesStartupDeferredTranscriptPreheat(t *test
 	if next == nil {
 		t.Fatal("session restore rebuild should schedule follow-up commands")
 	}
-	msg := next()
-	if _, ok := msg.(startupDeferredPreheatTickMsg); !ok {
-		t.Fatalf("follow-up msg = %T, want startupDeferredPreheatTickMsg", msg)
+	if _, ok := testFindMsg[startupDeferredPreheatTickMsg](testCmdMsgs(next)); !ok {
+		t.Fatal("session restore rebuild should schedule startup deferred preheat tick")
 	}
 }
 
@@ -64,7 +63,10 @@ func TestStartupDeferredTranscriptPreheatPopulatesHaloMetadata(t *testing.T) {
 		state.blockMeta[rightIdx].LineCounts = nil
 	}
 
-	preheatMsg := next().(startupDeferredPreheatTickMsg)
+	preheatMsg, ok := testFindMsg[startupDeferredPreheatTickMsg](testCmdMsgs(next))
+	if !ok {
+		t.Fatal("session restore rebuild should schedule startup deferred preheat tick")
+	}
 	cmd = m.handleStartupDeferredTranscriptPreheat(preheatMsg)
 	if cmd == nil {
 		t.Fatal("preheat tick should reschedule while deferred transcript remains active")
@@ -157,7 +159,7 @@ func TestStartupRestoredDeferredTranscriptUsesUpdatedWorkDirForRelativeToolPath(
 	}
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("needle line")
+	applyTestCmd(t, &m, m.executeSearchAgainstCurrentTranscript("needle line"))
 	match, ok := m.search.State.CurrentMatch()
 	if !ok {
 		t.Fatal("search should find deferred Read tool content")
@@ -262,7 +264,7 @@ func TestDeferredStartupTranscriptSendDraftExtendsVisibleTailWindow(t *testing.T
 	}
 
 	m.search = NewSearchModel(ModeNormal)
-	m.executeSearchAgainstCurrentTranscript("message-020")
+	applyTestCmd(t, &m, m.executeSearchAgainstCurrentTranscript("message-020"))
 	match, ok := m.search.State.CurrentMatch()
 	if !ok {
 		t.Fatal("search should find deferred transcript block before draft")

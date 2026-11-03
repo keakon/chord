@@ -429,6 +429,26 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 		fmt.Fprintf(&sb, "tui.hot_bytes: %d\n", m.viewport.hotBytes)
 		fmt.Fprintf(&sb, "tui.resident_bytes: %d\n", m.viewport.ResidentBytes())
 	}
+	if state := m.startupDeferredTranscript; state != nil {
+		hot, cold := 0, 0
+		var hotBytes int64
+		for _, block := range state.allBlocks {
+			if block == nil {
+				continue
+			}
+			if block.spillCold {
+				cold++
+				continue
+			}
+			hot++
+			hotBytes += block.estimatedHotBytes()
+		}
+		fmt.Fprintf(&sb, "tui.deferred_blocks: %d\n", len(state.allBlocks))
+		fmt.Fprintf(&sb, "tui.deferred_window: [%d,%d)\n", state.windowStart, state.windowEnd)
+		fmt.Fprintf(&sb, "tui.deferred_blocks_hot: %d\n", hot)
+		fmt.Fprintf(&sb, "tui.deferred_blocks_cold: %d\n", cold)
+		fmt.Fprintf(&sb, "tui.deferred_hot_bytes: %d\n", hotBytes)
+	}
 	encodedBytes, dataURLBytes := mediacache.ResidentBytes()
 	fmt.Fprintf(&sb, "llm.image_wire_cache_bytes: %d\n", llm.ImageWireCacheBytes())
 	fmt.Fprintf(&sb, "llm.image_encoding_cache_bytes: %d\n", encodedBytes)

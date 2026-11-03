@@ -4,6 +4,7 @@ func (m *Model) clearActiveSearch() {
 	if m == nil || !m.search.State.Active {
 		return
 	}
+	m.startupDeferredSearchGeneration++
 	ClearSearch(&m.search.State)
 	m.search.Input.Blur()
 	m.recalcViewportSize()

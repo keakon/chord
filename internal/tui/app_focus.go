@@ -61,6 +61,7 @@ func (m *Model) rebuildFocusedViewport(agentID, viewportFilter string) {
 		m.logStartupDeferredTranscriptExit(state, transcriptRestoreReasonFocusSwitch, viewportFilter)
 		m.startupDeferredTranscript = nil
 		m.startupDeferredPreheatGeneration++
+		m.startupDeferredSearchGeneration++
 	}
 	msgs := m.agent.GetMessages()
 	var nextID int

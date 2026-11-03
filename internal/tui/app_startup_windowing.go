@@ -59,16 +59,24 @@ type startupDeferredTranscriptState struct {
 	// metaSigs remembers the content signature behind each meta entry so a
 	// re-sync that changed no searchable content (e.g. a SettledAt stamp)
 	// skips the Summary/searchable rebuild.
-	metaSigs               map[int]uint64
-	hiddenBlocks           int
-	anchorBlockID          int
-	windowStart            int
-	windowEnd              int
-	originalViewportBudget int64
-	startedAt              time.Time
-	windowSwitchCount      int
-	preheatTickCount       int
-	preheatBlocksProcessed int
+	metaSigs      map[int]uint64
+	hiddenBlocks  int
+	anchorBlockID int
+	// archiveSpillCursor avoids rescanning already-cold prefixes on every
+	// bounded spill tick. Window changes reset it because the hidden set moves.
+	archiveSpillCursor int
+	// archiveSpillAllowOversized is set only by the background idle sweep.
+	// Foreground archive navigation keeps multi-hundred-KB cards resident so
+	// scroll-back does not pay a full reload; once the user has left the
+	// terminal, the memory can be reclaimed in bounded batches.
+	archiveSpillAllowOversized bool
+	windowStart                int
+	windowEnd                  int
+	originalViewportBudget     int64
+	startedAt                  time.Time
+	windowSwitchCount          int
+	preheatTickCount           int
+	preheatBlocksProcessed     int
 }
 
 func cloneBlocksForDeferredSource(blocks []*Block) []*Block {
@@ -177,6 +185,7 @@ func (m *Model) applyStartupDeferredTranscriptWindow(start, end int, trigger str
 	m.maybeEnforceStartupDeferredTranscriptRetention()
 	state.windowStart = start
 	state.windowEnd = end
+	state.archiveSpillCursor = 0
 	for _, block := range windowed {
 		if block != nil {
 			state.anchorBlockID = block.ID
@@ -184,7 +193,8 @@ func (m *Model) applyStartupDeferredTranscriptWindow(start, end int, trigger str
 		}
 	}
 	state.windowSwitchCount++
-	m.restartStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay)
+	m.markStartupDeferredPreheatPending()
+	m.markStartupDeferredArchiveSpillPending()
 	hiddenBefore := start
 	hiddenAfter := len(state.allBlocks) - end
 	log.Debugf("tui startup transcript window switch trigger=%v window_start=%v window_end=%v window_blocks=%v hidden_before=%v hidden_after=%v total_ms=%v", strings.TrimSpace(trigger), start, end, len(windowed), hiddenBefore, hiddenAfter, time.Since(started).Milliseconds())
@@ -195,17 +205,20 @@ func (m *Model) maybeWindowStartupTranscript(reason string, blocks []*Block) []*
 	if !transcriptReasonWindows(reason) {
 		m.startupDeferredTranscript = nil
 		m.startupDeferredPreheatGeneration++
+		m.startupDeferredSearchGeneration++
 		return blocks
 	}
 	if len(blocks) <= startupTranscriptWindowMinBlocks {
 		m.startupDeferredTranscript = nil
 		m.startupDeferredPreheatGeneration++
+		m.startupDeferredSearchGeneration++
 		return blocks
 	}
 	tailCount := startupTranscriptTailBlocks
 	if tailCount >= len(blocks) {
 		m.startupDeferredTranscript = nil
 		m.startupDeferredPreheatGeneration++
+		m.startupDeferredSearchGeneration++
 		return blocks
 	}
 	hiddenCount := len(blocks) - tailCount
@@ -233,7 +246,9 @@ func (m *Model) maybeWindowStartupTranscript(reason string, blocks []*Block) []*
 		startedAt:              time.Now(),
 	}
 	m.startupDeferredTranscript = state
+	m.startupDeferredSearchGeneration++
 	m.configureStartupDeferredTranscriptRetention(state)
+	m.markStartupDeferredArchiveSpillPending()
 	windowed := m.startupDeferredWindowBlocks(state, state.windowStart, state.windowEnd)
 	for _, block := range windowed {
 		if block != nil {
@@ -489,6 +504,9 @@ func (m *Model) maybeHydrateStartupDeferredTranscript(trigger string) bool {
 	m.logStartupDeferredTranscriptExit(state, "hydrate", trigger)
 	m.startupDeferredTranscript = nil
 	m.startupDeferredPreheatGeneration++
+	m.startupDeferredSearchGeneration++
+	m.startupDeferredPreheatPending = false
+	m.startupDeferredArchiveSpillPending = false
 	m.viewport.enforceHotBudget()
 	log.Debugf("tui startup transcript hydrate timing trigger=%v blocks=%v hidden_blocks=%v total_ms=%v", strings.TrimSpace(trigger), len(state.allBlocks), state.hiddenBlocks, time.Since(started).Milliseconds())
 	return true

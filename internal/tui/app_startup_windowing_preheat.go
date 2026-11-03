@@ -6,8 +6,14 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 )
 
-const startupDeferredTranscriptPreheatDelay = 250 * time.Millisecond
-const startupDeferredTranscriptPreheatHalo = 10
+const (
+	startupDeferredTranscriptPreheatDelay = 250 * time.Millisecond
+	startupDeferredTranscriptPreheatHalo  = 10
+	// Preheat is speculative layout work. Keep it away from blocks whose
+	// render would dominate a frame; those are measured only when visible.
+	startupDeferredPreheatMaxBlockBytes = 64 << 10
+	startupDeferredPreheatMaxBatchBytes = 256 << 10
+)
 
 type startupDeferredPreheatTickMsg struct {
 	generation uint64
@@ -36,6 +42,33 @@ func (m *Model) restartStartupDeferredTranscriptPreheat(delay time.Duration) tea
 	}
 	m.startupDeferredPreheatGeneration++
 	return startupDeferredPreheatTick(m.startupDeferredPreheatGeneration, delay)
+}
+
+// markStartupDeferredPreheatPending invalidates any armed preheat tick and asks
+// Update to schedule a fresh one. Window switches run inside key handlers that
+// cannot return commands, so the generation must advance here: a tick armed for
+// the previous window must not preheat the old halo.
+func (m *Model) markStartupDeferredPreheatPending() {
+	if m.startupDeferredTranscript == nil {
+		return
+	}
+	m.startupDeferredPreheatGeneration++
+	m.startupDeferredPreheatPending = true
+}
+
+// maybeScheduleStartupDeferredPreheatFromPending turns a preheat request into a
+// tick. Window switches run inside key handlers that cannot return commands, so
+// they only set the pending flag and the central Update hook schedules it here.
+func (m *Model) maybeScheduleStartupDeferredPreheatFromPending() tea.Cmd {
+	if m.startupDeferredTranscript == nil {
+		m.startupDeferredPreheatPending = false
+		return nil
+	}
+	if !m.startupDeferredPreheatPending {
+		return nil
+	}
+	m.startupDeferredPreheatPending = false
+	return startupDeferredPreheatTick(m.startupDeferredPreheatGeneration, startupDeferredTranscriptPreheatDelay)
 }
 
 // restartDeferredTranscriptPreheatAfterResize re-arms the halo preheat when a
@@ -96,28 +129,65 @@ func (m *Model) preheatStartupDeferredTranscriptNeighbors(state *startupDeferred
 		width = 80
 	}
 	preheated := false
+	remaining := int64(startupDeferredPreheatMaxBatchBytes)
+	budgetBlocked := false
 	leftStart := max(0, state.windowStart-startupDeferredTranscriptPreheatHalo)
 	for i := leftStart; i < state.windowStart; i++ {
+		size := startupDeferredPreheatBlockBytes(state.allBlocks[i])
+		if size > startupDeferredPreheatMaxBlockBytes {
+			continue
+		}
+		if size > remaining {
+			budgetBlocked = true
+			continue
+		}
 		if preheatStartupDeferredBlock(state, i, width) {
 			preheated = true
+			remaining -= size
 			state.preheatBlocksProcessed++
 		}
 	}
 	rightEnd := min(len(state.allBlocks), state.windowEnd+startupDeferredTranscriptPreheatHalo)
 	for i := state.windowEnd; i < rightEnd; i++ {
+		size := startupDeferredPreheatBlockBytes(state.allBlocks[i])
+		if size > startupDeferredPreheatMaxBlockBytes {
+			continue
+		}
+		if size > remaining {
+			budgetBlocked = true
+			continue
+		}
 		if preheatStartupDeferredBlock(state, i, width) {
 			preheated = true
+			remaining -= size
 			state.preheatBlocksProcessed++
 		}
 	}
-	return preheated
+	return preheated || budgetBlocked
+}
+
+func startupDeferredPreheatBlockBytes(block *Block) int64 {
+	if block == nil {
+		return 0
+	}
+	if block.spillCold {
+		if block.spillRef == nil {
+			return startupDeferredPreheatMaxBlockBytes + 1
+		}
+		return block.spillRef.Length
+	}
+	return block.estimatedHotBytes()
 }
 
 // preheatStartupDeferredBlock measures one halo block at the viewport width and
 // records its line count in the archive metadata. It reports whether the block
-// needed a render: a block that already carries a count for this width is left
+// needed new work: a block that already carries a count for this width is left
 // warm but is not new work, which is what lets the preheat timer stop once the
 // halo is covered.
+//
+// A spilled archive block is measured through a temporary inspection copy so
+// preheat never hydrates a cold card: hydration would make the block resident
+// again on every window switch, defeating the archive spill.
 func preheatStartupDeferredBlock(state *startupDeferredTranscriptState, index, width int) bool {
 	if state == nil || index < 0 || index >= len(state.allBlocks) || index >= len(state.blockMeta) {
 		return false
@@ -127,10 +197,31 @@ func preheatStartupDeferredBlock(state *startupDeferredTranscriptState, index, w
 		return false
 	}
 	meta := &state.blockMeta[index]
-	warm := block.lineCountCache > 0 && block.lineCacheWidth == width
+	if block.lineCountCache > 0 && block.lineCacheWidth == width {
+		if meta.LineCounts == nil {
+			meta.LineCounts = make(map[int]int, 1)
+		}
+		meta.LineCounts[width] = block.lineCountCache
+		return false
+	}
+	if startupDeferredPreheatBlockBytes(block) > startupDeferredPreheatMaxBlockBytes {
+		return false
+	}
 	lineCount := 0
-	if warm {
-		lineCount = block.lineCountCache
+	if block.spillCold {
+		if meta.LineCounts != nil {
+			if count, ok := meta.LineCounts[width]; ok && count > 0 {
+				return false
+			}
+		}
+		inspect, temporary := block.inspectionBlock()
+		if inspect == nil {
+			return false
+		}
+		lineCount = inspect.MeasureLineCount(width)
+		if temporary {
+			inspect.InvalidateCache()
+		}
 	} else {
 		lineCount = block.LineCount(width)
 	}
@@ -140,5 +231,5 @@ func preheatStartupDeferredBlock(state *startupDeferredTranscriptState, index, w
 		}
 		meta.LineCounts[width] = lineCount
 	}
-	return !warm && lineCount > 0
+	return lineCount > 0
 }

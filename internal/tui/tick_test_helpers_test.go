@@ -18,3 +18,35 @@ func stubTUITicks(t *testing.T) {
 	}
 	t.Cleanup(func() { tickCmd = orig })
 }
+
+// testCmdMsgs runs cmd and flattens any tea.BatchMsg produced by tea.Batch so
+// tests can assert on individual follow-up messages regardless of batch
+// composition or ordering.
+func testCmdMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if msg == nil {
+		return nil
+	}
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var msgs []tea.Msg
+	for _, sub := range batch {
+		msgs = append(msgs, testCmdMsgs(sub)...)
+	}
+	return msgs
+}
+
+func testFindMsg[T any](msgs []tea.Msg) (T, bool) {
+	for _, msg := range msgs {
+		if typed, ok := msg.(T); ok {
+			return typed, true
+		}
+	}
+	var zero T
+	return zero, false
+}

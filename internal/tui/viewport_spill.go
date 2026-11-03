@@ -412,8 +412,47 @@ func (b *Block) fallbackSummary() string {
 }
 
 func (v *Viewport) spillBlock(block *Block) bool {
+	return v.spillBlockWithMeasure(block, true)
+}
+
+// spillBlockForIdle is the idle-sweep variant: it preserves an existing line
+// count but does not render the whole block just to measure it. A missing
+// count is filled on demand if the block becomes visible again.
+func (v *Viewport) spillBlockForIdle(block *Block) bool {
+	return v.spillBlockWithMeasure(block, false)
+}
+
+func (v *Viewport) spillBlockWithMeasure(block *Block, measureLineCount bool) bool {
 	if v.spill == nil || block == nil || block.spillCold {
 		return false
+	}
+	sizeBefore, ok := spillBlockPayload(block, v.spill, v.width, measureLineCount)
+	sizeAfter := block.estimatedHotBytes()
+	if sizeAfter > sizeBefore {
+		// A failed spill may still have created caches while measuring; the
+		// viewport total never counted them, so account for them without
+		// subtracting anything the block still holds.
+		v.hotBytes += sizeAfter - sizeBefore
+	}
+	if !ok {
+		return false
+	}
+	v.hotBytes -= sizeBefore
+	if v.hotBytes < 0 {
+		v.hotBytes = 0
+	}
+	return true
+}
+
+// spillBlockPayload serializes block into store and clears every field the hot
+// budget counts, returning the hot bytes the block held before the spill. The
+// caller owns the byte accounting. measureLineCount records a rendered count
+// for width before the content is cleared; the deferred archive already keeps
+// per-width counts in its metadata and passes false so spilling a hidden card
+// never pays a full card assembly.
+func spillBlockPayload(block *Block, store *ViewportSpillStore, width int, measureLineCount bool) (int64, bool) {
+	if store == nil || block == nil || block.spillCold {
+		return 0, false
 	}
 	if block.spillSummary == "" {
 		block.spillSummary = block.Summary()
@@ -425,30 +464,23 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	if block.lineCacheWidth > 0 && len(block.lineCache) > 0 {
 		block.spillLineCounts[block.lineCacheWidth] = block.lineCountCache
 	}
-	if v.width > 0 {
-		if block.lineCountCache > 0 && block.lineCacheWidth == v.width {
+	if measureLineCount && width > 0 {
+		if block.lineCountCache > 0 && block.lineCacheWidth == width {
 			// The count survives a derived-cache release; reusing it avoids a
 			// whole-block re-render just to spill content that is about to be
 			// written out.
-			block.spillLineCounts[v.width] = block.lineCountCache
+			block.spillLineCounts[width] = block.lineCountCache
 		} else {
-			block.spillLineCounts[v.width] = block.LineCount(v.width)
+			block.spillLineCounts[width] = block.LineCount(width)
 		}
 	}
 
-	size := block.estimatedHotBytes()
-	if size > sizeBefore {
-		// The count render above created caches that the viewport total never
-		// counted; account for them so the subtraction below only removes bytes
-		// that were actually tracked.
-		v.hotBytes += size - sizeBefore
-	}
-	ref, err := v.spill.Append(block)
+	ref, err := store.Append(block)
 	if err != nil {
-		return false
+		return 0, false
 	}
 	block.spillRef = ref
-	block.spillStore = v.spill
+	block.spillStore = store
 	// Capture the identity before clearing Content so a later transcript
 	// rebuild can still pair this cold card with its rebuilt counterpart.
 	block.spillIdentityKey = rebuiltBlockIdentityKey(block)
@@ -501,9 +533,5 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	block.previewHL = nil
 	block.richMarkdownHL = nil
 	block.compactionSectionHL = nil
-	v.hotBytes -= size
-	if v.hotBytes < 0 {
-		v.hotBytes = 0
-	}
-	return true
+	return sizeBefore, true
 }

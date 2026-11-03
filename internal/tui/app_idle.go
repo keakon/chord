@@ -126,6 +126,7 @@ func (m *Model) hasActiveWorkForIdleReclaim() bool {
 func (m *Model) updateBackgroundIdleSweepState() tea.Cmd {
 	if m.displayState != stateBackground || m.hasActiveWorkForIdleReclaim() {
 		m.cancelFreeOSMemoryReclaim()
+		m.cancelIdleOversizedSpill()
 		m.backgroundIdleSince = time.Time{}
 		m.clearIdleSweepSchedule()
 		return nil
@@ -336,6 +337,14 @@ func (m *Model) performIdleSweep() {
 	// The deferred startup archive lives outside the viewport, so its previously
 	// visited windows need their own sweep.
 	m.dropStartupDeferredTranscriptHiddenCaches()
+	// Oversized off-screen blocks are exempt from the active budget so
+	// scroll-back stays instant; idle is the point where that trade flips.
+	// Queue a bounded batch rather than writing several blocks in this Update.
+	m.markIdleOversizedSpillPending()
+	if state := m.startupDeferredTranscript; state != nil {
+		state.archiveSpillAllowOversized = true
+		m.markStartupDeferredArchiveSpillPending()
+	}
 
 	// Shrink hot budget for aggressive spill.
 	cadence := m.currentCadence()

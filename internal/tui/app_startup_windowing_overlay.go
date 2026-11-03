@@ -38,19 +38,7 @@ func (m *Model) deferredStartupTranscriptSearch(query string) []MatchPosition {
 	if state == nil || len(state.blockMeta) == 0 || m.viewport == nil {
 		return nil
 	}
-	candidates := findMatchesInStartupDeferredBlockMeta(state.blockMeta, query, m.viewport.width)
-	matches := candidates[:0]
-	for _, match := range candidates {
-		if match.BlockIndex < 0 || match.BlockIndex >= len(state.allBlocks) {
-			continue
-		}
-		block := state.allBlocks[match.BlockIndex]
-		if innerOffset, ok := visibleSearchMatchInnerOffset(block, query, m.viewport.width); ok {
-			match.InnerOffset = innerOffset
-			matches = append(matches, match)
-		}
-	}
-	return matches
+	return findMatchesInStartupDeferredBlockMeta(state.blockMeta, query, m.viewport.width)
 }
 
 func (m *Model) locateDeferredStartupTranscriptBlock(blockID int, trigger string) bool {
@@ -135,23 +123,40 @@ func (m *Model) beginDeferredStartupTranscriptSearch() tea.Cmd {
 	return textinput.Blink
 }
 
-func (m *Model) executeSearchAgainstCurrentTranscript(query string) {
+func (m *Model) executeSearchAgainstCurrentTranscript(query string) tea.Cmd {
 	query = strings.TrimSpace(query)
 	if m.hasDeferredStartupTranscript() {
 		m.search.State.Query = query
 		m.search.State.Active = true
+		m.startupDeferredSearchGeneration++
+		generation := m.startupDeferredSearchGeneration
 		if query == "" {
 			m.search.State.Matches = nil
 			m.search.State.Current = -1
-			return
+			return nil
+		}
+		if m.startupDeferredHasColdBlocks() {
+			meta, width := m.snapshotStartupDeferredSearchBlocks()
+			prevOffset := m.viewport.offset
+			m.search.State.Matches = nil
+			m.search.State.Current = -1
+			return func() tea.Msg {
+				return startupDeferredSearchResultMsg{
+					generation: generation,
+					query:      query,
+					prevOffset: prevOffset,
+					matches:    findMatchesInStartupDeferredBlockMeta(meta, query, width),
+				}
+			}
 		}
 		m.search.State.Matches = m.deferredStartupTranscriptSearch(query)
 		m.search.State.Current = initialSearchCurrentIndex(m.search.State.Matches, m.searchAnchorIndexInDeferredMeta())
-		return
+		return nil
 	}
 	blocks := m.viewport.visibleBlocks()
 	ExecuteSearch(&m.search.State, blocks, query, m.viewport.width, m.searchAnchorIndexInVisibleBlocks(blocks))
 	m.viewport.markHotBudgetDirty()
+	return nil
 }
 
 func (m *Model) maybeRevealSearchMatchBlock(match MatchPosition) {

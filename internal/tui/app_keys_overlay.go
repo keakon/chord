@@ -126,8 +126,9 @@ func (m *Model) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		query := strings.TrimSpace(m.search.Input.Value())
 		prevOffset := m.viewport.offset
+		var searchCmd tea.Cmd
 		if query != "" {
-			m.executeSearchAgainstCurrentTranscript(query)
+			searchCmd = m.executeSearchAgainstCurrentTranscript(query)
 			if match, ok := m.search.State.CurrentMatch(); ok {
 				m.maybeScrollToSearchMatch(match, "search_enter")
 			}
@@ -135,7 +136,7 @@ func (m *Model) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 		m.search.Input.Blur()
 		cmd := m.switchModeWithIME(ModeNormal)
 		m.recalcViewportSize()
-		return m.refreshInlineImagesIfViewportMoved(prevOffset, cmd)
+		return tea.Batch(m.refreshInlineImagesIfViewportMoved(prevOffset, cmd), searchCmd)
 	default:
 		var cmd tea.Cmd
 		m.search, cmd = m.search.Update(msg)

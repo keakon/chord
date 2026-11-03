@@ -307,7 +307,8 @@ type Model struct {
 	pendingDialogs []pendingDialog
 
 	// Search state
-	search SearchModel
+	search                          SearchModel
+	startupDeferredSearchGeneration uint64
 
 	// Model selector state
 	modelSelect       modelSelectState
@@ -947,6 +948,14 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			m.recalcViewportSize()
 		}
 	}()
+	// Background maintenance (halo preheat, archive spill, idle oversized spill)
+	// is requested by handlers that cannot return a command; turn the pending
+	// flags into ticks here so every Update path shares one scheduler.
+	defer func() {
+		if maintenance := m.scheduleStartupDeferredMaintenance(); maintenance != nil {
+			cmd = tea.Batch(cmd, maintenance)
+		}
+	}()
 	defer func() {
 		if len(m.pendingDialogs) > 0 {
 			if next := m.tryPresentNextDialog(); next != nil {
@@ -1332,6 +1341,15 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 	case startupDeferredPreheatTickMsg:
 		return m, m.handleStartupDeferredTranscriptPreheat(msg)
+
+	case startupDeferredArchiveSpillTickMsg:
+		return m, m.handleStartupDeferredArchiveSpillTick(msg)
+
+	case idleOversizedSpillTickMsg:
+		return m, m.handleIdleOversizedSpillTick(msg)
+
+	case startupDeferredSearchResultMsg:
+		return m, m.handleStartupDeferredSearchResult(msg)
 
 	case streamFlushTickMsg:
 		return m, m.handleStreamFlushTick(msg)

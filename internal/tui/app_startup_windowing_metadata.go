@@ -5,20 +5,6 @@ import (
 	"strings"
 )
 
-func startupDeferredMetaSearchInnerOffset(searchable, query string, width int) int {
-	if query == "" || strings.TrimSpace(searchable) == "" {
-		return 0
-	}
-	if width <= 0 {
-		width = 80
-	}
-	lowerQuery := strings.ToLower(query)
-	if offset, ok := wrappedSearchMatchLineOffset(searchable, lowerQuery, width); ok {
-		return offset
-	}
-	return 0
-}
-
 // startupDeferredBlockMeta is the archive-side descriptor of one deferred
 // block. Summary and searchable text stay on the block and resolve on demand
 // (search is the only consumer and runs on explicit user action), so long
@@ -40,27 +26,22 @@ func (meta startupDeferredBlockMeta) summary() string {
 	return meta.block.Summary()
 }
 
-// searchableText resolves the block's cached lowercase search text. A block
-// that has since been spilled no longer carries its content, so the text comes
-// from a temporary copy loaded out of the spill store — the same fallback the
-// non-deferred search path uses. The copy is dropped as soon as the text is
-// built, so a search never keeps spilled cards materialized.
-func (meta startupDeferredBlockMeta) searchableText() string {
+// searchableInspection resolves the block's lowercase search text together
+// with the block that should be used for visibility validation. A spilled
+// archive block is loaded into a temporary inspection copy; the caller must
+// invalidate it when temporary is true.
+func (meta startupDeferredBlockMeta) searchableInspection() (string, *Block, bool) {
 	if meta.block == nil {
-		return ""
+		return "", nil, false
 	}
 	if !meta.block.spillCold {
-		return meta.block.searchableTextLower()
+		return meta.block.searchableTextLower(), meta.block, false
 	}
 	inspect, temporary := meta.block.inspectionBlock()
 	if inspect == nil {
-		return ""
+		return "", nil, false
 	}
-	text := inspect.searchableTextLower()
-	if temporary {
-		inspect.InvalidateCache()
-	}
-	return text
+	return inspect.searchableTextLower(), inspect, temporary
 }
 
 func cloneLineCounts(src map[int]int) map[int]int {
@@ -150,22 +131,28 @@ func findMatchesInStartupDeferredBlockMeta(meta []startupDeferredBlockMeta, quer
 	matches := make([]MatchPosition, 0)
 	lineOffset := 0
 	for i, blockMeta := range meta {
-		// Resolve the searchable text once per block: a spilled archive block
-		// reads it back from the spill store, so the candidate and visibility
-		// checks must share a single load.
-		searchable := blockMeta.searchableText()
+		searchable, inspect, temporary := blockMeta.searchableInspection()
+		if inspect == nil {
+			lineOffset += startupDeferredBlockLineCount(blockMeta, width)
+			continue
+		}
 		candidate := strings.Contains(searchable, lowerQuery)
 		if !candidate && blockMeta.Type == BlockAssistant {
 			candidate = assistantMarkdownMayContainQuery(searchable, lowerQuery)
 		}
 		if candidate && startupDeferredMetaSearchVisible(blockMeta, searchable) {
-			matches = append(matches, MatchPosition{
-				BlockIndex:  i,
-				BlockID:     blockMeta.BlockID,
-				LineOffset:  lineOffset,
-				InnerOffset: startupDeferredMetaSearchInnerOffset(searchable, query, width),
-				Query:       query,
-			})
+			if innerOffset, ok := visibleSearchMatchInnerOffset(inspect, query, width); ok {
+				matches = append(matches, MatchPosition{
+					BlockIndex:  i,
+					BlockID:     blockMeta.BlockID,
+					LineOffset:  lineOffset,
+					InnerOffset: innerOffset,
+					Query:       query,
+				})
+			}
+		}
+		if temporary {
+			inspect.InvalidateCache()
 		}
 		lineOffset += startupDeferredBlockLineCount(blockMeta, width)
 	}

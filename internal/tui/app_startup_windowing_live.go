@@ -119,6 +119,9 @@ func (m *Model) removeViewportBlockByID(blockID int) {
 	m.syncStartupDeferredTranscriptAfterViewportRemove(blockID)
 }
 
+// findDeferredBlock resolves a matching archive block. Callers mutate the
+// result, and a cold block's mutation would be overwritten by the spill payload
+// the next time it materializes, so the matched block is hydrated first.
 func (m *Model) findDeferredBlock(match func(*Block) bool) (*Block, bool) {
 	state := m.startupDeferredTranscript
 	if state == nil || len(state.allBlocks) == 0 || match == nil {
@@ -126,6 +129,7 @@ func (m *Model) findDeferredBlock(match func(*Block) bool) (*Block, bool) {
 	}
 	for _, block := range state.allBlocks {
 		if block != nil && match(block) {
+			_ = block.ensureMaterialized()
 			return block, true
 		}
 	}
@@ -157,6 +161,7 @@ func (m *Model) findLastPendingToolBlockByName(toolName string) (*Block, bool) {
 	for _, block := range slices.Backward(state.allBlocks) {
 
 		if block != nil && block.Type == BlockToolCall && tools.NormalizeName(block.ToolName) == toolName && !block.ResultDone {
+			_ = block.ensureMaterialized()
 			return block, true
 		}
 	}
@@ -349,6 +354,16 @@ func (m *Model) syncStartupDeferredTranscriptBlock(block *Block) {
 	if idx < 0 {
 		return
 	}
+	if block.spillCold {
+		// Cloning a cold block would copy its cleared content into the archive.
+		// Prefer the viewport copy so its hot-byte accounting follows the
+		// hydration; archive-only blocks hydrate in place.
+		if live := m.viewport.MaterializeBlockByID(block.ID); live != nil {
+			block = live
+		} else {
+			_ = block.ensureMaterialized()
+		}
+	}
 	clone := cloneBlockForDeferredSource(block)
 	state.allBlocks[idx] = clone
 	if metaIdx := state.metaIndexFor(idx, block.ID); metaIdx >= 0 {
@@ -370,6 +385,7 @@ func (m *Model) syncStartupDeferredTranscriptBlock(block *Block) {
 			state.metaSigs[block.ID] = sig
 		}
 	}
+	m.markStartupDeferredArchiveSpillPending()
 }
 
 func (m *Model) rebindLiveViewportBlocks() {
@@ -416,6 +432,7 @@ func (m *Model) syncStartupDeferredTranscriptAfterViewportRemove(blockID int) {
 		// Indices shift for every later block; rebuild the map rather than
 		// maintain it decrementally — removals are rare.
 		state.indexByID = buildDeferredBlockIndex(state.allBlocks)
+		state.archiveSpillCursor = 0
 		if metaIdx >= 0 {
 			state.blockMeta = append(state.blockMeta[:metaIdx], state.blockMeta[metaIdx+1:]...)
 			delete(state.metaSigs, blockID)
@@ -447,6 +464,7 @@ func (m *Model) syncStartupDeferredTranscriptAfterViewportAppend() {
 	}
 	state.blockMeta = append(state.blockMeta, startupDeferredMetaForBlock(clone, m.startupDeferredMetaWidth()))
 	state.anchorBlockID = block.ID
+	m.markStartupDeferredArchiveSpillPending()
 	wasShowingTail := state.windowEnd >= len(state.allBlocks)-1
 	forceTailWindow := block.Type == BlockUser
 	if wasShowingTail || forceTailWindow {

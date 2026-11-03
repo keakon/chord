@@ -66,6 +66,13 @@ type renderRuntimeState struct {
 	terminalTitleRequestSeen         bool
 	startupDeferredTranscript        *startupDeferredTranscriptState
 	startupDeferredPreheatGeneration uint64
+	startupDeferredPreheatPending    bool
+	// Archive spill keeps the hidden part of the deferred transcript cold.
+	// Pending is set by whoever changes the hidden set; the scheduler turns it
+	// into one in-flight batch tick.
+	startupDeferredArchiveSpillPending    bool
+	startupDeferredArchiveSpillScheduled  bool
+	startupDeferredArchiveSpillGeneration uint64
 }
 
 type selectionState struct {
@@ -126,6 +133,12 @@ type completionState struct {
 }
 
 type visibilityState struct {
+	// idleOversizedSpill* schedules small, cancellable batches for blocks the
+	// active hot-budget path intentionally keeps resident.
+	idleOversizedSpillPending    bool
+	idleOversizedSpillScheduled  bool
+	idleOversizedSpillGeneration uint64
+
 	// displayState tracks whether the terminal is considered focused (foreground)
 	// or blurred (background). This is best-effort only: driven by BlurMsg/FocusMsg.
 	displayState displayState

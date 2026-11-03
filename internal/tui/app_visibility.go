@@ -208,6 +208,10 @@ func (m *Model) handleFocusMsg() tea.Cmd {
 	now := time.Now()
 	m.displayState = stateForeground
 	m.cancelFreeOSMemoryReclaim()
+	m.cancelIdleOversizedSpill()
+	if state := m.startupDeferredTranscript; state != nil {
+		state.archiveSpillAllowOversized = false
+	}
 	m.lastForegroundAt = now
 	m.backgroundIdleSince = time.Time{}
 	m.idleSweepScheduled = false
@@ -240,6 +244,13 @@ func (m *Model) handleFocusMsg() tea.Cmd {
 
 	if m.viewport != nil {
 		m.viewport.RestoreHotBudget()
+		// Restoring the baseline budget would undo the aggressive deferred
+		// transcript budget for the rest of the session; re-apply it before the
+		// next render enforces the budget.
+		if state := m.startupDeferredTranscript; state != nil {
+			m.configureStartupDeferredTranscriptRetention(state)
+			m.viewport.markHotBudgetNeedsEnforcement()
+		}
 	}
 
 	cmds = append(cmds, m.imageProtocolCmdWithReason("focus-restore"))
