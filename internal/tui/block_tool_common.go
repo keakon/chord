@@ -1445,7 +1445,7 @@ func renderLSPDiagnosticsLines(content, indent string, width int) []string {
 			}
 		} else if lspDiagnosticsOmittedLineRe.MatchString(line) {
 			st = currentStyles.DimStyle
-		} else if strings.Contains(line, ": diagnostics unavailable (") {
+		} else if strings.Contains(line, "diagnostics unavailable (") {
 			st = currentStyles.LSPWarnStyle
 		} else if strings.Contains(line, "LSP:") || strings.Contains(line, "LSP errors detected") || strings.Contains(line, "<diagnostics") || lspDiagLineRe.MatchString(strings.TrimSpace(line)) {
 			st = currentStyles.LSPErrorStyle

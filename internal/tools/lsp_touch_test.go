@@ -228,12 +228,15 @@ func TestApplyPatchToolKeepsLSPDegradationNote(t *testing.T) {
 	if len(notes) != 1 || !strings.Contains(notes[0], "sample-lsp") {
 		t.Fatalf("apply_patch result = %q, want exactly one degradation note naming sample-lsp", out)
 	}
-	// The session note names no file, so the multi-file result must attribute
-	// the missing diagnostics for every file whose wait failed.
-	for _, name := range []string{"a.go", "b.go"} {
-		if !strings.Contains(out, name+": diagnostics unavailable (language server unavailable).") {
-			t.Fatalf("apply_patch result = %q, want %s named as unverified", out, name)
-		}
+	// Both files share the same start failure and nothing else on the card
+	// distinguishes them, so the batch collapses them into one unnamed line
+	// scoped to this patch's Diagnostics section; the session note above still
+	// names the server.
+	if !strings.Contains(out, "diagnostics unavailable (language server unavailable).") {
+		t.Fatalf("apply_patch result = %q, want the merged unverified line", out)
+	}
+	if strings.Contains(out, ".go: diagnostics unavailable") {
+		t.Fatalf("apply_patch result = %q, want no per-file prefix on the uniform miss", out)
 	}
 }
 

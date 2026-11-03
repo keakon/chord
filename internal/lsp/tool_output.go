@@ -157,6 +157,17 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		b.WriteString(block)
 		wroteBlock = true
 	}
+	// Bare misses (files whose wait produced no diagnostics at all) collapse
+	// into one line per reason; every other outcome keeps its per-file block,
+	// because something else on the card distinguishes the files.
+	type missGroup struct {
+		reason string
+		paths  []string
+	}
+	var missGroups []missGroup
+	missGroupIndex := make(map[string]int, len(primaryPaths))
+	namedBlocks := 0
+	uncoveredFiles := 0
 	for _, path := range primaryPaths {
 		state := states[path]
 		reportMiss := multi && state.needsFileReport()
@@ -166,19 +177,28 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		}
 		diags := selectedByPath[path]
 		switch {
-		case reportMiss && state.Status == FileWriteStatusPartial:
-			header := displayDiagnosticPath(path, displayBaseDir) + ": diagnostics incomplete (" + state.reason() + ")"
-			if len(diags) > 0 {
-				writeBlock(header + "; showing available diagnostics:\n" + strings.Join(formatDiagnosticLines(diags), "\n"))
-			} else {
-				writeBlock(header + ".")
-			}
 		case reportMiss && len(diags) > 0:
-			header := displayDiagnosticPath(path, displayBaseDir) + ": diagnostics unavailable (" + state.reason() + "); showing last known diagnostics:"
-			writeBlock(header + "\n" + strings.Join(formatDiagnosticLines(diags), "\n"))
+			namedBlocks++
+			verb, shown := "unavailable", "last known"
+			if state.Status == FileWriteStatusPartial {
+				verb, shown = "incomplete", "available"
+			}
+			header := displayDiagnosticPath(path, displayBaseDir) + ": diagnostics " + verb + " (" + state.reason() + ")"
+			writeBlock(header + "; showing " + shown + " diagnostics:\n" + strings.Join(formatDiagnosticLines(diags), "\n"))
+		case reportMiss && state.Status == FileWriteStatusPartial:
+			namedBlocks++
+			writeBlock(displayDiagnosticPath(path, displayBaseDir) + ": diagnostics incomplete (" + state.reason() + ").")
 		case reportMiss:
-			writeBlock(displayDiagnosticPath(path, displayBaseDir) + ": diagnostics unavailable (" + state.reason() + ").")
+			reason := state.reason()
+			idx, ok := missGroupIndex[reason]
+			if !ok {
+				idx = len(missGroups)
+				missGroupIndex[reason] = idx
+				missGroups = append(missGroups, missGroup{reason: reason})
+			}
+			missGroups[idx].paths = append(missGroups[idx].paths, displayDiagnosticPath(path, displayBaseDir))
 		case len(diags) > 0 && multi:
+			namedBlocks++
 			header := displayDiagnosticPath(path, displayBaseDir)
 			if counts != "" {
 				header += " (" + counts + ")"
@@ -187,8 +207,25 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		case len(diags) > 0:
 			writeBlock(strings.Join(formatDiagnosticLines(diags), "\n"))
 		case counts != "" && multi:
+			namedBlocks++
 			writeBlock(displayDiagnosticPath(path, displayBaseDir) + ": " + counts + ".")
+		default:
+			if state.Status == FileWriteStatusNoServer {
+				uncoveredFiles++
+			}
 		}
+	}
+	for _, group := range missGroups {
+		// The file list is droppable only when it would just repeat the
+		// patch's own file list: every file this section could describe shares
+		// the group's outcome and nothing else on the card distinguishes them.
+		// Any other mix keeps the names, or a silent verified-clean file would
+		// look covered by the miss line.
+		if namedBlocks == 0 && len(missGroups) == 1 && len(group.paths)+uncoveredFiles == len(primaryPaths) {
+			writeBlock("diagnostics unavailable (" + group.reason + ").")
+			continue
+		}
+		writeBlock(strings.Join(group.paths, ", ") + ": diagnostics unavailable (" + group.reason + ").")
 	}
 	appendOtherFileDiagnosticsSection(&b, others, wroteBlock, displayBaseDir)
 	if omitted > 0 {

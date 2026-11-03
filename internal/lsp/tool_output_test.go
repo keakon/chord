@@ -169,6 +169,30 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsNamesFilesWithoutFreshDiagnosti
 	}
 }
 
+func TestAppendLSPDiagnosticsToToolOutputForPathsCollapsesUniformMisses(t *testing.T) {
+	root := resolvedTempDir(t)
+	mgr := NewManager(&config.Config{
+		LSP: config.LSPConfig{"gopls": {Command: "gopls", FileTypes: []string{".go"}}},
+	}, root, nil)
+	pathA := filepath.Join(root, "a.go")
+	pathB := filepath.Join(root, "b.go")
+	note := filepath.Join(root, "notes.md")
+	detail := "wait timed out; eligible versioned diagnostics may follow with the next request"
+	states := map[string]FileWriteDiagnosticsState{
+		pathA: {Status: FileWriteStatusTimeout, Detail: detail},
+		pathB: {Status: FileWriteStatusTimeout, Detail: detail},
+		note:  {Status: FileWriteStatusNoServer},
+	}
+
+	out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA, pathB, note}, false, nil, nil, nil, states, root)
+	if !strings.Contains(out, "diagnostics unavailable ("+detail+").") {
+		t.Fatalf("output = %q, want one unnamed line for the uniform miss", out)
+	}
+	if strings.Contains(out, ": diagnostics unavailable") {
+		t.Fatalf("output = %q, want no file list repeating the patch's own", out)
+	}
+}
+
 func TestAppendLSPDiagnosticsToToolOutputForPathsLabelsCachedDiagnosticsAfterFailure(t *testing.T) {
 	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{

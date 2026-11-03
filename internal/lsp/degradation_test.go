@@ -185,7 +185,7 @@ func TestAfterFileWriteToolResultReportsTimeoutOnce(t *testing.T) {
 		return nil, false, 0, nil
 	}
 
-	const want = "LSP diagnostics unavailable for this edit (language server: no diagnostics within 3s; eligible versioned diagnostics may follow with the next request); do not treat this edit as verified."
+	const want = "LSP diagnostics unavailable for this edit (language server: wait timed out; eligible versioned diagnostics may follow with the next request); do not treat this edit as verified."
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
 	if !strings.Contains(out, want) {
 		t.Fatalf("timeout note = %q, want %q", out, want)

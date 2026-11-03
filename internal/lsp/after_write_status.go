@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -130,14 +129,18 @@ func timeoutFileWrite(output string, timeout time.Duration) FileWriteResult {
 		Status: FileWriteStatusTimeout,
 		// The write's late watch catches whatever the server publishes for
 		// this version after the wait gave up; say so, or an unverified file
-		// looks like a dead end.
+		// looks like a dead end. The precise wait length stays in the logs;
+		// in the result text it only varies card to card.
 		Detail: diagnosticsWaitDetail(timeout) + "; eligible versioned diagnostics may follow with the next request",
 	}
 }
 
+// diagnosticsWaitDetail names a diagnostics wait that ran out. The timeout
+// value itself is logged at the wait site and is not repeated here: it is an
+// internal budget leftover no reader can act on.
 func diagnosticsWaitDetail(timeout time.Duration) string {
 	if timeout <= 0 {
-		return "diagnostics wait budget exhausted"
+		return "wait budget exhausted"
 	}
-	return fmt.Sprintf("no diagnostics within %v", max(timeout.Round(100*time.Millisecond), 100*time.Millisecond))
+	return "wait timed out"
 }

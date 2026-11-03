@@ -189,7 +189,7 @@ func TestAfterFileWritesToolResultAppendsTimeoutNote(t *testing.T) {
 	results := mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
 		{Path: alpha, Content: "package main\n", ChangeType: WatchedFileChanged},
 	}, "")
-	if !strings.Contains(results[alpha].Output, "no diagnostics within") {
+	if !strings.Contains(results[alpha].Output, "wait timed out") {
 		t.Fatalf("timeout note missing from result: %q", results[alpha].Output)
 	}
 	if results[alpha].Status != FileWriteStatusTimeout {
