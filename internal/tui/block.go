@@ -114,6 +114,13 @@ type Block struct {
 	// system-reminder wrapper) for copy actions while Content contains the
 	// card-specific display form.
 	BackgroundCopyContent string
+	// BackgroundHeadlineLines records which Content lines the JOB RESULT
+	// formatter emitted as job headlines. Job output is free-form and may open
+	// lines with the same ✓/✗/• glyphs a headline uses, so the renderer matches
+	// headlines by these indices instead of re-deriving them from the text.
+	// Exported so the spill round-trip keeps it alongside the Content the
+	// indices point into.
+	BackgroundHeadlineLines []int
 
 	// LinkedAgentID is set for Delegate tool blocks when the result contains the
 	// created subagent's instance ID (e.g. "agent-1"). The card is always

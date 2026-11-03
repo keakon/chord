@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,15 +29,18 @@ func TestParseBackgroundResultKeepsElapsedAndQuietOutOfResidual(t *testing.T) {
 		t.Fatalf("timing fields leaked into residual: %v", parsed.residual)
 	}
 
-	formatted, _ := formatSingleBackgroundResult(raw, "", "", "", "")
-	if !strings.Contains(formatted, elapsedGlyph+" 1m35s") {
-		t.Fatalf("formatted card dropped the elapsed field:\n%s", formatted)
+	formatted := formatBackgroundResultCard(raw)
+	if !strings.Contains(formatted.content, elapsedGlyph+" 1m35s") {
+		t.Fatalf("formatted card dropped the elapsed field:\n%s", formatted.content)
+	}
+	if len(formatted.headlineLines) != 1 || formatted.headlineLines[0] != 0 {
+		t.Fatalf("headline lines = %v, want [0]", formatted.headlineLines)
 	}
 	// Quiet measures how long a *running* job has been silent; a finished card
 	// gets nothing from it, so the parser consumes the line and the renderer
 	// never sees it.
-	if strings.Contains(formatted, "quiet") {
-		t.Fatalf("formatted card kept the quiet field:\n%s", formatted)
+	if strings.Contains(formatted.content, "quiet") {
+		t.Fatalf("formatted card kept the quiet field:\n%s", formatted.content)
 	}
 }
 
@@ -98,9 +102,10 @@ func TestOverlayRowShowsQuietDuration(t *testing.T) {
 func TestRenderBackgroundResultSanitizesControlSequences(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	block := &Block{
-		Type:        BlockStatus,
-		StatusTitle: backgroundResultCardTitle,
-		Content:     "✓ job\nStatus: completed\nRelevant output:\nvalue \x1b[1;1H\x00\x9b31m",
+		Type:                    BlockStatus,
+		StatusTitle:             backgroundResultCardTitle,
+		Content:                 "✓ job\nStatus: completed\nRelevant output:\nvalue \x1b[1;1H\x00\x9b31m",
+		BackgroundHeadlineLines: []int{0},
 	}
 	raw := strings.Join(block.Render(100, ""), "\n")
 	if strings.Contains(raw, "\x1b[1;1H") || strings.ContainsRune(raw, '\x00') || strings.ContainsRune(raw, '\x9b') {
@@ -111,5 +116,105 @@ func TestRenderBackgroundResultSanitizesControlSequences(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("background result missing escaped %s in %q", want, plain)
 		}
+	}
+}
+
+// Each job section body opens with its headline, so the recorded headline
+// lines are the section starts: line 0 and, after section one's body plus the
+// blank join line, the offset of the next section's first line.
+func TestFormatBackgroundResultCardRecordsMultiJobHeadlineLines(t *testing.T) {
+	raw := "[Background job job-1 finished]\n\n" +
+		"Status: completed (exit code 0)\n" +
+		"Purpose: first\n\n" +
+		"Relevant output:\n" +
+		"line one\n" +
+		"line two\n" +
+		"[Background job job-2 finished]\n\n" +
+		"Status: failed (exit status 7)\n" +
+		"Purpose: second"
+	formatted := formatBackgroundResultCard(raw)
+	// Section one renders as headline, status line, the output section header
+	// and two output lines; the join adds one blank line before job-2.
+	if got, want := formatted.headlineLines, []int{0, 6}; !slices.Equal(got, want) {
+		t.Fatalf("headline lines = %v, want %v", got, want)
+	}
+	lines := strings.Split(formatted.content, "\n")
+	for _, idx := range formatted.headlineLines {
+		if !strings.HasPrefix(lines[idx], "✓") && !strings.HasPrefix(lines[idx], "✗") {
+			t.Fatalf("line %d = %q, want a glyph headline", idx, lines[idx])
+		}
+	}
+}
+
+// Build tools log their own progress marks: a docs site build opens its
+// completion lines with the same ✓ a job headline uses. A folded card folds to
+// the job's headline alone — output lines must not be promoted into extra
+// checkmark rows, and the unmarked output context stays hidden with the rest
+// of the output.
+func TestBackgroundResultFoldedKeepsOutputCheckmarksOutOfTheHeadlines(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	raw := "[Background job job-25 finished]\n\n" +
+		"Status: completed (exit code 0)\n" +
+		"Elapsed: 5s\n" +
+		"Purpose: build the bilingual docs\n" +
+		"Command: npm ci && npm run build\n\n" +
+		"Relevant output:\n" +
+		"npm warn allow-scripts fsevents@2.3.3\n" +
+		"> vitepress build\n" +
+		"- building client + server bundles...\n" +
+		"✓ building client + server bundles...\n" +
+		"- rendering pages...\n" +
+		"✓ rendering pages...\n" +
+		"build complete in 1.51s."
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "mb-fold-check-output", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-fold-check-output")
+	if !ok {
+		t.Fatal("expected background result block")
+	}
+	rows := foldedBackgroundResultRows(t, block, 90)
+	if len(rows) != 1 {
+		t.Fatalf("folded rows = %d (%v), want the job headline alone", len(rows), rows)
+	}
+	if !strings.Contains(rows[0], "✓ ▸ job-25 · build the bilingual docs") {
+		t.Fatalf("folded headline = %q, want the job headline", rows[0])
+	}
+}
+
+// Opening the card shows the output verbatim at the output indent: a ✓ line in
+// the output stays an output row, so exactly one headline row carries the
+// disclosure marker (the expanded ▾; the folded ▸ belongs to the folded row).
+func TestBackgroundResultExpandedRendersOutputCheckmarksVerbatim(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	raw := "[Background job job-25 finished]\n\n" +
+		"Status: completed (exit code 0)\n" +
+		"Elapsed: 5s\n" +
+		"Purpose: build the bilingual docs\n\n" +
+		"Relevant output:\n" +
+		"npm warn allow-scripts fsevents@2.3.3\n" +
+		"- building client + server bundles...\n" +
+		"✓ building client + server bundles...\n" +
+		"build complete in 1.51s."
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "mb-open-check-output", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-open-check-output")
+	if !ok {
+		t.Fatal("expected background result block")
+	}
+	if !block.ToggleAtWidth(120) || block.Collapsed {
+		t.Fatal("toggling must expand the card")
+	}
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{
+		"npm warn allow-scripts fsevents@2.3.3",
+		"✓ building client + server bundles...",
+		"build complete in 1.51s.",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expanded card lost output row %q:\n%s", want, rendered)
+		}
+	}
+	if got := strings.Count(rendered, toolDisclosureExpanded); got != 1 {
+		t.Fatalf("disclosure markers = %d, want the single job headline:\n%s", got, rendered)
 	}
 }

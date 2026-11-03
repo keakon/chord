@@ -165,6 +165,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- A folded JOB RESULT card no longer renders output lines that open with ✓, ✗, or • as extra checkmark rows: build tools that log their own progress marks, such as `vitepress`, no longer read as multiple completed jobs. Expanded multi-job cards also keep every job's headline row instead of folding the next job into the previous job's output.
+
 - The Ctrl+G diagnostics bundle no longer stalls the UI in long sessions: line counts come from the values recorded when cards were spilled to disk instead of reading every card back and re-rendering it, and only the visible window is written out as rendered blocks.
 
 - WebFetch checks permission rules before following each HTTP redirect, so an allowed URL cannot redirect a fetch to a denied target. Redirect targets requiring confirmation stop the fetch unless YOLO relaxes the rule; resolved connection IPs remain unchecked.

@@ -30,39 +30,66 @@ type parsedBackgroundResult struct {
 	duration    string
 }
 
-func formatBackgroundResultCardContent(raw, id, status, command, description string) (string, string) {
+// formattedBackgroundResult is the card body a JOB RESULT card renders plus
+// the one fact about it the renderer must not re-derive from the text: which
+// lines are job headlines. Job output is free-form and may itself open lines
+// with the ✓/✗/• glyphs a headline uses (build tools log their own progress
+// marks), so headline identity is recorded here at format time and the
+// renderer matches lines by index.
+type formattedBackgroundResult struct {
+	content       string
+	headlineLines []int
+	headlineID    string
+}
+
+func formatBackgroundResultCard(raw string) formattedBackgroundResult {
 	sections := splitBackgroundResultSections(raw)
-	if id == "" && status == "" && command == "" && description == "" && len(sections) > 1 {
-		formatted := make([]string, 0, len(sections))
+	if len(sections) > 1 {
+		contents := make([]string, 0, len(sections))
 		firstID := ""
 		for _, section := range sections {
-			content, sectionID := formatSingleBackgroundResult(section, "", "", "", "")
+			content, sectionID := formatSingleBackgroundResult(section)
 			if firstID == "" {
 				firstID = sectionID
 			}
 			if content != "" {
-				formatted = append(formatted, content)
+				contents = append(contents, content)
 			}
 		}
-		return strings.Join(formatted, "\n\n"), firstID
+		return joinBackgroundResultSections(contents, firstID)
 	}
-	return formatSingleBackgroundResult(raw, id, status, command, description)
+	content, id := formatSingleBackgroundResult(raw)
+	return formattedBackgroundResult{content: content, headlineLines: []int{0}, headlineID: id}
 }
 
-func formatSingleBackgroundResult(raw, id, status, command, description string) (string, string) {
+// joinBackgroundResultSections joins per-job section bodies with one blank
+// line. Each body opens with its headline, so the section start offsets are
+// the headline line indices the renderer matches on.
+func joinBackgroundResultSections(contents []string, firstID string) formattedBackgroundResult {
+	var b strings.Builder
+	headlines := make([]int, 0, len(contents))
+	lines := 0
+	for i, content := range contents {
+		if i > 0 {
+			// The "\n\n" separator ends the previous section's last line and
+			// writes the one blank line between sections, so it advances the
+			// line cursor by exactly one.
+			b.WriteString("\n\n")
+			lines++
+		}
+		headlines = append(headlines, lines)
+		b.WriteString(content)
+		lines += strings.Count(content, "\n") + 1
+	}
+	return formattedBackgroundResult{content: b.String(), headlineLines: headlines, headlineID: firstID}
+}
+
+func formatSingleBackgroundResult(raw string) (string, string) {
 	parsed := parseBackgroundResult(raw)
-	if strings.TrimSpace(id) == "" {
-		id = parsed.id
-	}
-	if strings.TrimSpace(status) == "" {
-		status = parsed.status
-	}
-	if strings.TrimSpace(command) == "" {
-		command = parsed.command
-	}
-	if strings.TrimSpace(description) == "" {
-		description = parsed.description
-	}
+	id := parsed.id
+	status := parsed.status
+	command := parsed.command
+	description := parsed.description
 	if strings.TrimSpace(description) == "" {
 		description = command
 	}
@@ -331,6 +358,25 @@ func (b *Block) isBackgroundResultCard() bool {
 	return b.BackgroundObjectID != "" || b.StatusTitle == backgroundResultCardTitle
 }
 
+// backgroundResultContentLines splits the card body the way every reader of a
+// JOB RESULT card's Content does. The headline indices stored on the block are
+// offsets into exactly this line sequence, so the formatter and the renderer
+// must share one splitting — a divergent split would point every index at the
+// wrong line.
+func backgroundResultContentLines(content string) []string {
+	return strings.Split(strings.TrimSpace(terminaltext.Sanitize(content)), "\n")
+}
+
+// applyBackgroundResultContent stores a formatted result on the block: the card
+// body, the headline indices that travel with it, and the bare copy text.
+// Every writer of a JOB RESULT card's Content goes through here so the indices
+// cannot drift from the text they point into.
+func (b *Block) applyBackgroundResultContent(formatted formattedBackgroundResult, raw string) {
+	b.Content = formatted.content
+	b.BackgroundHeadlineLines = formatted.headlineLines
+	b.BackgroundCopyContent = raw
+}
+
 func (b *Block) renderBackgroundResult(width int) []string {
 	metrics := newToolCardMetrics(width)
 	body := make([]string, 0, 8)
@@ -343,7 +389,8 @@ func (b *Block) renderBackgroundResult(width int) []string {
 	skippingOutput := false
 	headlineIdx := -1
 	headlineTailIdx := -1
-	contentLines := strings.Split(strings.TrimSpace(terminaltext.Sanitize(b.Content)), "\n")
+	contentLines := backgroundResultContentLines(b.Content)
+	nextHeadline := 0
 	for i := range len(contentLines) {
 		line := contentLines[i]
 		trimmed := strings.TrimSpace(line)
@@ -353,7 +400,8 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			}
 			continue
 		}
-		if isBackgroundResultHeadline(trimmed) {
+		if nextHeadline < len(b.BackgroundHeadlineLines) && b.BackgroundHeadlineLines[nextHeadline] == i {
+			nextHeadline++
 			skippingOutput = false
 			if len(body) > 0 && body[len(body)-1] != "" {
 				body = append(body, "")
@@ -404,13 +452,22 @@ func (b *Block) renderBackgroundResult(width int) []string {
 				body = append(body, "")
 			}
 			body = append(body, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Relevant output"))
-			output := strings.Join(contentLines[i+1:], "\n")
+			// Output is the tail of its section: it ends where the next job's
+			// headline begins, not at the end of the card — a ✓/✗ line inside
+			// the output belongs to the output, and the next job still gets its
+			// own headline row.
+			outputEnd := len(contentLines)
+			if nextHeadline < len(b.BackgroundHeadlineLines) {
+				outputEnd = b.BackgroundHeadlineLines[nextHeadline]
+			}
+			output := strings.Join(contentLines[i+1:outputEnd], "\n")
 			if backgroundResultHasCodeFence(output) {
 				codeLines, _, _ := renderAssistantMarkdownContent(output, output, metrics.contentWidth, 0, &b.codeHL)
 				for _, codeLine := range codeLines {
 					body = append(body, "    "+codeLine)
 				}
-				break
+				skippingOutput = true
+				continue
 			}
 			for outputLine := range strings.SplitSeq(output, "\n") {
 				if strings.TrimSpace(outputLine) == "" {
@@ -427,7 +484,8 @@ func (b *Block) renderBackgroundResult(width int) []string {
 					body = append(body, currentStyles.DimStyle.Render(prefix+part))
 				}
 			}
-			break
+			skippingOutput = true
+			continue
 		}
 		if expectStatus {
 			// This summary row contributes two things and nothing else: the
@@ -511,23 +569,16 @@ func splitBackgroundResultStatusTail(line string) (elapsed, detail string) {
 }
 
 // backgroundResultElapsedAfter returns the duration a card lifts from the
-// status line that follows the headline at index i, or "" when no status line
-// follows it. Only the one summary line the formatter writes directly under a
-// headline qualifies: any other neighbour (another headline, the relevant-output
-// section) leaves the wrap budget untouched.
+// status line the formatter writes directly under the headline at index i, or
+// "" when that line carries no measured part. The formatter always emits the
+// summary line at headline+1, so the lookup is positional.
 func backgroundResultElapsedAfter(lines []string, headline int) string {
-	for i := headline + 1; i < len(lines); i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed == "" {
-			continue
-		}
-		if isBackgroundResultHeadline(trimmed) {
-			return ""
-		}
-		elapsed, _ := splitBackgroundResultStatusTail(backgroundResultStatusDetail(trimmed))
-		return elapsed
+	if headline+1 >= len(lines) {
+		return ""
 	}
-	return ""
+	trimmed := strings.TrimSpace(lines[headline+1])
+	elapsed, _ := splitBackgroundResultStatusTail(backgroundResultStatusDetail(trimmed))
+	return elapsed
 }
 
 // backgroundResultElapsedSuffixWidth is the room the elapsed tail of a
@@ -554,11 +605,6 @@ func backgroundResultHasCodeFence(content string) bool {
 // line that already carries it, so a wrap budget or a reservation that forgets
 // the indent loses exactly that much text to the truncation.
 const backgroundResultHeadlineIndent = 4
-
-// isBackgroundResultHeadline reports whether a line is a ✓/✗/• headline.
-func isBackgroundResultHeadline(line string) bool {
-	return strings.HasPrefix(line, "✓") || strings.HasPrefix(line, "✗") || strings.HasPrefix(line, "•")
-}
 
 // styleBackgroundResultHeadline styles the ✓/✗/• headline and appends the
 // disclosure marker a collapsible card carries, so the folded state is visible

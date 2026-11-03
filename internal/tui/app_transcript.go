@@ -786,8 +786,8 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				// model; the rebuilt card and its copy content show the bare
 				// result text.
 				raw := message.StripSystemReminderOverlay(msg.Content)
-				content, headlineID := formatBackgroundResultCardContent(raw, "", "", "", "")
-				backgroundID := headlineID
+				formatted := formatBackgroundResultCard(raw)
+				backgroundID := formatted.headlineID
 				mailboxMessageID := ""
 				if msg.Mailbox != nil {
 					mailboxMessageID = strings.TrimSpace(msg.Mailbox.MessageID)
@@ -799,17 +799,17 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 						backgroundID = mailboxMessageID
 					}
 				}
-				blocks = append(blocks, &Block{
-					ID:                    *nextID,
-					Type:                  BlockStatus,
-					StatusTitle:           backgroundResultCardTitle,
-					Content:               content,
-					BackgroundCopyContent: raw,
-					BackgroundObjectID:    backgroundID,
-					MailboxMessageID:      mailboxMessageID,
-					MsgIndex:              msgIdx,
-					Collapsed:             true,
-				})
+				block := &Block{
+					ID:                 *nextID,
+					Type:               BlockStatus,
+					StatusTitle:        backgroundResultCardTitle,
+					BackgroundObjectID: backgroundID,
+					MailboxMessageID:   mailboxMessageID,
+					MsgIndex:           msgIdx,
+					Collapsed:          true,
+				}
+				block.applyBackgroundResultContent(formatted, raw)
+				blocks = append(blocks, block)
 				*nextID++
 				continue
 			}

@@ -240,7 +240,7 @@ func TestBackgroundResultAppendedEventUpdatesExistingDurableStatusBlock(t *testi
 // whether a re-delivery updates an existing card.
 func TestBackgroundResultAppendedEventDoesNotOverwriteRestoredCardWithReusedJobID(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 30)
-	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: "✓ job-1 · Run production build (previous run)", BackgroundObjectID: "mb-old", AgentID: "", Collapsed: true})
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: "✓ job-1 · Run production build (previous run)", BackgroundHeadlineLines: []int{0}, BackgroundObjectID: "mb-old", AgentID: "", Collapsed: true})
 
 	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("main", "mb-new", "[Background job job-1 finished]\n\nDescription: Run production build\nStatus: completed (exit code 0)")})
 
@@ -458,7 +458,8 @@ func TestBackgroundResultExpandedKeepsElapsedOnTheHeadline(t *testing.T) {
 func TestBackgroundResultExpandedHeadlineKeepsTextBesideTheElapsedTail(t *testing.T) {
 	const purpose = "run the full gateway test suite with the race detector and every quality gate enabledxxxxxxxxx"
 	block := &Block{Type: BlockStatus, StatusTitle: backgroundResultCardTitle,
-		Content: "✓ job-43 · " + purpose + "\nCompleted successfully · " + elapsedGlyph + " 17s"}
+		Content:                 "✓ job-43 · " + purpose + "\nCompleted successfully · " + elapsedGlyph + " 17s",
+		BackgroundHeadlineLines: []int{0}}
 
 	rows := foldedBackgroundResultRows(t, block, 50)
 	joined := strings.Join(rows, " ")
@@ -605,7 +606,7 @@ func TestStatusCardFoldFamilies(t *testing.T) {
 	}
 
 	// A JOB RESULT card keeps folding to each job's headline.
-	job := &Block{Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: "✓ job-1 · task\nfinished"}
+	job := &Block{Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: "✓ job-1 · task\nfinished", BackgroundHeadlineLines: []int{0}}
 	if !job.ToggleAtWidth(100) || !job.Collapsed {
 		t.Fatal("JOB RESULT cards must fold")
 	}
@@ -662,5 +663,79 @@ func TestBackgroundResultHeaderMatchesOnlyTheCurrentFormat(t *testing.T) {
 	}}, &nextID)
 	if len(blocks) != 1 || blocks[0].BackgroundObjectID != "job-7" {
 		t.Fatalf("current-format header must yield job-7, got %q", blocks[0].BackgroundObjectID)
+	}
+}
+
+// One durable message can carry several job sections. A ✓ line inside the
+// first job's output must not break the fold scan: every job still folds to
+// its own headline row, and nothing from the output leaks between them.
+func TestBackgroundResultMultiJobFoldSurvivesCheckmarksInTheOutput(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	raw := "[Background job job-1 finished]\n\n" +
+		"Status: completed (exit code 0)\n" +
+		"Purpose: first job\n\n" +
+		"Relevant output:\n" +
+		"- step one\n" +
+		"✓ step one done\n" +
+		"[Background job job-2 finished]\n\n" +
+		"Status: completed (exit code 0)\n" +
+		"Purpose: second job\n\n" +
+		"Relevant output:\n" +
+		"all clear"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "mb-multi-check", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-multi-check")
+	if !ok {
+		t.Fatal("expected background result block")
+	}
+	rows := foldedBackgroundResultRows(t, block, 90)
+	if len(rows) != 2 {
+		t.Fatalf("folded rows = %d (%v), want one headline per job", len(rows), rows)
+	}
+	if !strings.Contains(rows[0], "✓ ▸ job-1 · first job") || !strings.Contains(rows[1], "✓ ▸ job-2 · second job") {
+		t.Fatalf("folded headlines = %q, want both job headlines", rows)
+	}
+	if strings.Contains(strings.Join(rows, "\n"), "step one") {
+		t.Fatalf("folded card leaked output rows:\n%s", strings.Join(rows, "\n"))
+	}
+}
+
+// Expanded, the next job's headline ends the previous job's output: job-2 gets
+// its own headline row instead of being swallowed into job-1's dim output.
+func TestBackgroundResultMultiJobExpandedKeepsEachHeadline(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	raw := "[Background job job-1 finished]\n\n" +
+		"Status: completed (exit code 0)\n" +
+		"Purpose: first job\n\n" +
+		"Relevant output:\n" +
+		"- step one\n" +
+		"✓ step one done\n" +
+		"[Background job job-2 finished]\n\n" +
+		"Status: completed (exit code 0)\n" +
+		"Purpose: second job\n\n" +
+		"Relevant output:\n" +
+		"all clear"
+
+	_ = m.handleAgentEvent(agentEventMsg{event: backgroundResultAppended("", "mb-multi-open", raw)})
+	block, ok := m.viewport.FindStatusBlockByBackgroundObject("mb-multi-open")
+	if !ok {
+		t.Fatal("expected background result block")
+	}
+	if !block.ToggleAtWidth(120) || block.Collapsed {
+		t.Fatal("toggling must expand the card")
+	}
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
+	for _, want := range []string{
+		"✓ " + toolDisclosureExpanded + " job-1 · first job",
+		"✓ " + toolDisclosureExpanded + " job-2 · second job",
+		"✓ step one done",
+		"all clear",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expanded card lost %q:\n%s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, toolDisclosureExpanded+" step one done") {
+		t.Fatalf("output checkmark rendered as a headline:\n%s", rendered)
 	}
 }

@@ -502,6 +502,7 @@ func spillBlockPayload(block *Block, store *ViewportSpillStore, width int, measu
 	block.ResultNotes = nil
 	block.DoneReport = ""
 	block.BackgroundCopyContent = ""
+	block.BackgroundHeadlineLines = nil
 	block.ThinkingParts = nil
 	block.streamContentBuilder = nil
 	block.bodyVisibilityKey = ""

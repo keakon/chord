@@ -273,8 +273,8 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// the card and its copy content show the bare result text, matching the
 		// restore path.
 		raw := message.StripSystemReminderOverlay(evt.Message.Content)
-		content, headlineID := formatBackgroundResultCardContent(raw, "", "", "", "")
-		backgroundID := headlineID
+		formatted := formatBackgroundResultCard(raw)
+		backgroundID := formatted.headlineID
 		if evt.Message.Mailbox != nil {
 			// The durable mailbox row identity is the card key. Re-delivery of
 			// the same row still updates its card, while a new process reusing
@@ -285,8 +285,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			}
 		}
 		if block, ok := m.findStatusBlockByBackgroundObject(backgroundID); ok {
-			block.Content = content
-			block.BackgroundCopyContent = raw
+			block.applyBackgroundResultContent(formatted, raw)
 			block.StatusTitle = backgroundResultCardTitle
 			block.AgentID = agentID
 			if evt.Message.Mailbox != nil {
@@ -297,7 +296,8 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			m.updateViewportBlock(block)
 			m.markBlockSettled(block)
 		} else {
-			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, Content: content, BackgroundCopyContent: raw, AgentID: agentID, BackgroundObjectID: backgroundID, MsgIndex: evt.MessageIndex, Collapsed: true}
+			block := &Block{ID: m.nextBlockID, Type: BlockStatus, StatusTitle: backgroundResultCardTitle, AgentID: agentID, BackgroundObjectID: backgroundID, MsgIndex: evt.MessageIndex, Collapsed: true}
+			block.applyBackgroundResultContent(formatted, raw)
 			if evt.Message.Mailbox != nil {
 				block.MailboxMessageID = strings.TrimSpace(evt.Message.Mailbox.MessageID)
 			}
