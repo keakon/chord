@@ -297,3 +297,37 @@ func TestDiagnosticDumpIncludesPDFResidentBucket(t *testing.T) {
 		}
 	}
 }
+
+// Diagnostic dumps run on the Update path, so they must not hydrate spilled
+// blocks: reading and re-rendering every cold block froze the UI on long
+// sessions. Cold blocks contribute their stored metadata only.
+func TestDiagnosticDumpDoesNotHydrateSpilledBlocks(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "off-screen spilled body"})
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockUser, Content: strings.Repeat("tail line\n", 60)})
+	block := m.viewport.blocks[0]
+	if !m.viewport.spillBlock(block) {
+		t.Fatal("fixture: expected spillBlock to succeed")
+	}
+	if !block.spillCold {
+		t.Fatal("fixture: expected a cold block")
+	}
+
+	_, dump, err := m.buildDiagnosticDump(time.Now(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !block.spillCold {
+		t.Fatal("diagnostics dump hydrated a spilled block")
+	}
+	rendered := dump[strings.Index(dump, "[blocks.rendered]"):]
+	if end := strings.Index(rendered, "[viewport_render]"); end >= 0 {
+		rendered = rendered[:end]
+	}
+	if strings.Contains(rendered, "off-screen spilled body") {
+		t.Fatalf("dump rendered an off-screen spilled block:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "off-screen blocks omitted") {
+		t.Fatalf("dump missing omitted-block marker:\n%s", rendered)
+	}
+}

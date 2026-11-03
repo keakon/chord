@@ -88,6 +88,49 @@ func TestViewportDropOffScreenCachesReleasesDerivedCaches(t *testing.T) {
 	}
 }
 
+func TestIdleCacheSweepDoesNotSpillContentAlreadyUnderBudget(t *testing.T) {
+	v := NewViewport(80, 10)
+	defer func() { _ = v.Close() }()
+	v.baseHotBytes = 8 << 20
+	v.maxHotBytes = 8 << 20
+
+	big := &Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("body line\n", 40_000)}
+	v.AppendBlock(big)
+	big.mdCache = []string{strings.Repeat("cached line\n", 100_000)}
+	big.hotBytesMemoValid = false
+	v.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: strings.Repeat("tail line\n", 100)})
+	v.recomputeHotBytes()
+	// A rendered viewport has already accounted for its current caches.
+	v.hotBytesDirty = false
+
+	idleBudget := max(v.baseHotBytes/4, int64(1<<20))
+	if v.hotBytes <= idleBudget {
+		t.Fatalf("fixture: hot bytes = %d, want count above idle budget %d", v.hotBytes, idleBudget)
+	}
+
+	v.sticky = false
+	v.offset = v.TotalLines() - v.height
+	v.clampOffset()
+	v.DropOffScreenCaches()
+	if big.spillCold {
+		t.Fatal("cache sweep must not spill during the sweep itself")
+	}
+	if big.estimatedHotBytes() >= idleBudget {
+		t.Fatalf("fixture: released block estimate = %d, want < idle budget %d", big.estimatedHotBytes(), idleBudget)
+	}
+
+	v.ShrinkHotBudget()
+	if big.spillCold {
+		t.Fatalf("idle shrink spilled content that already fits the idle budget: hot=%d idle=%d", v.hotBytes, v.maxHotBytes)
+	}
+	if v.hotBytes > idleBudget {
+		t.Fatalf("hot bytes after cache sweep = %d, want <= idle budget %d", v.hotBytes, idleBudget)
+	}
+	if big.Content == "" {
+		t.Fatal("cache sweep must keep block content")
+	}
+}
+
 func TestBlockReleaseDerivedRenderCachesKeepsContentAndLineMetadata(t *testing.T) {
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "body **text**"}
 	block.mdCache = []string{"rendered"}
@@ -115,8 +158,11 @@ func TestBlockReleaseDerivedRenderCachesKeepsContentAndLineMetadata(t *testing.T
 	if block.viewportCache != nil || block.viewportCacheWidth != 0 {
 		t.Fatal("viewport cache survived release")
 	}
-	if block.lineCache != nil || block.lineCountCache != 0 {
+	if block.lineCache != nil {
 		t.Fatal("rendered line cache survived release")
+	}
+	if block.lineCountCache != 1 || block.lineCacheWidth != 80 {
+		t.Fatalf("line-count metadata must survive release: count=%d width=%d", block.lineCountCache, block.lineCacheWidth)
 	}
 	if block.searchTextLower != "" || block.searchTextReady {
 		t.Fatal("search cache survived release")

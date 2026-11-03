@@ -450,6 +450,16 @@ func (h *Highlighter) clearRenderCache() {
 	h.renderCacheBytes = 0
 }
 
+// RenderCacheBytes reports the approximate bytes held by the render cache. A
+// nil highlighter reports zero so callers can account for optional slots
+// without nil checks.
+func (h *Highlighter) RenderCacheBytes() int {
+	if h == nil {
+		return 0
+	}
+	return h.renderCacheBytes
+}
+
 func (h *Highlighter) updateLanguage(language string) {
 	language = NormalizeLanguage(language)
 	if h.language == language {

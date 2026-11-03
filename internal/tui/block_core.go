@@ -248,7 +248,7 @@ func (b *Block) LineCount(width int) int {
 		b.hotBytesMemoValid = false
 		return count
 	}
-	if b.lineCache == nil || b.lineCacheWidth != width {
+	if b.lineCacheWidth != width || (b.lineCache == nil && b.lineCountCache == 0) {
 		b.lineCache = b.Render(width, "")
 		b.lineCacheWidth = width
 		b.lineCountCache = len(b.lineCache)
@@ -418,7 +418,11 @@ func (b *Block) ReleaseDerivedRenderCaches() {
 	if b == nil || b.Streaming {
 		return
 	}
+	lineCount := b.lineCountCache
+	lineWidth := b.lineCacheWidth
 	b.InvalidateCache()
+	b.lineCountCache = lineCount
+	b.lineCacheWidth = lineWidth
 	b.bodyVisibilityKey = ""
 	b.bodyVisibilityValid = false
 	b.mdCache = nil

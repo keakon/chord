@@ -61,9 +61,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
-- The TUI holds about 8 MiB of off-screen render caches instead of up to 32 MiB; visible content, work in progress, and blocks larger than 4 MiB are not subject to that target. Scrolling back to an older card may re-render it.
+- The TUI releases off-screen render caches once they exceed about 8 MiB instead of holding up to 32 MiB, including while a session is active; visible content and work in progress stay rendered. Blocks larger than 4 MiB are still not spilled to disk, but their render caches are released too. Scrolling back to an older card may re-render it.
 
-- With the terminal in the background and every agent, job, and draft idle, the TUI returns reclaimable heap memory to the OS about 30 seconds after the last work stops instead of waiting five minutes. Dropping off-screen render caches still waits five minutes.
+- With the terminal in the background and every agent, job, and draft idle, the TUI returns reclaimable heap memory to the OS about 30 seconds after the last work stops instead of waiting five minutes. A full sweep of off-screen render caches still waits five minutes.
 
 - Multi-hunk `apply_patch` failures suggest splitting independent changes into single-hunk calls only when partial completion is acceptable; interdependent hunks stay in the same file group. Repeated match failures request a fresh read without suggesting that a single hunk be split, and `edit` with identical `old_string` and `new_string` states that retrying the same arguments cannot succeed.
 
@@ -162,6 +162,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Retained recent messages inside a checkpoint now say they are historical quotes and that `## Current User Request` is authoritative, so a truncated request excerpt is not overridden by a fuller quoted copy. The `compact_context` result and worker checkpoint also state that `state_files` are references the tool did not read or verify.
 
 ### Fixes
+
+- The Ctrl+G diagnostics bundle no longer stalls the UI in long sessions: line counts come from the values recorded when cards were spilled to disk instead of reading every card back and re-rendering it, and only the visible window is written out as rendered blocks.
 
 - WebFetch checks permission rules before following each HTTP redirect, so an allowed URL cannot redirect a fetch to a denied target. Redirect targets requiring confirmation stop the fetch unless YOLO relaxes the rule; resolved connection IPs remain unchecked.
 

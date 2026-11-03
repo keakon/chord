@@ -257,6 +257,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	var visible []*Block
 	var visibleWindowIDs []int
 	var recomputedTotal int
+	var recomputedSkipped int
 	var cacheLenMatch bool
 	var totalMatch bool
 	var startsMonotonic bool
@@ -271,11 +272,21 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 		spanChainMatch = true
 		expectedStart := 0
 		for i, block := range visible {
-			span := debugBlockLineCount(block, max(1, m.viewport.width))
-			recomputedTotal += span
-			if span <= 0 {
-				spansPositive = false
+			span, known := debugBlockLineCount(block, max(1, m.viewport.width))
+			if known {
+				if span <= 0 {
+					spansPositive = false
+				}
+			} else {
+				// Cold blocks report the count recorded at spill time. Without
+				// one, fall back to the viewport's own span so the start chain
+				// stays checkable instead of hydrating the block here.
+				recomputedSkipped++
+				if i < len(m.viewport.blockSpansCache) {
+					span = m.viewport.blockSpansCache[i]
+				}
 			}
+			recomputedTotal += span
 			if i < len(m.viewport.blockStartsCache) {
 				if m.viewport.blockStartsCache[i] != expectedStart {
 					startsMonotonic = false
@@ -381,6 +392,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 		fmt.Fprintf(&sb, "max_hot_bytes: %d\n", m.viewport.maxHotBytes)
 		fmt.Fprintf(&sb, "base_hot_bytes: %d\n", m.viewport.baseHotBytes)
 		fmt.Fprintf(&sb, "total_lines_recomputed: %d\n", recomputedTotal)
+		fmt.Fprintf(&sb, "total_lines_recomputed_skipped: %d\n", recomputedSkipped)
 		fmt.Fprintf(&sb, "last_block_span: %d dirty=%t\n", m.viewport.lastBlockSpan, m.viewport.lastBlockDirty)
 		fmt.Fprintf(&sb, "blocks_total: %d\n", len(m.viewport.blocks))
 		fmt.Fprintf(&sb, "blocks_visible: %d\n", len(visible))
@@ -475,7 +487,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 		for i, block := range visible {
 			lineCount := 0
 			if m.viewport != nil {
-				lineCount = debugBlockLineCount(block, max(1, m.viewport.width))
+				lineCount, _ = debugBlockLineCount(block, max(1, m.viewport.width))
 			}
 			start := -1
 			span := -1
@@ -511,12 +523,29 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	if len(visible) == 0 || m.viewport == nil {
 		fmt.Fprintf(&sb, "(none)\n")
 	} else {
-		spinner := m.activityFrame()
-		for _, block := range visible {
-			fmt.Fprintf(&sb, "-- block id=%d type=%s width=%d --\n", block.ID, debugBlockTypeString(block.Type), max(1, m.viewport.width))
-			rendered := strings.Join(block.Render(max(1, m.viewport.width), spinner), "\n")
-			writeDiagnosticDumpSection(&sb, safe(rendered))
+		// Only the visible window is rendered. Rendering every block forced a
+		// re-render (and spill hydration) of the whole transcript on the Update
+		// path, which froze the UI for seconds on long sessions; the screen
+		// buffer already captures the visible frame.
+		window := make(map[int]struct{}, len(visibleWindowIDs))
+		for _, id := range visibleWindowIDs {
+			window[id] = struct{}{}
 		}
+		spinner := m.activityFrame()
+		rendered := 0
+		for _, block := range visible {
+			if _, ok := window[block.ID]; !ok {
+				continue
+			}
+			rendered++
+			fmt.Fprintf(&sb, "-- block id=%d type=%s width=%d --\n", block.ID, debugBlockTypeString(block.Type), max(1, m.viewport.width))
+			lines := block.Render(max(1, m.viewport.width), spinner)
+			writeDiagnosticDumpSection(&sb, safe(strings.Join(lines, "\n")))
+		}
+		if rendered == 0 {
+			fmt.Fprintf(&sb, "(none)\n")
+		}
+		fmt.Fprintf(&sb, "-- %d off-screen blocks omitted --\n", len(visible)-rendered)
 	}
 
 	fmt.Fprintf(&sb, "\n[viewport_render]\n")
@@ -537,25 +566,22 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	return sb.String(), nil
 }
 
-func debugBlockLineCount(block *Block, width int) int {
+// debugBlockLineCount reports a block's line count without hydrating spilled
+// content. Diagnostics dumps run on the Update path, and a cold block's spill
+// read plus full re-render would block the UI; the count recorded at spill time
+// is enough for the dump. Warm blocks use (or build) their line-count cache.
+func debugBlockLineCount(block *Block, width int) (int, bool) {
 	if block == nil {
-		return 0
+		return 0, false
 	}
 	if width <= 0 {
 		width = 1
 	}
 	if block.spillCold {
-		inspect, temporary := block.inspectionBlock()
-		if inspect == nil {
-			return 0
-		}
-		lc := inspect.MeasureLineCount(width)
-		if temporary {
-			inspect.InvalidateCache()
-		}
-		return lc
+		lc, ok := block.spillLineCounts[width]
+		return lc, ok
 	}
-	return block.MeasureLineCount(width)
+	return block.LineCount(width), true
 }
 
 func sortedBlockIDList(ids map[int]struct{}) []int {

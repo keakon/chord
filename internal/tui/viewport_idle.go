@@ -43,6 +43,15 @@ func (v *Viewport) DropOffScreenCaches() {
 	}
 
 	margin := 5 // rows above/below visible window to preserve
+	released := false
+	defer func() {
+		if released {
+			// Cache release lowers the estimated hot bytes; invalidate the
+			// aggregate so a later idle shrink does not spill blocks that
+			// already fit.
+			v.markHotBudgetDirty()
+		}
+	}()
 	visibleStart := max(v.offset-margin, 0)
 	visibleEnd := v.offset + v.height + margin
 
@@ -59,6 +68,7 @@ func (v *Viewport) DropOffScreenCaches() {
 		if blockEnd < visibleStart || blockStart > visibleEnd {
 			if v.canDropBlockCache(block) {
 				block.ReleaseDerivedRenderCaches()
+				released = true
 			}
 		}
 

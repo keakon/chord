@@ -327,6 +327,12 @@ func (b *Block) estimatedHotBytes() int64 {
 	for _, line := range b.viewportCache {
 		total += len(line)
 	}
+	total += b.codeHL.RenderCacheBytes()
+	total += b.previewHL.RenderCacheBytes()
+	total += b.richMarkdownHL.RenderCacheBytes()
+	for _, hl := range b.compactionSectionHL {
+		total += hl.RenderCacheBytes()
+	}
 	if total < 512 {
 		total = 512
 	}
@@ -415,14 +421,28 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	if block.spillLineCounts == nil {
 		block.spillLineCounts = make(map[int]int)
 	}
+	sizeBefore := block.estimatedHotBytes()
 	if block.lineCacheWidth > 0 && len(block.lineCache) > 0 {
 		block.spillLineCounts[block.lineCacheWidth] = block.lineCountCache
 	}
 	if v.width > 0 {
-		block.spillLineCounts[v.width] = block.LineCount(v.width)
+		if block.lineCountCache > 0 && block.lineCacheWidth == v.width {
+			// The count survives a derived-cache release; reusing it avoids a
+			// whole-block re-render just to spill content that is about to be
+			// written out.
+			block.spillLineCounts[v.width] = block.lineCountCache
+		} else {
+			block.spillLineCounts[v.width] = block.LineCount(v.width)
+		}
 	}
 
 	size := block.estimatedHotBytes()
+	if size > sizeBefore {
+		// The count render above created caches that the viewport total never
+		// counted; account for them so the subtraction below only removes bytes
+		// that were actually tracked.
+		v.hotBytes += size - sizeBefore
+	}
 	ref, err := v.spill.Append(block)
 	if err != nil {
 		return false
@@ -478,6 +498,9 @@ func (v *Viewport) spillBlock(block *Block) bool {
 	block.viewportCache = nil
 	block.viewportCacheWidth = 0
 	block.codeHL = nil
+	block.previewHL = nil
+	block.richMarkdownHL = nil
+	block.compactionSectionHL = nil
 	v.hotBytes -= size
 	if v.hotBytes < 0 {
 		v.hotBytes = 0
