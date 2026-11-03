@@ -54,14 +54,10 @@ test:
 
 # Opt-in speed-up: run the tests with a memory-backed temp dir when one is
 # available, otherwise fall back to the default temp dir. See
-# scripts/test_tmpdir.sh and CONTRIBUTING.md. A private RAM disk created for
-# this run alone is ejected when the run ends; shared mounts are never touched.
+# scripts/test_tmpdir.sh and CONTRIBUTING.md. Each Unix run owns a temporary
+# directory; shared mounts are never swept or ejected.
 test-fast:
-	@tmp="$$( ./scripts/test_tmpdir.sh )"; \
-	 trap './scripts/test_tmpdir.sh --release "$$tmp"' EXIT; \
-	 if [[ -n "$$tmp" ]]; then echo "test-fast: TMPDIR=$$tmp"; \
-	 else echo "test-fast: no memory-backed temp dir; using the default temp dir"; fi; \
-	 TMPDIR="$$tmp" TMP="$$tmp" TEMP="$$tmp" $(GO) test -count=1 $(PKGS)
+	@CHORD_GO='$(GO)' bash scripts/run_tests.sh $(GO) test -count=1 $(PKGS)
 
 test-cover:
 	CHORD_GO='$(GO)' CHORD_TEST_COUNT=1 ./scripts/check_ci_local.sh $(PKGS)
@@ -75,11 +71,7 @@ race:
 # Local race gate: same script and checks as CI, with a memory-backed temp dir
 # when one is available. Use `make race` to reproduce the default-temp path.
 race-fast:
-	@tmp="$$( ./scripts/test_tmpdir.sh )"; \
-	 trap './scripts/test_tmpdir.sh --release "$$tmp"' EXIT; \
-	 if [[ -n "$$tmp" ]]; then echo "race-fast: TMPDIR=$$tmp"; \
-	 else echo "race-fast: no memory-backed temp dir; using the default temp dir"; fi; \
-	 TMPDIR="$$tmp" TMP="$$tmp" TEMP="$$tmp" ./scripts/check_ci_race.sh $(PKGS)
+	@CHORD_GO='$(GO)' bash scripts/run_tests.sh ./scripts/check_ci_race.sh $(PKGS)
 
 vet:
 	$(GO) vet $(PKGS)
@@ -114,7 +106,7 @@ docs-examples-check:
 	./scripts/check_docs_examples.sh
 
 resource-scripts-check:
-	bash -n scripts/test_tmpdir.sh scripts/test_tmpdir_ownership.sh
+	bash -n scripts/test_tmpdir.sh scripts/test_tmpdir_ownership.sh scripts/run_tests.sh
 	bash -n scripts/check_model_catalog_update.sh
 	bash -n scripts/test_model_catalog_check.sh
 	bash scripts/test_tmpdir_ownership.sh

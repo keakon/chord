@@ -45,7 +45,11 @@ func TestKeymapCLI(t *testing.T) {
 			if binding == "[]" {
 				effective = "disabled"
 			}
-			for _, want := range []string{projectPath + ":4", "keymap.quit[1]", "expected a string", "entire action ignored", effective, globalPath + ":2"} {
+			sourcePath := globalPath
+			if runes := []rune(sourcePath); len(runes) > 120 {
+				sourcePath = string(runes[:120]) + "…"
+			}
+			for _, want := range []string{projectPath + ":4", "keymap.quit[1]", "expected a string", "entire action ignored", effective, sourcePath + ":2"} {
 				if !strings.Contains(keymapIssues[0], want) {
 					t.Errorf("issue = %q, missing %q", keymapIssues[0], want)
 				}

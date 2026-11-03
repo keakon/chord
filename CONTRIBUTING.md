@@ -117,20 +117,50 @@ work directory (`$TMPDIR/go-build*`, including each test binary) on the same
 filesystem; with a warm Go build cache that peaks a few hundred MiB, but on a
 cold cache the same run writes every compiled package archive into that
 directory and can exceed 1 GiB. The tests' own temporary files are negligible.
-Size the RAM disk generously — the helper uses 4 GiB — because the disk
-allocates memory as data is written, so a larger ceiling does not reserve more
-RAM. A small disk fails with `no space left on device` while building.
+The helper creates a 4 GiB RAM disk on macOS. Its backing memory grows as blocks
+are written; deleting files frees filesystem space but does not necessarily
+return that memory to the system. Repeated writes and deletes can therefore
+leave `diskimages-helper` using much more memory than the remaining files.
+A small disk fails with `no space left on device` while building.
 
-Repeated runs do not accumulate: Go deletes its work directory when a command
-exits (including on Ctrl-C) and `go test` removes each test's temporary files,
-and the Go build cache lives outside the temp dir. A run killed hard (SIGKILL,
-OOM) can leave a `go-build*` directory behind, and nothing removes it — delete
-it or recreate the RAM disk with `scripts/test_tmpdir.sh --destroy`.
+On Unix, `make test-fast` and `make race-fast` create a separate
+`chord-test-runs/run-<id>/work` directory for each command. The runner sets
+`TMPDIR`, `TMP`, `TEMP`, and `GOTMPDIR` to that directory for the command and its
+children; the Go build cache stays separate. Concurrent runs keep their own
+directories. The runner executable is built for the host and cached under
+`GOCACHE/chord-test-runner` before the test workspace is created.
+That bootstrap build uses Go's normal cleanup; it is not supervised by the
+runner it is building.
+
+The runner removes the directory after the supervised process group exits and
+its inherited output pipes close. This also covers test failures, panics,
+timeouts, and cancellation with Ctrl-C or SIGTERM. A separate supervisor
+continues teardown if the runner is killed. The next run using the same base
+directory recovers leftovers only when their locks are available and their
+matching cleanup records prove completion. Missing evidence, open output
+pipes, and deletion failures leave the directory in place with a diagnostic.
+Failure to remove an old run leaves the new command free to run. A failure to
+clean up the current command makes an otherwise successful command fail.
+
+Tests must still use `t.TempDir()` and close resources through `t.Cleanup()`.
+Processes that detach into another session must have their own shutdown
+protocol: a process that also closes inherited output pipes cannot be tracked
+through the supervised group or those pipes. Files written outside the test
+workspace are the test's responsibility. Direct Go commands and non-Unix hosts
+do not use this supervisor; interruption can skip their test cleanup.
+
+The shared RAM disk stays mounted between runs. Files outside the runner's
+managed directories are left alone; remove them only after confirming that
+their users have exited. To release the macOS disk's backing
+memory as well, stop all users of the disk and run
+`scripts/test_tmpdir.sh --destroy`; the next `make test-fast` or `make race-fast`
+creates it again. The ownership check verifies which disk the helper created,
+not whether other processes still need it.
 
 To create one yourself:
 
 - **Linux**: `/dev/shm` is already a tmpfs, so `TMPDIR=/dev/shm` works — provided it allows executing files (Go runs the test binary from there) and has room; containers mount it `noexec` and only 64 MiB, so check with `findmnt /dev/shm` first. A dedicated tmpfs (`sudo mount -t tmpfs -o size=2g,exec tmpfs /mnt/ram`) is equivalent.
-- **macOS**: `scripts/test_tmpdir.sh` reuses `/Volumes/ChordTestRam` whenever it is writable and allows exec, and creates a new APFS RAM disk only when no usable mount is present. Both the Chord and chord-gateway helpers use the same owner record under `~/Library/Caches/chord-test-tmpdir`; the record stores the mounted device, volume UUID, parent disk, and attached physical store. `--destroy` ejects that physical store only when the mount still matches the first three fields and the store still backs the parent. A mount without a record is reused but left in place by `--destroy`. When the disk just attached cannot be confirmed as the one at `/Volumes/ChordTestRam`, the helper leaves that mount untouched — another process may already use it — and switches to a private `/Volumes/ChordTestRam-<pid>-<random>` disk instead. `make test-fast` and `make race-fast` eject that private disk when the run ends; other callers release it with `scripts/test_tmpdir.sh --release <dir>`, which never ejects the shared mount. It ejects the disk it attached when the mount provably does not use it, and otherwise leaves that disk attached and names the `diskutil eject` command in the warning. When only the owner record cannot be written, the shared mount stays in use and `--destroy` refuses it; that warning also names the `diskutil eject` command. To create a disk by hand:
+- **macOS**: `scripts/test_tmpdir.sh` reuses `/Volumes/ChordTestRam` whenever it is writable and allows exec, and creates a new APFS RAM disk only when no usable mount is present. Both the Chord and chord-gateway helpers use the same owner record under `~/Library/Caches/chord-test-tmpdir`; the record stores the mounted device, volume UUID, parent disk, and attached physical store. `--destroy` ejects that physical store only when the mount still matches the first three fields and the store still backs the parent. A mount without a record is reused but left in place by `--destroy`. When the disk just attached cannot be confirmed as the one at `/Volumes/ChordTestRam`, the helper leaves that mount untouched — another process may already use it — and switches to a private `/Volumes/ChordTestRam-<pid>-<random>` disk instead. `make test-fast` and `make race-fast` release that private disk after cleaning their test directory. An unproven cleanup or a killed runner can leave it mounted; release it with `scripts/test_tmpdir.sh --release <dir>` after its users have exited. This command never ejects the shared mount. It ejects the disk it attached when the mount provably does not use it, and otherwise leaves that disk attached and names the `diskutil eject` command in the warning. When only the owner record cannot be written, the shared mount stays in use and `--destroy` refuses it; that warning also names the `diskutil eject` command. To create a disk by hand:
 
   ```bash
   dev=$(hdiutil attach -nomount ram://8388608 | awk '{print $1}')
@@ -142,6 +172,11 @@ To create one yourself:
 Run `scripts/test_tmpdir_ownership.sh` after changing the helper's ownership behavior.
 
 - **Windows**: there is no built-in memory filesystem, and Go reads `TMP`/`TEMP`, not `TMPDIR`. Either install a RAM-disk tool and point `TMP`/`TEMP` at it, or point them at a fast SSD. `make test-fast` exports `TMPDIR`, `TMP`, and `TEMP` together, so the same path works under Git Bash.
+
+Keep `TMPDIR`, `TMP`, and `TEMP` scoped to test commands. Exporting them for the
+shell that launches Chord also puts Chord's own temporary files and its
+subprocesses' files on the test disk. `make test-fast` and `make race-fast` set
+these variables for the test command only.
 
 Any other test entry point can reuse the directory by prefixing the variable, for example:
 
@@ -157,7 +192,7 @@ TMPDIR=$(scripts/test_tmpdir.sh) make test-cover
 
 `make race-fast` is the local default. It delegates to
 `scripts/check_ci_race.sh`, the same entry point used by GitHub Actions, and
-points `TMPDIR`/`TMP`/`TEMP` at a memory-backed filesystem when one is available.
+uses the same isolated temporary directory and cleanup as `make test-fast`.
 In addition to `go test -race`, that script rejects unexpected stderr and leaked
 runtime or interactive output. You can pass a focused package set through
 `PKGS`, for example:

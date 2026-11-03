@@ -33,6 +33,9 @@ EOF
 cat >"$tmp/bin/plutil" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+# Consume the producer's output even though the fixture supplies the fields.
+# Closing stdin early makes pipefail observe an intermittent SIGPIPE.
+cat >/dev/null
 [[ "${MOCK_FAIL_FIELD:-}" != "$2" ]] || exit 1
 case "$2" in
 	DeviceNode) sed -n '1p' "$MOCK_DEVICE_FILE" ;;

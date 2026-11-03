@@ -147,11 +147,13 @@ func grepLineNumbers(t *testing.T, out string) []int {
 		if isContext {
 			sep = "-"
 		}
-		fields := strings.SplitN(strings.TrimPrefix(line, GrepContextLinePrefix), sep, 3)
-		if len(fields) < 3 {
+		body := strings.TrimPrefix(line, GrepContextLinePrefix)
+		at := grepSeparatorPairIndex(body, sep[0])
+		if at < 0 {
 			continue
 		}
-		n, err := strconv.Atoi(fields[1])
+		number, _, _ := strings.Cut(body[at+1:], sep)
+		n, err := strconv.Atoi(number)
 		if err != nil {
 			t.Fatalf("line %q: %v", line, err)
 		}
