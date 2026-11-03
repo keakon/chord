@@ -1431,7 +1431,9 @@ func TestSuperCopyHydratesSpilledFocusedCard(t *testing.T) {
 			})
 			m.mode = ModeNormal
 			m.input.SetValue(tt.input)
-			body := strings.TrimSpace(strings.Repeat("alpha ", 65536))
+			// The source alone must exceed the idle budget even when rendered
+			// rows compress well, so this still exercises a spilled card.
+			body := strings.TrimSpace(strings.Repeat("alpha ", 262144))
 			// A small budget exercises idle eviction without a large transcript.
 			m.viewport.baseHotBytes = 4 << 20
 			m.viewport.maxHotBytes = 4 << 20

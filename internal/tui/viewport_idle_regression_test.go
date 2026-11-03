@@ -96,7 +96,8 @@ func TestIdleCacheSweepDoesNotSpillContentAlreadyUnderBudget(t *testing.T) {
 
 	big := &Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("body line\n", 40_000)}
 	v.AppendBlock(big)
-	big.mdCache = []string{strings.Repeat("cached line\n", 100_000)}
+	// Derived rows alone exceed the idle budget even when other caches are packed.
+	big.mdCache = []string{strings.Repeat("cached line\n", 200_000)}
 	big.hotBytesMemoValid = false
 	v.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: strings.Repeat("tail line\n", 100)})
 	v.recomputeHotBytes()

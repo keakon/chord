@@ -354,7 +354,14 @@ func (b *Block) searchMatchLineOffsetInCachedRender(query string, width int) (in
 	if b.searchMatchReady && b.searchMatchWidth == width && b.searchMatchQueryLower == lowerQuery {
 		return b.searchMatchOffset, b.searchMatchFound
 	}
-	offset, found := searchMatchLineOffsetInRenderedLines(b.RenderRange(width, "", 0, b.LineCount(width)), lowerQuery, width)
+	var offset int
+	var found bool
+	for i, line := range b.renderedLineRange(width, 0, b.LineCount(width)) {
+		if _, ok := searchMatchLineOffsetInRenderedLines([]string{line}, lowerQuery, width); ok {
+			offset, found = i, true
+			break
+		}
+	}
 	b.searchMatchQueryLower = lowerQuery
 	b.searchMatchWidth = width
 	b.searchMatchOffset = offset

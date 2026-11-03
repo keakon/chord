@@ -268,6 +268,9 @@ func TestAssistantSyntheticPrefixWidthsStayAlignedWhenCachedLineEmbedsNewline(t 
 	if !injected {
 		t.Fatal("intro line not found in markdown cache")
 	}
+	// The injected intermediate row also invalidates the final range cache.
+	block.lineCache = nil
+	block.lineCountCache = 0
 
 	lines := block.Render(v.width, "")
 	if len(block.renderSyntheticPrefixWidths) != len(lines) {

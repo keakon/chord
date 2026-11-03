@@ -335,6 +335,7 @@ type Block struct {
 	// in-flight streaming content. They survive append-only streaming updates so
 	// unchanged settled prefixes can be reused across deltas.
 	streamSettledRaw                   string
+	streamProse                        streamProseCache
 	streamSettledFrontier              int
 	streamSettledWidth                 int
 	streamSettledLines                 []string
@@ -364,6 +365,7 @@ type Block struct {
 	streamTableFound             bool
 	streamContentBuilder         *strings.Builder
 	lineCache                    []string
+	packedRender                 *packedRenderCache
 	lineCacheWidth               int
 	lineCountCache               int
 	viewportCache                []string

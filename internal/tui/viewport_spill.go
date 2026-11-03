@@ -261,10 +261,17 @@ func (b *Block) estimatedHotBytes() int64 {
 	if b == nil || b.spillCold {
 		return 0
 	}
+	// A newly decoded packed window changes this block's hot footprint; drop
+	// the memo once per decode instead of on every packed render call.
+	if b.packedRender != nil && b.packedRender.hotDirty {
+		b.packedRender.hotDirty = false
+		b.hotBytesMemoValid = false
+	}
 	if b.hotBytesMemoValid {
 		return b.hotBytesMemo
 	}
 	var total int
+	total += b.packedRender.bytes()
 	total += len(b.Content)
 	total += len(b.ResultContent)
 	total += len(b.Diff)
@@ -308,6 +315,7 @@ func (b *Block) estimatedHotBytes() int64 {
 	}
 	for i := range b.thinkingStreamSettled {
 		cache := &b.thinkingStreamSettled[i]
+		total += cache.headings.CacheBytes()
 		for _, line := range cache.lines {
 			total += len(line)
 		}
@@ -518,6 +526,7 @@ func spillBlockPayload(block *Block, store *ViewportSpillStore, width int, measu
 	block.mdCacheContent = ""
 	block.mdCacheThemeVersion = 0
 	block.lineCache = nil
+	block.packedRender = nil
 	block.lineCacheWidth = 0
 	block.lineCountCache = 0
 	block.searchTextLower = ""

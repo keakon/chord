@@ -38,10 +38,12 @@ if [[ "${CHORD_BENCH_FULL:-}" == "1" ]]; then
   BENCH_PATTERN="$FULL_BENCH_PATTERN"
   : "${CHORD_BENCH_TIME:=1s}"
   PACED_BENCH_TIME=100x
+  CARD_BENCH_PATTERN='^(BenchmarkStreamingGrowingCard|BenchmarkLargeCardWindow)$'
 else
   BENCH_PATTERN="$SMOKE_BENCH_PATTERN"
   : "${CHORD_BENCH_TIME:=1x}"
   PACED_BENCH_TIME=1x
+  CARD_BENCH_PATTERN='^(BenchmarkStreamingGrowingCard|BenchmarkLargeCardWindow)$/^(1|2|1024)$/^(64|first_window|scroll_window)$'
 fi
 
 if [[ "${CHORD_BENCH_SKIP_TESTS:-}" != "1" ]]; then
@@ -65,6 +67,9 @@ go test ./internal/tui/overlaylist "${bench_args[@]}" | tee -a /tmp/chord-tui-be
 
 printf '\n==> Running TUI paced benchmarks\n'
 go test ./internal/tui -run '^$' -bench "$PACED_BENCH_PATTERN" -benchmem -benchtime "$PACED_BENCH_TIME" | tee -a /tmp/chord-tui-bench.txt
+
+printf '\n==> Running growing and large card benchmarks (one iteration per case)\n'
+go test ./internal/tui -run '^$' -bench "$CARD_BENCH_PATTERN" -benchmem -benchtime=1x | tee -a /tmp/chord-tui-bench.txt
 
 printf '\n==> Running streaming frontier benchmarks\n'
 frontier_bench_args=(-run '^$' -bench "$FRONTIER_BENCH_PATTERN" -benchmem)

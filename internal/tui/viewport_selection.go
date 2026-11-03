@@ -60,11 +60,11 @@ func (v *Viewport) GetLinePlain(blockID, lineInBlock int) (plain string, width i
 			continue
 		}
 		b = v.materialize(b)
-		lines := b.Render(v.width, "")
-		if lineInBlock < 0 || lineInBlock >= len(lines) {
+		if lineInBlock < 0 || lineInBlock >= b.LineCount(v.width) {
 			return "", 0
 		}
-		plain = terminaltext.StripANSI(lines[lineInBlock])
+		lines := b.RenderRange(v.width, "", lineInBlock, lineInBlock+1)
+		plain = terminaltext.StripANSI(lines[0])
 		width = selectionPlainTextWidth(plain)
 		return plain, width
 	}
@@ -91,19 +91,15 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 	var sb strings.Builder
 	for i := sIdx; i <= eIdx; i++ {
 		block := v.materialize(blocks[i])
-		lines := block.Render(v.width, "")
 		lineStart := 0
-		lineEnd := len(lines) - 1
+		lineEnd := block.LineCount(v.width) - 1
 		if i == sIdx {
 			lineStart = sL
 		}
 		if i == eIdx {
 			lineEnd = eL
 		}
-		for lineIdx := lineStart; lineIdx <= lineEnd; lineIdx++ {
-			if lineIdx >= len(lines) {
-				continue
-			}
+		for lineIdx, line := range block.renderedLineRange(v.width, lineStart, lineEnd+1) {
 			if placeholder := selectionImagePlaceholder(block, lineIdx); placeholder != "" {
 				if sb.Len() > 0 {
 					sb.WriteByte('\n')
@@ -111,7 +107,6 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 				sb.WriteString(placeholder)
 				continue
 			}
-			line := lines[lineIdx]
 			plain := terminaltext.StripANSI(line)
 			lineWidth := selectionPlainTextWidth(plain)
 			prefixAdjust := min(max(v.selectionLinePrefixWidth(block, lineIdx, plain), 0), lineWidth)

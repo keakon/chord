@@ -46,25 +46,14 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.mdCacheThemeVersion = src.mdCacheThemeVersion
 	clone.mdCacheSyntheticPrefixWidths = nil
 	clone.mdCacheSoftWrapContinuations = nil
-	clone.streamSettledPrefixedLines = nil
 	// The deferred clone is the archive source of record, not a render
 	// source: hydrated blocks rebuild their render caches on first paint, so
 	// deep-copying the streaming/render line caches here would multiply the
 	// per-event clone cost and keep every synced block's rendered lines hot
 	// outside the viewport's spill budget.
-	clone.streamSettledLines = nil
-	clone.streamSettledSyntheticPrefixWidths = nil
-	clone.streamSettledSoftWrapContinuations = nil
-	clone.streamSettledLineCount = 0
-	clone.streamTailRaw = src.streamTailRaw
-	clone.streamTailWidth = 0
-	clone.streamTailLines = nil
-	clone.streamTailSyntheticPrefixWidths = nil
-	clone.streamTailSoftWrapContinuations = nil
-	clone.streamCardHeadLines = nil
-	clone.streamCardHeadBody = nil
-	clone.streamCardHeadKey = streamCardHeadKey{}
+	clone.InvalidateStreamingSettledCache()
 	clone.lineCache = nil
+	clone.packedRender = nil
 	clone.lineCacheWidth = 0
 	clone.lineCountCache = 0
 	clone.viewportCache = nil
@@ -189,6 +178,9 @@ func (b *Block) Render(width int, spinnerFrame string) (lines []string) {
 			lines = blockRenderPanicFallback(b, width, recovered)
 		}
 	}()
+	if cache := b.packedRenderAt(width); cache != nil {
+		return cache.lines(0, cache.count)
+	}
 	switch b.Type {
 	case BlockUser:
 		return b.renderUser(width, spinnerFrame)
@@ -237,6 +229,9 @@ func blockRenderPanicFallback(b *Block, width int, recovered any) []string {
 // LineCount returns how many terminal lines this block occupies.
 func (b *Block) LineCount(width int) int {
 	_ = b.ensureMaterialized()
+	if cache := b.packedRenderAt(width); cache != nil {
+		return cache.count
+	}
 	if b.streamingApplyPatchRangeEligible() {
 		if width <= 0 {
 			width = 80
@@ -249,10 +244,7 @@ func (b *Block) LineCount(width int) int {
 		return count
 	}
 	if b.lineCacheWidth != width || (b.lineCache == nil && b.lineCountCache == 0) {
-		b.lineCache = b.Render(width, "")
-		b.lineCacheWidth = width
-		b.lineCountCache = len(b.lineCache)
-		b.hotBytesMemoValid = false
+		b.cacheRenderedLines(width, b.Render(width, ""))
 	}
 	return b.lineCountCache
 }
@@ -271,6 +263,9 @@ func (b *Block) RenderRange(width int, spinnerFrame string, start, end int) []st
 	}
 	if end < start {
 		end = start
+	}
+	if cache := b.packedRenderAt(width); cache != nil {
+		return cache.lines(start, end)
 	}
 	if cached := b.GetViewportCache(width, spinnerFrame); cached != nil {
 		if start >= len(cached) {
@@ -292,10 +287,10 @@ func (b *Block) RenderRange(width int, spinnerFrame string, start, end int) []st
 	}
 	lines := b.Render(width, spinnerFrame)
 	if spinnerFrame == "" {
-		b.lineCache = lines
-		b.lineCacheWidth = width
-		b.lineCountCache = len(lines)
-		b.hotBytesMemoValid = false
+		b.cacheRenderedLines(width, lines)
+		if cache := b.packedRenderAt(width); cache != nil {
+			return cache.lines(start, end)
+		}
 	}
 	if start >= len(lines) {
 		return nil
@@ -377,6 +372,7 @@ func (b *Block) ToggleAtWidth(width int) bool {
 // extend them, so they are reclaimed along with the rest.
 func (b *Block) InvalidateCache() {
 	b.lineCache = nil
+	b.packedRender = nil
 	b.lineCacheWidth = 0
 	b.lineCountCache = 0
 	b.hotBytesMemoValid = false
@@ -444,6 +440,7 @@ func (b *Block) ReleaseDerivedRenderCaches() {
 // prefix reuse invalid.
 func (b *Block) InvalidateStreamingSettledCache() {
 	b.streamSettledRaw = ""
+	b.streamProse = streamProseCache{}
 	b.streamSettledFrontier = 0
 	b.streamSettledWidth = 0
 	b.streamSettledLines = nil

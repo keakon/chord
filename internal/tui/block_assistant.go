@@ -134,16 +134,15 @@ type assistantMarkdownSegment struct {
 }
 
 type thinkingStreamSettledCache struct {
-	preprocessInput  string
-	preprocessResult string
-	raw              string
-	frontier         int
-	width            int
-	frontierScanner  markdownutil.StreamingFrontierScanner
-	lines            []string
-	tailRaw          string
-	tailWidth        int
-	tailLines        []string
+	headings        *reasoningtext.StreamingHeadings
+	raw             string
+	frontier        int
+	width           int
+	frontierScanner markdownutil.StreamingFrontierScanner
+	lines           []string
+	tailRaw         string
+	tailWidth       int
+	tailLines       []string
 	// styledLines caches the styled form of the settled lines so streaming
 	// flushes do not re-run per-line style rendering over the whole prefix.
 	styledLines        []string
@@ -205,11 +204,10 @@ func (b *Block) renderStreamingCardLines(kind uint8, style lipgloss.Style, inner
 		focused:      b.Focused,
 		valid:        true,
 	}
-	if b.streamCardHeadKey != key {
+	if b.streamCardHeadKey != key || !slices.Equal(bodyLines[:headCount], b.streamCardHeadBody) {
 		old := b.streamCardHeadKey
-		// The head content depends only on bodyLines[:headCount], so two
-		// flushes with the same headCount reuse the cached head even when the
-		// settled byte frontier moved.
+		// Reference definitions can change earlier rows without changing the
+		// head count; only an identical prefix can reuse wrapped rows.
 		incremental := old.valid &&
 			old.kind == key.kind && old.blockID == key.blockID &&
 			old.width == key.width && old.themeVersion == key.themeVersion &&
@@ -830,19 +828,13 @@ func (b *Block) renderAssistant(width int) []string {
 					// Rebuild settled cache only when frontier advances, width changes,
 					// or the stable prefix text itself changed.
 					if frontier != b.streamSettledFrontier || b.streamSettledWidth != contentWidth || settledRaw != b.streamSettledRaw {
-						sL, sS, sW := renderAssistantMarkdownContent(settledRaw, settledRaw, contentWidth, continuationExtra, &b.codeHL)
-						b.streamSettledRaw = settledRaw
-						b.streamSettledLines = sL
-						b.streamSettledPrefixedLines = nil
-						b.streamSettledSyntheticPrefixWidths = sS
-						b.streamSettledSoftWrapContinuations = sW
-						b.streamSettledFrontier = frontier
-						b.streamSettledWidth = contentWidth
+						b.renderSettledAssistant(settledRaw, contentWidth, continuationExtra)
 					}
 					settledLines = b.streamSettledLines
 					settledSynthetic = b.streamSettledSyntheticPrefixWidths
 					settledSoftWraps = b.streamSettledSoftWrapContinuations
 				} else {
+					b.streamProse = streamProseCache{}
 					b.streamSettledRaw = ""
 					b.streamSettledFrontier = 0
 					b.streamSettledWidth = 0
@@ -1046,25 +1038,22 @@ func (b *Block) renderAssistant(width int) []string {
 // renderThinkingParts renders thinking sections with indentation and ThinkingContentStyle (gray) only
 // so they are visually distinct from the main reply. Full line (including indent) is styled so color is consistent.
 // When ThinkingCollapsed is true, only the last maxCollapsedThinkingLines are shown.
-func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth int) ([]string, int) {
+func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth int) (settled, tail []string) {
 	part = removeTrailingCursorGlyph(part)
 	if !b.Streaming {
-		return contentMarkdown.Render(preprocessThinkingMarkdown(part), contentWidth), 0
+		return contentMarkdown.Render(preprocessThinkingMarkdown(part), contentWidth), nil
 	}
 
 	for len(b.thinkingStreamSettled) <= partIndex {
 		b.thinkingStreamSettled = append(b.thinkingStreamSettled, thinkingStreamSettledCache{})
 	}
 	cache := &b.thinkingStreamSettled[partIndex]
-	if cache.preprocessInput != part {
-		cache.preprocessInput = part
-		cache.preprocessResult = preprocessStreamingThinkingMarkdown(part)
+	if cache.headings == nil {
+		cache.headings = &reasoningtext.StreamingHeadings{}
 	}
-	part = cache.preprocessResult
+	part = cache.headings.Normalize(part)
 	frontier := cache.frontierScanner.Advance(part)
 
-	var out []string
-	settledLineCount := 0
 	if frontier > 0 {
 		settledRaw := part[:frontier]
 		switch {
@@ -1090,8 +1079,7 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 			cache.raw = settledRaw
 			cache.frontier = frontier
 		}
-		out = append(out, cache.lines...)
-		settledLineCount = len(out)
+		settled = cache.lines
 	} else if partIndex < len(b.thinkingStreamSettled) {
 		// The settled render cache may need to be discarded after a
 		// non-monotonic update, but keep the scanner state for the current
@@ -1099,16 +1087,15 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 		// every flush.
 		scanner := cache.frontierScanner
 		b.thinkingStreamSettled[partIndex] = thinkingStreamSettledCache{
-			frontierScanner:  scanner,
-			preprocessInput:  cache.preprocessInput,
-			preprocessResult: cache.preprocessResult,
+			frontierScanner: scanner,
+			headings:        cache.headings,
 		}
 		cache = &b.thinkingStreamSettled[partIndex]
 	}
 
-	if tail := part[frontier:]; tail != "" {
+	if tailRaw := part[frontier:]; tailRaw != "" {
 		var tailLines []string
-		if cache.tailRaw == tail && cache.tailWidth == contentWidth {
+		if cache.tailRaw == tailRaw && cache.tailWidth == contentWidth {
 			tailLines = cache.tailLines
 		} else {
 			// Summary parts are user-visible Markdown even while the surrounding
@@ -1116,26 +1103,24 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 			// settled prefix keeps its incremental cache and raw reasoning never
 			// reaches this path.
 			if b.ThinkingMarkdownProvisional {
-				tailLines = contentMarkdown.Render(preprocessStreamingThinkingMarkdown(tail), contentWidth)
+				tailLines = contentMarkdown.Render(preprocessStreamingThinkingMarkdown(tailRaw), contentWidth)
 			} else {
 				// Sanitize control sequences like the settled prefix
 				// (contentMarkdown.Render runs terminaltext.Sanitize) so the
 				// streaming tail cannot inject cursor moves or other ANSI
 				// commands into the thinking card.
-				tailLines = terminaltext.Wrap(terminaltext.Sanitize(tail), contentWidth)
+				tailLines = terminaltext.Wrap(terminaltext.Sanitize(tailRaw), contentWidth)
 			}
-			cache.tailRaw = tail
+			cache.tailRaw = tailRaw
 			cache.tailWidth = contentWidth
 			cache.tailLines = tailLines
 		}
-		// settledLineCount already equals len(cache.lines) from the block above;
-		// the tail is appended with the same blank-boundary normalization.
-		out = appendThinkingRenderedLines(out, tailLines)
+		tail = thinkingRenderedTail(settled, tailLines)
 	}
-	if len(out) == 0 {
-		out = []string{""}
+	if len(settled)+len(tail) == 0 {
+		tail = []string{""}
 	}
-	return out, settledLineCount
+	return settled, tail
 }
 
 // appendThinkingRenderedLines appends a freshly rendered markdown chunk to
@@ -1238,18 +1223,10 @@ func styleStreamingThinkingSettledLinesIncremental(mdLines []string, start, end 
 	return out, paraStart
 }
 
-// styledStreamingThinkingLines returns the styled lines for a streaming
-// thinking part, caching the styled settled prefix so each flush only styles
-// the unsettled tail. Output is identical to styling all lines in one pass:
-// tail lines never receive the paragraph title style regardless of the
-// paragraph state left by the settled prefix.
-func (b *Block) styledStreamingThinkingLines(mdLines []string, settledLineCount, partIndex int) []string {
-	if settledLineCount < 0 {
-		settledLineCount = 0
-	}
-	if settledLineCount > len(mdLines) {
-		settledLineCount = len(mdLines)
-	}
+// styledStreamingThinkingLines returns a borrowed settled prefix. Callers append
+// it to their own row slice before applying container backgrounds.
+func (b *Block) styledStreamingThinkingLines(mdLines []string, partIndex int) []string {
+	settledLineCount := len(mdLines)
 	var settledStyled []string
 	if partIndex >= 0 && partIndex < len(b.thinkingStreamSettled) {
 		cache := &b.thinkingStreamSettled[partIndex]
@@ -1272,16 +1249,7 @@ func (b *Block) styledStreamingThinkingLines(mdLines []string, settledLineCount,
 	} else {
 		settledStyled = styleStreamingThinkingSettledLines(mdLines[:settledLineCount])
 	}
-	out := make([]string, 0, len(settledStyled)+len(mdLines)-settledLineCount)
-	out = append(out, settledStyled...)
-	for _, line := range mdLines[settledLineCount:] {
-		if isBlankStyledLine(line) {
-			out = append(out, "")
-			continue
-		}
-		out = append(out, "  "+currentStyles.ThinkingContentStyle.Render(line))
-	}
-	return out
+	return settledStyled
 }
 
 func renderThinkingTranslationHeader(targetLang string, width int) string {
@@ -1350,9 +1318,10 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 		} else if i > 0 {
 			rawLines = append(rawLines, "") // small gap between distinct thinking segments
 		}
-		mdLines, settledLineCount := b.renderThinkingMarkdownPart(part, i, contentWidth)
+		mdLines, tail := b.renderThinkingMarkdownPart(part, i, contentWidth)
 		if b.Streaming {
-			rawLines = append(rawLines, b.styledStreamingThinkingLines(mdLines, settledLineCount, i)...)
+			rawLines = append(rawLines, b.styledStreamingThinkingLines(mdLines, i)...)
+			rawLines = append(rawLines, styleThinkingTail(tail)...)
 		} else {
 			rawLines = append(rawLines, styleRenderedThinkingLines(mdLines)...)
 			if i < len(b.ThinkingTranslations) {
@@ -1388,14 +1357,15 @@ func (b *Block) renderThinking(width int) []string {
 		return nil
 	}
 	// Use transparent renderer for thinking as well
-	mdLines, settledLineCount := b.renderThinkingMarkdownPart(content, 0, contentWidth)
+	mdLines, tail := b.renderThinkingMarkdownPart(content, 0, contentWidth)
 
 	var rawLines []string
 	rawLines = append(rawLines, currentStyles.ThinkingLabelStyle.Render(blockLabelWithID("THINKING", b.displayLabelID())))
 	rawLines = append(rawLines, "") // internal gap
 
 	if b.Streaming {
-		rawLines = append(rawLines, b.styledStreamingThinkingLines(mdLines, settledLineCount, 0)...)
+		rawLines = append(rawLines, b.styledStreamingThinkingLines(mdLines, 0)...)
+		rawLines = append(rawLines, styleThinkingTail(tail)...)
 	} else {
 		rawLines = append(rawLines, styleRenderedThinkingLines(mdLines)...)
 		rawLines = append(rawLines, renderThinkingTranslationSections(b.ThinkingTranslations, contentWidth)...)
@@ -1405,7 +1375,7 @@ func (b *Block) renderThinking(width int) []string {
 	thinkBg2 := currentStyles.Palette.ThinkingCardBg
 	railPrefix := cardRailPrefix("thinking", b.Focused)
 	if b.Streaming {
-		return b.renderStreamingCardLines(streamCardKindThinking, style, innerWidth, thinkBg2, railPrefix, rawLines, len(mdLines)-settledLineCount)
+		return b.renderStreamingCardLines(streamCardKindThinking, style, innerWidth, thinkBg2, railPrefix, rawLines, len(tail))
 	}
 	rawLines = preserveCardBg(rawLines, thinkBg2)
 	return renderPrewrappedCard(style, innerWidth, rawLines, thinkBg2, railPrefix)
