@@ -133,15 +133,29 @@ type visibilityState struct {
 	lastForegroundAt time.Time
 	// lastBackgroundAt records when we last received a BlurMsg.
 	lastBackgroundAt time.Time
-	// lastSweepAt records when the last idle sweep ran.
-	lastSweepAt time.Time
+	// lastCacheSweepAt records when the last cache idle sweep ran.
+	lastCacheSweepAt time.Time
 	// idleSweepScheduled is set when an idle sweep tick generation is live.
 	idleSweepScheduled bool
 	// idleSweepGeneration guards against stale idle sweep tick messages.
 	idleSweepGeneration uint64
-	// backgroundIdleSince tracks when the currently focused view last became idle
-	// while the terminal was in background mode. Zero means no active idle window.
+	// backgroundIdleSince tracks when the terminal last became background and
+	// globally idle. Zero means no active idle window.
 	backgroundIdleSince time.Time
+	// lastFreeOSMemoryAt records the last heap reclaim attempt, including
+	// attempts skipped by the reclaimable threshold.
+	lastFreeOSMemoryAt time.Time
+	// freeOSMemoryPending is set while a reap command is in flight.
+	freeOSMemoryPending bool
+	// freeOSMemoryGate cancels an in-flight reclaim when activity resumes.
+	freeOSMemoryGate *freeOSMemoryGate
+	// freeOSMemoryGeneration guards against stale FreeOSMemory results.
+	freeOSMemoryGeneration uint64
+	// freeOSMemoryLastReclaimable records the reclaimable bytes the last attempt
+	// observed, for diagnostics.
+	freeOSMemoryLastReclaimable uint64
+	// freeOSMemoryLastRan records whether the last attempt forced a GC.
+	freeOSMemoryLastRan bool
 	// deferredResumeTailOnFocus records whether the focused deferred transcript was
 	// logically pinned to the tail when the terminal blurred, so focus recovery can
 	// restore the true tail window instead of leaving the user at a stale page bottom.

@@ -245,7 +245,11 @@ func (m *Model) resetTimingStateForSessionRestore(preserveRequestActivity bool) 
 	clear(m.streamLastDeltaAt)
 	m.stopActiveAnimationIfIdle()
 	m.backgroundIdleSince = time.Time{}
-	m.lastSweepAt = time.Time{}
+	m.lastCacheSweepAt = time.Time{}
+	m.lastFreeOSMemoryAt = time.Time{}
+	m.cancelFreeOSMemoryReclaim()
+	m.freeOSMemoryPending = false
+	m.freeOSMemoryGeneration++
 	m.idleSweepScheduled = false
 	m.idleSweepGeneration++
 	if preserveRequestActivity {

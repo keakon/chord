@@ -480,7 +480,9 @@ func TestRebuildViewportFromMessagesClearsTimingState(t *testing.T) {
 	m.activityLastChanged["main"] = time.Now().Add(-9 * time.Second)
 	m.turnBusyStartedAt["main"] = time.Now().Add(-90 * time.Second)
 	m.backgroundIdleSince = time.Now().Add(-6 * time.Minute)
-	m.lastSweepAt = time.Now().Add(-1 * time.Minute)
+	m.lastCacheSweepAt = time.Now().Add(-1 * time.Minute)
+	m.lastFreeOSMemoryAt = time.Now().Add(-1 * time.Minute)
+	m.freeOSMemoryPending = true
 	m.idleSweepScheduled = true
 	m.animRunning = true
 
@@ -501,8 +503,11 @@ func TestRebuildViewportFromMessagesClearsTimingState(t *testing.T) {
 	if !m.backgroundIdleSince.IsZero() {
 		t.Fatalf("backgroundIdleSince = %v, want zero", m.backgroundIdleSince)
 	}
-	if !m.lastSweepAt.IsZero() {
-		t.Fatalf("lastSweepAt = %v, want zero", m.lastSweepAt)
+	if !m.lastCacheSweepAt.IsZero() {
+		t.Fatalf("lastCacheSweepAt = %v, want zero", m.lastCacheSweepAt)
+	}
+	if !m.lastFreeOSMemoryAt.IsZero() || m.freeOSMemoryPending {
+		t.Fatalf("free OS memory state = (%v, pending=%t), want reset", m.lastFreeOSMemoryAt, m.freeOSMemoryPending)
 	}
 	if m.idleSweepScheduled {
 		t.Fatal("idleSweepScheduled should be false after restore timing reset")

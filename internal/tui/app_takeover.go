@@ -172,18 +172,8 @@ func (m *Model) startTakeoverCommand(value string) tea.Cmd {
 	if m.takeoverInputFrozen() || m.agent == nil || m.currentSessionID() == sid {
 		return m.enqueueToast("Choose another session while this session is idle", "warn")
 	}
-	if m.hasOtherComposerDrafts(true) || len(m.queuedDrafts) > 0 || len(m.mailboxQueue) > 0 || m.inflightDraft != nil || len(m.activeJobs()) > 0 || m.agent.LoopKeepsMainBusy() || m.sessionSwitch.active() || m.mode == ModeConfirm || m.mode == ModeQuestion || (m.viewport != nil && m.viewport.HasUserLocalShellPending()) {
+	if m.hasActiveWorkForIdleReclaim() {
 		return m.enqueueToast("Finish active work and save or clear all drafts before taking over a session", "warn")
-	}
-	for _, activity := range m.activities {
-		if runtimeActivityBusy(activity) {
-			return m.enqueueToast("Wait for all agents to become idle before taking over a session", "warn")
-		}
-	}
-	for _, sub := range m.agent.GetSubAgents() {
-		if sub.State == string(agent.SubAgentStateRunning) {
-			return m.enqueueToast("Wait for all agents to become idle before taking over a session", "warn")
-		}
 	}
 	_, ok := m.agent.(interface {
 		ResumePausedSession(context.Context, string, recovery.TransferIdentity) error

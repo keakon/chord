@@ -63,6 +63,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - The TUI holds about 8 MiB of off-screen render caches instead of up to 32 MiB; visible content, work in progress, and blocks larger than 4 MiB are not subject to that target. Scrolling back to an older card may re-render it.
 
+- With the terminal in the background and every agent, job, and draft idle, the TUI returns reclaimable heap memory to the OS about 30 seconds after the last work stops instead of waiting five minutes. Dropping off-screen render caches still waits five minutes.
+
 - Multi-hunk `apply_patch` failures suggest splitting independent changes into single-hunk calls only when partial completion is acceptable; interdependent hunks stay in the same file group. Repeated match failures request a fresh read without suggesting that a single hunk be split, and `edit` with identical `old_string` and `new_string` states that retrying the same arguments cannot succeed.
 
 - Copying one card with `yy` or `Cmd+C` now copies only its body. `Nyy` keeps card labels and separators, and tool cards retain their Markdown section headings.

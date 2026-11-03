@@ -207,6 +207,7 @@ func (m *Model) handleBlurMsg() tea.Cmd {
 func (m *Model) handleFocusMsg() tea.Cmd {
 	now := time.Now()
 	m.displayState = stateForeground
+	m.cancelFreeOSMemoryReclaim()
 	m.lastForegroundAt = now
 	m.backgroundIdleSince = time.Time{}
 	m.idleSweepScheduled = false

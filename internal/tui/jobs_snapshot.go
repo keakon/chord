@@ -70,6 +70,13 @@ func (m *Model) refreshJobSnapshotIfStale() {
 	if m.jobsSnapshotValid && m.jobsSnapshotFrame == m.renderFrameGeneration {
 		return
 	}
+	m.refreshJobSnapshot()
+}
+
+// refreshJobSnapshot rebuilds the shared job snapshot now. Call it only from
+// paths that must not act on a frame-old snapshot, such as the background idle
+// tick, because it takes the registry lock.
+func (m *Model) refreshJobSnapshot() {
 	m.jobsSnapshot = tools.SnapshotJobs()
 	m.activeJobsSnapshot = m.activeJobsSnapshot[:0]
 	for _, state := range m.jobsSnapshot {
@@ -96,11 +103,15 @@ func (m *Model) invalidateJobSnapshot() {
 // animation, so no extra ticker is created here.
 func (m *Model) syncJobAnimation() tea.Cmd {
 	m.invalidateJobSnapshot()
+	// A job starting or finishing changes global idleness, so re-evaluate the
+	// background idle window against the refreshed snapshot instead of leaving
+	// it cleared by the event that reported the change.
+	idleCmd := m.updateBackgroundIdleSweepState()
 	if len(m.activeJobs()) > 0 {
-		return m.startActiveAnimation()
+		return tea.Batch(m.startActiveAnimation(), idleCmd)
 	}
 	m.stopActiveAnimationIfIdle()
-	return nil
+	return idleCmd
 }
 
 // sidebarAgentStillRunning reports whether a sidebar status means the worker has

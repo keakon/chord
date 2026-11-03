@@ -1327,6 +1327,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case idleSweepTickMsg:
 		return m, m.handleIdleSweepTick(msg)
 
+	case freeOSMemoryResultMsg:
+		return m, m.handleFreeOSMemoryResult(msg)
+
 	case startupDeferredPreheatTickMsg:
 		return m, m.handleStartupDeferredTranscriptPreheat(msg)
 
