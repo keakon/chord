@@ -12,11 +12,13 @@ import (
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
-// defaultViewportHotBytes is the hot-payload target, not a hard cap. Blocks
+// defaultViewportHotBytes is the hot-payload target, not a hard cap. It bounds
+// the payload and derived render caches of blocks outside the visible window;
+// returning to a spilled block pays a disk read and a full re-render. Blocks
 // larger than 4 MiB are exempt from spilling (see blockTooLargeToSpill), so the
 // resident hot payload can settle above this value whenever such a block is in
 // the transcript.
-const defaultViewportHotBytes int64 = 32 << 20
+const defaultViewportHotBytes int64 = 8 << 20
 
 type BlockSpillRef struct {
 	File   string
