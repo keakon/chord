@@ -550,6 +550,9 @@ func applyPatchOperationLineStats(op applyPatchOperation) (added, removed int) {
 		return lineCountForMutation(op.Content), 0
 	}
 	for _, hunk := range op.Hunks {
+		if applyPatchHunkIsNoOp(hunk) {
+			continue
+		}
 		for _, line := range hunk.Lines {
 			switch line.Kind {
 			case '+':
@@ -560,6 +563,27 @@ func applyPatchOperationLineStats(op applyPatchOperation) (added, removed int) {
 		}
 	}
 	return added, removed
+}
+
+// applyPatchHunkIsNoOp reports whether a hunk removes and adds identical
+// content. Models emit such hunks when moving files; the runtime diff skips
+// them, so display stats must skip them too. Otherwise a pure move looks like a
+// content update and keeps the raw patch preview instead of the move summary.
+func applyPatchHunkIsNoOp(hunk applyPatchHunk) bool {
+	before := make([]string, 0, len(hunk.Lines))
+	after := make([]string, 0, len(hunk.Lines))
+	for _, line := range hunk.Lines {
+		switch line.Kind {
+		case '-':
+			before = append(before, line.Text)
+		case '+':
+			after = append(after, line.Text)
+		default:
+			before = append(before, line.Text)
+			after = append(after, line.Text)
+		}
+	}
+	return slices.Equal(before, after)
 }
 
 func resolveApplyPatchTargets(doc applyPatchDocument, baseDir string) ([]MutationTarget, error) {

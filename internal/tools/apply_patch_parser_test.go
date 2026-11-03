@@ -59,6 +59,47 @@ func TestApplyPatchDisplayTargetsAggregateRepeatedUpdates(t *testing.T) {
 	}
 }
 
+func TestApplyPatchDisplayTargetsSkipNoOpHunks(t *testing.T) {
+	patch := "*** Begin Patch\n" +
+		"*** Update File: internal/lsp/probe_test.go\n" +
+		"*** Move to: notes/probe.go.txt\n" +
+		"@@\n-package lsp\n+package lsp\n" +
+		"*** End Patch"
+	targets, err := ApplyPatchDisplayTargets(applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets = %#v, want one operation", targets)
+	}
+	target := targets[0]
+	if target.Kind != MutationUpdate || target.TargetPath != "notes/probe.go.txt" {
+		t.Fatalf("move target = %#v", target)
+	}
+	if target.Added != 0 || target.Removed != 0 {
+		t.Fatalf("move stats = +%d -%d, want +0 -0 for a no-op hunk", target.Added, target.Removed)
+	}
+}
+
+func TestApplyPatchDisplayTargetsKeepRealChangesAlongsideNoOpHunks(t *testing.T) {
+	patch := "*** Begin Patch\n" +
+		"*** Update File: src/demo.go\n" +
+		"@@\n-package demo\n+package demo\n" +
+		"@@\n-old\n+new\n" +
+		"*** End Patch"
+	targets, err := ApplyPatchDisplayTargets(applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets = %#v, want one operation", targets)
+	}
+	target := targets[0]
+	if target.Added != 1 || target.Removed != 1 {
+		t.Fatalf("stats = +%d -%d, want +1 -1 counting only the real hunk", target.Added, target.Removed)
+	}
+}
+
 func TestApplyPatchDisplayTargetsRejectsNonCanonicalArgs(t *testing.T) {
 	raw := json.RawMessage(`{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`)
 	if _, err := ApplyPatchDisplayTargets(raw); err == nil {

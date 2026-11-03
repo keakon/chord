@@ -436,6 +436,51 @@ func TestApplyPatchToolCardHidesPureMoveDiff(t *testing.T) {
 	}
 }
 
+func TestApplyPatchToolCardHidesMoveWithNoOpHunkPreview(t *testing.T) {
+	args := `{"patch":"*** Begin Patch\n*** Update File: internal/lsp/probe_test.go\n*** Move to: notes/probe.go.txt\n@@\n-package lsp\n+package lsp\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
+		ResultContent: "Applied patch:\nR internal/lsp/probe_test.go -> notes/probe.go.txt",
+		Diff:          "--- internal/lsp/probe_test.go\n+++ notes/probe.go.txt\n@@ -1,1 +1,1 @@\n package lsp\n",
+	}
+
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "apply_patch internal/lsp/probe_test.go → notes/probe.go.txt") {
+		t.Fatalf("expected move path summary in header, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "↳ Requested patch:") || strings.Contains(plain, "*** Begin Patch") {
+		t.Fatalf("expected move with only a no-op hunk to omit the raw patch preview, got:\n%s", plain)
+	}
+}
+
+func TestApplyPatchToolCardKeepsMoveDiffWhenRequestHunkLooksNoOp(t *testing.T) {
+	// The request hunk removes and adds the same text, so the request-derived
+	// stats are +0/-0. The runtime applier still writes the added literal, and
+	// the applied diff records the whitespace change. The card must show that
+	// actual diff instead of treating the move as a pure rename.
+	args := `{"patch":"*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n@@\n-sample()\n+sample()\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone:    true,
+		ResultStatus:  message.ToolStatusSuccess,
+		ResultContent: "Applied patch:\nR src/old.go -> src/new.go",
+		Diff:          "--- src/old.go\n+++ src/new.go\n@@ -1,1 +1,1 @@\n-    sample()\n+sample()\n",
+	}
+
+	plain := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
+	for _, want := range []string{"apply_patch src/old.go → src/new.go", "+1 -1 lines", "-    sample()"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected %q in completed move card, got:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "↳ Requested patch:") || strings.Contains(plain, "*** Begin Patch") {
+		t.Fatalf("expected completed move card to omit the raw request preview, got:\n%s", plain)
+	}
+}
+
 func TestApplyPatchToolCardKeepsMoveWithUpdateDiff(t *testing.T) {
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n@@\n-old\n+new\n*** End Patch"}`
 	block := &Block{

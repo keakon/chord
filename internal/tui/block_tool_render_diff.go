@@ -551,7 +551,7 @@ func (b *Block) applyPatchDisplayDiff(targets []tools.ApplyPatchDisplayTarget) s
 			}
 			end++
 		}
-		if !b.applyPatchDiffSectionIsSummaryOnly(targets, lines[i], lines[i+1]) {
+		if !b.applyPatchDiffSectionIsSummaryOnly(targets, lines[i:end], lines[i], lines[i+1]) {
 			filtered = append(filtered, lines[i:end]...)
 		}
 		i = end
@@ -599,7 +599,7 @@ func (b *Block) applyPatchDiffSectionTarget(targets []tools.ApplyPatchDisplayTar
 	return tools.ApplyPatchDisplayTarget{}, false
 }
 
-func (b *Block) applyPatchDiffSectionIsSummaryOnly(targets []tools.ApplyPatchDisplayTarget, oldHeader, newHeader string) bool {
+func (b *Block) applyPatchDiffSectionIsSummaryOnly(targets []tools.ApplyPatchDisplayTarget, section []string, oldHeader, newHeader string) bool {
 	target, ok := b.applyPatchDiffSectionTarget(targets, oldHeader, newHeader)
 	if !ok {
 		// Without a parsed operation the section header is all we have; only a
@@ -612,8 +612,28 @@ func (b *Block) applyPatchDiffSectionIsSummaryOnly(targets []tools.ApplyPatchDis
 	if target.Kind == tools.MutationDelete {
 		return true
 	}
-	// A pure move/rename carries no content change either.
-	return target.TargetPath != "" && target.Added == 0 && target.Removed == 0
+	// Request stats can call a move a no-op while the runtime diff records a
+	// whitespace-normalized change. Trust the actual section when it has
+	// added or removed lines; only hide moves whose applied diff is empty.
+	if target.TargetPath != "" && target.Added == 0 && target.Removed == 0 {
+		return !applyPatchDiffSectionHasContentChanges(section)
+	}
+	return false
+}
+
+func applyPatchDiffSectionHasContentChanges(section []string) bool {
+	if len(section) < 2 {
+		return false
+	}
+	for _, line := range section[2:] {
+		if line == "" {
+			continue
+		}
+		if line[0] == '+' || line[0] == '-' {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Block) applyPatchDiffSectionDisplay(targets []tools.ApplyPatchDisplayTarget, oldHeader, newHeader string) (marker, path, syntaxPath string) {
