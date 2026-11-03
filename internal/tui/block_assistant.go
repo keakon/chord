@@ -869,7 +869,6 @@ func (b *Block) renderAssistant(width int) []string {
 				b.mdCache = settledLines
 				b.mdCacheSyntheticPrefixWidths = settledSynthetic
 				b.mdCacheSoftWrapContinuations = settledSoftWraps
-				b.streamSettledLineCount = len(settledLines)
 			} else {
 				b.InvalidateStreamingSettledCache()
 				b.mdCache, b.mdCacheSyntheticPrefixWidths, b.mdCacheSoftWrapContinuations = renderAssistantMarkdownContent(bodyContent, bodyContent, contentWidth, continuationExtra, &b.codeHL)

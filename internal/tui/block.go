@@ -342,7 +342,6 @@ type Block struct {
 	streamSettledPrefixedLines         []string // settled lines with the card content prefix pre-applied
 	streamSettledSyntheticPrefixWidths []int
 	streamSettledSoftWrapContinuations []bool
-	streamSettledLineCount             int // lines from settled prefix in mdCache (rest are tail cheap-path)
 	streamTailRaw                      string
 	streamTailWidth                    int
 	streamTailLines                    []string

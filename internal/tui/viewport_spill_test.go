@@ -108,8 +108,8 @@ func TestViewportSpillClearsStreamingRenderCaches(t *testing.T) {
 	if len(block.streamSettledSoftWrapContinuations) != 0 || len(block.streamTailSoftWrapContinuations) != 0 {
 		t.Fatalf("spill left streaming soft-wrap caches behind: settled=%d tail=%d", len(block.streamSettledSoftWrapContinuations), len(block.streamTailSoftWrapContinuations))
 	}
-	if block.streamSettledFrontier != 0 || block.streamSettledWidth != 0 || block.streamTailWidth != 0 || block.streamSettledLineCount != 0 {
-		t.Fatalf("spill left streaming bookkeeping behind: frontier=%d settledWidth=%d tailWidth=%d settledLineCount=%d", block.streamSettledFrontier, block.streamSettledWidth, block.streamTailWidth, block.streamSettledLineCount)
+	if block.streamSettledFrontier != 0 || block.streamSettledWidth != 0 || block.streamTailWidth != 0 {
+		t.Fatalf("spill left streaming bookkeeping behind: frontier=%d settledWidth=%d tailWidth=%d", block.streamSettledFrontier, block.streamSettledWidth, block.streamTailWidth)
 	}
 }
 

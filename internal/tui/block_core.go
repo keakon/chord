@@ -384,7 +384,6 @@ func (b *Block) InvalidateCache() {
 		b.mdCacheSyntheticPrefixWidths = nil
 		b.mdCacheSoftWrapContinuations = nil
 	}
-	b.streamSettledLineCount = 0
 	b.viewportCache = nil
 	b.viewportCacheWidth = 0
 	b.renderSyntheticPrefixWidths = nil
@@ -452,7 +451,6 @@ func (b *Block) InvalidateStreamingSettledCache() {
 	b.streamTailLines = nil
 	b.streamTailSyntheticPrefixWidths = nil
 	b.streamTailSoftWrapContinuations = nil
-	b.streamSettledLineCount = 0
 	b.streamCardHeadLines = nil
 	b.streamCardHeadBody = nil
 	b.streamCardHeadKey = streamCardHeadKey{}

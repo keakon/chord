@@ -389,8 +389,8 @@ func TestStreamingAssistantBlock_NoFrontierNoMarkdown(t *testing.T) {
 		Streaming: true,
 	}
 	block.Render(80, "")
-	if block.streamSettledLineCount != 0 {
-		t.Fatalf("expected no settled lines when no frontier, got %d", block.streamSettledLineCount)
+	if len(block.streamSettledLines) != 0 {
+		t.Fatalf("expected no settled lines when no frontier, got %d", len(block.streamSettledLines))
 	}
 }
 
@@ -460,11 +460,8 @@ func TestStreamingAssistantBlock_NoExtraEmptyTailLineWhenAllContentSettled(t *te
 		Streaming: true,
 	}
 	block.Render(80, "")
-	if block.streamSettledLineCount == 0 {
+	if len(block.streamSettledLines) == 0 {
 		t.Fatal("expected settled prefix to be rendered")
-	}
-	if got, want := len(block.streamSettledLines), block.streamSettledLineCount; got != want {
-		t.Fatalf("settled lines=%d want %d (no extra tail lines when fully settled)", got, want)
 	}
 	if len(block.streamTailLines) != 0 {
 		t.Fatalf("streamTailLines=%d want 0 when fully settled", len(block.streamTailLines))
