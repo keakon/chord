@@ -346,24 +346,59 @@ func TestDeleteHeaderShowsFilePath(t *testing.T) {
 
 // TestDeleteCardListsPathsOnlyWhenTheHeaderCannotNameThem pins the delete
 // card to the rule the patch cards already follow: the header leads with the
-// subject, so a single target needs no per-path row, while several targets
-// (or a partial outcome) still name every path in the body.
+// subject, so a fully visible single target needs no per-path row, while
+// several targets, a truncated target, or a partial outcome still name every
+// path in the body.
 func TestDeleteCardListsPathsOnlyWhenTheHeaderCannotNameThem(t *testing.T) {
 	ApplyTheme(uitheme.Default())
+	longPath := "internal/tui/" + strings.Repeat("very-long-segment/", 8) + "obsolete.go"
 	cases := []struct {
-		name    string
-		args    string
-		result  string
-		status  message.ToolResultStatus
-		want    []string
-		notWant []string
+		name     string
+		args     string
+		result   string
+		status   message.ToolResultStatus
+		width    int
+		want     []string
+		wantPath string
+		notWant  []string
 	}{
 		{
 			name:    "single file drops the repeated row",
 			args:    `{"paths":["internal/tui/obsolete.go"],"reason":"remove obsolete file"}`,
 			result:  "Delete completed.\n\nDeleted (1):\n- internal/tui/obsolete.go",
+			status:  message.ToolStatusSuccess,
 			want:    []string{"delete internal/tui/obsolete.go (remove obsolete file)"},
 			notWant: []string{"Deleted internal/tui/obsolete.go"},
+		},
+		{
+			name:     "single file keeps the row when the header truncates the path",
+			args:     fmt.Sprintf(`{"paths":[%q],"reason":"remove obsolete file"}`, longPath),
+			result:   "Delete completed.\n\nDeleted (1):\n- " + longPath,
+			status:   message.ToolStatusSuccess,
+			width:    80,
+			want:     []string{"…", "Deleted "},
+			wantPath: longPath,
+		},
+		{
+			name:   "single file error keeps the row",
+			args:   `{"paths":["internal/tui/a.go"],"reason":"cleanup"}`,
+			result: "Delete stopped after an execution error.\n\nDeleted (1):\n- internal/tui/a.go",
+			status: message.ToolStatusError,
+			want:   []string{"Deleted internal/tui/a.go"},
+		},
+		{
+			name:   "single file cancellation keeps the row",
+			args:   `{"paths":["internal/tui/a.go"],"reason":"cleanup"}`,
+			result: "Delete stopped after an execution error.\n\nDeleted (1):\n- internal/tui/a.go",
+			status: message.ToolStatusCancelled,
+			want:   []string{"Deleted internal/tui/a.go"},
+		},
+		{
+			name:    "single file keeps the row for a different result path",
+			args:    `{"paths":["internal/tui/a.go"],"reason":"cleanup"}`,
+			result:  "Delete completed.\n\nDeleted (1):\n- internal/tui/b.go",
+			want:    []string{"Deleted internal/tui/b.go"},
+			notWant: []string{"Deleted internal/tui/a.go"},
 		},
 		{
 			name:   "several files keep the list",
@@ -381,11 +416,22 @@ func TestDeleteCardListsPathsOnlyWhenTheHeaderCannotNameThem(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			width := c.width
+			if width == 0 {
+				width = 120
+			}
 			block := outcomeCardFixture(tools.NameDelete, c.args, c.result, c.status)
-			joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(block.Render(width, ""), "\n"))
 			for _, want := range c.want {
 				if !strings.Contains(joined, want) {
 					t.Fatalf("expected delete card to contain %q; got:\n%s", want, joined)
+				}
+			}
+			if c.wantPath != "" {
+				compact := strings.Join(strings.Fields(joined), "")
+				compact = strings.ReplaceAll(compact, "│", "")
+				if !strings.Contains(compact, c.wantPath) {
+					t.Fatalf("expected delete card to show the full path %q; got:\n%s", c.wantPath, joined)
 				}
 			}
 			for _, unwanted := range c.notWant {
@@ -394,6 +440,24 @@ func TestDeleteCardListsPathsOnlyWhenTheHeaderCannotNameThem(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeletePendingCardKeepsTruncatedTargetVisible(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	longPath := "internal/tui/" + strings.Repeat("very-long-segment/", 8) + "obsolete.go"
+	block := outcomeCardFixture(tools.NameDelete, fmt.Sprintf(`{"paths":[%q],"reason":"remove obsolete file"}`, longPath), "", "")
+	block.ResultDone = false
+	block.ResultStatus = ""
+
+	joined := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
+	if !strings.Contains(joined, "…") {
+		t.Fatalf("expected the pending delete header to truncate the long path; got:\n%s", joined)
+	}
+	compact := strings.Join(strings.Fields(joined), "")
+	compact = strings.ReplaceAll(compact, "│", "")
+	if !strings.Contains(compact, longPath) {
+		t.Fatalf("pending delete card hid the full target; got:\n%s", joined)
 	}
 }
 

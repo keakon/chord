@@ -59,6 +59,7 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 	}
 
+	result = appendToolElapsedToHeader(result, b, cardWidth)
 	displayResult := b.stripResultNotes(b.ResultContent)
 	if b.toolResultIsError() {
 		displayResult = toolErrorDisplayContent(displayResult)
@@ -73,7 +74,7 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 			appendToolOutcomeBody(&result, toolOutcomeError, failureSummary, contentWidth, false)
 		}
 	}
-	for _, section := range deleteSectionsToRender(sections, paths, b) {
+	for _, section := range deleteSectionsToRender(sections, paths, b, result[0]) {
 		result = appendDeleteDisplaySection(result, b, section, contentWidth)
 	}
 	if len(sections) == 0 && strings.TrimSpace(headline) != "" && failureSummary == "" {
@@ -85,7 +86,6 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 			result = append(result, toolFieldMarker(style, line))
 		}
 	}
-	result = appendToolElapsedToHeader(result, b, cardWidth)
 	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
@@ -93,10 +93,11 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 // A delete card leads with its target, so a clean single-file delete needs no
 // body row: the header carries the path and the success mark carries the
 // outcome. The row earns its place when the header cannot name the file
-// (several targets collapse into one count) or when the outcome is partial
-// (other sections, an error or a cancellation) — the same rule the patch cards
-// follow when they list targets only when the header cannot carry them.
-func deleteSectionsToRender(sections []deleteDisplaySection, paths []string, b *Block) []deleteDisplaySection {
+// (several targets collapse into one count, or the header truncates the single
+// target) or when the outcome is partial (other sections, an error or a
+// cancellation) — the same rule the patch cards follow when they list targets
+// only when the header cannot carry them.
+func deleteSectionsToRender(sections []deleteDisplaySection, paths []string, b *Block, headerLine string) []deleteDisplaySection {
 	if len(sections) != 1 || len(paths) != 1 {
 		return sections
 	}
@@ -107,19 +108,31 @@ func deleteSectionsToRender(sections []deleteDisplaySection, paths []string, b *
 	if section.label != "Deleted" || len(section.items) != 1 {
 		return sections
 	}
+	// Keep the row when the header line was truncated before the full target
+	// fit; otherwise the card would hide the path it claims to show.
+	headerPath := b.displayToolPath(paths[0])
+	if headerPath == "" || !strings.Contains(terminaltext.StripANSI(headerLine), headerPath) {
+		return sections
+	}
 	// Keep the row when the result names a different file than the request
 	// asked for, so the card never hides the path that was actually removed.
-	if b.displayToolPath(paths[0]) != b.deleteDisplayItem(section.items[0]) {
+	if headerPath != b.deleteDisplayItem(section.items[0]) {
 		return sections
 	}
 	return nil
 }
 
 func appendDeleteRequestedPaths(result []string, b *Block, paths []string, width int) []string {
-	// The header already names a single target, so the list only earns its
-	// place when several paths collapse into one header summary.
-	if len(paths) <= 1 {
+	if len(paths) == 0 {
 		return result
+	}
+	if len(paths) == 1 {
+		// The header names a single target, so the list only earns its place
+		// when the final header could not carry the complete path.
+		target := b.displayToolPath(paths[0])
+		if target == "" || strings.Contains(terminaltext.StripANSI(result[0]), target) {
+			return result
+		}
 	}
 	items := make([]string, 0, len(paths))
 	for _, path := range paths {
