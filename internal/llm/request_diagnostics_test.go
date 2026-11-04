@@ -217,9 +217,10 @@ func TestDiagnosticDomainsRebuildRatherThanRememberModels(t *testing.T) {
 		}
 		snapshot, _ := store.Latest()
 		want := contextdiag.DomainChanged
-		if i == 0 {
+		switch i {
+		case 0:
 			want = contextdiag.First
-		} else if i == 1 {
+		case 1:
 			want = contextdiag.Comparable
 		}
 		if snapshot.Cache.BaselineState != want || snapshot.Cache.Explanation != contextdiag.ReadObserved {

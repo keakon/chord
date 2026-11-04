@@ -63,6 +63,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Gzip-compressed requests no longer keep their output buffers alive in idle compressor caches after the requests release them.
 
+- Responses conversation history and interrupted replies retain less unused response data, reducing memory growth during long sessions.
+
 - Diagnostic exports collect logs and a Go heap profile in the background. Shared logs are filtered by process before applying output limits, and export metadata reports sampling times, scan limits, and read failures.
 
 - Go edits can start the configured language server while `apply_patch`, `edit`, or `write` arguments are still streaming, overlapping startup with content generation to reduce the first edit's wait. Read-only work does not trigger this startup.

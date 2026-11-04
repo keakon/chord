@@ -795,7 +795,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		var added responseOutputItemAdded
-		if err := responsesSSEUnmarshal(eventData, &added); err != nil {
+		if err := responsesRetainedJSON.Unmarshal(eventData, &added); err != nil {
 			log.Debugf("responses: skip unparseable output_item.added err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1067,7 +1067,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_summary_text.done":
 		var done responseReasoningSummaryTextDone
-		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+		if err := responsesRetainedJSON.Unmarshal(eventData, &done); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_summary_text.done err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1100,7 +1100,13 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		if delta.Delta != "" {
-			state.resp.ReasoningContent += delta.Delta
+			if state.resp.ReasoningContent == "" {
+				// Concatenating with an empty string can reuse the decoded
+				// field, pinning its event when no later delta arrives.
+				state.resp.ReasoningContent = cloneLongLivedLLMString(delta.Delta)
+			} else {
+				state.resp.ReasoningContent += delta.Delta
+			}
 			if state.visibleReasoningText {
 				if state.pendingVisibleReasoning != nil {
 					state.pendingVisibleReasoning.WriteString(delta.Delta)
@@ -1118,7 +1124,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_text.done":
 		var done responseReasoningTextDone
-		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+		if err := responsesRetainedJSON.Unmarshal(eventData, &done); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_text.done err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1138,7 +1144,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		var done responseOutputItemDone
-		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+		if err := responsesRetainedJSON.Unmarshal(eventData, &done); err != nil {
 			log.Debugf("responses: skip unparseable output_item.done err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1282,7 +1288,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.completed":
 		var completed responseCompleted
-		if err := responsesSSEUnmarshal(eventData, &completed); err != nil {
+		if err := responsesRetainedJSON.Unmarshal(eventData, &completed); err != nil {
 			return nil, nil, false, fmt.Errorf("parse completed: %w", err)
 		}
 		respObj := completed.Response
@@ -1320,7 +1326,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.incomplete":
 		var incomplete responseIncomplete
-		if err := responsesSSEUnmarshal(eventData, &incomplete); err != nil {
+		if err := responsesRetainedJSON.Unmarshal(eventData, &incomplete); err != nil {
 			return nil, nil, false, fmt.Errorf("parse incomplete: %w", err)
 		}
 		respObj := incomplete.Response
@@ -1352,15 +1358,19 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 	return nil, nil, false, nil
 }
 
-// responsesSSEUnmarshal is a thin wrapper around the SSE payload decoder used
-// by the Responses stream parser.
+// Retained items, thinking text and errors escape the current SSE event.
+// Copy their strings so small IDs/types cannot keep an entire payload alive.
+var responsesRetainedJSON = sonicjson.Config{CopyString: true}.Froze()
+
+// responsesSSEUnmarshal decodes transient event envelopes and deltas. Callers
+// retaining decoded strings use responsesRetainedJSON or clone at the boundary.
 func responsesSSEUnmarshal(data []byte, v any) error {
 	return sonicjson.ConfigDefault.Unmarshal(data, v)
 }
 
 func parseResponsesProviderErrorEvent(eventType string, eventData []byte) (*APIError, error) {
 	var payload responsesProviderErrorPayload
-	if err := responsesSSEUnmarshal(eventData, &payload); err != nil {
+	if err := responsesRetainedJSON.Unmarshal(eventData, &payload); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", eventType, err)
 	}
 	errObj := payload.Error
