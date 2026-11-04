@@ -16,6 +16,7 @@ import (
 func (s *SubAgent) runLoop() {
 	log.Debugf("SubAgent event loop started instance=%v task_id=%v agent_def=%v", s.instanceID, s.taskID, s.agentDefName)
 	defer func() {
+		s.directoryInstructions.Load().clearTurnDiscovery()
 		// Stop the silence watchdog before joining request goroutines: an
 		// aborted-but-still-exiting request goroutine may still signal wake.
 		s.stopLLMSilenceTimer()
@@ -35,6 +36,14 @@ func (s *SubAgent) runLoop() {
 	for {
 		if s.pauseStopped {
 			return
+		}
+		var turnDone <-chan struct{}
+		if s.turn != nil {
+			if s.turn.Ctx.Err() != nil {
+				s.directoryInstructions.Load().clearTurnDiscovery()
+			} else {
+				turnDone = s.turn.Ctx.Done()
+			}
 		}
 		s.trySessionPauseCaptures()
 		s.refillInputChannelFromOverflow()
@@ -130,6 +139,10 @@ func (s *SubAgent) runLoop() {
 		case <-s.wakeCh:
 			// State transitions and queue producers use wakeCh to make this
 			// select rebuild state-gated channels such as inputCh.
+
+		case <-turnDone:
+			// Clear discovery on the owner even when cancellation produces no
+			// LLM or tool result. The next iteration disables this closed case.
 
 		case prepared := <-s.directoryPreparedCh:
 			s.handleDirectoryInstructionsPrepared(prepared)

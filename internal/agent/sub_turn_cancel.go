@@ -17,8 +17,9 @@ func (s *SubAgent) cancelCurrentTurnFromLoop() {
 	if s.turn == nil {
 		return
 	}
-	s.directoryInstructions.Load().clearTurnDiscovery()
 
+	// Parent control paths also call this under turnMu. Directory discovery
+	// stays owner-only; runLoop observes cancellation and clears it.
 	turn := s.turn
 	if turn.deliveryPending.Load() {
 		turn.deliverySubCancel.Store(true)
