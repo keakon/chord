@@ -56,6 +56,11 @@ func (s PathScope) degenerate() bool {
 //     exist yet but its parent does.
 //  5. Otherwise the absolute spelling is kept, which only absolute rules and
 //     "*" can match.
+//
+// Rules gate the caller's path intent, not physical filesystem containment.
+// A lexical checkout hit preserves symlink aliases in that spelling. The
+// symlink fallback only recognizes checkout membership for other spellings;
+// it does not check permissions on each target in a link chain.
 func normalizePathInput(input string, scope PathScope) string {
 	p := strings.TrimSpace(input)
 	if p == "" {

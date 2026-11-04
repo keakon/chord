@@ -132,6 +132,61 @@ func TestEvaluatePathScopeOutsideRepositoryKeepsAbsoluteSpelling(t *testing.T) {
 	}
 }
 
+func TestEvaluatePathScopePreservesInCheckoutSymlinkSpelling(t *testing.T) {
+	const toolName = "read"
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restricted := filepath.Join(root, "restricted")
+	if err := os.Mkdir(restricted, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{restricted, outside} {
+		if err := os.WriteFile(filepath.Join(dir, "sample.go"), []byte("package sample\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := PathScope{Cwd: root, Roots: []string{root}}
+	rs := Ruleset{
+		{Permission: "*", Pattern: "*", Action: ActionAllow},
+		{Permission: toolName, Pattern: "restricted/**", Action: ActionDeny},
+		{Permission: toolName, Pattern: filepath.ToSlash(filepath.Join(outside, "**")), Action: ActionDeny},
+	}
+	for _, target := range []string{filepath.Join(restricted, "sample.go"), filepath.Join(outside, "sample.go")} {
+		if got := rs.EvaluatePath(toolName, target, scope); got != ActionDeny {
+			t.Fatalf("target permission = %q, want deny", got)
+		}
+	}
+	for _, tt := range []struct {
+		alias, target, suffix string
+	}{
+		{alias: "alias.go", target: filepath.Join(restricted, "sample.go")},
+		{alias: "alias", target: restricted, suffix: "sample.go"},
+		{alias: "external.go", target: filepath.Join(outside, "sample.go")},
+		{alias: "external", target: outside, suffix: "sample.go"},
+	} {
+		t.Run(tt.alias, func(t *testing.T) {
+			if err := os.Symlink(tt.target, filepath.Join(root, tt.alias)); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			relative := filepath.ToSlash(filepath.Join(tt.alias, tt.suffix))
+			for _, path := range []string{relative, filepath.Join(root, relative)} {
+				if got := normalizePathInput(path, scope); got != relative {
+					t.Errorf("normalizePathInput(%q) = %q, want %q", path, got, relative)
+				}
+				if got := rs.EvaluatePath(toolName, path, scope); got != ActionAllow {
+					t.Errorf("alias permission = %q, want allow", got)
+				}
+			}
+		})
+	}
+}
+
 // TestEvaluatePathScopeResolvesSymlinkedPrefix covers step ④: an absolute path
 // spelled through a symlinked prefix still maps onto the root. Skipped where
 // the temp dir has no symlinked spelling to exercise.

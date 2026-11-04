@@ -214,6 +214,8 @@ Treat it as a problem only when the row stays red, keeps showing a real connecti
 
 ## No diagnostics after writing files
 
+For Go edits, Chord can start the configured language server while `apply_patch`, `edit`, or `write` arguments are still streaming, once a complete target path and its permissions are known. This overlaps startup with generation of the file content. It only prepares the server; diagnostics still follow the actual write. Read-only work does not trigger this startup, and calls requiring approval or synchronous hooks wait for normal execution.
+
 If you configured LSP but do not see diagnostics after writing files:
 
 - check whether the corresponding language server is installed locally

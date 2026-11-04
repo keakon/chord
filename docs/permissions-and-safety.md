@@ -73,6 +73,8 @@ This page starts from `"*": allow` as a trusted-workspace baseline; for a least-
 
 Permission matching examines the tool call and the repository the session works in. For `shell`, only the command string is matched: a `workdir` argument does not participate. For file tools (`read`, `write`, `edit`, `apply_patch`, `delete`, `view_image`), the target path is normalized before rules are matched: a path inside any checkout of the current repository becomes repository-relative (`src/main.go`), so `foo.go`, `./foo.go`, `internal/../foo.go`, and an absolute spelling of the same file all hit the same rule no matter which checkout or subdirectory the session runs in. Paths outside every checkout stay absolute. When no repository resolves (a plain directory, or no `git` binary), the session working directory takes the repository's place.
 
+Normalization expands `~`, resolves relative paths against the tool's working directory, and cleans `.` / `..`. When that spelling already lies inside a checkout, Chord keeps its repository-relative spelling for matching: `alias/sample.go` still matches as `alias/sample.go` even if `alias` points elsewhere. Only a path with no checkout match is resolved through symlinks to try to map it back into a checkout; a path still outside keeps its original absolute spelling. Rules do not check every target in a symlink chain.
+
 File-tool rule patterns are scoped by their form:
 
 - `*` matches every path spelling, meaning "any path".
@@ -231,6 +233,8 @@ File tools act directly on the workspace; they are not a dry run. Use Git for im
 | `delete` | Delete a file without requiring a complete read first. Deleting a symbolic link removes the link, not its target; `write` refuses to follow symbolic links. |
 | `read` / `view_image` / `grep` | Leave files unchanged, but their content can enter the conversation and model requests. Read-only does not prevent sensitive data from leaving the machine. |
 
+On Unix, `write` and `edit` reject symbolic links in the final path component; `apply_patch` also rejects symbolic-link file targets. These file-target checks do not reject symbolic links in parent directories.
+
 ### Checks and backups before writing
 
 - **Whole-file replacement**: `write` does not refuse solely because the model has not read the current version. Unread, partially read, or subsequently changed content is backed up when possible, with the location reported in the result. Content matching the model's most recent write or edit needs no additional backup.
@@ -271,6 +275,8 @@ Chord can integrate with:
 - MCP
 - Hooks
 - local shell commands
+
+Language servers (LSP) analyze a discovered workspace and may read files beyond the edited target. Their workspace root does not change which path a file-tool permission rule matches, and their reads are not checked against those rules. Use OS-level isolation when their filesystem access must be confined.
 
 Each capability expands the runtime boundary. Before enabling one, confirm:
 

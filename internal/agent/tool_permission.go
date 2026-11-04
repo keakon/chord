@@ -328,6 +328,10 @@ func evaluateApplyPatchPermissionInDir(ruleset permission.Ruleset, args json.Raw
 		arg := extractToolArgument(tools.NameApplyPatch, args)
 		return toolPermissionDecision{Action: ruleset.EvaluatePath(tools.NameApplyPatch, arg, scope), MatchArgument: arg}
 	}
+	return evaluateApplyPatchTargetsPermissionInDir(ruleset, targets, scope)
+}
+
+func evaluateApplyPatchTargetsPermissionInDir(ruleset permission.Ruleset, targets []tools.ApplyPatchDisplayTarget, scope permission.PathScope) toolPermissionDecision {
 	paths := make([]string, 0, len(targets)*2)
 	deletePaths := make(map[string]bool)
 	writePaths := make(map[string]bool)

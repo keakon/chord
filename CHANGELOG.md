@@ -61,6 +61,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Go edits can start the configured language server while `apply_patch`, `edit`, or `write` arguments are still streaming, overlapping startup with content generation to reduce the first edit's wait. Read-only work does not trigger this startup.
+
 - Long replies use less CPU while streaming, especially paragraph-based answers and reasoning with headings. Large completed reply and reasoning cards use less memory while remaining available for scrolling, search, and copying.
 
 - The TUI releases off-screen render caches once they exceed about 8 MiB instead of holding up to 32 MiB, including while a session is active; visible content and work in progress stay rendered. Blocks larger than 4 MiB are still not spilled to disk, but their render caches are released too. Scrolling back to an older card may re-render it.

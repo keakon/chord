@@ -12,6 +12,7 @@ import (
 )
 
 type streamToolDeltaReducer struct {
+	prewarm                      *streamEditPrewarm
 	agentID                      string
 	turn                         *Turn
 	registry                     *tools.Registry
@@ -35,7 +36,7 @@ type streamToolDeltaReducer struct {
 	drainPartialOnRollback bool
 }
 
-func (r streamToolDeltaReducer) Handle(delta message.StreamDelta) bool {
+func (r *streamToolDeltaReducer) Handle(delta message.StreamDelta) bool {
 	switch delta.Type {
 	case message.StreamDeltaToolUseStart:
 		r.handleToolUseStart(delta)
@@ -54,7 +55,7 @@ func (r streamToolDeltaReducer) Handle(delta message.StreamDelta) bool {
 	}
 }
 
-func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
+func (r *streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 	if r.flushBeforeTool != nil {
 		r.flushBeforeTool()
 	}
@@ -81,6 +82,7 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 		}
 		r.reportEarlierStreamingToolArgs(delta.ToolCall.ID)
 	}
+	r.prewarmEditStart(delta.ToolCall)
 	if r.emit != nil {
 		r.emit(ToolCallStartEvent{
 			ID:       delta.ToolCall.ID,
@@ -110,7 +112,7 @@ func (r streamToolDeltaReducer) reportEarlierStreamingToolArgs(callID string) {
 	}
 }
 
-func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
+func (r *streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
 	if delta.ToolCall == nil || r.turn == nil || delta.ToolCall.ID == "" {
 		return
 	}
@@ -118,6 +120,7 @@ func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
 		r.promoteStreamingActivity("tool_use_delta")
 	}
 	name := tools.NormalizeName(delta.ToolCall.Name)
+	r.prewarmEditDelta(delta.ToolCall)
 	if delta.ToolCall.InputText != "" {
 		// Freeform input (Responses custom apply_patch deltas): accumulate the
 		// raw text and hand it to the TUI as the growing patch preview,
@@ -231,11 +234,14 @@ func (r streamToolDeltaReducer) maybeStartEarlySpeculativeToolCall(callID string
 	r.turn.streamingToolExec.Start(message.ToolCall{ID: callID, Name: callName, Args: json.RawMessage(call.ArgsJSON)})
 }
 
-func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
+func (r *streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 	if delta.ToolCall == nil || r.turn == nil || delta.ToolCall.ID == "" {
 		return
 	}
 	callID := delta.ToolCall.ID
+	if r.prewarm != nil {
+		delete(r.prewarm.calls, callID)
+	}
 	callName := tools.NormalizeName(delta.ToolCall.Name)
 	argsJSON := ""
 	if call, ok := r.turn.getStreamingToolCall(callID); ok {
@@ -280,7 +286,11 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 	r.turn.markStreamingToolArgsReported(callID)
 }
 
-func (r streamToolDeltaReducer) handleRollback(delta message.StreamDelta) {
+func (r *streamToolDeltaReducer) handleRollback(delta message.StreamDelta) {
+	if r.prewarm != nil {
+		r.prewarm.cancel()
+		r.prewarm = nil
+	}
 	if r.turn != nil {
 		// Reasoning is always dropped, whatever the text policy is. A finalized
 		// reasoning item is bound to the attempt that produced it, so keeping

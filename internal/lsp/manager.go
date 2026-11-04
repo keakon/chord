@@ -158,6 +158,7 @@ type Manager struct {
 	// drain must not advance those clients' generations in between.
 	pendingResyncMu sync.Mutex
 	syncTasks       map[chan struct{}]context.CancelFunc
+	prewarmTasks    int
 
 	// startEra is the context era in-flight launches run under. Stop cancels
 	// the current era and clears it, so every launch that began before the
@@ -463,12 +464,24 @@ func uriToPath(uri string) string {
 // configured root marker, falling back to the project root, so nested frontend
 // packages get their own language-server instance rooted at the package.
 func (m *Manager) Start(ctx context.Context, path string) {
+	m.start(ctx, path, nil)
+}
+
+func (m *Manager) start(ctx context.Context, path string, era context.Context) {
 	if m.cfg == nil || len(m.cfg.LSP) == 0 {
 		return
 	}
 	path = normalizeWaiterPath(path)
-	m.pruneMissingRoots(ctx)
+	if era == nil {
+		m.pruneMissingRoots(ctx)
+	}
 	m.clientsMu.Lock()
+	// A queued prewarm belongs to its original era. It may never restart a
+	// manager after Stop, even if filesystem discovery raced shutdown.
+	if era != nil && (era != m.startEra || era.Err() != nil || ctx.Err() != nil) {
+		m.clientsMu.Unlock()
+		return
+	}
 	var toStart []struct {
 		key   clientKey
 		cfg   config.LSPServerConfig
@@ -477,6 +490,9 @@ func (m *Manager) Start(ctx context.Context, path string) {
 	for name, srvCfg := range m.cfg.LSP {
 		if srvCfg.Disabled {
 			continue
+		}
+		if era != nil && len(m.launches) >= maxPrewarmTasks {
+			break
 		}
 		root, ok := m.serverRootForPath(name, srvCfg, path)
 		if !ok {
@@ -508,7 +524,20 @@ func (m *Manager) Start(ctx context.Context, path string) {
 
 	for _, s := range toStart {
 		key, srvCfg, entry := s.key, s.cfg, s.entry
-		go m.startServer(ctx, key, srvCfg, entry)
+		launchCtx := ctx
+		if era != nil {
+			// Once registered, the launch is shared with real writes. The
+			// speculative caller no longer owns its cancellation.
+			launchCtx = era
+		}
+		go func() {
+			if era != nil {
+				var cancel context.CancelFunc
+				launchCtx, cancel = context.WithTimeout(launchCtx, prewarmStartTimeout)
+				defer cancel()
+			}
+			m.startServer(launchCtx, key, srvCfg, entry)
+		}()
 	}
 }
 
