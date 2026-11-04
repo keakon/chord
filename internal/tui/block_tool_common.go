@@ -1446,7 +1446,10 @@ func renderLSPDiagnosticsLines(content, indent string, width int) []string {
 		} else if lspDiagnosticsOmittedLineRe.MatchString(line) {
 			st = currentStyles.DimStyle
 		} else if strings.Contains(line, "diagnostics unavailable (") {
-			st = currentStyles.LSPWarnStyle
+			// A miss is routine status, not a problem: the edit simply was not
+			// LSP-verified (usually a wait that ran out), so keep it quiet
+			// instead of dressing it as a warning.
+			st = currentStyles.DimStyle
 		} else if strings.Contains(line, "LSP:") || strings.Contains(line, "LSP errors detected") || strings.Contains(line, "<diagnostics") || lspDiagLineRe.MatchString(strings.TrimSpace(line)) {
 			st = currentStyles.LSPErrorStyle
 		} else {

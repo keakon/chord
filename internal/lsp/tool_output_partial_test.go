@@ -23,8 +23,8 @@ func TestBatchDiagnosticsReportsBackendFailuresWithoutServerCoverage(t *testing.
 		}
 	}
 	single := m.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{first}, true, nil, nil, nil, states, root)
-	if single != "Applied patch" {
-		t.Fatalf("single-file compact output = %q", single)
+	if single != "Applied patch\n\nDiagnostics:\ndiagnostics unavailable (checker unavailable)." {
+		t.Fatalf("single-file output = %q, want the unnamed unverified line", single)
 	}
 }
 

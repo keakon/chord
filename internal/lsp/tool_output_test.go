@@ -218,7 +218,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsLabelsCachedDiagnosticsAfterFai
 	}
 }
 
-func TestAppendLSPDiagnosticsToToolOutputForPathsIgnoresStatesForSingleFile(t *testing.T) {
+func TestAppendLSPDiagnosticsToToolOutputForPathsDescribesStateForSingleFile(t *testing.T) {
 	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{"gopls": {Command: "gopls", FileTypes: []string{".go"}}},
@@ -228,12 +228,14 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsIgnoresStatesForSingleFile(t *t
 		pathA: {Status: FileWriteStatusStartFailed, Detail: "language server unavailable"},
 	}
 
-	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA}, false, nil, nil, nil, states, ""); out != "Applied patch" {
-		t.Fatalf("output = %q, want single-file results to keep the compact format", out)
+	// A single-file result keeps the file implicit but still says the write
+	// was not verified — an empty result would read as a clean one.
+	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA}, false, nil, nil, nil, states, ""); out != "Applied patch\n\nDiagnostics:\ndiagnostics unavailable (language server unavailable)." {
+		t.Fatalf("output = %q, want the unnamed unverified line", out)
 	}
 	extras := map[string][]Diagnostic{pathA: {{Severity: 1, Line: 0, Message: "a"}}}
-	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA}, false, nil, nil, extras, states, ""); out != "Applied patch\n\nDiagnostics:\n[E] 1:1 a" {
-		t.Fatalf("output = %q, want single-file results to keep the compact format", out)
+	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA}, false, nil, nil, extras, states, ""); out != "Applied patch\n\nDiagnostics:\ndiagnostics unavailable (language server unavailable); showing last known diagnostics:\n[E] 1:1 a" {
+		t.Fatalf("output = %q, want cached diagnostics labelled as last known", out)
 	}
 }
 

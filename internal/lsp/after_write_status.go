@@ -127,12 +127,18 @@ func timeoutFileWrite(output string, timeout time.Duration) FileWriteResult {
 	return FileWriteResult{
 		Output: output,
 		Status: FileWriteStatusTimeout,
-		// The write's late watch catches whatever the server publishes for
-		// this version after the wait gave up; say so, or an unverified file
-		// looks like a dead end. The precise wait length stays in the logs;
-		// in the result text it only varies card to card.
-		Detail: diagnosticsWaitDetail(timeout) + "; eligible versioned diagnostics may follow with the next request",
+		Detail: deferredDiagnosticsDetail(timeout),
 	}
+}
+
+// deferredDiagnosticsDetail is the model-facing reason one diagnostics wait
+// reports: what ran out, and where the analysis lands instead. The write's
+// late watch catches whatever the server publishes for this version after the
+// wait gave up; saying so keeps an unverified file from looking like a dead
+// end. The precise wait length stays in the logs; in the result text it only
+// varies card to card.
+func deferredDiagnosticsDetail(timeout time.Duration) string {
+	return diagnosticsWaitDetail(timeout) + "; eligible versioned diagnostics may follow with the next request"
 }
 
 // diagnosticsWaitDetail names a diagnostics wait that ran out. The timeout

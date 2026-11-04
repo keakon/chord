@@ -217,12 +217,12 @@ func (m *Manager) prepareReadyAfterFileWrite(ctx context.Context, absPath, conte
 }
 
 // awaitPreparedAfterFileWrite runs the wait half of the after-write pipeline
-// for a prepared write: fresh diagnostics, sync confirmation, timeout notes,
-// and the review snapshot. It returns the tool-result string with this file's
-// diagnostics appended after base, plus whether those diagnostics describe
-// this write. A wait that times out still registers the late-diagnostics
-// watch, so the analysis the server finishes later is claimed by the next
-// request instead of being lost.
+// for a prepared write: fresh diagnostics, sync confirmation, timeout
+// reporting in the result's diagnostics section, and the review snapshot. It
+// returns the tool-result string with this file's diagnostics appended after
+// base, plus whether those diagnostics describe this write. A wait that times
+// out still registers the late-diagnostics watch, so the analysis the server
+// finishes later is claimed by the next request instead of being lost.
 func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *afterWritePrepared, includeOtherFiles bool, displayBaseDir string) FileWriteResult {
 	if !prepared.wait {
 		m.logAfterWriteBreakdown(prepared, prepared.skipStatus, false, false, 0)
@@ -248,10 +248,10 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 		lateWatch = m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, prepared.watchGenerations, baseline, lastSeq, prepared.writerAgentID, prepared.sync.token)
 	}
 	if !notified && ctx.Err() == nil {
-		// A timeout is logged every time; the model hears about the first one
-		// per session so an empty result is never mistaken for a clean one.
+		// A timeout is logged every time, and the result's diagnostics section
+		// reports it every time, so an unverified write is never mistaken for
+		// a clean one.
 		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", prepared.path, prepared.waitTimeout)
-		prepared.base = m.appendDeferredDiagnosticsNote(prepared.path, prepared.base, prepared.waitTimeout)
 	}
 	status := unavailableStatus(ctx, FileWriteStatusTimeout)
 	if notified {
@@ -264,16 +264,19 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 	}
 	result := synchronizedFileWrite("", prepared.sync)
 	states := map[string]FileWriteDiagnosticsState{prepared.path: {FailedServers: result.FailedServers}}
-	byPath := m.diagnosticsForWritePaths([]string{prepared.path}, states)
-	out := m.appendFileDiagnosticsToToolOutput(prepared.base, prepared.path, includeOtherFiles, nil, config.DiagnosticOutputConfig{}, displayBaseDir, byPath)
-	if !notified && len(byPath[prepared.path]) > 0 {
-		// The diagnostics the result carries were published for an earlier
-		// version of the file; say so instead of implying they verified this
-		// write.
-		out = annotateLastKnownDiagnostics(out)
+	if !notified && ctx.Err() == nil {
+		// The wait ran out, so nothing here verified this write. The section
+		// says so itself — naming the reason and the late watch that still
+		// claims the analysis — instead of an empty block reading as clean.
+		states[prepared.path] = FileWriteDiagnosticsState{
+			Status:        FileWriteStatusTimeout,
+			Detail:        deferredDiagnosticsDetail(prepared.waitTimeout),
+			FailedServers: result.FailedServers,
+		}
 	}
+	out := m.AppendLSPDiagnosticsToToolOutputForPaths(prepared.base, []string{prepared.path}, includeOtherFiles, nil, nil, nil, states, displayBaseDir)
+	result.Output = out
 	if notified {
-		result.Output = out
 		return result
 	}
 	if ctx.Err() != nil {
@@ -330,7 +333,7 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 	}, func(taskCtx context.Context) {
 		m.detachPreparedWrite(taskCtx, &prepared, identity.AgentIDFromContext(ctx))
 	}) {
-		return m.coldWriteBudgetResult(ctx, absPath, base).Output
+		return m.coldWriteBudgetResult(ctx, absPath, base, includeOtherFiles, displayBaseDir).Output
 	}
 	return m.awaitPreparedAfterFileWrite(ctx, &prepared, includeOtherFiles, displayBaseDir).Output
 }
@@ -411,11 +414,9 @@ func (m *Manager) logLSPServiceNote(path, msg string) {
 
 // LSP degradation kinds that get one model-facing line per server per session.
 const (
-	lspDegradationStart    = "start"
-	lspDegradationExited   = "exited"
-	lspDegradationTimeout  = "timeout"
-	lspDegradationDeferred = "deferred"
-	lspDegradationSync     = "sync"
+	lspDegradationStart  = "start"
+	lspDegradationExited = "exited"
+	lspDegradationSync   = "sync"
 )
 
 // lspDegradationNotePrefix opens every model-facing degradation line, so
@@ -470,23 +471,6 @@ func (m *Manager) appendExitedServerNotes(ctx context.Context, absPath, base str
 		}
 	}
 	return base, exited
-}
-
-// appendTimeoutNote reports a diagnostics wait that ran out on the Python
-// semantic path, where a timeout falls back to the quick backend rather than a
-// late watch. The wait covers every server that owns the file, so the line
-// names none of them and is reported once per workspace per session.
-func (m *Manager) appendTimeoutNote(path, base string, waitTimeout time.Duration) string {
-	return appendLSPDegradationNote(base, m.noteLSPDegradationForPath(path, lspDegradationTimeout, "", fmt.Sprintf("no diagnostics within %s", waitTimeout)))
-}
-
-// appendDeferredDiagnosticsNote reports a diagnostics wait that ran out on the
-// generic path, where the write's late watch catches the analysis the server
-// finishes later. It uses its own degradation kind so it neither suppresses
-// nor is suppressed by the Python path's timeout note, and is reported once
-// per workspace per session.
-func (m *Manager) appendDeferredDiagnosticsNote(path, base string, waitTimeout time.Duration) string {
-	return appendLSPDegradationNote(base, m.noteLSPDegradationForPath(path, lspDegradationDeferred, "", diagnosticsWaitDetail(waitTimeout)+"; eligible versioned diagnostics may follow with the next request"))
 }
 
 // DegradationNotes returns the degradation lines AfterFileWriteToolResult

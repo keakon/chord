@@ -49,8 +49,9 @@ func (m *Manager) DiagnosticOutputConfigForPath(path string) config.DiagnosticOu
 // than being appended once per file. baselines is keyed by normalized absolute
 // path and feeds the per-file "(N new, M resolved)" header counts; a nil map
 // means no baseline information and omits the counts entirely. states reports
-// files whose diagnostics could not be verified; when the batch has more than
-// one primary file those files are named even if they have no diagnostics.
+// files whose diagnostics could not be verified; those files are described
+// even when they have no diagnostics, named individually once the batch has
+// more than one primary file.
 func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPaths []string, includeOtherFiles bool, baselines map[string][]Diagnostic, outputs map[string]config.DiagnosticOutputConfig, extras map[string][]Diagnostic, states map[string]FileWriteDiagnosticsState, displayBaseDir string) string {
 	if m == nil {
 		return base
@@ -137,7 +138,7 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	multi := len(primaryPaths) > 1
 	hasBlocks := len(others) > 0
 	for _, path := range primaryPaths {
-		if len(selectedByPath[path]) > 0 || (multi && states[path].needsFileReport()) {
+		if len(selectedByPath[path]) > 0 || states[path].needsFileReport() {
 			hasBlocks = true
 			break
 		}
@@ -170,24 +171,22 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	uncoveredFiles := 0
 	for _, path := range primaryPaths {
 		state := states[path]
-		reportMiss := multi && state.needsFileReport()
+		reportMiss := state.needsFileReport()
 		var counts string
 		if multi && baselines != nil && !reportMiss {
 			counts = diagnosticChangeCounts(baselines[path], byPath[path])
 		}
 		diags := selectedByPath[path]
+		// A miss names its file once the batch has several; a single-file
+		// result keeps the file implicit because the whole result is about it.
+		missSubject := ""
+		if multi {
+			missSubject = displayDiagnosticPath(path, displayBaseDir) + ": "
+		}
 		switch {
-		case reportMiss && len(diags) > 0:
+		case reportMiss && (len(diags) > 0 || state.Status == FileWriteStatusPartial):
 			namedBlocks++
-			verb, shown := "unavailable", "last known"
-			if state.Status == FileWriteStatusPartial {
-				verb, shown = "incomplete", "available"
-			}
-			header := displayDiagnosticPath(path, displayBaseDir) + ": diagnostics " + verb + " (" + state.reason() + ")"
-			writeBlock(header + "; showing " + shown + " diagnostics:\n" + strings.Join(formatDiagnosticLines(diags), "\n"))
-		case reportMiss && state.Status == FileWriteStatusPartial:
-			namedBlocks++
-			writeBlock(displayDiagnosticPath(path, displayBaseDir) + ": diagnostics incomplete (" + state.reason() + ").")
+			writeBlock(formatFileDiagnosticsBlock(missSubject, diags, state))
 		case reportMiss:
 			reason := state.reason()
 			idx, ok := missGroupIndex[reason]
@@ -239,23 +238,6 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		}
 	}
 	return b.String()
-}
-
-// lastKnownDiagnosticsAnnotation labels diagnostics a timed-out write still
-// shows: the cached set describes an earlier version of the file, not the
-// write that just failed to wait.
-const lastKnownDiagnosticsAnnotation = "showing last known diagnostics (may predate this edit):"
-
-// annotateLastKnownDiagnostics inserts the last-known label right under the
-// Diagnostics: header of a single-file tool result. A result without a
-// diagnostics section is returned unchanged.
-func annotateLastKnownDiagnostics(out string) string {
-	idx := strings.Index(out, DiagnosticsSectionMarker)
-	if idx < 0 {
-		return out
-	}
-	at := idx + len(DiagnosticsSectionMarker)
-	return out[:at] + lastKnownDiagnosticsAnnotation + "\n" + out[at:]
 }
 
 func (m *Manager) diagnosticsForWritePaths(paths []string, states map[string]FileWriteDiagnosticsState) map[string][]Diagnostic {
@@ -387,10 +369,10 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 	if m == nil {
 		return base
 	}
-	return m.appendFileDiagnosticsToToolOutput(base, editedPath, includeOtherFiles, ranges, output, displayBaseDir, m.diagnosticsForPaths([]string{editedPath}))
+	return m.appendFileDiagnosticsToToolOutput(base, editedPath, includeOtherFiles, ranges, output, displayBaseDir, m.diagnosticsForPaths([]string{editedPath}), FileWriteDiagnosticsState{})
 }
 
-func (m *Manager) appendFileDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool, ranges []EditRange, output config.DiagnosticOutputConfig, displayBaseDir string, byPath map[string][]Diagnostic) string {
+func (m *Manager) appendFileDiagnosticsToToolOutput(base, editedPath string, includeOtherFiles bool, ranges []EditRange, output config.DiagnosticOutputConfig, displayBaseDir string, byPath map[string][]Diagnostic, state FileWriteDiagnosticsState) string {
 	edited, err := filepath.Abs(editedPath)
 	if err != nil {
 		edited = filepath.Clean(editedPath)
@@ -428,7 +410,7 @@ func (m *Manager) appendFileDiagnosticsToToolOutput(base, editedPath string, inc
 		primaryDirs := map[string]struct{}{filepath.Dir(edited): {}}
 		others, _ = m.reserveOtherFileDiagnostics(otherPaths, byPath, primaryDirs, remaining)
 	}
-	if len(primary) == 0 && len(others) == 0 {
+	if len(primary) == 0 && len(others) == 0 && !state.needsFileReport() {
 		return base
 	}
 
@@ -436,12 +418,25 @@ func (m *Manager) appendFileDiagnosticsToToolOutput(base, editedPath string, inc
 	b.WriteString(base)
 	b.WriteString(DiagnosticsSectionMarker)
 
-	if len(primary) > 0 {
-		b.WriteString(strings.Join(formatDiagnosticLines(primary), "\n"))
-	}
-	appendOtherFileDiagnosticsSection(&b, others, len(primary) > 0, displayBaseDir)
+	b.WriteString(formatFileDiagnosticsBlock("", primary, state))
+	appendOtherFileDiagnosticsSection(&b, others, len(primary) > 0 || state.needsFileReport(), displayBaseDir)
 
 	return b.String()
+}
+
+func formatFileDiagnosticsBlock(subject string, diags []Diagnostic, state FileWriteDiagnosticsState) string {
+	if !state.needsFileReport() {
+		return strings.Join(formatDiagnosticLines(diags), "\n")
+	}
+	verb, shown := "unavailable", "last known"
+	if state.Status == FileWriteStatusPartial {
+		verb, shown = "incomplete", "available"
+	}
+	header := subject + "diagnostics " + verb + " (" + state.reason() + ")"
+	if len(diags) == 0 {
+		return header + "."
+	}
+	return header + "; showing " + shown + " diagnostics:\n" + strings.Join(formatDiagnosticLines(diags), "\n")
 }
 
 func (m *Manager) diagnosticsByAbsPath(owners map[clientKey]*Client) (map[string][]Diagnostic, map[string]map[string][]Diagnostic) {

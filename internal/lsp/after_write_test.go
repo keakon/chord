@@ -405,9 +405,9 @@ func TestAfterFileWriteToolResultDidSaveFollowsServerCapability(t *testing.T) {
 }
 
 // TestAfterFileWriteTimeoutLabelsCachedDiagnostics guards the honesty rule: a
-// timed-out write that still shows the file's cached diagnostics must say they
-// may predate the edit, so an unchanged diagnostic block is never read as
-// verification of the write that just timed out.
+// timed-out write that still shows the file's cached diagnostics must say the
+// wait ran out and that the set is last-known, so an unchanged diagnostic
+// block is never read as verification of the write that just timed out.
 func TestAfterFileWriteTimeoutLabelsCachedDiagnostics(t *testing.T) {
 	mgr, path, client := newAfterWriteTestManager(t)
 	uri := protocol.DocumentURI(client.pathToURI(path))
@@ -429,7 +429,7 @@ func TestAfterFileWriteTimeoutLabelsCachedDiagnostics(t *testing.T) {
 	if !strings.Contains(out, "cached type error") {
 		t.Fatalf("timeout output should carry the cached diagnostics: %q", out)
 	}
-	if !strings.Contains(out, "\nshowing last known diagnostics (may predate this edit):\n") {
+	if !strings.Contains(out, "diagnostics unavailable (wait timed out; eligible versioned diagnostics may follow with the next request); showing last known diagnostics:\n[E]") {
 		t.Fatalf("timeout output should label the cached diagnostics: %q", out)
 	}
 }

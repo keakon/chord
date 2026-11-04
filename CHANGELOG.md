@@ -175,6 +175,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Python edits now report every semantic diagnostics timeout when Ruff is unavailable and label cached diagnostics as last known.
+
 - Links from the model selection page to the team configuration example now work on the documentation site in both languages.
 
 - Terminal titles use both typed and pasted text in the first message; when an attachment comes first, the title still comes from the message text.

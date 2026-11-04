@@ -92,9 +92,16 @@ func (m *Manager) detachPreparedWrite(ctx context.Context, prepared *afterWriteP
 	m.logAfterWriteBreakdown(prepared, status, false, lateWatch, 0)
 }
 
-func (m *Manager) coldWriteBudgetResult(ctx context.Context, path, base string) FileWriteResult {
+// coldWriteBudgetResult reports a write whose cold-start total budget ran out
+// before its diagnostics wait could start (or finish). The cancelled case
+// stays untouched; a timed-out one reports the wait in its diagnostics
+// section, same as a wait that ran its course.
+func (m *Manager) coldWriteBudgetResult(ctx context.Context, path, base string, includeOtherFiles bool, displayBaseDir string) FileWriteResult {
 	if ctx.Err() != nil {
 		return FileWriteResult{Output: base, Status: FileWriteStatusCancelled}
 	}
-	return timeoutFileWrite(m.appendDeferredDiagnosticsNote(path, base, coldStartWriteBudget), coldStartWriteBudget)
+	result := timeoutFileWrite(base, coldStartWriteBudget)
+	states := map[string]FileWriteDiagnosticsState{path: {Status: result.Status, Detail: result.Detail}}
+	result.Output = m.AppendLSPDiagnosticsToToolOutputForPaths(base, []string{path}, includeOtherFiles, nil, nil, nil, states, displayBaseDir)
+	return result
 }

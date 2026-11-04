@@ -21,8 +21,8 @@ func TestNoteLSPDegradationDedupesPerServerKindAndResets(t *testing.T) {
 	if again := mgr.noteLSPDegradationForPath("", lspDegradationStart, "gopls", "init timeout"); again != "" {
 		t.Fatalf("repeat note = %q, want empty", again)
 	}
-	if other := mgr.noteLSPDegradationForPath("", lspDegradationTimeout, "gopls", ""); other == "" {
-		t.Fatal("a timeout is a different kind and must not be deduped into the start failure")
+	if other := mgr.noteLSPDegradationForPath("", lspDegradationExited, "gopls", ""); other == "" {
+		t.Fatal("a server exit is a different kind and must not be deduped into the start failure")
 	}
 	if otherServer := mgr.noteLSPDegradationForPath("", lspDegradationStart, "pyright", ""); otherServer == "" {
 		t.Fatal("notes must not be deduped across servers")
@@ -155,7 +155,7 @@ func TestAfterFileWriteToolResultReportsStartFailureOnce(t *testing.T) {
 	}
 }
 
-func TestAfterFileWriteToolResultReportsTimeoutOnce(t *testing.T) {
+func TestAfterFileWriteToolResultReportsTimeoutInTheDiagnosticsSection(t *testing.T) {
 	mgr, path, client := newAfterWriteTestManager(t)
 	client.name = "gopls"
 
@@ -185,15 +185,17 @@ func TestAfterFileWriteToolResultReportsTimeoutOnce(t *testing.T) {
 		return nil, false, 0, nil
 	}
 
-	const want = "LSP diagnostics unavailable for this edit (language server: wait timed out; eligible versioned diagnostics may follow with the next request); do not treat this edit as verified."
-	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
-	if !strings.Contains(out, want) {
-		t.Fatalf("timeout note = %q, want %q", out, want)
-	}
-
-	repeat := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
-	if strings.Contains(repeat, "LSP diagnostics unavailable") {
-		t.Fatalf("timeout should be reported once per session: %q", repeat)
+	// The result's diagnostics section carries the timeout itself, on every
+	// timed-out write: an unverified file must never read as a clean one.
+	const want = "\n\nDiagnostics:\ndiagnostics unavailable (wait timed out; eligible versioned diagnostics may follow with the next request)."
+	for range 2 {
+		out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
+		if !strings.HasSuffix(out, want) {
+			t.Fatalf("timeout output = %q, want suffix %q", out, want)
+		}
+		if strings.Contains(out, "LSP diagnostics unavailable") {
+			t.Fatalf("timeout must not spend a session degradation note: %q", out)
+		}
 	}
 }
 

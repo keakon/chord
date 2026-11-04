@@ -192,7 +192,7 @@ func (m *Manager) AfterFileWritesToolResult(ctx context.Context, writes []FileWr
 		results := make(map[string]FileWriteResult, len(batch))
 		for _, entry := range batch {
 			if entry.await {
-				results[entry.key] = m.coldWriteBudgetResult(ctx, entry.path, entry.base)
+				results[entry.key] = m.coldWriteBudgetResult(ctx, entry.path, entry.base, false, displayBaseDir)
 			} else {
 				results[entry.key] = entry.result
 			}

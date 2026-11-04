@@ -587,7 +587,7 @@ func TestAfterFileWriteBudgetExhaustedStillWatches(t *testing.T) {
 		t.Fatalf("pending syncs = %d, want none: the client did appear", got)
 	}
 	if !strings.Contains(out, "eligible versioned diagnostics may follow with the next request") {
-		t.Fatalf("output = %q, want the deferred diagnostics note", out)
+		t.Fatalf("output = %q, want the diagnostics-section timeout report", out)
 	}
 	mgr.lateMu.Lock()
 	_, watched := mgr.lateWatches[path]

@@ -77,10 +77,8 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 		m.confirmDiagnosticsSync(sync.token)
 	}
 	if !notified && ctx.Err() == nil {
-		// A timeout is logged every time; the model hears about the first one
-		// per session so an empty result is never mistaken for a clean one. The
-		// quick-backend fallback below replaces the semantic result, so only the
-		// no-fallback case carries the note.
+		// A successful quick-backend fallback replaces the unverified semantic
+		// result; otherwise the diagnostics section reports the timeout.
 		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", absPath, waitTimeout)
 		if isPythonPath(absPath) {
 			pyCfg := m.cfg.Diagnostics.Python
@@ -90,25 +88,28 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 				return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, fallbackBase, ranges, changeType, false, displayBaseDir)
 			}
 		}
-		base = m.appendTimeoutNote(absPath, base, waitTimeout)
 	}
 
 	m.recordReviewSnapshot(absPath)
 	result := synchronizedFileWrite("", sync)
 	states := map[string]FileWriteDiagnosticsState{absPath: {FailedServers: result.FailedServers}}
+	if !notified && ctx.Err() == nil {
+		result.Status = FileWriteStatusTimeout
+		// This path does not register a late watch, so it cannot promise a
+		// diagnostic follow-up on the next request.
+		result.Detail = diagnosticsWaitDetail(waitTimeout)
+		states[absPath] = FileWriteDiagnosticsState{Status: result.Status, Detail: result.Detail, FailedServers: result.FailedServers}
+	}
 	byPath := m.diagnosticsForWritePaths([]string{absPath}, states)
-	out := m.appendFileDiagnosticsToToolOutput(base, absPath, includeOtherFiles, ranges, diagnosticsOutputConfig(m.cfg, absPath), displayBaseDir, byPath)
-	if len(sync.serverErrors) == 0 {
+	out := m.appendFileDiagnosticsToToolOutput(base, absPath, includeOtherFiles, ranges, diagnosticsOutputConfig(m.cfg, absPath), displayBaseDir, byPath, states[absPath])
+	if notified && len(sync.serverErrors) == 0 {
 		out = appendDiagnosticChangeSummary(out, baseline, byPath[absPath])
 	}
-	if notified {
-		result.Output = out
-		return result
-	}
-	if ctx.Err() != nil {
+	result.Output = out
+	if !notified && ctx.Err() != nil {
 		return unavailableFileWrite(ctx, out, FileWriteStatusTimeout)
 	}
-	return timeoutFileWrite(out, waitTimeout)
+	return result
 }
 
 func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, selection pythonDiagnosticSelection, base string, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) FileWriteResult {

@@ -42,7 +42,7 @@ func TestRealGoplsColdTimeoutClaimsFirstPublish(t *testing.T) {
 	if elapsed := time.Since(began); elapsed > coldStartWriteBudget+500*time.Millisecond {
 		t.Fatalf("cold write took %v, exceeds foreground budget tolerance", elapsed)
 	}
-	if !strings.Contains(out, "LSP diagnostics unavailable") {
+	if !strings.Contains(out, "diagnostics unavailable (") {
 		t.Fatalf("forced cold timeout returned verified result: %q", out)
 	}
 	tick := time.NewTicker(50 * time.Millisecond)
