@@ -74,6 +74,8 @@ jobs:
           path: candidate
       - name: Validate installation and formula
         run: |
+          git config --global user.name "keakon"
+          git config --global user.email "1155229+keakon@users.noreply.github.com"
           brew tap-new keakon/release-check
           cp candidate/chord.rb "$(brew --repository keakon/release-check)/Formula/chord.rb"
           brew trust --formula keakon/release-check/chord
