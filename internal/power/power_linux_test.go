@@ -5,6 +5,8 @@ package power
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -101,13 +103,25 @@ func TestOwnerWatchExactMatch(t *testing.T) {
 	}
 }
 
+// Abstract sockets avoid the 108-byte path limit of long test-runner temporary
+// directories.
+func abstractSocketName(t *testing.T, prefix string) string {
+	t.Helper()
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		t.Fatal(err)
+	}
+	return prefix + hex.EncodeToString(suffix[:])
+}
+
 func isolatedBus(t *testing.T) string {
 	t.Helper()
 	path, err := exec.LookPath("dbus-daemon")
 	if err != nil {
 		t.Skip("dbus-daemon is required for isolated Linux D-Bus integration tests")
 	}
-	cmd := exec.Command(path, "--session", "--nofork", "--nopidfile", "--print-address=1", "--address=unix:path="+filepath.Join(t.TempDir(), "bus"))
+	name := abstractSocketName(t, "chord-power-bus-")
+	cmd := exec.Command(path, "--session", "--nofork", "--nopidfile", "--print-address=1", "--address=unix:abstract="+name)
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -315,8 +329,8 @@ func TestLinuxOwnerLoss(t *testing.T) {
 }
 
 func TestLinuxAuthCancellation(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "socket")
-	listener, err := net.Listen("unix", path)
+	name := abstractSocketName(t, "chord-power-auth-")
+	listener, err := net.Listen("unix", "@"+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +344,7 @@ func TestLinuxAuthCancellation(t *testing.T) {
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
-	go func() { _, err := acquireLinuxProvider(ctx, logindName, "unix:path="+path); result <- err }()
+	go func() { _, err := acquireLinuxProvider(ctx, logindName, "unix:abstract="+name); result <- err }()
 	conn := <-accepted
 	defer conn.Close()
 	cancel()
