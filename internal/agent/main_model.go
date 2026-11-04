@@ -399,11 +399,8 @@ func (a *MainAgent) swapLLMClientWithRefLocked(newClient *llm.Client, modelName 
 		// request surface. Prompt-cache reuse is already invalidated by the
 		// switch itself, so the new run re-baselines every currently enabled
 		// manual MCP tool and then resumes cache-friendly mounts wherever the
-		// new target accepts them. A top-level pin from resume, fork, or durable
-		// compaction survives the switch: the history it distrusts is still the
-		// history the new target receives, and only a session-head event clears
-		// it.
-		a.resetMCPMountSurface(a.mcpMountFullInjectionOnly.Load())
+		// new target accepts them.
+		a.resetMCPMountSurface()
 	} else {
 		a.resetMCPToolMountState()
 		a.clearFrozenToolSurface()

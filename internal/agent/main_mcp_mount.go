@@ -35,9 +35,6 @@ func (a *MainAgent) mcpToolMountMode() mcpToolMountMode {
 	if a.HasDeferredTools() {
 		return mcpMountFullInjection
 	}
-	if a.mcpMountFullInjectionOnly.Load() {
-		return mcpMountFullInjection
-	}
 	client, _, selectedRef, _ := a.llmSnapshot()
 	if client == nil {
 		return mcpMountFullInjection
@@ -245,26 +242,16 @@ func (a *MainAgent) resetMCPToolMountState() {
 	a.mcpMountState.mu.Unlock()
 }
 
-// forceFullMCPToolInjection reverts the session run to top-level MCP tool
-// injection and disables cache-friendly dynamic mounts (Responses
-// additional_tools and Kimi mcp_system_tools_message) until the next
-// session-head event resets the surface. It is used at boundaries where
-// prompt-cache reuse no longer applies and the restored history would
-// mis-anchor the dynamic declarations — session resume, forked history, and
-// durable compaction. A model switch neither sets nor clears it: the switched
-// run re-baselines every currently enabled manual tool for the new target and
-// resumes cache-friendly mounts where that target accepts them unless this pin
-// is already in place (see swapLLMClientWithRefLocked).
-func (a *MainAgent) forceFullMCPToolInjection() {
-	a.resetMCPMountSurface(true)
-}
-
 // resetMCPMountSurface clears the dynamic-mount bookkeeping and rebuilds the
-// runtime tool/prompt surface. fullInjectionOnly pins the run to top-level
-// injection; false lets cache-friendly mounts run where the target accepts
-// them.
-func (a *MainAgent) resetMCPMountSurface(fullInjectionOnly bool) {
-	a.mcpMountFullInjectionOnly.Store(fullInjectionOnly)
+// runtime tool/prompt surface. Call it at boundaries that rewrite the message
+// prefix (durable compaction, session resume, fork) or change the selected
+// target (model switch): the next build re-baselines every currently enabled
+// manual MCP tool into the top-level tools array — the prompt cache is cold
+// there anyway — and enablements after the boundary resume dynamic
+// declarations. A tool that was disabled at the boundary and is re-enabled
+// afterwards still falls back through the historical-call guard, so a
+// declaration never lands after its own calls.
+func (a *MainAgent) resetMCPMountSurface() {
 	a.resetMCPToolMountState()
 	a.mcpServersPromptMu.Lock()
 	a.mcpServersPrompt = a.mcpRuntimePrompt

@@ -505,9 +505,9 @@ func TestModelDrivenSkipDraftCarriesVerdict(t *testing.T) {
 
 func TestEstimatePostResetFixedRequestTokensAtLeastCurrentFixed(t *testing.T) {
 	t.Parallel()
-	// P1-2: the projected side of the low-gain gate must account for the
-	// post-reset full-injection tool surface. forceFullMCPToolInjection drops
-	// cache-friendly mounts after apply, so the projected fixed surface can
+	// The projected side of the low-gain gate must account for the post-reset
+	// re-baselined tool surface: the mount reset re-baselines every currently
+	// enabled manual MCP tool at top level, so the projected fixed surface can
 	// never be smaller than the current one.
 	a := newTestMainAgent(t, t.TempDir())
 	current := a.estimateFixedRequestTokens()

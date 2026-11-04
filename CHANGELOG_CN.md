@@ -61,6 +61,8 @@
 
 ### 改进
 
+- 在上下文压缩、会话恢复或 fork 之后启用的 MCP server，重新走保留缓存的动态工具声明，而不是顶层注入。这些边界本就会让提示词缓存失效，工具表面只重建一次，因此在支持动态声明形态的模型（`compat.responses.mcp_additional_tools`、`compat.chat_completions.mcp_system_tools_message`）上，之后的 `/mcp enable` 不再带来缓存未命中。
+
 - 使用 gzip 压缩请求时，请求释放输出缓冲区后，空闲压缩器缓存不再继续持有它，减少内存保留。
 
 - 减少 Responses 会话历史和中断回复保留的多余响应数据，降低长会话的内存增长。

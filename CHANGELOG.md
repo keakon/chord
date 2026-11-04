@@ -61,6 +61,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- MCP servers enabled after a durable compaction, session resume, or fork once again ride the cache-preserving dynamic tool declarations instead of top-level injection. These boundaries rebuild the tool surface once while the prompt cache is cold anyway, so on models that support the dynamic mount shapes (`compat.responses.mcp_additional_tools`, `compat.chat_completions.mcp_system_tools_message`) subsequent `/mcp enable` toggles no longer cost a prompt-cache miss.
+
 - Gzip-compressed requests no longer keep their output buffers alive in idle compressor caches after the requests release them.
 
 - Responses conversation history and interrupted replies retain less unused response data, reducing memory growth during long sessions.

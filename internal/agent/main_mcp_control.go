@@ -286,12 +286,13 @@ func (a *MainAgent) emitMCPSurfaceChangeToast(result MCPControlResult, surfaceBu
 	if !a.mcpControlChangesTopLevelSurface(result) {
 		return
 	}
-	// The boundary that forced top-level injection (session resume/fork,
-	// durable compaction, or a switch to a target without a dynamic mount)
-	// may already have invalidated the prompt cache. Before the rebuilt run
-	// has sent its first request there is no cache left to miss, so the
-	// warning is redundant. The same holds for a second toggle that lands
-	// before any request: the first one already rewrote the surface.
+	// A full-injection mount (a target without a dynamic mount, deferred
+	// schemas, or a mount fallback) rewrites the whole tool surface on the
+	// next request. Before that request has been sent there is no cache left
+	// to miss — the boundary that triggered the rebuild already invalidated
+	// it — so the warning is redundant. The same holds for a second toggle
+	// that lands before any request: the first one already rewrote the
+	// surface.
 	if a.effectiveMCPMountIsFullInjection() && !surfaceBuilt {
 		return
 	}

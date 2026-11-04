@@ -750,17 +750,7 @@ type MainAgent struct {
 	mcpControlFn        func(context.Context, MCPControlRequest) (MCPControlResult, error)
 	mcpMountState       mcpToolMountState
 	loopDoneLateMount   atomic.Bool
-	// mcpMountFullInjectionOnly is sticky for the current session run. Once
-	// set, cache-friendly dynamic MCP mounts (Responses additional_tools and
-	// Kimi mcp_system_tools_message) are disabled and every MCP tool is
-	// injected in the top-level tools array. It is set on boundaries where
-	// prompt-cache reuse no longer applies and the restored history could
-	// mis-anchor the dynamic declarations — session resume, forked history,
-	// and durable compaction. The next session-head event
-	// (resetSessionBuildState) clears it: a fresh, empty session run may mount
-	// dynamically again.
-	mcpMountFullInjectionOnly atomic.Bool
-	sessionBuilt              atomic.Bool
+	sessionBuilt        atomic.Bool
 
 	// shuttingDown is set to true when Shutdown begins. UpdateTodos checks
 	// this flag to avoid overwriting the final snapshot.

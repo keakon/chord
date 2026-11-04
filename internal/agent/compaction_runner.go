@@ -753,11 +753,12 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		a.requeueMailboxMessagesAfterCompaction(mailboxReplayIDs)
 	}
 
-	// Durable compaction rewrites the message prefix, so any cache-friendly
-	// dynamic MCP mount anchors become invalid. Revert to top-level MCP tools
-	// instead of re-anchoring additional_tools / mcp_system_tools_message
-	// declarations against the compacted history.
-	a.forceFullMCPToolInjection()
+	// Durable compaction rewrites the message prefix, so existing dynamic MCP
+	// mount anchors cannot be replayed. Reset the mount bookkeeping at this
+	// cold-cache boundary: the next build re-baselines every currently enabled
+	// manual MCP tool into the top-level tools array, and enablements after
+	// the boundary resume dynamic declarations against the compacted history.
+	a.resetMCPMountSurface()
 	// Everything after the session head is new now, so a pending Memory
 	// commit costs only the reminder itself here.
 	a.applyLoadedMemoryAtCacheBreak()

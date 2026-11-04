@@ -721,10 +721,11 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.ctxMgr.RestoreMessages(prefix)
 	a.restoreQuestions(prefix)
 	a.installContextNoticePresence(prefix)
-	// The forked session carries the copied history prefix: dynamic MCP
-	// mounts could be mis-anchored against it, so this run stays on
-	// top-level injection.
-	a.forceFullMCPToolInjection()
+	// The forked session carries the copied history prefix: reset the mount
+	// bookkeeping so the next build re-baselines enabled manual MCP tools at
+	// top level (the cache is cold here) and later toggles resume dynamic
+	// declarations.
+	a.resetMCPMountSurface()
 	a.restoreMainTrackedFileState(prefix)
 	a.resetRuntimeEvidenceFromMessages(prefix)
 	todos := rebuildTodosFromMessages(prefix)

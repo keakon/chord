@@ -50,12 +50,12 @@ type modelDrivenBarrierSnapshot struct {
 	// denominator instead of understating the current side.
 	queuedUserMessages []message.Message
 	// postResetFixedRequestTokens is the fixed surface the next request pays
-	// after the reset applies: applyCompactionDraft runs
-	// forceFullMCPToolInjection, which drops cache-friendly mounts and
-	// re-injects the full MCP tool surface at top level. A cache-friendly
-	// barrier captures only the mounted subset for fixedRequestTokens, so the
-	// projected side must use the larger full-injection surface instead of
-	// being silently understated.
+	// after the reset applies: applyCompactionDraft resets the MCP mount
+	// bookkeeping, so the rebuilt surface re-baselines every currently
+	// enabled manual MCP tool at top level. A cache-friendly barrier captures
+	// only the mounted subset for fixedRequestTokens, so the projected side
+	// must use the larger re-baselined surface instead of being silently
+	// understated.
 	postResetFixedRequestTokens int
 	// currentRequestBatch is the main-model request batch at the barrier
 	// (currentRequestBatch semantics: the request-batch counter falling back
@@ -421,12 +421,11 @@ func (a *MainAgent) estimateFixedRequestTokens() int {
 
 // estimatePostResetFixedRequestTokens estimates the fixed request surface the
 // next request pays after a model-driven reset applies. applyCompactionDraft
-// calls forceFullMCPToolInjection, which clears cache-friendly mounts and the
-// frozen tool surface so mainLLMToolDefinitions would return the full visible
-// tool set. The full-injection surface is computed directly here (it does not
-// depend on mount state) so the projected side of the low-gain gate reflects
-// the larger post-reset tool surface rather than the cache-friendly subset
-// captured for the current side.
+// resets the MCP mount bookkeeping, and the rebuilt frozen surface re-baselines
+// every currently enabled manual MCP tool at top level. The re-baselined
+// surface is computed directly here (it does not depend on mount state) so the
+// projected side of the low-gain gate reflects the larger post-reset tool
+// surface rather than the cache-friendly subset captured for the current side.
 func (a *MainAgent) estimatePostResetFixedRequestTokens() int {
 	a.llmMu.RLock()
 	sysPrompt := a.installedSysPrompt

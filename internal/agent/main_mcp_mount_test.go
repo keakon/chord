@@ -365,35 +365,6 @@ func newResponsesAdditionalToolsClient(model string) *llm.Client {
 	return llm.NewClient(provider, stubProvider{}, model, 4096, "")
 }
 
-func TestForceFullMCPToolInjectionDisablesDynamicMount(t *testing.T) {
-	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
-	a.tools = tools.NewRegistry()
-	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
-	a.llmClient = newResponsesAdditionalToolsClient("custom-model")
-
-	if got := a.mcpToolMountMode(); got != mcpMountResponsesAdditionalTools {
-		t.Fatalf("mount mode before force = %v, want responses additional_tools", got)
-	}
-
-	a.forceFullMCPToolInjection()
-	if got := a.mcpToolMountMode(); got != mcpMountFullInjection {
-		t.Fatalf("mount mode after force = %v, want full injection", got)
-	}
-
-	// Mirror callLLM: the mount mode is always taken from mcpToolMountMode().
-	got, fallback, fellBack := a.mountRuntimeMCPTools(
-		[]message.Message{{Role: message.RoleUser, Content: "first"}},
-		a.mcpToolMountMode(),
-	)
-	if fellBack || len(fallback) != 0 {
-		t.Fatalf("forced mount returned fallback=%v defs=%#v", fellBack, fallback)
-	}
-	if countMCPMounts(got) != 0 {
-		t.Fatalf("forced full injection should not emit dynamic mounts: %#v", got)
-	}
-}
-
 func TestModelSwitchRebaselinesManualToolsAndKeepsDynamicMount(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
@@ -420,27 +391,32 @@ func TestModelSwitchRebaselinesManualToolsAndKeepsDynamicMount(t *testing.T) {
 	}
 }
 
-// The top-level pin set by resume (or durable compaction) exists because the
-// restored history calls tools whose dynamic declarations were lost; a model
-// switch keeps that history, so it must keep the pin until the next session
-// head instead of resuming dynamic mounts.
-func TestModelSwitchAfterResumeKeepsTopLevelInjection(t *testing.T) {
+// A resume (resetSessionBuildState) and a model switch both reset the mount
+// bookkeeping: each rebuild re-baselines every currently enabled manual tool
+// at top level — the boundary cache is cold — and dynamic mounts stay
+// available for enablements after the boundary.
+func TestModelSwitchAfterResumeRebaselinesAndResumesDynamicMount(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
 	a.llmClient = newResponsesAdditionalToolsClient("model-a")
 	a.SetProviderModelRef("sample/model-a")
-	a.forceFullMCPToolInjection()
+	a.resetSessionBuildState()
 
 	a.swapLLMClientWithRef(newResponsesAdditionalToolsClient("model-b"), "model-b", 4096, "sample/model-b")
 
-	if got := a.mcpToolMountMode(); got != mcpMountFullInjection {
-		t.Fatalf("mount mode after a post-resume model switch = %v, want full injection", got)
-	}
-	a.resetSessionBuildState()
 	if got := a.mcpToolMountMode(); got != mcpMountResponsesAdditionalTools {
-		t.Fatalf("mount mode after the next session head = %v, want responses additional_tools", got)
+		t.Fatalf("mount mode after a post-resume model switch = %v, want responses additional_tools", got)
+	}
+	topLevel := false
+	for _, tool := range a.stableVisibleLLMTools() {
+		if tool.Name() == "mcp_sample_lookup" {
+			topLevel = true
+		}
+	}
+	if !topLevel {
+		t.Fatal("the switched run must re-baseline enabled manual MCP tools at top level")
 	}
 }
 
@@ -559,24 +535,57 @@ func countMCPMounts(messages []message.Message) int {
 	return count
 }
 
-func TestSessionHeadResetRestoresDynamicMount(t *testing.T) {
+// Durable compaction rewrites the message prefix, so anchors recorded before
+// it cannot be replayed. The apply path resets the mount bookkeeping without
+// pinning the run: the next build re-baselines enabled manual tools at top
+// level (the boundary cache is cold) and a later toggle of a fresh server
+// appends a dynamic declaration again.
+func TestCompactionResetRebaselinesAndResumesDynamicMount(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
 	a.llmClient = newResponsesAdditionalToolsClient("custom-model")
 
-	a.forceFullMCPToolInjection()
-	if got := a.mcpToolMountMode(); got != mcpMountFullInjection {
-		t.Fatalf("mount mode while forced = %v, want full injection", got)
+	// Pre-compaction run: baseline sealed empty, so the enabled tool rides as
+	// a dynamic declaration anchored at the conversation tail.
+	sealEmptyMCPMountBaseline(a)
+	messages := []message.Message{{Role: message.RoleUser, Content: "first"}}
+	mounted, defs, fellBack := a.mountRuntimeMCPTools(messages, mcpMountResponsesAdditionalTools)
+	if fellBack || len(defs) != 0 {
+		t.Fatalf("pre-compaction mount fallback = %v, defs = %#v", fellBack, defs)
+	}
+	if countMCPMounts(mounted) != 1 {
+		t.Fatalf("pre-compaction mount count = %d, want 1: %#v", countMCPMounts(mounted), mounted)
 	}
 
-	// A session-head event starts a fresh run: an empty session has no
-	// history to mis-anchor against, so dynamic mounts come back.
-	a.resetSessionBuildState()
+	// Compaction apply resets the bookkeeping against the rewritten history.
+	a.resetMCPMountSurface()
+
 	if got := a.mcpToolMountMode(); got != mcpMountResponsesAdditionalTools {
-		t.Fatalf("mount mode after fresh session head = %v, want responses additional_tools", got)
+		t.Fatalf("mount mode after compaction reset = %v, want responses additional_tools", got)
 	}
+	topLevel := false
+	for _, tool := range a.stableVisibleLLMTools() {
+		if tool.Name() == "mcp_sample_lookup" {
+			topLevel = true
+		}
+	}
+	if !topLevel {
+		t.Fatal("compaction must re-baseline enabled manual MCP tools at top level")
+	}
+
+	// A server enabled after the boundary uses the incremental declaration
+	// channel again; the re-baselined tool stays undeclared.
+	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_fetch", description: "fetch"})
+	next, defs, fellBack := a.mountRuntimeMCPTools(messages, mcpMountResponsesAdditionalTools)
+	if fellBack || len(defs) != 0 {
+		t.Fatalf("post-compaction mount fallback = %v, defs = %#v", fellBack, defs)
+	}
+	if countMCPMounts(next) != 1 {
+		t.Fatalf("post-compaction mount count = %d, want 1: %#v", countMCPMounts(next), next)
+	}
+	assertMCPMountAt(t, next, len(next)-1, "mcp_sample_fetch")
 }
 
 func TestManualMCPEnabledBeforeFirstRequestRidesTopLevelTools(t *testing.T) {

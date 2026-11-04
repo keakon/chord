@@ -253,10 +253,13 @@ func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) er
 // resetSessionBuildState reinitializes the LLM surface at a session-head
 // event. The new session run starts with cache-friendly dynamic MCP mounts
 // available again — an empty session has no history to mis-anchor against.
-// Callers that install a session carrying history (resume, fork) follow up
-// with forceFullMCPToolInjection.
+// resetSessionBuildState drops the session-run build state so the next request
+// rebuilds the surface. The mount reset re-baselines every currently enabled
+// manual MCP tool into the top-level tools array on that build — the boundary
+// cache is cold — and enablements after the boundary resume dynamic
+// declarations.
 func (a *MainAgent) resetSessionBuildState() {
-	a.resetMCPMountSurface(false)
+	a.resetMCPMountSurface()
 	// A new or restored session history has no cached prefix to protect.
 	a.applyLoadedMemoryAtCacheBreak()
 	// Otherwise the session reminder content is intentionally kept: it is

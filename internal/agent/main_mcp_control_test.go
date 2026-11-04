@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -382,9 +383,16 @@ func TestMCPControlDetectsTopLevelBaselineChangesInDynamicMode(t *testing.T) {
 		t.Fatal("enabling a server outside the top-level baseline should stay on the dynamic mount")
 	}
 
-	a.forceFullMCPToolInjection()
+	// A target without a dynamic mount rewrites the top-level surface on
+	// every control change.
+	provider := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: "https://example.invalid/v1",
+		Models: map[string]config.ModelConfig{"model-c": {Limit: config.ModelLimit{Context: 128000, Output: 4096}}},
+	}, []string{"test-key"})
+	a.swapLLMClientWithRef(llm.NewClient(provider, stubProvider{}, "model-c", 4096, ""), "model-c", 4096, "sample/model-c")
 	if !a.mcpControlChangesTopLevelSurface(MCPControlResult{Enabled: []string{"late-server"}}) {
-		t.Fatal("forced full injection must report every MCP control change as cache-affecting")
+		t.Fatal("a full-injection target must report every MCP control change as cache-affecting")
 	}
 }
 
