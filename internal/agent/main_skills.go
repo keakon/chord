@@ -68,8 +68,16 @@ func (a *MainAgent) userSkillsSnapshot() []*skill.Meta {
 // agent. The catalog is the complete discovered set so the TUI selector can
 // explain a skill the role's ruleset denies instead of silently omitting it.
 func (a *MainAgent) skillInvocationStates() []skill.InvocationState {
-	messages := a.ctxMgr.Snapshot()
-	return skillInvocationStatesFromVisibleBodies(messages, a.skillActivationView(), a.currentRequestBatch(messages), a.contextReductionPolicy().StaleAgeTurns)
+	messages, batch := a.skillHistorySnapshot()
+	return skillInvocationStatesFromVisibleBodies(messages, a.skillActivationView(), batch, a.contextReductionPolicy().StaleAgeTurns)
+}
+
+func (a *MainAgent) skillHistorySnapshot() ([]message.Message, uint64) {
+	messages, maxBatch := a.ctxMgr.SkillHistorySnapshot()
+	if batch := a.requestBatches.current(a.sessionEpoch); batch > 0 {
+		return messages, batch
+	}
+	return messages, maxBatch
 }
 
 func (a *MainAgent) CallableSkills() []*skill.Meta { return a.callableSkillsSnapshot() }
@@ -299,8 +307,8 @@ func (a *MainAgent) HasSkillBodyInContext(digest string) bool {
 	if a == nil || a.ctxMgr == nil {
 		return false
 	}
-	messages := a.ctxMgr.Snapshot()
-	return skillBodyVisibleInMessages(messages, digest, a.currentRequestBatch(messages), a.contextReductionPolicy().StaleAgeTurns)
+	messages, batch := a.skillHistorySnapshot()
+	return skillBodyVisibleInMessages(messages, digest, batch, a.contextReductionPolicy().StaleAgeTurns)
 }
 
 func (a *MainAgent) startupSkillsSnapshot() []*skill.Meta {

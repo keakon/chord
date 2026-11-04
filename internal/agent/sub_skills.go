@@ -55,7 +55,8 @@ func (s *SubAgent) userSkillsSnapshot() []*skill.Meta {
 // skillInvocationStates returns per-skill visibility and load state for the
 // TUI's focused view of this worker.
 func (s *SubAgent) skillInvocationStates() []skill.InvocationState {
-	return skillInvocationStatesFromVisibleBodies(s.ctxMgr.Snapshot(), s.skillActivationView(), 0, 0)
+	messages, _ := s.ctxMgr.SkillHistorySnapshot()
+	return skillInvocationStatesFromVisibleBodies(messages, s.skillActivationView(), 0, 0)
 }
 
 func (s *SubAgent) availableSkillsPromptBlock() string {
@@ -168,7 +169,8 @@ func (s *SubAgent) HasSkillBodyInContext(digest string) bool {
 	if s == nil || s.ctxMgr == nil {
 		return false
 	}
-	return skillBodyVisibleInMessages(s.ctxMgr.Snapshot(), digest, 0, 0)
+	messages, _ := s.ctxMgr.SkillHistorySnapshot()
+	return skillBodyVisibleInMessages(messages, digest, 0, 0)
 }
 
 func (s *SubAgent) startupSkillsSnapshot() []*skill.Meta {
