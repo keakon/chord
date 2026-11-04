@@ -65,18 +65,20 @@ func (m *Model) handleWindowSizeUpdate(msg tea.WindowSizeMsg) tea.Cmd {
 			previousViewportWidth = m.viewport.width
 		}
 		m.applyTerminalSize(nextW, nextH, true)
+		cacheCmd := m.scheduleResizeCacheSweep()
 		preheatCmd := m.restartDeferredTranscriptPreheatAfterResize(previousViewportWidth)
 		if (shrankW && !largeShrinkW) || (shrankH && !largeShrinkH) {
 			version := m.resizeVersion
 			return tea.Batch(
 				m.imageProtocolCmd(),
 				preheatCmd,
+				cacheCmd,
 				tickCmd(40*time.Millisecond, func(time.Time) tea.Msg {
 					return applyResizeMsg{version: version}
 				}),
 			)
 		}
-		return tea.Batch(m.imageProtocolCmd(), preheatCmd)
+		return tea.Batch(m.imageProtocolCmd(), preheatCmd, cacheCmd)
 	}
 	m.resizeVersion++
 	version := m.resizeVersion
@@ -98,5 +100,5 @@ func (m *Model) handleApplyResize(msg applyResizeMsg) tea.Cmd {
 		previousViewportWidth = m.viewport.width
 	}
 	m.applyTerminalSize(m.pendingResizeW, m.pendingResizeH, false)
-	return tea.Batch(m.imageProtocolCmd(), m.restartDeferredTranscriptPreheatAfterResize(previousViewportWidth))
+	return tea.Batch(m.imageProtocolCmd(), m.restartDeferredTranscriptPreheatAfterResize(previousViewportWidth), m.scheduleResizeCacheSweep())
 }

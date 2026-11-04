@@ -36,6 +36,7 @@ func TestWindowSizeMsgShrinkIsDebounced(t *testing.T) {
 }
 
 func TestWindowSizeMsgLargeWidthShrinkAppliesImmediately(t *testing.T) {
+	stubTUITicks(t)
 	m := NewModelWithSize(nil, 121, 40)
 
 	updated, cmd := m.Update(tea.WindowSizeMsg{Width: 115, Height: 40})
@@ -56,12 +57,11 @@ func TestWindowSizeMsgLargeWidthShrinkAppliesImmediately(t *testing.T) {
 	if model.rightPanelVisible {
 		t.Fatal("rightPanelVisible should be false after immediate shrink to width 115")
 	}
-	if cmd != nil {
-		t.Fatalf("large width shrink should not debounce, got %#v", cmd)
-	}
+	assertOnlyResizeCacheSweep(t, cmd)
 }
 
 func TestWindowSizeMsgLargeHeightShrinkAppliesImmediately(t *testing.T) {
+	stubTUITicks(t)
 	m := NewModelWithSize(nil, 120, 40)
 
 	updated, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
@@ -79,9 +79,7 @@ func TestWindowSizeMsgLargeHeightShrinkAppliesImmediately(t *testing.T) {
 	if model.resizeVersion != 1 {
 		t.Fatalf("resizeVersion = %d, want 1", model.resizeVersion)
 	}
-	if cmd != nil {
-		t.Fatalf("large height shrink should not debounce, got %#v", cmd)
-	}
+	assertOnlyResizeCacheSweep(t, cmd)
 }
 
 func TestWindowSizeMsgLargeWidthShrinkHeightSmallShrinkAppliesWidthImmediately(t *testing.T) {
@@ -111,6 +109,7 @@ func TestWindowSizeMsgLargeWidthShrinkHeightSmallShrinkAppliesWidthImmediately(t
 }
 
 func TestWindowSizeMsgGrowthAppliesImmediately(t *testing.T) {
+	stubTUITicks(t)
 	m := NewModelWithSize(nil, 120, 35)
 
 	updated, cmd := m.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
@@ -128,9 +127,7 @@ func TestWindowSizeMsgGrowthAppliesImmediately(t *testing.T) {
 	if model.resizeVersion != 1 {
 		t.Fatalf("resizeVersion = %d, want 1", model.resizeVersion)
 	}
-	if cmd != nil {
-		t.Fatalf("growth WindowSizeMsg should not debounce, got %#v", cmd)
-	}
+	assertOnlyResizeCacheSweep(t, cmd)
 }
 
 func TestWindowSizeMsgWidthGrowthHeightShrinkAppliesWidthImmediately(t *testing.T) {
@@ -334,6 +331,7 @@ func TestApplyResizeMsgUnchangedPendingSizeDoesNothing(t *testing.T) {
 }
 
 func TestApplyResizeMsgUsesLatestPendingSize(t *testing.T) {
+	stubTUITicks(t)
 	m := NewModelWithSize(nil, 150, 40)
 	m.pendingResizeW = 121
 	m.pendingResizeH = 36
@@ -351,9 +349,7 @@ func TestApplyResizeMsgUsesLatestPendingSize(t *testing.T) {
 	if !model.rightPanelVisible {
 		t.Fatal("rightPanelVisible should remain true at width 121")
 	}
-	if cmd != nil {
-		t.Fatalf("applyResizeMsg should not schedule extra command, got %#v", cmd)
-	}
+	assertOnlyResizeCacheSweep(t, cmd)
 }
 
 func TestDirectoryModeKeepsRightPanelLayoutAndStatusBarState(t *testing.T) {

@@ -71,6 +71,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - The TUI releases off-screen render caches once they exceed about 8 MiB instead of holding up to 32 MiB, including while a session is active; visible content and work in progress stay rendered. Blocks larger than 4 MiB are still not spilled to disk, but their render caches are released too. Scrolling back to an older card may re-render it.
 
+- Resizing the terminal schedules cache cleanup 30 seconds later, releasing off-screen render caches and excess screen-buffer capacity. Further size changes during that interval share the same cleanup; without another size change, no further cleanup is scheduled. Visible content, active cards and scroll position are preserved.
+
 - With the terminal in the background and every agent, job, and draft idle, the TUI returns reclaimable heap memory to the OS about 30 seconds after the last work stops instead of waiting five minutes. A full sweep of off-screen render caches still waits five minutes.
 
 - Multi-hunk `apply_patch` failures suggest splitting independent changes into single-hunk calls only when partial completion is acceptable; interdependent hunks stay in the same file group. Repeated match failures request a fresh read without suggesting that a single hunk be split, and `edit` with identical `old_string` and `new_string` states that retrying the same arguments cannot succeed.

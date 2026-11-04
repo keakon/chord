@@ -33,10 +33,9 @@ func (v *Viewport) cachedLineCount(block *Block, width int) (int, bool) {
 //   - The focused block
 //
 // This is a lightweight operation: it only clears cache references, it does
-// not re-render anything or perform spill-store I/O. It is called from the
-// background idle sweep, so it also drops the derived caches (rendered
-// Markdown, highlighters) that a sweep on the visible foreground path would
-// keep for instant scroll-back.
+// not re-render anything or perform spill-store I/O. Background idle and
+// delayed resize sweeps use it to release derived Markdown/highlighter caches
+// while keeping the visible window ready to draw.
 func (v *Viewport) DropOffScreenCaches() {
 	if v == nil {
 		return
@@ -85,7 +84,7 @@ func (v *Viewport) DropOffScreenCaches() {
 // from stale line counts.
 func (v *Viewport) offscreenSweepSpan(blocks []*Block, index int, block *Block) (int, bool) {
 	if v.blockPositionCacheValid(blocks) && index < len(v.blockSpansCache) {
-		if span := v.blockSpansCache[index]; span > 0 {
+		if span := v.blockSpansCache[index]; span >= 0 {
 			return span, true
 		}
 	}

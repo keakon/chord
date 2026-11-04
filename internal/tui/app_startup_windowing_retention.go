@@ -75,7 +75,9 @@ func (m *Model) dropStartupDeferredTranscriptHiddenCaches() {
 		if i >= keepStart && i < keepEnd {
 			continue
 		}
-		block.ReleaseDerivedRenderCaches()
+		if m.viewport.canDropBlockCache(block) {
+			block.ReleaseDerivedRenderCaches()
+		}
 	}
 }
 

@@ -279,14 +279,15 @@ func (m *Model) handleInputQueueCommand(content string) tea.Cmd {
 		return nil
 	}
 	action := fields[1]
-	if action == "cancel-edit" {
+	switch action {
+	case "cancel-edit":
 		draft := m.inputQueue.editing
 		if draft == nil {
 			return nil
 		}
 		op := m.nextInputQueueOperation(inputQueueAction{draft: *draft, kind: "release"})
 		m.agent.ControlInputQueue(agent.QueueControl{OperationID: op, Target: m.agent.InputDeliveryTarget(), Action: agent.InputQueueReleaseEdit, InputID: draft.InputID, ExpectedRevision: draft.Revision})
-	} else if action == "next" || action == "after" || action == "withdraw" {
+	case "next", "after", "withdraw":
 		if len(fields) != 3 {
 			return m.enqueueToast("Specify a queue item number", "warn")
 		}
@@ -315,7 +316,7 @@ func (m *Model) handleInputQueueCommand(content string) tea.Cmd {
 		}
 		op := m.nextInputQueueOperation(inputQueueAction{draft: draft, kind: "policy"})
 		m.agent.UpdateQueuedInput(agent.UpdateInput{OperationID: op, Target: m.agent.InputDeliveryTarget(), InputID: draft.InputID, ExpectedRevision: draft.Revision, DeliveryPolicy: policy})
-	} else {
+	default:
 		if action != agent.InputQueueClear {
 			return m.enqueueToast("Unknown queue action", "warn")
 		}

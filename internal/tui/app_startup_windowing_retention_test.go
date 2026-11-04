@@ -43,3 +43,31 @@ func TestDropStartupDeferredTranscriptHiddenCachesReleasesOnlyOutsideHalo(t *tes
 		}
 	}
 }
+
+func TestResizeCacheSweepProtectsActiveArchiveBlocks(t *testing.T) {
+	blocks := []*Block{
+		{ID: 1, Type: BlockAssistant, Focused: true},
+		{ID: 2, Type: BlockAssistant, Streaming: true},
+		{ID: 3, Type: BlockUser, UserLocalShellPending: true},
+		{ID: 4, Type: BlockToolCall, ResultDone: false},
+		{ID: 5, Type: BlockAssistant},
+	}
+	for _, block := range blocks {
+		block.mdCache = []string{"rendered"}
+	}
+	m := &Model{
+		startupDeferredTranscript: &startupDeferredTranscriptState{
+			allBlocks: blocks, windowStart: 30, windowEnd: 40,
+		},
+		resizeCacheSweepScheduled: true, resizeCacheSweepGeneration: 1,
+	}
+	m.handleResizeCacheSweep(resizeCacheSweepTickMsg{generation: 1})
+	for _, block := range blocks[:4] {
+		if block.mdCache == nil {
+			t.Fatalf("protected archive block %d lost its cache", block.ID)
+		}
+	}
+	if blocks[4].mdCache != nil {
+		t.Fatal("inactive archive block retained its cache")
+	}
+}

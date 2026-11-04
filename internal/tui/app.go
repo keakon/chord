@@ -466,6 +466,9 @@ type Model struct {
 	pendingResizeH int
 	resizeVersion  int
 
+	resizeCacheSweepScheduled  bool
+	resizeCacheSweepGeneration uint64
+
 	runtimeCacheMgr          runtimeCacheManager
 	runtimeCacheHandle       runtimeCacheSessionHandle
 	runtimeCacheSession      string
@@ -927,7 +930,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			cmd = tea.Sequence(m.imageViewerCleanup, cmd)
 			m.imageViewerCleanup = nil
 		}
-		if m.fileViewer.open && ((m.mode != ModeFileViewer && !(m.mode == ModeImageViewer && m.imageViewer.ReturnMode == ModeFileViewer)) || m.fileViewer.owner != m.imageViewerOwner() || m.fileViewer.checkout != m.workingDir || m.fileViewer.checkoutGeneration != m.workingDirGeneration) {
+		if m.fileViewer.open && ((m.mode != ModeFileViewer && (m.mode != ModeImageViewer || m.imageViewer.ReturnMode != ModeFileViewer)) || m.fileViewer.owner != m.imageViewerOwner() || m.fileViewer.checkout != m.workingDir || m.fileViewer.checkoutGeneration != m.workingDirGeneration) {
 			if m.fileViewer.cancel != nil {
 				m.fileViewer.cancel()
 			}
@@ -1337,6 +1340,10 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 	case idleSweepTickMsg:
 		return m, m.handleIdleSweepTick(msg)
+
+	case resizeCacheSweepTickMsg:
+		m.handleResizeCacheSweep(msg)
+		return m, nil
 
 	case freeOSMemoryResultMsg:
 		return m, m.handleFreeOSMemoryResult(msg)
