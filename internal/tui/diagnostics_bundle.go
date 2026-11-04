@@ -269,22 +269,55 @@ func (m *Model) collectDiagnosticLLMTrace(projectLocator *config.ProjectLocator)
 }
 
 func readTextTail(path string, maxBytes int, maxLines int) (string, bool) {
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
+	f, err := os.Open(path)
+	if err != nil {
 		return "", false
 	}
-	if maxBytes > 0 && len(data) > maxBytes {
-		data = data[len(data)-maxBytes:]
-		if idx := bytes.IndexByte(data, '\n'); idx >= 0 && idx+1 < len(data) {
-			data = data[idx+1:]
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return "", false
+	}
+	start := int64(0)
+	if maxBytes > 0 && info.Size() > int64(maxBytes) {
+		// Include the preceding byte to distinguish a line boundary from a
+		// partial first line without reading the rest of the trace.
+		start = info.Size() - int64(maxBytes) - 1
+	}
+	data := make([]byte, info.Size()-start)
+	n, err := f.ReadAt(data, start)
+	if err != nil && err != io.EOF {
+		return "", false
+	}
+	data = data[:n]
+	if len(data) == 0 {
+		return "", false
+	}
+	if maxBytes > 0 && info.Size() > int64(maxBytes) {
+		atLineStart := data[0] == '\n'
+		data = data[1:]
+		if !atLineStart {
+			if idx := bytes.IndexByte(data, '\n'); idx >= 0 && idx+1 < len(data) {
+				data = data[idx+1:]
+			}
 		}
 	}
 	if maxLines > 0 {
-		lines := bytes.Split(data, []byte("\n"))
-		if len(lines) > maxLines+1 {
-			lines = lines[len(lines)-(maxLines+1):]
+		end := len(data)
+		if end > 0 && data[end-1] == '\n' {
+			end--
 		}
-		data = bytes.Join(lines, []byte("\n"))
+		for range maxLines {
+			idx := bytes.LastIndexByte(data[:end], '\n')
+			if idx < 0 {
+				end = -1
+				break
+			}
+			end = idx
+		}
+		if end >= 0 {
+			data = data[end+1:]
+		}
 	}
 	return string(data), true
 }

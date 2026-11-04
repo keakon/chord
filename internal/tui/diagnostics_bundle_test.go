@@ -247,3 +247,37 @@ func TestCollectDiagnosticLLMTraceCurrentSession(t *testing.T) {
 		t.Fatalf("tail = %q, want trace lines", tail)
 	}
 }
+
+func TestReadTextTail(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		content  string
+		maxBytes int
+		maxLines int
+		want     string
+	}{
+		{name: "empty"},
+		{name: "whole", content: "one\ntwo\n", want: "one\ntwo\n"},
+		{name: "line limit", content: "one\ntwo\nthree\n", maxLines: 2, want: "two\nthree\n"},
+		{name: "unterminated line", content: "one\ntwo\nthree", maxLines: 2, want: "two\nthree"},
+		{name: "partial first line", content: "one\ntwo\nthree\n", maxBytes: 8, want: "three\n"},
+		{name: "exact line boundary", content: "one\ntwo\nthree\n", maxBytes: 10, want: "two\nthree\n"},
+		{name: "both limits", content: "one\ntwo\nthree\n", maxBytes: 10, maxLines: 1, want: "three\n"},
+		{name: "long line", content: "abcdefgh", maxBytes: 4, want: "efgh"},
+		{name: "trailing blank lines", content: "one\n\n\n", maxLines: 2, want: "\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "trace.jsonl")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := readTextTail(path, tc.maxBytes, tc.maxLines)
+			if got != tc.want || ok != (tc.content != "") {
+				t.Fatalf("readTextTail = %q, %t; want %q, %t", got, ok, tc.want, tc.content != "")
+			}
+		})
+	}
+	if _, ok := readTextTail(filepath.Join(t.TempDir(), "missing"), 1024, 10); ok {
+		t.Fatal("missing trace reported as readable")
+	}
+}

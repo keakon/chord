@@ -160,6 +160,38 @@ func TestGzipCompress(t *testing.T) {
 	}
 }
 
+func TestGzipCompressReturnedBodiesSurviveReuse(t *testing.T) {
+	for i := range 8 {
+		t.Run(string(rune('a'+i)), func(t *testing.T) {
+			t.Parallel()
+			inputs := make([][]byte, 4)
+			outputs := make([][]byte, len(inputs))
+			for j := range inputs {
+				inputs[j] = bytes.Repeat([]byte{byte('a' + i), byte('0' + j)}, 4096)
+				var err error
+				outputs[j], err = gzipCompress(inputs[j])
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			for j, output := range outputs {
+				reader, err := gzip.NewReader(bytes.NewReader(output))
+				if err != nil {
+					t.Fatal(err)
+				}
+				decoded, err := io.ReadAll(reader)
+				reader.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(decoded, inputs[j]) {
+					t.Fatalf("body %d changed after compressor reuse", j)
+				}
+			}
+		})
+	}
+}
+
 func TestZstdCompress(t *testing.T) {
 	data := bytes.Repeat([]byte("hello world "), 1000)
 	compressed, err := zstdCompress(data)

@@ -103,7 +103,12 @@ func gzipCompress(data []byte) ([]byte, error) {
 	buf := bytes.NewBuffer(make([]byte, 0, compressedBodyEstimate(len(data))))
 	w, _ := gzipWriterPool.Get().(*gzip.Writer)
 	w.Reset(buf)
-	defer gzipWriterPool.Put(w)
+	defer func() {
+		// The pooled writer retains its destination until the next Reset.
+		// Detach the backing array without resetting the compressor twice.
+		*buf = bytes.Buffer{}
+		gzipWriterPool.Put(w)
+	}()
 	if _, err := w.Write(data); err != nil {
 		return nil, fmt.Errorf("gzip write: %w", err)
 	}

@@ -61,6 +61,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Gzip-compressed requests no longer keep their output buffers alive in idle compressor caches after the requests release them.
+
 - Go edits can start the configured language server while `apply_patch`, `edit`, or `write` arguments are still streaming, overlapping startup with content generation to reduce the first edit's wait. Read-only work does not trigger this startup.
 
 - Long replies use less CPU while streaming, especially paragraph-based answers and reasoning with headings. Large completed reply and reasoning cards use less memory while remaining available for scrolling, search, and copying.
