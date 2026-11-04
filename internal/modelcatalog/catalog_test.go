@@ -79,8 +79,8 @@ func TestModelFactsAndBindings(t *testing.T) {
 		t.Fatal("cross-endpoint lookup must not resolve")
 	}
 	bindings := BindingsForEndpoint("codex")
-	if len(bindings) != 7 {
-		t.Fatalf("codex bindings = %d, want the seven wizard models", len(bindings))
+	if len(bindings) != 8 {
+		t.Fatalf("codex bindings = %d, want the eight wizard models", len(bindings))
 	}
 	for i := 1; i < len(bindings); i++ {
 		if bindings[i-1].WireModelID > bindings[i].WireModelID {

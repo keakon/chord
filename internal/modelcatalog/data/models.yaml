@@ -25,6 +25,7 @@ models:
     input_modalities:
     - text
     - image
+    - pdf
     coding_sources:
     - url: https://platform.claude.com/docs/en/models/overview
       checked: '2026-10-04'
@@ -32,16 +33,24 @@ models:
       input_per_million: 4
       output_per_million: 20
       currency: USD
-      checked: '2026-10-04'
+      checked: '2026-11-05'
       source:
-        url: https://platform.claude.com/docs/en/models/overview
-        checked: '2026-10-04'
+        url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: '2026-11-05'
+      notes: >-
+        Standard USD API rates. Cache reads are $0.20/MTok (0.05x base input);
+        cache writes are $5/MTok (5m) and $8/MTok (1h). The full 1M context is
+        included at standard pricing; batch pricing is separate.
     context: 1000000
     output: 128000
     reasoning_options: [low, medium, high, xhigh, max]
     sources:
       - url: https://platform.claude.com/docs/en/build-with-claude/effort
         checked: "2026-10-05"
+      - url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: "2026-11-05"
+      - url: https://platform.claude.com/docs/en/build-with-claude/pdf-support
+        checked: "2026-11-05"
       - url: https://models.dev/anthropic/claude-opus-5-5
         checked: "2026-10-01"
       - url: https://docs.anthropic.com/en/docs/about-claude/models
@@ -69,6 +78,7 @@ models:
     input_modalities:
     - text
     - image
+    - pdf
     coding_sources:
     - url: https://platform.claude.com/docs/en/models/overview
       checked: '2026-10-04'
@@ -76,16 +86,24 @@ models:
       input_per_million: 2
       output_per_million: 10
       currency: USD
-      checked: '2026-10-04'
+      checked: '2026-11-05'
       source:
-        url: https://platform.claude.com/docs/en/models/overview
-        checked: '2026-10-04'
+        url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: '2026-11-05'
+      notes: >-
+        Standard USD API rates. Cache reads are $0.10/MTok (0.05x base input);
+        cache writes are $2.50/MTok (5m) and $4/MTok (1h). The full 1M context
+        is included at standard pricing; batch pricing is separate.
     context: 1000000
     output: 128000
     reasoning_options: [low, medium, high, xhigh, max]
     sources:
       - url: https://platform.claude.com/docs/en/build-with-claude/effort
         checked: "2026-10-05"
+      - url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: "2026-11-05"
+      - url: https://platform.claude.com/docs/en/build-with-claude/pdf-support
+        checked: "2026-11-05"
       - url: https://models.dev/anthropic/claude-sonnet-5-5
         checked: "2026-10-01"
       - url: https://docs.anthropic.com/en/docs/about-claude/models
@@ -119,6 +137,7 @@ models:
     input_modalities:
     - text
     - image
+    - pdf
     coding_sources:
     - url: https://www.anthropic.com/claude-haiku-5-5
       checked: "2026-10-08"
@@ -131,9 +150,11 @@ models:
         url: https://platform.claude.com/docs/en/models/haiku-5-5/overview
         checked: "2026-10-08"
       notes: >-
-        Base rates for prompts up to 100K tokens. Prompts over 100K use
-        $0.50/$2.50 per million input/output tokens; cache and batch pricing
-        are separate.
+        Base rates for prompts up to 100K tokens. Prompts over 100K pay
+        $0.50 input / $2.50 output / $0.05 cache read / $0.625 cache write
+        (5m) / $1 cache write (1h) per million tokens. Below 100K, cache
+        reads are $0.01/MTok and cache writes $0.125/MTok (5m) and
+        $0.20/MTok (1h); batch pricing is separate.
     context: 1000000
     output: 128000
     reasoning_options: [low, medium, high, xhigh, max]
@@ -143,6 +164,10 @@ models:
         checked: "2026-10-08"
       - url: https://platform.claude.com/docs/en/build-with-claude/effort
         checked: "2026-10-08"
+      - url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: "2026-11-05"
+      - url: https://platform.claude.com/docs/en/build-with-claude/pdf-support
+        checked: "2026-11-05"
       - url: https://www.anthropic.com/claude-haiku-5-5
         checked: "2026-10-08"
 
@@ -165,7 +190,7 @@ models:
           checked: "2026-10-05"
     context: 1000000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://www.anthropic.com/claude/fable
       checked: "2026-10-08"
@@ -174,13 +199,18 @@ models:
       input_per_million: 10
       output_per_million: 50
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-11-05"
       source:
-        url: https://platform.claude.com/docs/en/about-claude/models/overview
-        checked: "2026-10-04"
+        url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates. Cache reads are $0.25/MTok (0.025x base
+        input); cache writes are $12.50/MTok (5m) and $20/MTok (1h).
     sources:
-      - url: https://platform.claude.com/docs/en/about-claude/models/overview
-        checked: "2026-10-04"
+      - url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: "2026-11-05"
+      - url: https://platform.claude.com/docs/en/build-with-claude/pdf-support
+        checked: "2026-11-05"
       - url: https://docs.anthropic.com/en/docs/build-with-claude/effort
         checked: "2026-10-04"
 
@@ -197,7 +227,7 @@ models:
           checked: "2026-10-04"
     context: 1000000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://www.anthropic.com/news/claude-opus-5
       checked: "2026-10-08"
@@ -206,13 +236,21 @@ models:
       input_per_million: 5
       output_per_million: 25
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-11-05"
       source:
-        url: https://platform.claude.com/docs/en/about-claude/models/overview
-        checked: "2026-10-04"
+        url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates. Cache reads are $0.50/MTok (0.1x base input);
+        cache writes are $6.25/MTok (5m) and $10/MTok (1h). The full 1M
+        context is included at standard pricing.
     sources:
       - url: https://platform.claude.com/docs/en/about-claude/models/overview
         checked: "2026-10-04"
+      - url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: "2026-11-05"
+      - url: https://platform.claude.com/docs/en/build-with-claude/pdf-support
+        checked: "2026-11-05"
       - url: https://docs.anthropic.com/en/docs/build-with-claude/effort
         checked: "2026-10-04"
 
@@ -229,7 +267,7 @@ models:
           checked: "2026-10-04"
     context: 1000000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://www.anthropic.com/news/claude-sonnet-5
       checked: "2026-10-08"
@@ -238,13 +276,22 @@ models:
       input_per_million: 2
       output_per_million: 10
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-11-05"
       source:
-        url: https://platform.claude.com/docs/en/about-claude/models/overview
-        checked: "2026-10-04"
+        url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates. Cache reads are $0.20/MTok (0.1x base input);
+        cache writes are $2.50/MTok (5m) and $4/MTok (1h). The $2/$10 rate,
+        announced as introductory pricing through August 31, 2026, is now the
+        standard price; the planned increase to $3/$15 was cancelled.
     sources:
       - url: https://platform.claude.com/docs/en/about-claude/models/overview
         checked: "2026-10-04"
+      - url: https://platform.claude.com/docs/en/about-claude/pricing
+        checked: "2026-11-05"
+      - url: https://platform.claude.com/docs/en/build-with-claude/pdf-support
+        checked: "2026-11-05"
       - url: https://docs.anthropic.com/en/docs/build-with-claude/effort
         checked: "2026-10-04"
 
@@ -316,10 +363,18 @@ models:
       input_per_million: 0.75
       output_per_million: 3.75
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-11-05"
       source:
-        url: https://ai.google.dev/gemini-api/docs/generate-content/latest-model
-        checked: "2026-10-04"
+        url: https://aistudio.google.com/docs/pricing
+        checked: "2026-11-05"
+      notes: >-
+        Standard paid-tier USD rates through December 31, 2026: input
+        (cache miss) $0.75, output (including thinking tokens) $3.75, implicit
+        cache hits $0.075/MTok, and cache storage $0.50 per million tokens
+        per hour. From January 1, 2027 these double ($1.50 input, $7.50
+        output, $0.15 cache hits, $1.00 storage). No separate cache-write
+        price is listed; Batch, Flex and Priority rates differ. The model
+        page lists PDF among the supported inputs.
     sources:
       - url: https://models.dev/google/gemini-3.8-flash
         checked: "2026-10-01"
@@ -379,6 +434,20 @@ models:
     output: 65536
     input_modalities: [text, image, video, audio, pdf]
     reasoning_options: [low, medium, high]
+    cost:
+      input_per_million: 2
+      output_per_million: 12
+      currency: USD
+      checked: "2026-11-05"
+      source:
+        url: https://aistudio.google.com/docs/pricing
+        checked: "2026-11-05"
+      notes: >-
+        Standard paid-tier USD rates. Prompts over 200K tokens reprice the
+        entire request at $4 input / $0.40 cache hit / $18 output per million
+        tokens. Implicit cache hits are $0.20/MTok at or below 200K; cache
+        storage is $4.50 per million tokens per hour. No free tier; no
+        separate cache-write price is listed.
     sources:
       - url: https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
         checked: "2026-10-04"
@@ -398,14 +467,31 @@ models:
           checked: "2026-10-08"
     context: 1050000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://openai.com/index/gpt-5-6/
       checked: "2026-10-08"
     reasoning_options: [none, low, medium, high, xhigh, max]
+    cost:
+      input_per_million: 0.2
+      output_per_million: 1.2
+      currency: USD
+      checked: "2026-11-05"
+      source:
+        url: https://developers.openai.com/api/docs/models/gpt-5.6-luna
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates for uncached input and text output up to 272K
+        input tokens. Cached input is $0.02/MTok; cache writes are
+        $0.25/MTok (30-minute) and $0.50/MTok (12-hour). Above 272K, the
+        entire request uses 2x input and cache rates and 1.5x output rates
+        ($0.4 input / $0.04 cached / $1.8 output). Batch and Flex rates are
+        50% lower.
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-5.6-luna
         checked: "2026-10-05"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-05"
       - url: https://models.dev/openai/gpt-5.6-luna
         checked: "2026-10-01"
       - url: https://platform.openai.com/docs/models
@@ -426,14 +512,33 @@ models:
           checked: "2026-10-08"
     context: 1050000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://openai.com/index/gpt-5-6/
       checked: "2026-10-08"
     reasoning_options: [none, low, medium, high, xhigh, max]
+    cost:
+      input_per_million: 5
+      output_per_million: 30
+      currency: USD
+      checked: "2026-11-05"
+      source:
+        url: https://developers.openai.com/api/docs/models/gpt-5.6-sol
+        checked: "2026-11-05"
+      notes: >-
+        Standard (non-promotional) USD API rates for uncached input and text
+        output up to 272K input tokens. Cached input is $0.50/MTok; cache
+        writes are $6.25/MTok (30-minute) and $12.50/MTok (12-hour). Above
+        272K, the entire request uses 2x input and cache rates and 1.5x
+        output rates ($10 input / $1 cached / $45 output). Batch and Flex
+        rates are 50% lower. Promotional windows are not recorded; the
+        official pages currently display a time-limited rate below these
+        standard prices.
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-5.6-sol
         checked: "2026-10-05"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-05"
       - url: https://models.dev/openai/gpt-5.6-sol
         checked: "2026-10-01"
       - url: https://platform.openai.com/docs/models
@@ -454,14 +559,31 @@ models:
           checked: "2026-10-08"
     context: 1050000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://openai.com/index/gpt-5-6/
       checked: "2026-10-08"
     reasoning_options: [none, low, medium, high, xhigh, max]
+    cost:
+      input_per_million: 2
+      output_per_million: 12
+      currency: USD
+      checked: "2026-11-05"
+      source:
+        url: https://developers.openai.com/api/docs/models/gpt-5.6-terra
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates for uncached input and text output up to 272K
+        input tokens. Cached input is $0.20/MTok; cache writes are
+        $2.50/MTok (30-minute) and $5.00/MTok (12-hour). Above 272K, the
+        entire request uses 2x input and cache rates and 1.5x output rates
+        ($4 input / $0.4 cached / $18 output). Batch and Flex rates are 50%
+        lower.
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-5.6-terra
         checked: "2026-10-05"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-05"
       - url: https://models.dev/openai/gpt-5.6-terra
         checked: "2026-10-01"
       - url: https://platform.openai.com/docs/models
@@ -482,7 +604,7 @@ models:
           checked: "2026-10-05"
     context: 1050000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://openai.com/index/gpt-6-astra/
       checked: "2026-10-08"
@@ -491,18 +613,23 @@ models:
       input_per_million: 10
       output_per_million: 50
       currency: USD
-      checked: "2026-10-05"
+      checked: "2026-11-05"
       source:
         url: https://developers.openai.com/api/docs/models/gpt-6-astra
-        checked: "2026-10-05"
+        checked: "2026-11-05"
       notes: >-
         Standard USD API rates for uncached text input and text output up to
-        272K input tokens. Above 272K, the entire request uses 2x input and
-        cache rates and 1.5x output rates. Cache writes, processing tiers
-        and regional pricing are separate; these are not Codex subscription rates.
+        272K input tokens. Cached input is $1/MTok; cache writes are
+        $12.50/MTok (30-minute) and $25/MTok (12-hour). Above 272K, the
+        entire request uses 2x input and cache rates and 1.5x output rates.
+        Batch and Flex rates are 50% lower; Fast mode is 2x and Ultrafast
+        mode is 6x the applicable rates; regional processing adds a 10%
+        premium where available. These are not Codex subscription rates.
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-6-astra
         checked: "2026-10-05"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-05"
       - url: https://models.dev/openai/gpt-6-astra
         checked: "2026-10-01"
       - url: https://developers.openai.com/api/docs/models
@@ -523,7 +650,7 @@ models:
           checked: "2026-10-04"
     context: 1050000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://openai.com/index/introducing-gpt-6-sol-and-luna/
       checked: "2026-10-08"
@@ -532,18 +659,22 @@ models:
       input_per_million: 0.1
       output_per_million: 0.5
       currency: USD
-      checked: "2026-10-05"
+      checked: "2026-11-05"
       source:
         url: https://developers.openai.com/api/docs/models/gpt-6-luna
-        checked: "2026-10-05"
+        checked: "2026-11-05"
       notes: >-
         Standard USD API rates for uncached text input and text output up to
-        272K input tokens. Above 272K, the entire request uses 2x input and
-        cache rates and 1.5x output rates. Cache writes, processing tiers
-        and regional pricing are separate; these are not Codex subscription rates.
+        272K input tokens. Cached input is $0.01/MTok; cache writes are
+        $0.125/MTok (30-minute) and $0.25/MTok (12-hour). Above 272K, the
+        entire request uses 2x input and cache rates and 1.5x output rates.
+        Batch and Flex rates are 50% lower; regional processing adds a 10%
+        premium where available. These are not Codex subscription rates.
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-6-luna
         checked: "2026-10-05"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-05"
       - url: https://models.dev/openai/gpt-6-luna
         checked: "2026-10-01"
       - url: https://developers.openai.com/api/docs/models
@@ -564,7 +695,7 @@ models:
           checked: "2026-10-08"
     context: 1050000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://openai.com/index/introducing-gpt-6-sol-and-luna/
       checked: "2026-10-08"
@@ -573,18 +704,23 @@ models:
       input_per_million: 2
       output_per_million: 10
       currency: USD
-      checked: "2026-10-05"
+      checked: "2026-11-05"
       source:
         url: https://developers.openai.com/api/docs/models/gpt-6-sol
-        checked: "2026-10-05"
+        checked: "2026-11-05"
       notes: >-
         Standard USD API rates for uncached text input and text output up to
-        272K input tokens. Above 272K, the entire request uses 2x input and
-        cache rates and 1.5x output rates. Cache writes, processing tiers
-        and regional pricing are separate; these are not Codex subscription rates.
+        272K input tokens. Cached input is $0.20/MTok; cache writes are
+        $2.50/MTok (30-minute) and $5.00/MTok (12-hour). Above 272K, the
+        entire request uses 2x input and cache rates and 1.5x output rates.
+        Batch and Flex rates are 50% lower; Fast mode is 2x the applicable
+        rates; regional processing adds a 10% premium where available. These
+        are not Codex subscription rates.
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-6-sol
         checked: "2026-10-05"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-05"
       - url: https://models.dev/openai/gpt-6-sol
         checked: "2026-10-01"
       - url: https://platform.openai.com/docs/models
@@ -610,7 +746,7 @@ models:
           checked: "2026-10-05"
     context: 1050000
     output: 128000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://developers.openai.com/api/docs/models/gpt-6.1-sol
       checked: "2026-10-08"
@@ -619,24 +755,79 @@ models:
       input_per_million: 2
       output_per_million: 10
       currency: USD
-      checked: "2026-10-05"
+      checked: "2026-11-05"
       source:
         url: https://developers.openai.com/api/docs/models/gpt-6.1-sol
-        checked: "2026-10-05"
+        checked: "2026-11-05"
       notes: >-
         Standard USD API rates for uncached text input and text output up to
-        272K input tokens. Above 272K, the entire request uses 2x input and
-        cache rates and 1.5x output rates. Cache writes, processing tiers
-        and regional pricing are separate; these are not Codex subscription rates.
+        272K input tokens. Cached input is $0.10/MTok (5% of the uncached
+        input rate); cache writes are $2.50/MTok (30-minute) and $5.00/MTok
+        (12-hour). Above 272K, the entire request uses 2x input and cache
+        rates and 1.5x output rates. Batch and Flex rates are 50% lower;
+        Fast mode is 2x and Ultrafast mode is 6x the applicable rates;
+        regional processing adds a 10% premium where available. These are
+        not Codex subscription rates.
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-6.1-sol
         checked: "2026-10-05"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-05"
       - url: https://models.dev/openai/gpt-6.1-sol
         checked: "2026-10-01"
       - url: https://developers.openai.com/api/docs/models
         checked: "2026-10-04"
       - url: https://developers.openai.com/api/docs/pricing
         checked: "2026-10-04"
+
+  - id: openai/gpt-6.1-terra
+    config_profile:
+      model:
+        reasoning:
+          summary: auto
+      compaction:
+        threshold: 0.25
+        reminder: 0.20
+        notes: Chord starting heuristic to stay below the 272K input pricing tier; not a provider limit or a measured optimum. Tune for task quality, latency and cache reuse.
+      sources:
+        - url: https://developers.openai.com/api/docs/models/gpt-6.1-terra
+          checked: "2026-10-27"
+        - url: https://developers.openai.com/api/docs/guides/reasoning
+          checked: "2026-10-27"
+    released: "2026-10-26"
+    context: 1050000
+    output: 128000
+    input_modalities: [text, image, pdf]
+    coding_sources:
+    - url: https://openai.com/index/introducing-gpt-6-1-terra
+      checked: "2026-10-27"
+    reasoning_options: [none, low, medium, high, xhigh, max]
+    cost:
+      input_per_million: 1
+      output_per_million: 5
+      currency: USD
+      checked: "2026-10-27"
+      source:
+        url: https://developers.openai.com/api/docs/models/gpt-6.1-terra
+        checked: "2026-10-27"
+      notes: >-
+        Standard USD API rates for uncached text input and text output up to
+        272K input tokens. Above 272K, the entire request uses 2x input and
+        cache rates and 1.5x output rates. Cached input is $0.05/MTok; cache
+        writes are $1.25/MTok (30-minute) and $2.50/MTok (12-hour). Batch and
+        Flex rates are 50% lower; regional processing, Fast mode and Codex
+        subscription rates are separate.
+    sources:
+      - url: https://openai.com/index/introducing-gpt-6-1-terra
+        checked: "2026-10-27"
+      - url: https://openai.com/news/
+        checked: "2026-10-27"
+      - url: https://developers.openai.com/api/docs/models/gpt-6.1-terra
+        checked: "2026-10-27"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-05"
+      - url: https://developers.openai.com/api/docs/models
+        checked: "2026-10-27"
 
   # Documented connections support one-command onboarding. These are API
   # recipes, not smoke-tested managed bindings; no route send rules are borrowed.
@@ -680,10 +871,14 @@ models:
       input_per_million: 1.4
       output_per_million: 4.4
       currency: USD
-      checked: "2026-10-08"
+      checked: "2026-11-05"
       source:
         url: https://docs.z.ai/guides/overview/pricing
-        checked: "2026-10-08"
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates. Cached input is $0.26/MTok; cached-input
+        storage is listed as limited-time free and no separate cache write
+        fee is shown.
     sources:
       - url: https://docs.z.ai/guides/llm/glm-5.3
         checked: "2026-10-04"
@@ -712,7 +907,7 @@ models:
         checked: '2026-10-04'
     context: 1048576
     output: 1048576
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://platform.kimi.ai/docs/guide/kimi-k3-quickstart
       checked: "2026-10-08"
@@ -721,10 +916,16 @@ models:
       input_per_million: 3
       output_per_million: 15
       currency: USD
-      checked: "2026-10-08"
+      checked: "2026-11-05"
       source:
-        url: https://platform.kimi.ai/docs/pricing/chat
-        checked: "2026-10-08"
+        url: https://platform.kimi.ai/docs/guide/context-caching
+        checked: "2026-11-05"
+      notes: >-
+        Flat pay-as-you-go rates with no tiering by context length. Cached
+        input is $0.30/MTok (one-tenth of the cache-miss rate); cache writes
+        are $3.00/MTok (5m TTL) and $6.00/MTok (1h TTL), charged once when
+        the prefix is first written. Batch inference is billed at 60% of the
+        standard price.
     sources:
       - url: https://platform.kimi.ai/docs/guide/kimi-k3-quickstart
         checked: "2026-10-04"
@@ -732,6 +933,108 @@ models:
         checked: "2026-10-04"
       - url: https://models.dev/moonshotai/kimi-k3
         checked: "2026-10-04"
+
+  - id: moonshotai/kimi-k3.1-pro
+    config_profile:
+      compat:
+        chat_completions:
+          native_thinking: thinking
+        reasoning_continuity:
+          mode: openai_visible
+          reasoning_replay: all
+      sources:
+        - url: https://platform.kimi.ai/docs/api/models-overview
+          checked: "2026-10-24"
+        - url: https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+          checked: "2026-10-24"
+    released: "2026-10-24"
+    connection:
+      request_url: https://api.moonshot.ai/v1/chat/completions
+      wire_model_id: kimi-k3.1-pro
+      env_var: MOONSHOT_API_KEY
+      sources:
+      - url: https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+        checked: "2026-10-24"
+    context: 1048576
+    output: 1048576
+    input_modalities: [text, image, video]
+    coding_sources:
+    - url: https://kimi.ai/blog/kimi-k3-1-pro
+      checked: "2026-10-24"
+    - url: https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+      checked: "2026-10-24"
+    reasoning_options: [low, high, max]
+    cost:
+      input_per_million: 2
+      output_per_million: 10
+      currency: USD
+      checked: "2026-10-24"
+      source:
+        url: https://platform.kimi.ai/docs/pricing/chat
+        checked: "2026-10-24"
+      notes: >-
+        Standard USD API rates for uncached input and output. Cached input is
+        $0.20/MTok; cache writes are $2.00/MTok (5m) and $4.00/MTok (1h).
+        Access requires a minimum $1 top-up; promotions and account-tier rate
+        limits are separate.
+    sources:
+      - url: https://kimi.ai/blog/kimi-k3-1-pro
+        checked: "2026-10-24"
+      - url: https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+        checked: "2026-10-24"
+      - url: https://platform.kimi.ai/docs/pricing/chat
+        checked: "2026-10-24"
+
+  - id: moonshotai/kimi-k3.1-pro-highspeed
+    config_profile:
+      compat:
+        chat_completions:
+          native_thinking: thinking
+        reasoning_continuity:
+          mode: openai_visible
+          reasoning_replay: all
+      sources:
+        - url: https://platform.kimi.ai/docs/api/models-overview
+          checked: "2026-10-24"
+        - url: https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+          checked: "2026-10-24"
+    released: "2026-10-24"
+    connection:
+      request_url: https://api.moonshot.ai/v1/chat/completions
+      wire_model_id: kimi-k3.1-pro-highspeed
+      env_var: MOONSHOT_API_KEY
+      sources:
+      - url: https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+        checked: "2026-10-24"
+    context: 1048576
+    output: 1048576
+    input_modalities: [text, image, video]
+    coding_sources:
+    - url: https://kimi.ai/blog/kimi-k3-1-pro
+      checked: "2026-10-24"
+    - url: https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+      checked: "2026-10-24"
+    reasoning_options: [low, high, max]
+    cost:
+      input_per_million: 4
+      output_per_million: 20
+      currency: USD
+      checked: "2026-10-24"
+      source:
+        url: https://platform.kimi.ai/docs/pricing/chat
+        checked: "2026-10-24"
+      notes: >-
+        Standard USD API rates for uncached input and output on the 2-3x faster
+        serving variant. Cached input is $0.20/MTok; cache writes are
+        $4.00/MTok (5m) and $8.00/MTok (1h). Access requires a minimum $1
+        top-up; promotions and account-tier rate limits are separate.
+    sources:
+      - url: https://kimi.ai/blog/kimi-k3-1-pro
+        checked: "2026-10-24"
+      - url: https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+        checked: "2026-10-24"
+      - url: https://platform.kimi.ai/docs/pricing/chat
+        checked: "2026-10-24"
 
   - id: alibaba/qwen3.8-max
     context: 1000000
@@ -747,14 +1050,17 @@ models:
       input_per_million: 1.65
       output_per_million: 4.951
       currency: USD
-      checked: "2026-10-09"
+      checked: "2026-11-05"
       source:
         url: https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max
-        checked: "2026-10-09"
+        checked: "2026-11-05"
       notes: >-
         Standard uncached USD API rates for China (Beijing) and Global scopes.
         Singapore International and Virginia US scopes cost $2 input and $6
-        output per million tokens. Cache, batch and promotional prices are separate.
+        output per million tokens. Cache hits are $0.206/MTok in the China
+        (Beijing) and Global scopes and $0.25/MTok in the Singapore
+        International and US scopes; batch and promotional prices are
+        separate.
     sources:
       - url: https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max
         checked: "2026-10-09"
@@ -774,10 +1080,16 @@ models:
       input_per_million: 0.15
       output_per_million: 0.47
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-11-05"
       source:
-        url: https://docs.modelstudio.console.alibabacloud.com/en/model-studio/qwen3-8-flash
-        checked: "2026-10-04"
+        url: https://www.alibabacloud.com/help/en/model-studio/qwen3-8-flash
+        checked: "2026-11-05"
+      notes: >-
+        Standard uncached USD API rates for the Singapore International scope
+        (tier 2). Tier 2 cache hits are $0.016/MTok and explicit cache
+        creation $0.2/MTok. Tier 1 (China Beijing and Global scopes in Hong
+        Kong, Frankfurt, Tokyo, Virginia) is $0.113 input / $0.014 cache hit
+        / $0.382 output, with explicit cache creation at $0.177/MTok.
     sources:
       - url: https://docs.modelstudio.console.alibabacloud.com/en/model-studio/qwen3-8-flash
         checked: "2026-10-04"
@@ -811,7 +1123,7 @@ models:
         checked: '2026-10-17'
     context: 1000000
     output: 393216
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://api-docs.deepseek.com/news/news260910
       checked: "2026-10-17"
@@ -823,15 +1135,16 @@ models:
       input_per_million: 0.3
       output_per_million: 1.2
       currency: USD
-      checked: "2026-10-17"
+      checked: "2026-11-05"
       source:
         url: https://api-docs.deepseek.com/quick_start/pricing/
-        checked: "2026-10-17"
-      notes: Peak, uncached USD API rates. Off-peak prices are half; cache hits are priced
-        separately.
+        checked: "2026-11-05"
+      notes: >-
+        Peak, uncached USD API rates. Off-peak prices are half. Cache hits are
+        $0.006/MTok peak ($0.003 off-peak); no cache write fee is documented.
     sources:
       - url: https://api-docs.deepseek.com/quick_start/pricing/
-        checked: "2026-10-17"
+        checked: "2026-11-05"
       - url: https://api-docs.deepseek.com/news/news260910
         checked: "2026-10-17"
       - url: https://api-docs.deepseek.com/news/news261017
@@ -854,7 +1167,7 @@ models:
         checked: '2026-10-04'
     context: 500000
     output: 500000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://x.ai/news/grok-4-7
       checked: "2026-10-08"
@@ -870,8 +1183,10 @@ models:
       notes: >-
         Standard global USD API rates for uncached input and text output below
         200K prompt tokens. At 200K or more, the entire request costs $4 input
-        and $12 output per million tokens. The US regional endpoint adds a
-        1.1x multiplier; cache hits and batch pricing are separate.
+        and $12 output per million tokens. Cache hits are $0.50/MTok below
+        200K prompt tokens and $1.00/MTok at 200K or more; the Batch API takes
+        20% off standard rates for all token types. The US regional endpoint
+        adds a 1.1x multiplier.
     sources:
       - url: https://x.ai/api
         checked: "2026-10-04"
@@ -897,7 +1212,7 @@ models:
         checked: '2026-10-04'
     context: 500000
     output: 500000
-    input_modalities: [text, image]
+    input_modalities: [text, image, pdf]
     coding_sources:
     - url: https://x.ai/news/grok-4-6
       checked: "2026-10-08"
@@ -913,8 +1228,10 @@ models:
       notes: >-
         Standard global USD API rates for uncached input and text output below
         200K prompt tokens. At 200K or more, the entire request costs $4 input
-        and $12 output per million tokens. The US regional endpoint adds a
-        1.1x multiplier; cache hits and batch pricing are separate.
+        and $12 output per million tokens. Cache hits are $0.50/MTok below
+        200K prompt tokens and $1.00/MTok at 200K or more; the Batch API takes
+        20% off standard rates for all token types. The US regional endpoint
+        adds a 1.1x multiplier.
     sources:
       - url: https://docs.x.ai/developers/grok-4-6
         checked: "2026-10-04"
@@ -942,10 +1259,15 @@ models:
       input_per_million: 1.25
       output_per_million: 4.25
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-11-05"
       source:
         url: https://dev.meta.ai/docs/pricing-rate-limits
-        checked: "2026-10-04"
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates. Cached input is $0.15/MTok when a request
+        prefix matches the cache; no cache write fee is listed. The
+        -contributor variants (prompts used for training) are billed at
+        $0.10/$0.002/$0.20 per million input/cached/output tokens.
     sources:
       - url: https://dev.meta.ai/docs/models
         checked: "2026-10-04"
@@ -973,10 +1295,15 @@ models:
       input_per_million: 1.25
       output_per_million: 4.25
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-11-05"
       source:
         url: https://dev.meta.ai/docs/pricing-rate-limits
-        checked: "2026-10-04"
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates. Cached input is $0.15/MTok when a request
+        prefix matches the cache; no cache write fee is listed. The
+        -contributor variants (prompts used for training) are billed at
+        $0.10/$0.002/$0.20 per million input/cached/output tokens.
     sources:
       - url: https://dev.meta.ai/docs/models
         checked: "2026-10-04"
@@ -1017,6 +1344,18 @@ models:
     - low
     - high
     - max
+    cost:
+      input_per_million: 0.15
+      output_per_million: 0.5
+      currency: USD
+      checked: "2026-11-05"
+      source:
+        url: https://docs.z.ai/guides/overview/pricing
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates. Cached input is $0.03/MTok; cached-input
+        storage is listed as limited-time free and no separate cache write
+        fee is shown.
     coding_sources:
     - url: https://docs.z.ai/guides/vlm/glm-5.3-flash
       checked: '2026-10-04'
@@ -1063,6 +1402,18 @@ models:
     - low
     - high
     - max
+    cost:
+      input_per_million: 0.37
+      output_per_million: 1.25
+      currency: USD
+      checked: "2026-11-05"
+      source:
+        url: https://docs.z.ai/guides/overview/pricing
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates. Cached input is $0.075/MTok; cached-input
+        storage is listed as limited-time free and no separate cache write
+        fee is shown.
     coding_sources:
     - url: https://docs.z.ai/guides/vlm/glm-5.3-flash
       checked: '2026-10-04'
@@ -1111,12 +1462,13 @@ models:
       input_per_million: 1.32
       output_per_million: 3.96
       currency: USD
-      checked: '2026-10-04'
+      checked: '2026-11-05'
       source:
         url: https://api-docs.deepseek.com/quick_start/pricing/
-        checked: '2026-10-04'
-      notes: Peak, uncached USD API rates. Off-peak prices are half; cache hits are priced
-        separately.
+        checked: '2026-11-05'
+      notes: >-
+        Peak, uncached USD API rates. Off-peak prices are half. Cache hits are
+        $0.044/MTok peak ($0.022 off-peak); no cache write fee is documented.
     sources:
     - url: https://api-docs.deepseek.com/quick_start/pricing/
       checked: '2026-10-04'
@@ -1142,6 +1494,11 @@ models:
     reasoning_options:
     - none
     - high
+    # Cost block intentionally omitted: the official model page states North
+    # Mini Code is "free until rate limits are reached" and no per-token
+    # prices or cache rates are published on any official Cohere page
+    # (cohere.com/pricing routes North to custom enterprise pricing). Zero
+    # prices are not recordable; see the coverage reason for the free tier.
     coding_sources:
     - url: https://docs.cohere.com/docs/north-mini-code-1.0
       checked: '2026-10-04'
@@ -1186,15 +1543,18 @@ models:
       - url: https://docs.inceptionlabs.ai/get-started/models
         checked: '2026-10-04'
     cost:
-      input_per_million: 0.04
-      output_per_million: 0.15
+      input_per_million: 0.2
+      output_per_million: 0.75
       currency: USD
-      checked: '2026-10-04'
+      checked: '2026-11-05'
       source:
         url: https://docs.inceptionlabs.ai/get-started/models
-        checked: '2026-10-04'
-      notes: Promotional 80% discount observed on the checked date; regular uncached input/output
-        rates are $0.20/$0.75 per million.
+        checked: '2026-11-05'
+      notes: >-
+        Standard USD API rates; cached input is $0.02/MTok and no cache write
+        fee is documented. The 80% promotional rate recorded on 2026-10-04
+        ($0.04/$0.15) no longer appears on the pricing page; Mercury 2.5 is
+        not part of the launch discount shown for Mercury 3.
     sources:
     - url: https://docs.inceptionlabs.ai/get-started/models
       checked: '2026-10-04'
@@ -1219,6 +1579,19 @@ models:
     - low
     - medium
     - high
+    cost:
+      input_per_million: 1
+      output_per_million: 2.7
+      currency: USD
+      checked: "2026-11-05"
+      source:
+        url: https://platform.stepfun.ai/docs/en/guides/pricing/details
+        checked: "2026-11-05"
+      notes: >-
+        Standard USD API rates. Cache hits are $0.10/MTok; the cache-miss
+        input price includes writing new content to the cache (no separate
+        cache write fee). Output tokens include both reasoning and the final
+        answer.
     coding_sources:
     - url: https://platform.stepfun.com/docs/zh/guides/models/step-5-preview
       checked: '2026-10-04'
