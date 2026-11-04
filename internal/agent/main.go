@@ -850,9 +850,9 @@ type MainAgent struct {
 	// the Delegate tool, excluding the currently active role. Rebuilt when role filters change.
 	cachedSubAgents []*config.AgentConfig
 
-	// cachedSessionReminderContent is the meta user message content carrying
-	// environment + workspace rules (under "# Workspace Instructions" /
-	// <INSTRUCTIONS>). Built once ensureSessionBuilt completes and refreshed
+	// cachedSessionReminderContent carries environment and memory; current
+	// AGENTS.md contents are added separately during request assembly.
+	// Built once ensureSessionBuilt completes and refreshed
 	// in place on session-head events; injected into every LLM request so the
 	// prompt prefix keeps one stable shape. Not persisted to ctxMgr or jsonl.
 	cachedSessionReminderContent atomic.Pointer[string]

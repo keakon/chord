@@ -38,6 +38,65 @@ func TestDirectoryInstructionViewInitialOwnsScopeAndRequiresExactBody(t *testing
 		t.Fatal("refs without exact body admitted")
 	}
 }
+
+func TestDirectoryInstructionMessagesKeepMechanismGuidanceInSystemPrompt(t *testing.T) {
+	root := directoryTestFact(".", "Use repository conventions.")
+	module := directoryTestFact("module", "Preserve schema field names.")
+	leaf := directoryTestFact("module/leaf", "Keep identifiers unchanged.")
+	history := []message.Message{
+		{Role: message.RoleUser, Content: "Inspect the module."},
+		directoryInstructionFactMessage([]message.DirectoryInstructionFact{module}),
+		directoryInstructionFactMessage([]message.DirectoryInstructionFact{leaf}),
+	}
+	r := &directoryInstructionRuntime{
+		binding: directoryInstructionBinding{CheckoutRoot: "/repo"},
+		initial: directoryInstructionSnapshot{Observations: map[string]directoryInstructionObservation{
+			".": {Status: "present", SourcePath: root.SourcePath, Body: root.Body, BodyHash: root.BodyHash},
+		}},
+	}
+	v := buildDirectoryInstructionView(r.initial, history, r.binding)
+	r.view.Store(&v)
+
+	for name, system := range map[string]string{
+		"main": (&MainAgent{}).buildSystemPrompt(),
+		"sub":  (&SubAgent{}).buildSystemPrompt(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for range 2 {
+				projected, err := projectDirectoryInstructions(history, v)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := injectDirectoryInstructionReminder(projected, "", r)
+				if _, err := validateDirectoryInstructionRequest(request, v); err != nil {
+					t.Fatal(err)
+				}
+				text := system
+				blocks := 0
+				for _, m := range request {
+					text += "\n" + m.Content
+					blocks += strings.Count(m.Content, "# AGENTS.md")
+					for _, unwanted := range []string{"The runtime automatically discovers AGENTS.md files", "Do not search for or read AGENTS.md files", "Deeper AGENTS.md instructions override"} {
+						if strings.Contains(m.Content, unwanted) {
+							t.Fatalf("injected body repeated mechanism guidance %q", unwanted)
+						}
+					}
+				}
+				if blocks != 3 {
+					t.Fatalf("AGENTS.md blocks = %d, want 3", blocks)
+				}
+				if count := strings.Count(text, "The runtime automatically discovers AGENTS.md files"); count != 1 {
+					t.Fatalf("mechanism guidance count = %d, want 1", count)
+				}
+				for _, f := range []message.DirectoryInstructionFact{root, module, leaf} {
+					if count := strings.Count(text, f.Body); count != 1 {
+						t.Fatalf("body %q count = %d, want 1", f.Body, count)
+					}
+				}
+			}
+		})
+	}
+}
 func TestDirectoryInstructionUnknownInputBudgetDoesNotBlock(t *testing.T) {
 	binding := directoryInstructionBinding{CheckoutRoot: "/repo", ContentRoot: "/repo", WorkDir: "/repo"}
 	body := "package rules"

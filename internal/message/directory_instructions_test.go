@@ -5,14 +5,12 @@ import (
 	"testing"
 )
 
-func TestRenderDirectoryInstructionFactsOmitsFileFraming(t *testing.T) {
+func TestRenderDirectoryInstructionFactsOmitsMechanismGuidance(t *testing.T) {
 	facts := []DirectoryInstructionFact{
 		{CheckoutRoot: "/repo", Scope: ".", SourcePath: "/repo/AGENTS.md", Operation: DirectoryInstructionUpsert, Body: "Use tabs."},
 		{CheckoutRoot: "/repo", Scope: "pkg", SourcePath: "/repo/pkg/AGENTS.md", Operation: DirectoryInstructionUpsert, Body: "Keep identifiers unchanged."},
 	}
-	want := `# Workspace Instructions
-
-Deeper directory rules override parent rules only within their subtree; sibling rules do not override each other. System instructions, explicit user requests, and role permissions remain higher priority.
+	want := `# AGENTS.md
 
 Scope: . (checkout: /repo)
 <INSTRUCTIONS>
@@ -26,6 +24,18 @@ Keep identifiers unchanged.
 `
 	if got := RenderDirectoryInstructionFacts(facts); got != want {
 		t.Fatalf("rendered instructions = %q, want %q", got, want)
+	}
+}
+
+func TestRenderDirectoryInstructionFactsAbsentContentsStayEmpty(t *testing.T) {
+	for _, facts := range [][]DirectoryInstructionFact{
+		nil,
+		{{Scope: ".", Operation: DirectoryInstructionRemove}},
+		{{Scope: "pkg", Operation: DirectoryInstructionBlocked, Reason: DirectoryInstructionReasonIO}},
+	} {
+		if got := RenderDirectoryInstructionFacts(facts); got != "" {
+			t.Fatalf("absent contents rendered as %q", got)
+		}
 	}
 }
 

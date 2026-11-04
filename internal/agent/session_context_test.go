@@ -90,16 +90,18 @@ func TestCallLLMInjectsWorkingDirectoryReminderIntoFirstProviderRequest(t *testi
 func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	facts := []message.DirectoryInstructionFact{directoryTestFact(".", "project rules body")}
 	got := buildSessionContextReminder(SessionEnvSnapshot{Date: "Apr 17 2026"}, facts)
-	for _, fragment := range []string{"# Workspace Instructions", "<INSTRUCTIONS>\nproject rules body\n</INSTRUCTIONS>", "Deeper directory rules override parent rules only within their subtree", "role permissions remain higher priority", "Today's date"} {
+	for _, fragment := range []string{"# AGENTS.md", "<INSTRUCTIONS>\nproject rules body\n</INSTRUCTIONS>", "Scope: .", "Today's date"} {
 		if !strings.Contains(got, fragment) {
 			t.Fatalf("missing %q in %q", fragment, got)
 		}
 	}
-	if strings.Count(got, "# Workspace Instructions") != 1 {
+	if strings.Count(got, "# AGENTS.md") != 1 {
 		t.Fatal("duplicate renderer framing")
 	}
-	if strings.Contains(got, "AGENTS.md") || strings.Contains(got, "Source: ") {
-		t.Fatalf("unexpected file framing: %q", got)
+	for _, unwanted := range []string{"The runtime automatically discovers AGENTS.md files", "Do not search for or read AGENTS.md files", "Deeper AGENTS.md instructions override", "Source: "} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("unexpected mechanism guidance or source framing %q: %q", unwanted, got)
+		}
 	}
 }
 
@@ -130,14 +132,13 @@ func TestCallLLMInjectsAgentsMDReminderIntoFirstProviderRequest(t *testing.T) {
 	if len(seen) < 2 {
 		t.Fatalf("provider messages = %#v, want reminder plus user message", seen)
 	}
-	if seen[0].Role != "user" || !strings.Contains(seen[0].Content, "# Workspace Instructions") || !strings.Contains(seen[0].Content, "<INSTRUCTIONS>") || !strings.Contains(seen[0].Content, "# Repo Rules") {
-		t.Fatalf("first provider message missing workspace instructions: %#v", seen[0])
+	if seen[0].Role != "user" || !strings.Contains(seen[0].Content, "# AGENTS.md") || !strings.Contains(seen[0].Content, "<INSTRUCTIONS>") || !strings.Contains(seen[0].Content, "# Repo Rules") {
+		t.Fatalf("first provider message missing AGENTS.md contents: %#v", seen[0])
 	}
-	if strings.Contains(seen[0].Content, "AGENTS.md") || strings.Contains(seen[0].Content, "Source: ") {
-		t.Fatalf("first provider message contains file framing: %#v", seen[0])
-	}
-	if !strings.Contains(seen[0].Content, "Deeper directory rules override parent rules") {
-		t.Fatal("missing scope priority framing")
+	for _, unwanted := range []string{"The runtime automatically discovers AGENTS.md files", "Deeper AGENTS.md instructions override", "Source: "} {
+		if strings.Contains(seen[0].Content, unwanted) {
+			t.Fatalf("first provider message contains repeated guidance %q: %#v", unwanted, seen[0])
+		}
 	}
 
 	if got := seen[1].Content; !strings.Contains(got, "analyze hardcoded behavior") {
@@ -186,7 +187,7 @@ func TestInjectMetaUserReminder_EmptyMessagesReturnsReminderOnly(t *testing.T) {
 // prompt cache from the start.
 func TestInjectSessionContextReminderIsStableAcrossRequests(t *testing.T) {
 	a := &MainAgent{}
-	content := "# Workspace Instructions\n<INSTRUCTIONS>\nuse tabs\n</INSTRUCTIONS>"
+	content := "# AGENTS.md\n<INSTRUCTIONS>\nuse tabs\n</INSTRUCTIONS>"
 	a.cachedSessionReminderContent.Store(&content)
 
 	base := []message.Message{
@@ -214,7 +215,7 @@ func TestInjectSessionContextReminderIsStableAcrossRequests(t *testing.T) {
 // once-only flag dropped AGENTS.md guidance from every request after the
 // first and flipped the prefix shape between request one and two.
 func TestSubAgentInjectSessionContextReminderIsStableAcrossRequests(t *testing.T) {
-	content := "# Workspace Instructions\n<INSTRUCTIONS>\nuse tabs\n</INSTRUCTIONS>"
+	content := "# AGENTS.md\n<INSTRUCTIONS>\nuse tabs\n</INSTRUCTIONS>"
 	s := &SubAgent{}
 	s.cachedSessionReminderContent.Store(&content)
 

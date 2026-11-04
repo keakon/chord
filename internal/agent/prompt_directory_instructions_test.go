@@ -23,8 +23,8 @@ func TestLoadAgentsMDWithWorkDir_RootOnly(t *testing.T) {
 	if !strings.Contains(got, "<INSTRUCTIONS>\nroot instructions\n</INSTRUCTIONS>") {
 		t.Fatalf("expected root instructions, got %q", got)
 	}
-	if !strings.Contains(got, "Scope: .") || strings.Contains(got, "Source: ") || strings.Contains(got, "AGENTS.md") {
-		t.Fatalf("missing scope or unexpected file framing: %q", got)
+	if !strings.Contains(got, "# AGENTS.md") || !strings.Contains(got, "Scope: .") || strings.Contains(got, "Source: ") {
+		t.Fatalf("missing scope or unexpected source framing: %q", got)
 	}
 }
 
@@ -199,25 +199,36 @@ func TestLoadAgentsMDWithWorkDir_AnchorsWalkAtCheckoutRoot(t *testing.T) {
 	}
 }
 
-// The stable system prompt never mentions AGENTS.md: the injected block names
-// itself and states its own precedence, so a prompt line that depends on whether
-// rules exist would only claim a block the request may not carry — and it would
-// invalidate the cached prefix whenever rules appear or disappear.
-func TestBuildSystemPrompt_NeverFramesAgentsMD(t *testing.T) {
+func TestBuildSystemPromptAgentsMDMechanismIndependentOfContents(t *testing.T) {
 	withRules := &MainAgent{tools: tools.NewRegistry()}
-	setCachedAgentsMDForTest(withRules, "repo rules")
+	setCachedAgentsMDForTest(withRules, "Use repository conventions.")
 	sub := &SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}
 	sub.directoryInstructions.Store(withRules.directoryInstructions.Load())
 
-	for name, prompt := range map[string]string{
-		"main without rules": (&MainAgent{tools: tools.NewRegistry()}).buildSystemPrompt(),
-		"main with rules":    withRules.buildSystemPrompt(),
-		"sub without rules":  (&SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}).buildSystemPrompt(),
-		"sub with rules":     sub.buildSystemPrompt(),
+	for name, prompts := range map[string][2]string{
+		"main": {
+			(&MainAgent{tools: tools.NewRegistry()}).buildSystemPrompt(),
+			withRules.buildSystemPrompt(),
+		},
+		"sub": {
+			(&SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}).buildSystemPrompt(),
+			sub.buildSystemPrompt(),
+		},
 	} {
-		for _, unwanted := range []string{"# Workspace Instructions", "AGENTS.md"} {
-			if strings.Contains(prompt, unwanted) {
-				t.Fatalf("%s: system prompt mentions AGENTS.md (%q), got:\n%s", name, unwanted, prompt)
+		if prompts[0] != prompts[1] {
+			t.Fatalf("%s: AGENTS.md contents changed the stable system prompt", name)
+		}
+		for _, prompt := range prompts {
+			if count := strings.Count(prompt, "The runtime automatically discovers AGENTS.md files"); count != 1 {
+				t.Fatalf("%s: mechanism guidance count = %d, want 1", name, count)
+			}
+			if !strings.Contains(prompt, "Do not search for or read AGENTS.md files unless your current task requires editing their contents.") {
+				t.Fatalf("%s: missing edit-only reading exception", name)
+			}
+			for _, unwanted := range []string{"# AGENTS.md", "<INSTRUCTIONS>", "Use repository conventions."} {
+				if strings.Contains(prompt, unwanted) {
+					t.Fatalf("%s: system prompt contains injected body framing %q", name, unwanted)
+				}
 			}
 		}
 	}

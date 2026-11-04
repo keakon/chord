@@ -297,9 +297,9 @@ type SubAgent struct {
 	// publishes a new generation here and never touches the parent's binding.
 	workDirState workDirBinding
 
-	// cachedSessionReminderContent is the meta user message content carrying
-	// environment + workspace rules (under "# Workspace Instructions" /
-	// <INSTRUCTIONS>). Built at construction and rebuilt on a worktree switch,
+	// cachedSessionReminderContent carries environment; current AGENTS.md
+	// contents are added separately during request assembly.
+	// Built at construction and rebuilt on a worktree switch,
 	// so the environment block always names the active checkout; injected into
 	// every request so the prompt prefix keeps one stable shape. Not persisted.
 	// The pointer is atomic because a worktree switch runs in a tool goroutine
@@ -1693,10 +1693,8 @@ func (s *SubAgent) buildSystemPrompt() string {
 	}
 	parts = append(parts, taskSection)
 
-	// Workspace instructions are delivered as a meta user message under a
-	// "# Workspace Instructions" / <INSTRUCTIONS> self-identifying block via
-	// cachedSessionReminder (mirrors MainAgent). It does not belong in the
-	// stable system prompt.
+	// AGENTS.md contents are injected separately from the shared mechanism
+	// guidance, as in MainAgent.
 
 	if block := s.availableSkillsPromptBlock(); block != "" {
 		parts = append(parts, block)

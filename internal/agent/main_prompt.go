@@ -104,12 +104,8 @@ func (a *MainAgent) buildSystemPrompt() string {
 	if block := a.primaryAgentCoordinationPromptBlock(); block != "" {
 		parts = append(parts, block)
 	}
-	// Workspace instructions are injected as a meta user message (under a
-	// "# Workspace Instructions" / <INSTRUCTIONS> self-identifying block) via
-	// injectSessionContextReminder. The stable prompt never frames them: the
-	// block names itself and states its own precedence, and a prompt line that
-	// depends on whether rules exist would both invalidate the cached prefix and
-	// claim a block that the request may not carry.
+	// AGENTS.md contents are injected separately from the stable mechanism
+	// guidance so discovering another directory never changes this prefix.
 	if a.memoryIsActive() {
 		// Only the fixed discipline lives in the stable prompt; the actual
 		// memory data is injected under an untrusted wrapper in the reminder so
