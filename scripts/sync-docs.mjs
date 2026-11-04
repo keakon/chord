@@ -138,6 +138,10 @@ function rewriteLinkDestination(destination, lang) {
       const anchor = (rest || '').startsWith('#') ? rest : '';
       return `(${sitePath(cn ? 'zh' : lang, 'examples', anchor)})`;
     })
+    .replace(/\(\.\/examples\/([\w-]+?)(_CN)?\.md([^)]*)\)/g, (_m, slug, cn, rest) => {
+      const anchor = (rest || '').startsWith('#') ? rest : '';
+      return `(${sitePath(cn ? 'zh' : lang, slug, anchor)})`;
+    })
     // ./examples/<file>.yaml  → repo blob link (yaml not a content collection)
     .replace(/\(\.\/examples\/([\w.-]+)\.yaml\)/g, (_m, name) =>
       `(https://github.com/keakon/chord/blob/main/docs/examples/${name}.yaml)`,

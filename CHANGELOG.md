@@ -167,6 +167,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Links from the model selection page to the team configuration example now work on the documentation site in both languages.
+
 - Terminal titles use both typed and pasted text in the first message; when an attachment comes first, the title still comes from the message text.
 
 - A folded JOB RESULT card no longer renders output lines that open with ✓, ✗, or • as extra checkmark rows: build tools that log their own progress marks, such as `vitepress`, no longer read as multiple completed jobs. Expanded multi-job cards also keep every job's headline row instead of folding the next job into the previous job's output.
