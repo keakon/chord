@@ -97,10 +97,9 @@ func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStd
 	// during launch from the process table, and a fast failure must still be
 	// reported with the start token that proves its group.
 	childDone := make(chan error, 1)
-	pid, pgid, err := managedProcessGroupID(cmd)
+	pid, pgid, startToken, err := managedProcessIdentity(cmd)
+	startChildReaper(cmd, childDone)
 	if err != nil {
-		startChildReaper(cmd, childDone)
-		startToken, _ := processStartToken(pid)
 		if pgid <= 0 {
 			pgid = pid
 		}
@@ -113,24 +112,6 @@ func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStd
 		}
 		return fail(out, request, err, true, pid, pgid, startToken, startedAt, cleanup)
 	}
-	startToken, tokenErr := processStartToken(pid)
-	if tokenErr != nil {
-		startChildReaper(cmd, childDone)
-		cleanup, cleanupErr := cleanupUnboundProcess(cmd, pid, pgid, "", killGrace, childDone)
-		if cleanupErr != nil {
-			cleanup.Proven = false
-			if cleanup.Note == "" {
-				cleanup.Note = cleanupErr.Error()
-			}
-		}
-		return fail(out, request, fmt.Errorf("read managed process identity: %w", tokenErr), true, pid, pgid, "", startedAt, cleanup)
-	}
-	// One reaper owns cmd.Wait for the rest of the run. The handshake-failure
-	// and supervision paths share it: a zombie leader is still a group member,
-	// so without reaping first the cleanup probe waits out both grace periods
-	// and reports an unproven receipt for a group that is already empty.
-	startChildReaper(cmd, childDone)
-
 	run := &supervisedRun{
 		request:    request,
 		out:        out,
@@ -161,7 +142,7 @@ func launchManaged(out *os.File, request Message, reader *bufio.Reader, childStd
 	return run.supervise()
 }
 
-var managedProcessGroupID = processGroupID
+var managedProcessIdentity = processIdentity
 
 // startChildReaper waits for the managed process on its own goroutine. The
 // reaper must not start before the identity is read: cmd.Wait reaps the leader
@@ -184,6 +165,10 @@ func cleanupUnboundProcess(cmd *exec.Cmd, pid, pgid int, startToken string, grac
 	}
 	cleanup, err := terminateGroup(pid, pgid, startToken, grace)
 	waitForReap(childDone, grace)
+	if startToken == "" {
+		cleanup.Proven = false
+		cleanup.Note = "managed process start identity is unavailable"
+	}
 	return cleanup, err
 }
 

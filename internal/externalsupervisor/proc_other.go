@@ -42,8 +42,8 @@ var ErrIdentityMismatch = errors.New("supervised process identity no longer matc
 
 func configureProcessGroup(_ *exec.Cmd) {}
 
-func processGroupID(_ *exec.Cmd) (int, int, error) {
-	return 0, 0, ErrUnsupportedProcessGroup
+func processIdentity(_ *exec.Cmd) (int, int, string, error) {
+	return 0, 0, "", ErrUnsupportedProcessGroup
 }
 
 func probeGroup(_, _ int, _ string) GroupState { return GroupUnknown }
@@ -52,8 +52,6 @@ func terminateGroup(pid, pgid int, _ string, _ time.Duration) (Cleanup, error) {
 	return Cleanup{}, fmt.Errorf("%w: process group %d of pid %d is %s",
 		ErrUnsupportedProcessGroup, pgid, pid, probeGroup(pid, pgid, ""))
 }
-
-func processStartToken(int) (string, error) { return "", ErrUnsupportedProcessGroup }
 
 func setCloseOnExec(_ ...*os.File) {}
 

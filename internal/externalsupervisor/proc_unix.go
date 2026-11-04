@@ -58,23 +58,22 @@ func configureProcessGroup(cmd *exec.Cmd) {
 	}
 }
 
-// processGroupID is the group the managed process leads. A process that
-// called setsid leads the group named by its own pid.
-func processGroupID(cmd *exec.Cmd) (pid, pgid int, err error) {
+// A process that called setsid leads the group named by its own pid.
+func processIdentity(cmd *exec.Cmd) (pid, pgid int, startToken string, err error) {
 	if cmd == nil || cmd.Process == nil {
-		return 0, 0, errors.New("managed process was not started")
+		return 0, 0, "", errors.New("managed process was not started")
 	}
 	pid = cmd.Process.Pid
-	pgid, err = syscall.Getpgid(pid)
+	pgid, startToken, err = readProcessIdentity(pid)
 	if err != nil {
-		return pid, 0, fmt.Errorf("read managed process group: %w", err)
+		return pid, pgid, startToken, fmt.Errorf("read managed process identity: %w", err)
 	}
 	if pgid != pid {
 		// A setsid leader always leads its own group; anything else means the
 		// identity is not the one we can signal as a unit.
-		return pid, pgid, fmt.Errorf("managed process %d leads group %d", pid, pgid)
+		return pid, pgid, startToken, fmt.Errorf("managed process %d leads group %d: %w", pid, pgid, ErrIdentityMismatch)
 	}
-	return pid, pgid, nil
+	return pid, pgid, startToken, nil
 }
 
 // probeGroup resolves a bound identity. It never treats a live pid as proof on
@@ -86,63 +85,28 @@ func processGroupID(cmd *exec.Cmd) (pid, pgid int, err error) {
 // refusing every unverifiable group, would leave Chord's own leaked children
 // running and fail the task, so cleanup accepts that narrow window instead.
 func probeGroup(pid, pgid int, startToken string) GroupState {
-	if pgid <= 0 {
+	if pid <= 0 || pgid <= 0 {
 		return GroupUnknown
 	}
-	if startToken != "" {
-		token, err := processStartToken(pid)
-		switch {
-		case err == nil:
-			if token != startToken {
-				return GroupUnknown
-			}
-			actual, err := syscall.Getpgid(pid)
-			if err != nil || actual != pgid {
-				return GroupUnknown
-			}
-			return GroupAlive
-		case errors.Is(err, syscall.EIO):
-			// Darwin reports EIO once the process was reaped. The token is
-			// gone, but the group id may still belong to our leaked child.
-			// Only treat the group as ours when the pid itself is also gone:
-			// a live Getpgid means the pid was recycled and may lead or belong
-			// to another group, so refuse to signal it.
-			if _, gerr := syscall.Getpgid(pid); !errors.Is(gerr, syscall.ESRCH) {
-				return GroupUnknown
-			}
-			if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
-				return GroupGone
-			}
-			return GroupAlive
-		case processStartTokenGone(err):
-			// The leader is gone; a live group id means members still hold the
-			// group it named.
-			if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
-				return GroupGone
-			} else if err != nil {
-				return GroupUnknown
-			}
-			return GroupAlive
-		default:
+	actual, token, err := readProcessIdentity(pid)
+	switch {
+	case err == nil:
+		if actual != pgid || (startToken != "" && token != startToken) {
 			return GroupUnknown
 		}
-	}
-	if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
-		return GroupGone
-	}
-	actual, err := syscall.Getpgid(pid)
-	if err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			// The leader is gone but the group is not: another member still
-			// holds it, and the group id is still the one we bound.
-			return GroupAlive
+		return GroupAlive
+	case processIdentityGone(err):
+		// Reaping the leader does not end the group: descendants may still
+		// hold it. Only ESRCH from the group probe proves it empty.
+		if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
+			return GroupGone
+		} else if err != nil {
+			return GroupUnknown
 		}
+		return GroupAlive
+	default:
 		return GroupUnknown
 	}
-	if actual != pgid {
-		return GroupUnknown
-	}
-	return GroupAlive
 }
 
 // terminateGroup tears the bound process group down: SIGTERM first, SIGKILL
@@ -185,7 +149,7 @@ func waitGroupGone(pid, pgid int, startToken string, timeout time.Duration) bool
 	return true
 }
 
-func processStartTokenGone(err error) bool {
+func processIdentityGone(err error) bool {
 	return errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.ENOENT) || errors.Is(err, os.ErrNotExist)
 }
 

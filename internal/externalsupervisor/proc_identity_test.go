@@ -4,11 +4,30 @@ package externalsupervisor
 
 import (
 	"errors"
+	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
+
+func TestReadProcessIdentityMatchesCurrentProcess(t *testing.T) {
+	pid := os.Getpid()
+	pgid, token, err := readProcessIdentity(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := unix.Getpgid(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pgid != want || ((runtime.GOOS == "darwin" || runtime.GOOS == "linux") && token == "") {
+		t.Fatalf("identity = (%d, %q), want group %d and a start token on supported platforms", pgid, token, want)
+	}
+}
 
 func TestProbeGroupRejectsMismatchedStartToken(t *testing.T) {
 	cmd := exec.Command("sleep", "30")
@@ -21,7 +40,7 @@ func TestProbeGroupRejectsMismatchedStartToken(t *testing.T) {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		_ = cmd.Wait()
 	})
-	token, err := processStartToken(pid)
+	_, token, err := readProcessIdentity(pid)
 	if err != nil {
 		t.Skipf("process start token is unavailable: %v", err)
 	}

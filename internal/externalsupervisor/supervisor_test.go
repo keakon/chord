@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // writeManagedFixture writes a shell script standing in for the managed
@@ -190,7 +192,7 @@ func TestTerminateGroupRefusesMismatchedIdentity(t *testing.T) {
 	if !ok {
 		t.Fatal("supervisor did not bind an identity")
 	}
-	foreign, err := syscall.Getpgid(0)
+	foreign, err := unix.Getpgid(0)
 	if err != nil {
 		t.Fatalf("read test process group: %v", err)
 	}
@@ -454,14 +456,18 @@ func TestLaunchFailureAfterSpawnCleansWholeGroup(t *testing.T) {
 	}
 	defer outR.Close()
 	var startedPID int
-	original := managedProcessGroupID
-	managedProcessGroupID = func(cmd *exec.Cmd) (int, int, error) {
+	original := managedProcessIdentity
+	managedProcessIdentity = func(cmd *exec.Cmd) (int, int, string, error) {
 		startedPID = cmd.Process.Pid
 		time.Sleep(50 * time.Millisecond)
-		return startedPID, 0, errors.New("injected process-group lookup failure")
+		pid, pgid, token, err := original(cmd)
+		if err != nil {
+			return pid, pgid, token, err
+		}
+		return pid, pgid, token, errors.New("injected process identity rejection")
 	}
 	defer func() {
-		managedProcessGroupID = original
+		managedProcessIdentity = original
 		if startedPID > 0 {
 			_ = syscall.Kill(-startedPID, syscall.SIGKILL)
 		}

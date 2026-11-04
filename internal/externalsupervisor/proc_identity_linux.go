@@ -9,29 +9,32 @@ import (
 	"strings"
 )
 
-// processStartToken returns a value that changes when the pid is reused. The
-// kernel exposes the process start time in field 22 of /proc/<pid>/stat.
-func processStartToken(pid int) (string, error) {
+// /proc/<pid>/stat retains the group and start time until the child is reaped.
+func readProcessIdentity(pid int) (pgid int, startToken string, err error) {
 	if pid <= 0 {
-		return "", fmt.Errorf("invalid pid %d", pid)
+		return 0, "", fmt.Errorf("invalid pid %d", pid)
 	}
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		return "", err
+		return 0, "", fmt.Errorf("read process %d identity: %w", pid, err)
 	}
 	// comm may contain spaces and parentheses; fields resume after the last ')'.
 	end := strings.LastIndexByte(string(data), ')')
 	if end < 0 {
-		return "", fmt.Errorf("parse /proc/%d/stat: missing comm terminator", pid)
+		return 0, "", fmt.Errorf("parse /proc/%d/stat: missing comm terminator", pid)
 	}
 	fields := strings.Fields(string(data[end+1:]))
 	// The first field after comm is state (field 3), so starttime (field 22)
 	// is at index 19.
 	if len(fields) <= 19 {
-		return "", fmt.Errorf("parse /proc/%d/stat: missing start time", pid)
+		return 0, "", fmt.Errorf("parse /proc/%d/stat: missing start time", pid)
+	}
+	pgid, err = strconv.Atoi(fields[2])
+	if err != nil {
+		return 0, "", fmt.Errorf("parse /proc/%d/stat process group: %w", pid, err)
 	}
 	if _, err := strconv.ParseUint(fields[19], 10, 64); err != nil {
-		return "", fmt.Errorf("parse /proc/%d/stat start time: %w", pid, err)
+		return pgid, "", fmt.Errorf("parse /proc/%d/stat start time: %w", pid, err)
 	}
-	return "linux:" + fields[19], nil
+	return pgid, "linux:" + fields[19], nil
 }
