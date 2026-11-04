@@ -515,6 +515,7 @@ type Model struct {
 	tuiDiagnosticEvents [maxTUIDiagnosticEvents]tuiDiagnosticEvent
 	tuiDiagnosticNext   int
 	tuiDiagnosticCount  int
+	diagnosticsPending  bool
 
 	// agentErrors keeps a ring buffer of recent agent error events for the error panel.
 	agentErrors      [maxAgentErrors]agentErrorRecord
@@ -1096,6 +1097,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 	// -- attachment loaded ----------------------------------------------
 	case diagnosticsBundleMsg:
+		m.diagnosticsPending = false
 		if msg.err != nil {
 			m.recordTUIDiagnostic("diagnostics-bundle-error", "%v", msg.err)
 			return m, m.enqueueToast(fmt.Sprintf("Diagnostics export failed: %v", msg.err), "error")

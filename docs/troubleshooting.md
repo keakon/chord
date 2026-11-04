@@ -501,6 +501,20 @@ When `auth.yaml` contains hundreds or thousands of OpenAI / ChatGPT OAuth accoun
 
 When manually converting Codex/sub2api exports, keep any available `email`, `account_id`, and `account_user_id`. Use `chord doctor models` for deliberate account diagnostics.
 
+## Exporting memory and runtime diagnostics
+
+Press `Ctrl+G` in the TUI to export a diagnostic ZIP. The completion notification shows its path. Log scanning, heap sampling, and ZIP writing run in the background; pressing the shortcut again while an export is running does not start another export.
+
+The bundle's `heap.pprof` contains Go allocation stacks and sampled counts, without object contents. With Go installed, extract the bundle and run:
+
+```bash
+go tool pprof -top heap.pprof
+```
+
+`metadata.txt` records the heap sampling time, sampling rate, and Go memory statistics before and after sampling. `tui-dump.txt` contains the UI and session-payload snapshot taken when you pressed the shortcut. These snapshots have different timestamps. A normal export does not force garbage collection (GC); heap-profile frees may lag by up to two GC cycles. `HeapAlloc` also includes garbage awaiting collection, so it is not an exact live-object total.
+
+`runtime-log-tail.txt` selects the current process by the PID in each log header. It includes up to the latest 240 lines, about 256 KiB, from a scan of at most 16 MiB across the current and rotated logs. `metadata.txt` reports scan and output limits and read errors. If the bundle has no log file, check those statuses before searching the log directory for earlier records. Project-root paths, home-directory paths, and recognized credentials are redacted in exported content.
+
 ## Related
 
 - [Quickstart](./quickstart.md)

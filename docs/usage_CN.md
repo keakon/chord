@@ -77,7 +77,7 @@ Chord 在后台运行时，当前聚焦的 Agent 从 busy 变为 idle 后，终�
 - `Ctrl+P`：切换主角色模型池
 - `Ctrl+O`：打开 MCP server 选择器
 - `Ctrl+E`：打开错误面板，查看目前已记录的错误
-- `Ctrl+G`：导出诊断包
+- `Ctrl+G`：导出包含运行日志和 Go 堆采样的诊断包，详见[诊断导出](./troubleshooting_CN.md#导出内存与运行日志诊断)
 - `q`：双击退出
 - `Ctrl+C`：双击退出
 

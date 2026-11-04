@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,9 +34,10 @@ func TestCollectDiagnosticLogTailSelectsCurrentProcessFromSharedLog(t *testing.T
 		t.Fatalf("WriteFile(log): %v", err)
 	}
 
-	name, tail := collectDiagnosticLogTail(dir, baseDir, 2)
-	if name != "chord.log" {
-		t.Fatalf("log name = %q, want chord.log", name)
+	result := collectDiagnosticLogTail(context.Background(), dir, baseDir, 2)
+	tail := result.tail
+	if len(result.sources) != 1 || result.sources[0] != "chord.log" {
+		t.Fatalf("log sources = %v, want chord.log", result.sources)
 	}
 	if !strings.Contains(tail, "pid=2") {
 		t.Fatalf("tail should include current process line, got %q", tail)
@@ -65,7 +67,7 @@ func TestCollectDiagnosticLogTailIncludesStartupLinesBeforeSession(t *testing.T)
 		t.Fatalf("WriteFile(log): %v", err)
 	}
 
-	_, tail := collectDiagnosticLogTail(dir, baseDir, 2)
+	tail := collectDiagnosticLogTail(context.Background(), dir, baseDir, 2).tail
 	if !strings.Contains(tail, "current startup") || !strings.Contains(tail, "session start") {
 		t.Fatalf("tail should include same pid startup and sid lines, got %q", tail)
 	}
@@ -96,9 +98,10 @@ func TestCollectDiagnosticLogTailFallsBackToRotatedSharedLog(t *testing.T) {
 		t.Fatalf("Chtimes(rotated): %v", err)
 	}
 
-	name, tail := collectDiagnosticLogTail(dir, baseDir, 2)
-	if name != "chord.log.1" {
-		t.Fatalf("log name = %q, want chord.log.1", name)
+	result := collectDiagnosticLogTail(context.Background(), dir, baseDir, 2)
+	tail := result.tail
+	if len(result.sources) != 1 || result.sources[0] != "chord.log.1" {
+		t.Fatalf("log sources = %v, want chord.log.1", result.sources)
 	}
 	if !strings.Contains(tail, "pid=2") {
 		t.Fatalf("tail = %q, want process line", tail)
@@ -119,7 +122,7 @@ func TestCollectDiagnosticLogTailDoesNotPrefixMatchPid(t *testing.T) {
 		t.Fatalf("WriteFile(log): %v", err)
 	}
 
-	_, tail := collectDiagnosticLogTail(dir, baseDir, 2)
+	tail := collectDiagnosticLogTail(context.Background(), dir, baseDir, 2).tail
 	if !strings.Contains(tail, "current session") || !strings.Contains(tail, "current stderr continuation") {
 		t.Fatalf("tail should include exact current pid lines, got %q", tail)
 	}
@@ -150,7 +153,7 @@ func TestIsRuntimeLogFile(t *testing.T) {
 func TestBuildDiagnosticsMetadataIncludesProcessInstanceID(t *testing.T) {
 	m := NewModel(nil)
 	m.SetInstanceID("111-222")
-	meta := m.buildDiagnosticsMetadata(time.Unix(0, 0), "shortcut:ctrl+g", "/tmp/proj", "/tmp/proj/out.zip", "chord.log", llm.LLMTraceFileName())
+	meta := m.buildDiagnosticsMetadata(time.Unix(0, 0), "shortcut:ctrl+g", "/tmp/proj", "/tmp/proj/out.zip")
 	if !strings.Contains(meta, "process_instance_id: 111-222") {
 		t.Fatalf("metadata = %q, want process_instance_id", meta)
 	}
@@ -236,10 +239,7 @@ func TestCollectDiagnosticLLMTraceCurrentSession(t *testing.T) {
 	if err := os.WriteFile(tracePath, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(trace): %v", err)
 	}
-	backend := &sessionControlAgent{sessionSummary: &agent.SessionSummary{ID: sessionID}}
-	m := NewModel(backend)
-	m.workingDir = projectRoot
-	name, tail := m.collectDiagnosticLLMTrace(projectLocator)
+	name, tail := collectDiagnosticLLMTrace(projectLocator, sessionID)
 	if name != llm.LLMTraceFileName() {
 		t.Fatalf("name = %q, want %q", name, llm.LLMTraceFileName())
 	}

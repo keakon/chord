@@ -496,6 +496,20 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 chord --logs-dir ./chord-logs
 ```
 
+## 导出内存与运行日志诊断
+
+在 TUI 中按 `Ctrl+G` 导出诊断 ZIP，完成后提示会显示文件路径。日志扫描、堆采样和打包在后台执行；已有导出正在运行时，重复按键不会启动另一份导出。
+
+包内的 `heap.pprof` 包含 Go 堆分配栈和采样计数，不包含对象内容。安装 Go 后，解压诊断包并运行：
+
+```bash
+go tool pprof -top heap.pprof
+```
+
+`metadata.txt` 记录堆采样时间、采样率，以及采样前后的 Go 内存统计；`tui-dump.txt` 保留按键时的界面和会话载荷快照。两者采样时间不同。普通导出不会强制垃圾回收（GC），堆 profile 的释放统计可能滞后最多两轮 GC；`HeapAlloc` 也包含尚未回收的垃圾，不能直接当作存活对象总量。
+
+`runtime-log-tail.txt` 按日志头部的进程 ID 筛选当前进程，最多保留最近 240 行、约 256 KiB，扫描总量限制为 16 MiB，包含轮转文件。`metadata.txt` 会标明是否达到扫描或输出上限，以及是否发生读取错误。包内没有日志文件时，先查看这些状态，再到日志目录查找更早的记录。导出内容中的项目根目录、用户主目录和已识别的凭据会脱敏。
+
 ## 相关文档
 
 - [快速开始](./quickstart_CN.md)

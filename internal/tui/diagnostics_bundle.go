@@ -3,13 +3,12 @@ package tui
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -33,14 +32,13 @@ type diagnosticsBundleMsg struct {
 }
 
 type diagnosticsBundleData struct {
-	contextJSON  []byte
-	bundlePath   string
-	metadata     string
-	tuiDump      string
-	logName      string
-	logTail      string
-	llmTraceName string
-	llmTraceTail string
+	contextJSON []byte
+	baseDir     string
+	sessionID   string
+	filename    string
+	locator     config.PathLocator
+	metadata    string
+	tuiDump     string
 }
 
 var (
@@ -54,56 +52,83 @@ var (
 
 func writeDiagnosticsBundleCmd(data diagnosticsBundleData) tea.Cmd {
 	return func() tea.Msg {
-		if err := os.MkdirAll(filepath.Dir(data.bundlePath), 0o700); err != nil {
-			return diagnosticsBundleMsg{err: fmt.Errorf("create diagnostics dir: %w", err)}
-		}
-		f, err := os.OpenFile(data.bundlePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-		if err != nil {
-			return diagnosticsBundleMsg{err: fmt.Errorf("create diagnostics bundle: %w", err)}
-		}
-		defer f.Close()
-
-		zw := zip.NewWriter(f)
-		if len(data.contextJSON) == 0 {
-			data.contextJSON = exportContextDiagnostics(agent.ContextDiagnosticsView{})
-		}
-		if err := writeDiagnosticsZipFile(zw, "context.json", string(data.contextJSON)); err != nil {
-			_ = zw.Close()
-			return diagnosticsBundleMsg{err: err}
-		}
-		if err := writeDiagnosticsZipFile(zw, "metadata.txt", data.metadata); err != nil {
-			_ = zw.Close()
-			return diagnosticsBundleMsg{err: err}
-		}
-		if err := writeDiagnosticsZipFile(zw, "tui-dump.txt", data.tuiDump); err != nil {
-			_ = zw.Close()
-			return diagnosticsBundleMsg{err: err}
-		}
-		if strings.TrimSpace(data.logTail) != "" {
-			name := data.logName
-			if strings.TrimSpace(name) == "" {
-				name = "runtime-log-tail.txt"
-			}
-			if err := writeDiagnosticsZipFile(zw, name, data.logTail); err != nil {
-				_ = zw.Close()
-				return diagnosticsBundleMsg{err: err}
-			}
-		}
-		if strings.TrimSpace(data.llmTraceTail) != "" {
-			name := data.llmTraceName
-			if strings.TrimSpace(name) == "" {
-				name = llm.LLMTraceFileName()
-			}
-			if err := writeDiagnosticsZipFile(zw, name, data.llmTraceTail); err != nil {
-				_ = zw.Close()
-				return diagnosticsBundleMsg{err: err}
-			}
-		}
-		if err := zw.Close(); err != nil {
-			return diagnosticsBundleMsg{err: fmt.Errorf("finalize diagnostics bundle: %w", err)}
-		}
-		return diagnosticsBundleMsg{path: data.bundlePath}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		path, err := writeDiagnosticsBundle(ctx, data)
+		return diagnosticsBundleMsg{path: path, err: err}
 	}
+}
+
+func writeDiagnosticsBundle(ctx context.Context, data diagnosticsBundleData) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("collect diagnostics: %w", err)
+	}
+	project, err := data.locator.LocateProject(data.baseDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve project export dir: %w", err)
+	}
+	heap, memory, err := collectDiagnosticHeap(data.baseDir)
+	if err != nil {
+		return "", err
+	}
+	logs := collectDiagnosticLogTail(ctx, data.locator.LogsDir, data.baseDir, os.Getpid())
+	traceName, trace := collectDiagnosticLLMTrace(project, data.sessionID)
+	meta := data.metadata + memory + logs.metadata(data.baseDir)
+	if traceName != "" {
+		meta += fmt.Sprintf("llm_trace_tail: %s\nllm_trace_collected_at: %s\n", traceName, time.Now().Format(time.RFC3339Nano))
+	}
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("collect diagnostics: %w", err)
+	}
+	if err := os.MkdirAll(project.ProjectExportsDir, 0o700); err != nil {
+		return "", fmt.Errorf("create diagnostics dir: %w", err)
+	}
+	f, err := os.CreateTemp(project.ProjectExportsDir, ".diagnostics-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create diagnostics bundle: %w", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	zw := zip.NewWriter(f)
+	defer zw.Close()
+	for _, entry := range []struct{ name, content string }{
+		{"context.json", string(data.contextJSON)},
+		{"metadata.txt", meta},
+		{"tui-dump.txt", data.tuiDump},
+		{"runtime-log-tail.txt", logs.tail},
+		{traceName, trace},
+	} {
+		if entry.content == "" {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("write diagnostics bundle: %w", err)
+		}
+		if err := writeDiagnosticsZipFile(zw, entry.name, entry.content); err != nil {
+			return "", err
+		}
+	}
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: diagnosticHeapFilename, Method: zip.Store})
+	if err != nil {
+		return "", fmt.Errorf("create heap profile entry: %w", err)
+	}
+	if _, err := w.Write(heap); err != nil {
+		return "", fmt.Errorf("write heap profile: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return "", fmt.Errorf("finalize diagnostics bundle: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("close diagnostics bundle: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("publish diagnostics bundle: %w", err)
+	}
+	path := filepath.Join(project.ProjectExportsDir, data.filename)
+	if err := os.Rename(f.Name(), path); err != nil {
+		return "", fmt.Errorf("publish diagnostics bundle: %w", err)
+	}
+	return path, nil
 }
 
 func writeDiagnosticsZipFile(zw *zip.Writer, name, content string) error {
@@ -118,11 +143,15 @@ func writeDiagnosticsZipFile(zw *zip.Writer, name, content string) error {
 }
 
 func (m *Model) exportDiagnosticsBundleNow(trigger string) tea.Cmd {
+	if m.diagnosticsPending {
+		return m.enqueueToast("Diagnostics export is already running", "info")
+	}
 	now := time.Now()
 	data, err := m.buildDiagnosticsBundle(now, trigger)
 	if err != nil {
 		return func() tea.Msg { return diagnosticsBundleMsg{err: err} }
 	}
+	m.diagnosticsPending = true
 	return writeDiagnosticsBundleCmd(data)
 }
 
@@ -139,34 +168,32 @@ func (m *Model) buildDiagnosticsBundle(now time.Time, trigger string) (diagnosti
 	if err != nil {
 		return diagnosticsBundleData{}, fmt.Errorf("resolve storage paths: %w", err)
 	}
-	projectLocator, err := locator.EnsureProject(baseDir)
-	if err != nil {
-		return diagnosticsBundleData{}, fmt.Errorf("resolve project export dir: %w", err)
-	}
-	bundlePath := filepath.Join(projectLocator.ProjectExportsDir,
-		fmt.Sprintf("diagnostics-%s-%d.zip", now.Format("20060102-150405.000"), os.Getpid()))
+	filename := fmt.Sprintf("diagnostics-%s-%d.zip", now.Format("20060102-150405.000000000"), os.Getpid())
 
 	m.recordTUIDiagnostic("diagnostics-bundle", "%s", trigger)
-	tuiDump, err := m.buildDiagnosticDumpContent(now, trigger, bundlePath, true)
+	tuiDump, err := m.buildDiagnosticDumpContent(now, trigger, filename, true)
 	if err != nil {
 		return diagnosticsBundleData{}, err
 	}
-	logName, logTail := collectDiagnosticLogTail(locator.LogsDir, baseDir, os.Getpid())
-	llmTraceName, llmTraceTail := m.collectDiagnosticLLMTrace(projectLocator)
-	meta := m.buildDiagnosticsMetadata(now, trigger, baseDir, bundlePath, logName, llmTraceName)
+	var sessionID string
+	if m.agent != nil {
+		if summary := m.agent.GetSessionSummary(); summary != nil {
+			sessionID = summary.ID
+		}
+	}
+	meta := m.buildDiagnosticsMetadata(now, trigger, baseDir, filename)
 	return diagnosticsBundleData{
-		contextJSON:  m.exportFocusedContextDiagnostics(),
-		bundlePath:   bundlePath,
-		metadata:     meta,
-		tuiDump:      tuiDump,
-		logName:      logName,
-		logTail:      logTail,
-		llmTraceName: llmTraceName,
-		llmTraceTail: llmTraceTail,
+		contextJSON: m.exportFocusedContextDiagnostics(),
+		baseDir:     baseDir,
+		sessionID:   sessionID,
+		filename:    filename,
+		locator:     *locator,
+		metadata:    meta,
+		tuiDump:     tuiDump,
 	}, nil
 }
 
-func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundlePath, logName, llmTraceName string) string {
+func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundlePath string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Chord diagnostics bundle\n")
 	fmt.Fprintf(&sb, "generated_at: %s\n", now.Format(time.RFC3339Nano))
@@ -184,14 +211,6 @@ func (m *Model) buildDiagnosticsMetadata(now time.Time, trigger, baseDir, bundle
 	}
 	if strings.TrimSpace(m.instanceID) != "" {
 		fmt.Fprintf(&sb, "process_instance_id: %s\n", sanitizeDiagnosticText(m.instanceID, baseDir))
-	}
-	if strings.TrimSpace(logName) != "" {
-		fmt.Fprintf(&sb, "runtime_log_tail: %s\n", sanitizeDiagnosticText(logName, baseDir))
-	} else {
-		fmt.Fprintf(&sb, "runtime_log_tail: (not found)\n")
-	}
-	if strings.TrimSpace(llmTraceName) != "" {
-		fmt.Fprintf(&sb, "llm_trace_tail: %s\n", sanitizeDiagnosticText(llmTraceName, baseDir))
 	}
 	if provider, ok := m.agent.(interface {
 		OrchestrationStats() agent.OrchestrationStats
@@ -252,15 +271,11 @@ func (m *Model) sessionSummaryString() string {
 	return strings.Join(parts, " ")
 }
 
-func (m *Model) collectDiagnosticLLMTrace(projectLocator *config.ProjectLocator) (string, string) {
-	if m == nil || m.agent == nil || projectLocator == nil {
+func collectDiagnosticLLMTrace(projectLocator *config.ProjectLocator, sessionID string) (string, string) {
+	if projectLocator == nil || strings.TrimSpace(sessionID) == "" {
 		return "", ""
 	}
-	summary := m.agent.GetSessionSummary()
-	if summary == nil || strings.TrimSpace(summary.ID) == "" {
-		return "", ""
-	}
-	path := filepath.Join(projectLocator.ProjectSessionsDir, summary.ID, "traces", llm.LLMTraceFileName())
+	path := filepath.Join(projectLocator.ProjectSessionsDir, sessionID, "traces", llm.LLMTraceFileName())
 	tail, ok := readTextTail(path, diagnosticLLMTraceTailBytes, diagnosticLLMTraceTailLines)
 	if !ok || strings.TrimSpace(tail) == "" {
 		return "", ""
@@ -320,165 +335,6 @@ func readTextTail(path string, maxBytes int, maxLines int) (string, bool) {
 		}
 	}
 	return string(data), true
-}
-
-func collectDiagnosticLogTail(logsDir, baseDir string, pid int) (string, string) {
-	if strings.TrimSpace(logsDir) == "" || pid <= 0 {
-		return "", ""
-	}
-	entries, err := os.ReadDir(logsDir)
-	if err != nil {
-		return "", ""
-	}
-	type candidate struct {
-		path    string
-		name    string
-		modTime time.Time
-	}
-	cands := make([]candidate, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if strings.HasPrefix(name, ".") || !isRuntimeLogFile(name) {
-			continue
-		}
-		path := filepath.Join(logsDir, name)
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		cands = append(cands, candidate{path: path, name: name, modTime: info.ModTime()})
-	}
-	sort.Slice(cands, func(i, j int) bool { return cands[i].modTime.After(cands[j].modTime) })
-	for _, cand := range cands {
-		tail, ok := readSanitizedLogTail(cand.path, baseDir, pid)
-		if !ok || strings.TrimSpace(tail) == "" {
-			continue
-		}
-		return cand.name, tail
-	}
-	return "", ""
-}
-
-func isRuntimeLogFile(name string) bool {
-	if name == "chord.log" {
-		return true
-	}
-	if !strings.HasPrefix(name, "chord.log.") {
-		return false
-	}
-	suffix := strings.TrimPrefix(name, "chord.log.")
-	if suffix == "" {
-		return false
-	}
-	_, err := strconv.Atoi(suffix)
-	return err == nil
-}
-
-func readSanitizedLogTail(path, baseDir string, pid int) (string, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return "", false
-	}
-	start := int64(0)
-	if info.Size() > diagnosticLogTailBytes {
-		start = info.Size() - diagnosticLogTailBytes
-	}
-	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return "", false
-	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, f); err != nil {
-		return "", false
-	}
-	lines := strings.Split(textclean.NormalizeNewlines(buf.String()), "\n")
-	if len(lines) > diagnosticLogTailLines {
-		lines = lines[len(lines)-diagnosticLogTailLines:]
-	}
-	pidMarker := ""
-	if pid > 0 {
-		pidMarker = "pid=" + strconv.Itoa(pid)
-	}
-	filtered := make([]string, 0, len(lines))
-	captureStderr := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			if captureStderr && len(filtered) > 0 {
-				filtered = append(filtered, "")
-			}
-			continue
-		}
-		if pidMarker != "" && containsLogField(line, pidMarker) {
-			filtered = append(filtered, sanitizeDiagnosticText(line, baseDir))
-			captureStderr = true
-			continue
-		}
-		if captureStderr && !containsLogFieldPrefix(line, "pid=") {
-			filtered = append(filtered, sanitizeDiagnosticText(line, baseDir))
-			continue
-		}
-		captureStderr = false
-	}
-	for len(filtered) > 0 && strings.TrimSpace(filtered[0]) == "" {
-		filtered = filtered[1:]
-	}
-	for len(filtered) > 0 && strings.TrimSpace(filtered[len(filtered)-1]) == "" {
-		filtered = filtered[:len(filtered)-1]
-	}
-	if len(filtered) == 0 {
-		return "", false
-	}
-	return strings.Join(filtered, "\n") + "\n", true
-}
-
-func containsLogField(line, field string) bool {
-	for start := 0; ; {
-		idx := strings.Index(line[start:], field)
-		if idx < 0 {
-			return false
-		}
-		pos := start + idx
-		if isLogFieldStart(line, pos) && isLogFieldEnd(line, pos+len(field)) {
-			return true
-		}
-		start = pos + len(field)
-		if start >= len(line) {
-			return false
-		}
-	}
-}
-
-func containsLogFieldPrefix(line, prefix string) bool {
-	for start := 0; ; {
-		idx := strings.Index(line[start:], prefix)
-		if idx < 0 {
-			return false
-		}
-		pos := start + idx
-		if isLogFieldStart(line, pos) {
-			return true
-		}
-		start = pos + len(prefix)
-		if start >= len(line) {
-			return false
-		}
-	}
-}
-
-func isLogFieldStart(line string, pos int) bool {
-	return pos == 0 || line[pos-1] == ' ' || line[pos-1] == '['
-}
-
-func isLogFieldEnd(line string, pos int) bool {
-	return pos >= len(line) || line[pos] == ' ' || line[pos] == ']'
 }
 
 func sanitizeDiagnosticText(s, baseDir string) string {

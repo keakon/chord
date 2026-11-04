@@ -77,7 +77,7 @@ Common keys:
 - `Ctrl+P`: switch the main role model pool
 - `Ctrl+O`: open the MCP server selector
 - `Ctrl+E`: open the error panel (view the errors recorded so far)
-- `Ctrl+G`: export a diagnostics bundle
+- `Ctrl+G`: export a diagnostics bundle with runtime logs and a Go heap profile; see [diagnostic export](./troubleshooting.md#exporting-memory-and-runtime-diagnostics)
 - `q`: press twice to quit
 - `Ctrl+C`: press twice to quit
 
