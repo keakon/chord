@@ -2,9 +2,11 @@
 
 **A faster, cheaper, lighter terminal coding agent.**
 
-New to Chord? Start with the [Quickstart](./quickstart.md), pick a channel in [Choosing models](./model-choice.md) if you have not already, add a model with [`chord config add`](./cli.md#chord-config-add), then set approval rules in [Permissions & Safety](./permissions-and-safety.md). Already using it? Find the relevant guide below.
+Six coding agents each ran the same DeepSWE v1.1 task (adding streaming JSON iteration to `httpx`) on the same model. Chord was fastest and cheapest: 6m37s at an estimated $0.052, about 1/3 of Claude Code's time and cost. See [Performance](./performance.md) for the full comparisons and test conditions.
 
-In one DeepSWE v1.1 task Chord finished first and cheapest (6m37s, $0.052); see [Performance](./performance.md) for the full table and methodology.
+A session uses tens of megabytes of memory (39MB after 200 messages in our test), so you can run several agents at once even on modest hardware.
+
+The [Quickstart](./quickstart.md) takes you through installation, model setup, and your first task. See [supported accounts and APIs](./model-choice.md#supported-accounts-and-apis) to check compatibility with your existing keys or accounts. With the default configuration, Chord edits files and runs commands directly; to approve actions before they run, see [Permissions & Safety](./permissions-and-safety.md).
 
 [中文](./index_CN.md)
 

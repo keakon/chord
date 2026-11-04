@@ -7,7 +7,13 @@
 
 <p align="center"><strong>更快、更省、更轻的终端 Coding Agent。</strong></p>
 
+<p align="center">同一任务实测：耗时和成本约为 Claude Code 的 1/3。</p>
+
+<p align="center">单个会话只占几十兆内存（实测 200 条消息后 39MB），配置不高的电脑也能同时跑多个 Agent。</p>
+
 <p align="center">
+  <a href="./docs/quickstart_CN.md">快速开始</a> ·
+  <a href="./docs/model-choice_CN.md#账号与-api-支持">模型接入</a> ·
   <a href="https://keakon.github.io/chord/zh/">文档站</a> ·
   <a href="./README.md">English README</a>
 </p>
@@ -23,34 +29,56 @@
   <img src="./docs/assets/screenshot.png" alt="Chord 终端界面：左侧是工具调用、补丁和诊断，右侧是模型、用量、待办和变更文件" width="900">
 </p>
 
-## 亮点功能
+## 实测数据
 
-- [模型自动切换](./docs/configuration_CN.md#模型池)
-- [请求级剪裁＋持久压缩](./docs/context-management_CN.md)
-- [流式工具早执行](./docs/performance_CN.md#流式工具早执行)
-- [内存占用小](./docs/performance_CN.md#应用内存)
-- [导入 Claude Code、Codex、OpenCode 会话](./docs/usage_CN.md#导入外部会话)
-- [Vim 风格键盘操作](./docs/keybindings_CN.md)
+### 给 httpx 添加流式 JSON 迭代接口
+
+六款编程 Agent 用同一个模型分别完成同一个 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)：给 Python HTTP 客户端 `httpx` 添加流式 JSON 迭代接口，并处理解码失败、响应重复迭代等边界情况。模型均为 `deepseek-flash`（现由 DeepSeek-V4.1-Flash-1017 提供服务）。耗时包含模型交互、代码修改和测试执行，不含环境准备和最终收尾。
+
+| 工具 | 耗时 | 估算成本 |
+|---------|------|------|
+| Chord 0.8.1 | **6m37s** | **￥0.348** |
+| deepseek-harness 0.1.5-rc.1 | 9m50s（1.49 倍） | ￥0.527（1.51 倍） |
+| pi 0.85.1 | 10m22s（1.57 倍） | ￥0.576（1.65 倍） |
+| codex 0.154.0 | 17m01s（2.57 倍） | ￥0.929（2.67 倍） |
+| mini-swe-agent 2.4.6 | 18m29s（2.79 倍） | ￥0.835（2.40 倍） |
+| claude code 2.1.272 | 22m25s（3.39 倍） | ￥1.104（3.17 倍） |
+
+括号内为相对 Chord 的倍数。Chord 用时最短、成本最低，输入和输出 token（54,530 / 58,559）也最少。
+
+Chord 会在每次请求前剪裁旧工具输出、对长会话做持久压缩，并在参数完整时提前执行安全工具；实现细节见[性能](./docs/performance_CN.md#工作方式)。
+
+### 应用内存
+
+在 macOS 15.3.2（arm64）上，分别测量空会话和加载 200 条消息后的内存占用：
+
+| 工具 | 空会话 | 200 条消息 | 增量 |
+|---------|--------|------------|------|
+| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
+| codex 0.154.0 | **27MB** | 47MB | +20MB |
+| claude code 2.1.273 | 143MB | 216MB | +73MB |
+
+以上数据来自一次任务实测和一次内存测试，不代表普遍结果。[查看 token 明细与测量条件](./docs/performance_CN.md#实测数据)。
 
 ## 三步上手
 
 ### 1. 安装
 
-已安装 Go 1.27.0+ 时：
-
-```bash
-go install github.com/keakon/chord/cmd/chord@latest
-```
-
-源码构建要求 Go 1.27.0 或更新版本；默认的 `GOTOOLCHAIN=auto` 会在需要时自动下载所需 toolchain。
-
-未安装 Go 1.27.0+ 时，从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载与 OS/架构匹配的压缩包，解压后把 `chord` 放入 `PATH`，再运行：
+从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载对应系统和架构的压缩包，解压后把 `chord` 加入 `PATH`。不需要安装 Go；运行以下命令确认安装：
 
 ```bash
 chord --version
 ```
 
-macOS 上首次运行下载的二进制可能被系统阻止（文件来自互联网且未公证），解除阻止的 `xattr` / `codesign` 命令见[快速开始](./docs/quickstart_CN.md#1-安装)。
+macOS 下载版首次运行可能被系统阻止，处理步骤见[快速开始](./docs/quickstart_CN.md#1-安装)。
+
+也可用 Go 1.27.0 或更新版本安装：
+
+```bash
+go install github.com/keakon/chord/cmd/chord@latest
+```
+
+默认的 `GOTOOLCHAIN=auto` 会在需要时自动下载所需工具链。
 
 ### 2. 在项目里启动
 
@@ -61,9 +89,9 @@ cd my-project
 chord
 ```
 
-缺少 `config.yaml` 时，Chord 会启动一次性的初始化向导：创建最小可用的 `config.yaml`，必要时再创建 `auth.yaml`，结束时展示实际路径。
+首次运行且没有配置文件时，向导会引导你填写模型 API 地址、模型名称和 API key，或通过 Codex OAuth 登录。
 
-想手写 YAML 或需要不同的 provider / 模型配置，见[快速开始](./docs/quickstart_CN.md)。
+查看已有账号或 API 是否支持，见[账号与 API 支持](./docs/model-choice_CN.md#账号与-api-支持)；详细步骤见[快速开始](./docs/quickstart_CN.md)。
 
 ### 3. 发送第一个任务
 
@@ -73,50 +101,26 @@ chord
 请解释这个项目的主要模块和测试入口，先不要修改文件。
 ```
 
-查看回答和工具执行结果。熟悉项目后，再让 Chord 实现具体改动。
+先看它的回答。默认配置下，Chord 会直接修改文件和执行命令，只有用 `delete` 工具删除文件时需要确认；想先审批再执行，见[权限与安全](./docs/permissions-and-safety_CN.md)。熟悉项目后，交给它一个具体改动：它负责改代码、跑测试，你在终端里检查 diff。
 
-手动配置 provider / 模型以及 `limit` 字段的规则见[快速开始](./docs/quickstart_CN.md)与[术语表](./docs/glossary_CN.md)；可直接复制的 `config.yaml` 见[配置示例](./docs/examples/index_CN.md)。
+按 `Esc` 进入 Normal 模式，再按 `q` 退出。下次在同一项目目录运行 `chord --continue` 继续最近的会话。
 
-## 文档
+## 更多功能
 
-- [快速开始](./docs/quickstart_CN.md)：安装并完成第一个任务
-- [使用指南](./docs/usage_CN.md)：日常操作、恢复会话和长任务
-- [按工作选模型](./docs/model-choice_CN.md) · [模型配置速查](./docs/model-configs_CN.md) · [配置示例](./docs/examples/index_CN.md)：先选渠道，再接入
+- [模型自动切换](./docs/configuration_CN.md#模型池)：配置多个模型，请求失败时自动尝试切换到下一个模型并重试。
+- [导入已有会话](./docs/usage_CN.md#导入外部会话)：导入 Claude Code、Codex 或 OpenCode 的会话历史，在 Chord 中继续工作。
+- [Vim 风格键盘操作](./docs/keybindings_CN.md)：用键盘浏览会话、操作工具卡和切换面板。
+
+## 按主题查文档
+
+- [快速开始](./docs/quickstart_CN.md)：安装、接入模型，完成第一个任务
+- [使用指南](./docs/usage_CN.md)：日常操作、恢复会话、长任务和并行工作
+- [模型配置](./docs/model-configs_CN.md) · [配置示例](./docs/examples/index_CN.md)：接入模型或自定义网关
 - [权限与安全](./docs/permissions-and-safety_CN.md)：决定哪些操作需要确认
-- [长任务](./docs/usage_CN.md#loop持续执行模式)：让实现、检查和修复连续推进
-- [扩展与定制](./docs/customization_CN.md)：配置角色、技能、代码诊断和外部工具
+- [扩展与定制](./docs/customization_CN.md)：配置多 Agent、技能、代码诊断和外部工具
 - [Headless 集成](./docs/headless_CN.md)：通过 `chord headless` 从其他入口操控
 - [ACP Agent 模式](./docs/acp_CN.md)：通过 `chord acp` 让 ACP 客户端（如 Zed）直接调用 Chord
 - [排障](./docs/troubleshooting_CN.md) · [完整文档目录](./docs/index_CN.md)
-
-## 实测数据
-
-六款同类编码 agent 用同一个模型（`deepseek-flash`，现由 DeepSeek-V4.1-Flash-1017 提供服务）跑同一个 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)：给 `httpx` 加上流式 JSON 迭代接口。Chord 0.8.1 用时最短、成本最低：6m37s、￥0.348，输入 54.5K token、缓存读取 2.96M token、输出 58.6K token。第二名的耗时是它的 1.49 倍、成本是 1.51 倍。
-
-### 真实编码任务
-
-| 工具 | 耗时 | 成本 |
-|---------|------|------|
-| Chord 0.8.1 | **6m37s** | **￥0.348** |
-| deepseek-harness 0.1.5-rc.1 | 9m50s（1.49 倍） | ￥0.527（1.51 倍） |
-| pi 0.85.1 | 10m22s（1.57 倍） | ￥0.576（1.65 倍） |
-| codex 0.154.0 | 17m01s（2.57 倍） | ￥0.929（2.67 倍） |
-| mini-swe-agent 2.4.6 | 18m29s（2.79 倍） | ￥0.835（2.40 倍） |
-| claude code 2.1.272 | 22m25s（3.39 倍） | ￥1.104（3.17 倍） |
-
-括号里是相对 Chord 的倍数。
-
-### 应用内存
-
-测试环境：macOS 15.3.2（arm64）。
-
-| 工具 | 空会话 | 200 条消息 | 增量 |
-|---------|--------|------------|------|
-| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
-| codex 0.154.0 | **27MB** | 47MB | +20MB |
-| claude code 2.1.273 | 143MB | 216MB | +73MB |
-
-以上数据来自一次任务实测和一次内存场景，不代表普遍结果。完整数据表、测量方法和实现说明见[性能](./docs/performance_CN.md#实测数据)。
 
 ## 项目链接
 

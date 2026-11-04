@@ -6,7 +6,7 @@
 
 Start with the balanced tier for everyday development and the reliability-first tier for concurrency, permissions, or recovery. Use cheaper models for explicit mechanical work. A single main agent can finish a small task without starting a team. Add models for Chord's native agents with [`chord config add`](./cli.md#chord-config-add); the catalog supplies limits, modalities, and reasoning variants. Full layouts are in [Examples](./examples/index.md).
 
-## Will what you already pay for reach Chord?
+## Supported accounts and APIs
 
 Chord's native main agent and subagents connect with API keys or Codex OAuth (`chord auth codex`). [Claude Code](./external-agents.md) can also run as an external subagent using its own CLI authentication. The main agent still needs an API or Codex connection.
 

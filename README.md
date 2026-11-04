@@ -7,7 +7,13 @@
 
 <p align="center"><strong>A faster, cheaper, lighter terminal coding agent.</strong></p>
 
+<p align="center">In one measured task: about 1/3 of Claude Code's time and cost.</p>
+
+<p align="center">A session uses tens of megabytes of memory (39MB after 200 messages in our test), so you can run several agents at once even on modest hardware.</p>
+
 <p align="center">
+  <a href="./docs/quickstart.md">Quickstart</a> ·
+  <a href="./docs/model-choice.md#supported-accounts-and-apis">Model access</a> ·
   <a href="https://keakon.github.io/chord/">Docs site</a> ·
   <a href="./README_CN.md">中文 README</a>
 </p>
@@ -23,34 +29,56 @@
   <img src="./docs/assets/screenshot.png" alt="Chord terminal UI: tool calls, patches, and diagnostics on the left; model, usage, todos, and changed files on the right" width="900">
 </p>
 
-## Feature highlights
+## Measured results
 
-- [Automatic model fallback](./docs/configuration.md#model-pools-selecting-providermodel)
-- [Request trimming plus compaction](./docs/context-management.md)
-- [Streaming tool early execution](./docs/performance.md#streaming-tool-early-execution)
-- [Small memory footprint](./docs/performance.md#app-memory)
-- [Import Claude Code, Codex, and OpenCode sessions](./docs/usage.md#importing-external-sessions)
-- [Vim-style keyboard controls](./docs/keybindings.md)
+### Adding streaming JSON iteration to httpx
+
+Six coding agents each ran the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) on the same model: add streaming JSON iteration to the Python HTTP client `httpx`, handling decoding errors and single-use responses. All runs used `deepseek-flash`, now served by DeepSeek-V4.1-Flash-1017. Time includes model interactions, code changes, and test execution, but excludes environment setup and final cleanup.
+
+| Harness | Time | Estimated cost |
+|---------|------|------|
+| Chord 0.8.1 | **6m37s** | **$0.052** |
+| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | $0.079 (1.51×) |
+| pi 0.85.1 | 10m22s (1.57×) | $0.086 (1.65×) |
+| codex 0.154.0 | 17m01s (2.57×) | $0.139 (2.67×) |
+| mini-swe-agent 2.4.6 | 18m29s (2.79×) | $0.125 (2.40×) |
+| claude code 2.1.272 | 22m25s (3.39×) | $0.166 (3.17×) |
+
+Multipliers are relative to Chord. Chord was fastest and cheapest, and used the fewest input and output tokens (54,530 / 58,559).
+
+Chord trims old tool output when building each request, compacts long-session context, and starts safe tools as soon as their arguments are complete; see [Performance](./docs/performance.md#how-it-works) for details.
+
+### App memory
+
+Memory measured on macOS 15.3.2 (arm64), with an empty session and after loading 200 messages:
+
+| Harness | Empty session | 200 messages | Growth |
+|---------|---------------|--------------|--------|
+| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
+| codex 0.154.0 | **27MB** | 47MB | +20MB |
+| claude code 2.1.273 | 143MB | 216MB | +73MB |
+
+One measured task and one memory test; your numbers will differ. [See the token breakdown and test conditions](./docs/performance.md#measured-results).
 
 ## Three-step setup
 
 ### 1. Install
 
-If you already have Go 1.27.0+ installed:
-
-```bash
-go install github.com/keakon/chord/cmd/chord@latest
-```
-
-Source builds require Go 1.27.0 or newer; the default `GOTOOLCHAIN=auto` downloads the required toolchain when needed.
-
-If you do not have Go 1.27.0+, download the archive for your OS/architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, put `chord` on your `PATH`, and run:
+Download the archive for your OS and architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`. No Go installation is needed. Verify the installation:
 
 ```bash
 chord --version
 ```
 
-On macOS, the downloaded binary may be blocked on first run because it came from the internet and is not notarized; see [Quickstart](./docs/quickstart.md#1-install) for the `xattr` / `codesign` commands that unblock it.
+On macOS, the downloaded binary may be blocked on first run; see [Quickstart](./docs/quickstart.md#1-install) for the steps to unblock it.
+
+You can also install with Go 1.27.0 or newer:
+
+```bash
+go install github.com/keakon/chord/cmd/chord@latest
+```
+
+The default `GOTOOLCHAIN=auto` downloads the required toolchain when needed.
 
 ### 2. Start in your project
 
@@ -61,9 +89,9 @@ cd my-project
 chord
 ```
 
-If `config.yaml` is missing, Chord launches a one-time setup wizard: it creates the minimal `config.yaml` and, when needed, `auth.yaml`, then prints the exact paths it used.
+On the first run without a configuration file, the wizard guides you through entering your model API URL, model name, and API key, or signing in with Codex OAuth.
 
-To write YAML manually or use a different provider/model setup, see [Quickstart](./docs/quickstart.md).
+See [supported accounts and APIs](./docs/model-choice.md#supported-accounts-and-apis) to check compatibility with your existing keys or accounts. For detailed steps, see [Quickstart](./docs/quickstart.md).
 
 ### 3. Send your first task
 
@@ -73,50 +101,26 @@ Describe what you want and press `Enter`. For example, have it read through your
 Explain this project's main modules and how to run its tests. Do not change any files yet.
 ```
 
-Inspect the response and tool results. Once you know your way around, ask Chord to make a specific change.
+Read its answer. With the default configuration, Chord edits files and runs commands directly; only file deletions through the `delete` tool ask first. To approve actions before they run, see [Permissions & Safety](./docs/permissions-and-safety.md). Once you are comfortable, give Chord a specific change: it edits code and runs tests, and you review the diff in the terminal.
 
-For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/quickstart.md) and the [Glossary](./docs/glossary.md); ready-to-paste `config.yaml` files are in the [configuration examples](./docs/examples/index.md).
+Press `Esc` to enter Normal mode, then `q` to quit. Run `chord --continue` from the same project directory next time to resume the most recent session.
 
-## Documentation
+## More features
 
-- [Quickstart](./docs/quickstart.md): install and complete your first task
-- [Usage](./docs/usage.md): everyday controls, session recovery, and long tasks
-- [Choosing models](./docs/model-choice.md) · [Model configuration recipes](./docs/model-configs.md) · [Configuration examples](./docs/examples/index.md): pick a channel, then connect it
+- [Automatic model fallback](./docs/configuration.md#model-pools-selecting-providermodel): configure multiple models so Chord can automatically try the next model when a request fails.
+- [Import existing sessions](./docs/usage.md#importing-external-sessions): bring your Claude Code, Codex, or OpenCode history into Chord and continue working.
+- [Vim-style keyboard controls](./docs/keybindings.md): browse sessions, operate tool cards, and switch panels from the keyboard.
+
+## Find a guide
+
+- [Quickstart](./docs/quickstart.md): install, connect a model, and complete your first task
+- [Usage](./docs/usage.md): everyday controls, session recovery, long tasks, and parallel work
+- [Model configuration](./docs/model-configs.md) · [Configuration examples](./docs/examples/index.md): connect models or custom gateways
 - [Permissions & Safety](./docs/permissions-and-safety.md): choose which actions need approval
-- [Long tasks](./docs/usage.md#loop-continuous-execution-mode): keep implementation, checks, and fixes moving
-- [Customization](./docs/customization.md): configure roles, skills, code diagnostics, and external tools
+- [Customization](./docs/customization.md): configure multiple agents, skills, code diagnostics, and external tools
 - [Headless](./docs/headless.md): control Chord from another interface with `chord headless`
 - [ACP agent mode](./docs/acp.md): drive Chord from ACP clients such as Zed with `chord acp`
 - [Troubleshooting](./docs/troubleshooting.md) · [Full documentation index](./docs/index.md)
-
-## Measured results
-
-Six agent harnesses ran the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): adding streaming JSON iteration to `httpx`. All six runs used `deepseek-flash`, now served by DeepSeek-V4.1-Flash-1017. Chord 0.8.1 finished first and cheapest: 6m37s and $0.052, using 54.5K input tokens, 2.96M cache-read tokens, and 58.6K output tokens. The next-best run took 1.49× as long and cost 1.51× as much.
-
-### Real-world coding task
-
-| Harness | Time | Cost |
-|---------|------|------|
-| Chord 0.8.1 | **6m37s** | **$0.052** |
-| deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | $0.079 (1.51×) |
-| pi 0.85.1 | 10m22s (1.57×) | $0.086 (1.65×) |
-| codex 0.154.0 | 17m01s (2.57×) | $0.139 (2.67×) |
-| mini-swe-agent 2.4.6 | 18m29s (2.79×) | $0.125 (2.40×) |
-| claude code 2.1.272 | 22m25s (3.39×) | $0.166 (3.17×) |
-
-Multipliers are relative to Chord.
-
-### App memory
-
-Measured on macOS 15.3.2 (arm64).
-
-| Harness | Empty session | 200 messages | Growth |
-|---------|---------------|--------------|--------|
-| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
-| codex 0.154.0 | **27MB** | 47MB | +20MB |
-| claude code 2.1.273 | 143MB | 216MB | +73MB |
-
-One measured task and one memory scenario; your numbers will differ. Full tables, methodology, and implementation notes: [Performance](./docs/performance.md#measured-results).
 
 ## Project links
 

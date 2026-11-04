@@ -6,7 +6,7 @@
 
 日常开发从均衡档开始，涉及并发、权限或恢复时用可靠性优先档。明确的机械任务可以降档；小任务由单个主代理直接完成，不必启动整套团队。Chord 原生 Agent 接入模型用 [`chord config add`](./cli_CN.md#chord-config-add)，限额、模态和 reasoning 档位由目录补齐；完整布局见[配置示例](./examples/index_CN.md)。
 
-## 你已经在付的，Chord 用得上吗？
+## 账号与 API 支持
 
 Chord 原生主／子 Agent 通过 API key 或 Codex OAuth（`chord auth codex`）接入模型。[Claude Code](./external-agents_CN.md) 也可以作为外部子 Agent，沿用 CLI 自己的认证。主 Agent 仍需 API 或 Codex 接入。
 

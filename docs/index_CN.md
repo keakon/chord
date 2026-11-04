@@ -2,9 +2,11 @@
 
 **更快、更省、更轻的终端 Coding Agent。**
 
-第一次使用时，建议按这个顺序走：先看[快速开始](./quickstart_CN.md)跑通第一个任务，还没选定渠道时先看[按工作选模型](./model-choice_CN.md)，再用 [`chord config add`](./cli_CN.md#chord-config-add) 添加模型，最后在[权限与安全](./permissions-and-safety_CN.md)定好审批规则；已经在用时，按下面的目标找答案。
+六款编程 Agent 用同一个模型分别完成同一个 DeepSWE v1.1 任务（给 `httpx` 添加流式 JSON 迭代接口），Chord 用时最短、成本最低：6m37s，估算成本 ￥0.348，耗时和成本约为 Claude Code 的 1/3。完整对比表和测量条件见[性能](./performance_CN.md)。
 
-一次 DeepSWE v1.1 任务实测里 Chord 用时最短、成本最低（6m37s，￥0.348），完整表格与测量方法见[性能](./performance_CN.md)。
+单个会话只占几十兆内存（实测 200 条消息后 39MB），配置不高的电脑也能同时跑多个 Agent。
+
+[快速开始](./quickstart_CN.md)带你安装、接入模型并完成第一个任务。查看已有账号或 API 是否支持，见[账号与 API 支持](./model-choice_CN.md#账号与-api-支持)。默认配置下 Chord 会直接修改文件和执行命令，想先审批再执行，见[权限与安全](./permissions-and-safety_CN.md)。
 
 [English](./index.md)
 
