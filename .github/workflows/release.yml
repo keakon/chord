@@ -18,6 +18,8 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     # `push` to a v* tag runs on that tag. `workflow_dispatch` runs on main but
     # we release the explicitly requested tag, so verify it looks like a tag.
     if: ${{ github.event_name == 'push' || startsWith(inputs.tag, 'v') }}
@@ -25,9 +27,12 @@ jobs:
       - name: Resolve release tag
         id: tag
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
           else
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           fi
@@ -123,3 +128,11 @@ jobs:
             --target "$(git rev-parse HEAD)" \
             --title "${RELEASE_TAG}" \
             --generate-notes
+
+  homebrew:
+    needs: release
+    uses: ./.github/workflows/homebrew.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

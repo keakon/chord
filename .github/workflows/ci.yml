@@ -319,6 +319,16 @@ jobs:
       - name: Check pre-push hook environment
         run: scripts/test_pre_push.sh
 
+  homebrew-workflow:
+    name: Homebrew workflow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test release update and recovery
+        run: ruby scripts/test_homebrew_workflow.rb
+
   deadcode:
     name: Deadcode gate
     runs-on: ubuntu-latest
