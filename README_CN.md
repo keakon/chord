@@ -71,7 +71,7 @@ brew install keakon/tap/chord
 chord --version
 ```
 
-Homebrew 有匹配的预编译包时，安装无需 Go；否则会安装构建依赖并从源码编译。升级方法见[快速开始](./docs/quickstart_CN.md#homebrewmacos-和-linux)。
+Homebrew 直接安装 macOS 或 Linux 的 ARM64、x86_64 发布包，无需 Go，不从源码编译。升级方法见[快速开始](./docs/quickstart_CN.md#homebrewmacos-和-linux)。
 
 也可从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载对应系统和架构的压缩包，解压后把 `chord` 加入 `PATH`。这些二进制文件不需要 Go。
 

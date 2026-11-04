@@ -12,7 +12,7 @@ With [Homebrew](https://brew.sh) installed, run:
 brew install keakon/tap/chord
 ```
 
-Homebrew automatically adds the [Chord tap](https://github.com/keakon/homebrew-tap). When a prebuilt package (bottle) matches your system, installation does not require Go. Otherwise, Homebrew installs the build dependencies and compiles from source.
+Homebrew automatically adds the [Chord tap](https://github.com/keakon/homebrew-tap) and installs the release binary for macOS or Linux on ARM64 or x86_64. It verifies the package's SHA256 and installs Bash, Zsh, and Fish completions. Go is not required; the formula does not fall back to compiling from source.
 
 To upgrade:
 

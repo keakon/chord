@@ -71,7 +71,7 @@ brew install keakon/tap/chord
 chord --version
 ```
 
-Homebrew installs a matching prebuilt package without Go. If none is available, it installs the build dependencies and compiles from source. See [Quickstart](./docs/quickstart.md#homebrew-macos-and-linux) for upgrades.
+Homebrew installs the release binary for macOS or Linux on ARM64 or x86_64, without Go or a source build. See [Quickstart](./docs/quickstart.md#homebrew-macos-and-linux) for upgrades.
 
 Alternatively, download the archive for your OS and architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`. These binaries do not require Go.
 

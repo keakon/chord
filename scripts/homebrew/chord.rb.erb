@@ -1,0 +1,41 @@
+class Chord < Formula
+  desc "AI coding assistant with multi-agent orchestration"
+  homepage "https://github.com/keakon/chord"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/keakon/chord/releases/download/<%= tag %>/chord-<%= tag %>-darwin-arm64.tar.gz"
+      sha256 "<%= checksums.fetch("darwin-arm64") %>"
+    end
+    on_intel do
+      url "https://github.com/keakon/chord/releases/download/<%= tag %>/chord-<%= tag %>-darwin-amd64.tar.gz"
+      sha256 "<%= checksums.fetch("darwin-amd64") %>"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/keakon/chord/releases/download/<%= tag %>/chord-<%= tag %>-linux-arm64.tar.gz"
+      sha256 "<%= checksums.fetch("linux-arm64") %>"
+    end
+    on_intel do
+      url "https://github.com/keakon/chord/releases/download/<%= tag %>/chord-<%= tag %>-linux-amd64.tar.gz"
+      sha256 "<%= checksums.fetch("linux-amd64") %>"
+    end
+  end
+
+  def install
+    bin.install "chord"
+    generate_completions_from_executable(bin/"chord", "completion")
+  end
+
+  test do
+    assert_match(/^chord version v#{Regexp.escape(version.to_s)}(?: [0-9a-f]+)?$/,
+                 shell_output("#{bin}/chord --version"))
+    assert_match "headless", shell_output("#{bin}/chord --help")
+    assert_match "complete -o", shell_output("#{bin}/chord completion bash")
+    assert_match "session id or --session-dir is required",
+                 shell_output("#{bin}/chord sessions project 2>&1", 1)
+  end
+end

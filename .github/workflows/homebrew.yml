@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Published stable release tag, e.g. v0.8.2"
+        description: "Published stable release tag (e.g. v0.8.2)"
         required: true
         type: string
 
@@ -28,96 +28,79 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
-  update:
+  prepare:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
+    outputs:
+      updated: ${{ steps.formula.outputs.updated }}
     env:
-      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-      HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.tag }}
-      TAP_REPOSITORY: keakon/homebrew-tap
     steps:
-      - name: Validate release
-        id: release
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: keakon/homebrew-tap
+          ref: main
+          path: tap
+          persist-credentials: false
+      - name: Generate stable release formula
+        id: formula
+        run: ruby scripts/homebrew.rb prepare "$RELEASE_TAG" tap
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.formula.outputs.updated == 'true'
+        with:
+          name: homebrew-formula
+          path: tap/Formula/chord.rb
+          if-no-files-found: error
+
+  test:
+    needs: prepare
+    if: needs.prepare.outputs.updated == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: Homebrew/actions/setup-homebrew@d482da0e602890d3160aade42e72c8556103bf04 # 2026.10.26.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: homebrew-formula
+          path: candidate
+      - name: Validate installation and formula
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Skipping non-stable version: $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "::error::Configure HOMEBREW_TAP_TOKEN with access to keakon/homebrew-tap."
-            exit 1
-          fi
-          release="$(gh release view "$RELEASE_TAG" --repo keakon/chord \
-            --json tagName,isDraft,isPrerelease)"
-          if [[ "$(jq -r '.isDraft or .isPrerelease' <<< "$release")" == true ]]; then
-            echo "Skipping draft or prerelease: $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          latest="$(gh release view --repo keakon/chord --json tagName --jq .tagName)"
-          if [[ "$RELEASE_TAG" != "$latest" ]]; then
-            echo "Skipping $RELEASE_TAG; the latest stable release is $latest." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "update=true" >> "$GITHUB_OUTPUT"
+          brew tap-new keakon/release-check
+          cp candidate/chord.rb "$(brew --repository keakon/release-check)/Formula/chord.rb"
+          brew trust --formula keakon/release-check/chord
+          brew install keakon/release-check/chord
+          brew test keakon/release-check/chord
+          brew audit --strict keakon/release-check/chord
 
-      - name: Set up Homebrew
-        if: steps.release.outputs.update == 'true'
-        uses: Homebrew/actions/setup-homebrew@d482da0e602890d3160aade42e72c8556103bf04 # 2026.10.26.1
-
-      - name: Create version pull request
-        if: steps.release.outputs.update == 'true'
-        run: |
-          git config --global user.name keakon
-          git config --global user.email 1155229+keakon@users.noreply.github.com
-          gh auth setup-git
-          brew tap keakon/tap
-          brew trust --formula keakon/tap/chord
-
-          version="${RELEASE_TAG#v}"
-          current="$(brew info --json=v2 keakon/tap/chord | jq -r '.formulae[0].versions.stable')"
-          newest="$(printf '%s\n%s\n' "$version" "$current" | sort -V | tail -n 1)"
-          if [[ "$current" == "$newest" ]]; then
-            echo "Formula is already at $current; skipping $version." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          branch="bump-chord-$version"
-          existing="$(gh pr list --repo "$TAP_REPOSITORY" --state open \
-            --head "$branch" --json url --jq '.[0].url // empty')"
-          if [[ -n "$existing" ]]; then
-            echo "Update PR already exists: $existing" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          bump_args=(
-            "--version=$version"
-            "--url=https://github.com/keakon/chord/archive/refs/tags/$RELEASE_TAG.tar.gz"
-            keakon/tap/chord
-          )
-          tap_path="$(brew --repository keakon/tap)"
-          remote_ref="$(git -C "$tap_path" ls-remote --heads origin "refs/heads/$branch")"
-          if [[ -n "$remote_ref" ]]; then
-            git -C "$tap_path" fetch --no-tags origin "refs/heads/$branch"
-            branch_sha="$(git -C "$tap_path" rev-parse FETCH_HEAD)"
-            changed="$(git -C "$tap_path" diff --name-only HEAD "$branch_sha")"
-            if [[ "$changed" != "Formula/chord.rb" ]]; then
-              echo "::error::Existing branch $branch changes unexpected files; inspect it manually."
-              exit 1
-            fi
-
-            # A failed PR request can leave a pushed branch behind. Regenerate
-            # from the trusted default branch without executing the leftover formula.
-            brew bump-formula-pr --write-only "${bump_args[@]}"
-            if ! git -C "$tap_path" diff --quiet "$branch_sha" --; then
-              echo "::error::Existing branch $branch does not match the expected update; inspect it manually."
-              exit 1
-            fi
-            base="$(git -C "$tap_path" symbolic-ref --short refs/remotes/origin/HEAD)"
-            gh pr create --repo "$TAP_REPOSITORY" --head "$branch" --base "${base#origin/}" \
-              --title "chord $version" --body "Update Chord to $version." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          brew bump-formula-pr --no-fork --no-browse "${bump_args[@]}"
-          gh pr list --repo "$TAP_REPOSITORY" --state open \
-            --head "$branch" --json url --jq '.[].url' >> "$GITHUB_STEP_SUMMARY"
+  publish:
+    needs: [prepare, test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: keakon/homebrew-tap
+          ref: main
+          path: tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: homebrew-formula
+          path: candidate
+      - name: Update tap main
+        run: ruby scripts/homebrew.rb publish "$RELEASE_TAG" tap candidate/chord.rb

@@ -12,7 +12,7 @@
 brew install keakon/tap/chord
 ```
 
-Homebrew 会自动添加 [Chord 软件源（tap）](https://github.com/keakon/homebrew-tap)。有匹配当前系统的预编译安装包（bottle）时，安装无需 Go；否则 Homebrew 会安装构建依赖并从源码编译。
+Homebrew 会自动添加 [Chord 软件源（tap）](https://github.com/keakon/homebrew-tap)，安装 macOS 或 Linux 的 ARM64、x86_64 发布包，校验 SHA256，并安装 Bash、Zsh 和 Fish 补全。安装无需 Go，配方不提供源码编译回退。
 
 后续升级：
 

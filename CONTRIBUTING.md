@@ -25,6 +25,37 @@ make build
 
 `go build ./...` checks that every package compiles; `make build` writes `./chord` with cgo disabled, `-trimpath`, and stripped symbols.
 
+## Homebrew releases
+
+Pushing a stable `vX.Y.Z` tag builds and publishes the release archives. After the
+release job succeeds, `homebrew.yml` generates the formula from
+`scripts/homebrew/chord.rb.erb` and the release's `SHA256SUMS`. It installs and tests
+the candidate on macOS and Linux, on both ARM64 and x86_64, before committing it
+directly to `keakon/homebrew-tap`'s `main` branch.
+
+Set `HOMEBREW_TAP_TOKEN` in this repository to a fine-grained token with Contents
+read/write access only to `keakon/homebrew-tap`. Pull requests permission is not
+needed. The tap's branch rules must permit this identity to push to `main`.
+Only the final publishing job uses this token.
+
+To retry a tap update without rebuilding the release:
+
+```bash
+gh workflow run homebrew.yml --repo keakon/chord --ref main -f tag=v0.8.2
+```
+
+Replace the tag with the published stable version. Drafts, prereleases, older
+releases, and versions already installed in the tap are skipped. Validation
+failures leave the tap unchanged. A concurrent push fails without overwriting
+remote changes; rerun the workflow to validate and publish against the new state.
+
+Changes to formula installation or tests belong in the template and the tap's
+current formula. Verify the generator and publishing behavior with:
+
+```bash
+ruby scripts/test_homebrew.rb
+```
+
 ## Git Hooks Setup (Required)
 
 After cloning the repository, enable commit hooks:
