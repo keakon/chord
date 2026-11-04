@@ -23,9 +23,7 @@ const (
 	defaultMaxLineBytes = 16 << 20
 	defaultKillGrace    = 5 * time.Second
 	// streamDrainGrace bounds how long the scanners may keep reading after the
-	// process group is gone. It stays below the stop grace callers use, so the
-	// run ends here instead of flipping a delivered result into a teardown
-	// failure.
+	// process group is gone, so inherited pipes cannot keep the run open.
 	streamDrainGrace = time.Second
 )
 
@@ -383,12 +381,18 @@ func (s *Session) Stop(grace time.Duration) {
 }
 
 // Finish closes input without interrupting a successfully completed turn.
+// Stream draining has its own deadline and is not part of the exit grace.
 func (s *Session) Finish(grace time.Duration) {
 	_ = s.stdin.Close()
 	go func() {
 		select {
-		case <-s.done:
+		case <-s.exited:
 		case <-time.After(grace):
+			select {
+			case <-s.exited:
+				return
+			default:
+			}
 			s.recordReadError(fmt.Errorf("external process did not exit after input closed"))
 			s.Terminate()
 		}

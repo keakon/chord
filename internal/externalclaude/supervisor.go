@@ -79,9 +79,9 @@ func startSupervised(cfg ProcessConfig) (*Session, error) {
 // descendant escaped the group holding the write ends.
 func (s *Session) waitSupervised() {
 	_ = s.sup.Wait()
+	close(s.exited)
 	stopErr := s.sup.Stop(s.killGrace)
 	s.drainStreams()
-	close(s.exited)
 	report := s.sup.Report()
 	if report.Reported {
 		switch {
