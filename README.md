@@ -64,11 +64,16 @@ One measured task and one memory test; your numbers will differ. [See the token 
 
 ### 1. Install
 
-Download the archive for your OS and architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`. No Go installation is needed. Verify the installation:
+On macOS or Linux with [Homebrew](https://brew.sh) installed:
 
 ```bash
+brew install keakon/tap/chord
 chord --version
 ```
+
+Homebrew installs a matching prebuilt package without Go. If none is available, it installs the build dependencies and compiles from source. See [Quickstart](./docs/quickstart.md#homebrew-macos-and-linux) for upgrades.
+
+Alternatively, download the archive for your OS and architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`. These binaries do not require Go.
 
 On macOS, the downloaded binary may be blocked on first run; see [Quickstart](./docs/quickstart.md#1-install) for the steps to unblock it.
 

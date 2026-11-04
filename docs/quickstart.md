@@ -4,21 +4,46 @@ Have a model API key or an account with Codex access ready. See [supported accou
 
 ## 1. Install
 
-Download the archive for your OS and architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`. No Go installation is needed. Verify the installation:
+### Homebrew (macOS and Linux)
+
+With [Homebrew](https://brew.sh) installed, run:
 
 ```bash
-chord --version
+brew install keakon/tap/chord
 ```
 
-You can also install with Go 1.27.0 or newer:
+Homebrew automatically adds the [Chord tap](https://github.com/keakon/homebrew-tap). When a prebuilt package (bottle) matches your system, installation does not require Go. Otherwise, Homebrew installs the build dependencies and compiles from source.
+
+To upgrade:
+
+```bash
+brew update
+brew upgrade chord
+```
+
+### Download a binary
+
+Download the archive for your OS and architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`. These binaries do not require Go.
+
+### Install with Go
+
+With Go 1.27.0 or newer:
 
 ```bash
 go install github.com/keakon/chord/cmd/chord@latest
 ```
 
+### Verify the installation
+
+After installing with any of these methods, run:
+
+```bash
+chord --version
+```
+
 ### If macOS blocks the downloaded binary
 
-On macOS, a downloaded binary may be blocked on first run because it came from the internet and is not notarized. If that happens, run:
+On macOS, a binary downloaded manually from GitHub Releases may be blocked on first run because it came from the internet and is not notarized. If that happens, run:
 
 ```bash
 xattr -dr com.apple.quarantine /path/to/chord

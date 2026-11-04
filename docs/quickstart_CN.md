@@ -4,21 +4,46 @@
 
 ## 1. 安装
 
-从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载对应系统和架构的压缩包，解压后把 `chord` 加入 `PATH`。不需要安装 Go；运行以下命令确认安装：
+### Homebrew（macOS 和 Linux）
+
+已安装 [Homebrew](https://brew.sh) 时，运行：
 
 ```bash
-chord --version
+brew install keakon/tap/chord
 ```
 
-也可用 Go 1.27.0 或更新版本安装：
+Homebrew 会自动添加 [Chord 软件源（tap）](https://github.com/keakon/homebrew-tap)。有匹配当前系统的预编译安装包（bottle）时，安装无需 Go；否则 Homebrew 会安装构建依赖并从源码编译。
+
+后续升级：
+
+```bash
+brew update
+brew upgrade chord
+```
+
+### 下载二进制文件
+
+从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载对应系统和架构的压缩包，解压后把 `chord` 加入 `PATH`。这些二进制文件不需要 Go。
+
+### 用 Go 安装
+
+使用 Go 1.27.0 或更新版本：
 
 ```bash
 go install github.com/keakon/chord/cmd/chord@latest
 ```
 
+### 确认安装
+
+无论选择哪种方式，安装后都可运行：
+
+```bash
+chord --version
+```
+
 ### macOS 下载版被系统阻止
 
-下载版首次运行时，macOS 可能因文件来自互联网且未公证而阻止运行。遇到这种情况时执行：
+手动从 GitHub Releases 下载的二进制文件首次运行时，macOS 可能因文件来自互联网且未公证而阻止运行。遇到这种情况时执行：
 
 ```bash
 xattr -dr com.apple.quarantine /path/to/chord
