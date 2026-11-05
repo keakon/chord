@@ -318,6 +318,7 @@ Notes:
 - Imported tool cards represent history only. Re-run `read` before editing a file when you need current contents and stale-change protection.
 - Signed Anthropic thinking is preserved. Other reasoning is omitted by default; use `--reasoning visible` to import it as plain text.
 - Claude sidechain/sub-agent entries are excluded from the main session. Import warnings, skipped records, and conversion statistics are written to `import-report.json`.
+- You can import the same source conversation multiple times, for example to continue it with different models. Each import creates a separate Chord session by default. Use `--sid <id> --force` to replace an existing session.
 
 Common flags:
 

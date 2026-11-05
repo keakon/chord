@@ -316,6 +316,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 - 导入的工具卡只代表历史记录。编辑相关文件前，请重新 `read` 以获取最新内容和过期变更提醒。
 - Anthropic 的签名思考内容会保留；其他推理内容默认省略，可用 `--reasoning visible` 作为普通文本导入。
 - Claude 的支线 / 子 Agent 记录不会进入主会话。导入警告、跳过记录和转换统计会写入 `import-report.json`。
+- 同一来源会话可以多次导入，例如分别用不同模型继续执行。每次导入默认创建独立的 Chord 会话；要替换已有会话，使用 `--sid <id> --force`。
 
 常用参数：
 

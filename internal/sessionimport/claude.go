@@ -21,6 +21,7 @@ type claudeTranscriptEnvelope struct {
 	LogicalParentUUID string          `json:"logicalParentUuid"`
 	IsSidechain       bool            `json:"isSidechain"`
 	AgentID           string          `json:"agentId"`
+	SessionID         string          `json:"sessionId"`
 	Message           json.RawMessage `json:"message"`
 	Content           json.RawMessage `json:"content"`
 }
@@ -156,6 +157,9 @@ func convertClaudeTranscript(data []byte, reasoningMode string, report *ImportRe
 		var env claudeTranscriptEnvelope
 		if err := importJSONUnmarshalString(line, &env); err != nil {
 			return nil, fmt.Errorf("claude import: line %d: parse JSON: %w", lineNo, err)
+		}
+		if report.SourceSessionID == "" {
+			report.SourceSessionID = env.SessionID
 		}
 		entry, skipped := classifyClaudeEntry(claudeNode{Envelope: env, Index: lineNo}, report.Claude)
 		if skipped {

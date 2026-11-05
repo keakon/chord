@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -237,6 +239,225 @@ func TestImport_OpenCode_InlineImageSurvivesInstallAsFile(t *testing.T) {
 	}
 	if !bytes.HasPrefix(saved, []byte("\x89PNG\r\n\x1a\n")) {
 		t.Fatalf("attachment is not a PNG: %d bytes", len(saved))
+	}
+}
+
+func TestImport_RepeatedSourceCreatesIndependentSessions(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	t.Setenv("CHORD_SESSIONS_DIR", "")
+	projectRoot := t.TempDir()
+
+	cases := []struct {
+		name   string
+		source string
+		body   string
+	}{
+		{"claude", "claude", `{"sessionId":"0196f7a2-1111-7000-8000-000000000001","uuid":"u1","message":{"role":"user","content":"hi"}}
+{"sessionId":"0196f7a2-1111-7000-8000-000000000001","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}`},
+		{"codex", "codex", `{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"codex-1"}}
+{"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run pwd"}]}}`},
+		{"opencode", "opencode", `{"info":{"id":"sess-1"},"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := filepath.Join(t.TempDir(), "input")
+			if err := os.WriteFile(input, []byte(tc.body), 0o600); err != nil {
+				t.Fatalf("write input: %v", err)
+			}
+			opts := ImportOptions{Source: tc.source, InputPath: input, ProjectRoot: projectRoot}
+
+			first, err := Import(context.Background(), opts)
+			if err != nil {
+				t.Fatalf("first import: %v", err)
+			}
+
+			second, err := Import(context.Background(), opts)
+			if err != nil {
+				t.Fatalf("second import of the same source: %v", err)
+			}
+			if second.SessionID == first.SessionID {
+				t.Fatalf("second import reused the same session id")
+			}
+			if !slices.Equal(second.Report.Warnings, first.Report.Warnings) {
+				t.Fatalf("repeated import changed warnings: first=%v second=%v", first.Report.Warnings, second.Report.Warnings)
+			}
+			var firstTranscript []byte
+			for _, res := range []*ImportResult{first, second} {
+				meta, err := recovery.LoadSessionMeta(res.SessionDir)
+				if err != nil {
+					t.Fatalf("LoadSessionMeta: %v", err)
+				}
+				if meta == nil || meta.ImportedFrom == nil || meta.ImportedFrom.Source != tc.source ||
+					meta.ImportedFrom.SourceSessionID == "" || meta.ImportedFrom.SourceSessionID != first.Report.SourceSessionID {
+					t.Fatalf("source provenance missing: %+v", meta)
+				}
+				transcript, err := os.ReadFile(filepath.Join(res.SessionDir, identity.MainSessionLogFilename))
+				if err != nil {
+					t.Fatalf("read imported transcript: %v", err)
+				}
+				if len(transcript) == 0 {
+					t.Fatal("empty imported transcript")
+				}
+				if res == first {
+					firstTranscript = transcript
+				} else if !bytes.Equal(transcript, firstTranscript) {
+					t.Fatal("repeated import changed the source history")
+				}
+			}
+		})
+	}
+}
+
+func TestImport_DryRunRepeatedSourceWithoutWriting(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	t.Setenv("CHORD_SESSIONS_DIR", "")
+	projectRoot := t.TempDir()
+
+	input := filepath.Join(t.TempDir(), "claude-transcript.jsonl")
+	body := `{"sessionId":"0196f7a2-1111-7000-8000-000000000001","uuid":"u1","message":{"role":"user","content":"hi"}}
+{"sessionId":"0196f7a2-1111-7000-8000-000000000001","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}`
+	if err := os.WriteFile(input, []byte(body), 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	first, err := Import(context.Background(), ImportOptions{Source: "claude", InputPath: input, ProjectRoot: projectRoot})
+	if err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+
+	sessionsDir := testProjectSessionsDir(t, projectRoot)
+	before, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		t.Fatalf("read sessions dir: %v", err)
+	}
+
+	res, err := Import(context.Background(), ImportOptions{Source: "claude", InputPath: input, ProjectRoot: projectRoot, DryRun: true})
+	if err != nil {
+		t.Fatalf("dry-run import: %v", err)
+	}
+	if !slices.Equal(res.Report.Warnings, first.Report.Warnings) {
+		t.Fatalf("dry-run changed warnings: first=%v dry-run=%v", first.Report.Warnings, res.Report.Warnings)
+	}
+	if res.SessionID != "" || res.SessionDir != "" {
+		t.Fatalf("dry-run allocated a session: %+v", res)
+	}
+	after, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		t.Fatalf("read sessions dir after dry-run: %v", err)
+	}
+	if !slices.EqualFunc(before, after, func(a, b os.DirEntry) bool { return a.Name() == b.Name() }) {
+		t.Fatal("dry-run changed session directory entries")
+	}
+}
+
+func TestImport_SourceWithoutSessionIDStaysImportable(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	t.Setenv("CHORD_SESSIONS_DIR", "")
+	projectRoot := t.TempDir()
+
+	input := filepath.Join(t.TempDir(), "claude-transcript.jsonl")
+	body := `{"uuid":"u1","message":{"role":"user","content":"hi"}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}`
+	if err := os.WriteFile(input, []byte(body), 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	opts := ImportOptions{Source: "claude", InputPath: input, ProjectRoot: projectRoot}
+
+	first, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	second, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second import without a source session id: %v", err)
+	}
+	if second.SessionID == first.SessionID {
+		t.Fatalf("second import reused the same session id")
+	}
+	if !slices.Equal(second.Report.Warnings, first.Report.Warnings) {
+		t.Fatalf("repeated import changed warnings: first=%v second=%v", first.Report.Warnings, second.Report.Warnings)
+	}
+
+	meta, err := recovery.LoadSessionMeta(first.SessionDir)
+	if err != nil || meta == nil || meta.ImportedFrom == nil {
+		t.Fatalf("LoadSessionMeta: meta=%+v err=%v", meta, err)
+	}
+	if meta.ImportedFrom.SourceSessionID != "" {
+		t.Fatalf("unexpected SourceSessionID: %q", meta.ImportedFrom.SourceSessionID)
+	}
+}
+
+func testProjectSessionsDir(t *testing.T, projectRoot string) string {
+	t.Helper()
+	locator, err := config.DefaultPathLocator()
+	if err != nil {
+		t.Fatalf("DefaultPathLocator: %v", err)
+	}
+	pl, err := locator.LocateProject(projectRoot)
+	if err != nil {
+		t.Fatalf("LocateProject: %v", err)
+	}
+	return pl.ProjectSessionsDir
+}
+
+func TestImport_ExistingSessionIDRequiresForce(t *testing.T) {
+	t.Setenv("CHORD_STATE_DIR", t.TempDir())
+	t.Setenv("CHORD_SESSIONS_DIR", "")
+	input := filepath.Join(t.TempDir(), "export.json")
+	body := `{"info":{"id":"source-1"},"messages":[{"role":"user","content":"first request"}]}`
+	if err := os.WriteFile(input, []byte(body), 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	opts := ImportOptions{
+		Source:      "opencode",
+		InputPath:   input,
+		ProjectRoot: t.TempDir(),
+		SessionID:   "test-session",
+	}
+	first, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	logPath := filepath.Join(first.SessionDir, identity.MainSessionLogFilename)
+	before, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read first transcript: %v", err)
+	}
+
+	body = `{"info":{"id":"source-1"},"messages":[{"role":"user","content":"updated request"}]}`
+	if writeErr := os.WriteFile(input, []byte(body), 0o600); writeErr != nil {
+		t.Fatalf("update input: %v", writeErr)
+	}
+	if _, importErr := Import(context.Background(), opts); !errors.Is(importErr, errSessionIDExists) {
+		t.Fatalf("import with existing session id: %v, want %v", importErr, errSessionIDExists)
+	}
+	after, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read protected transcript: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("rejected import changed the existing transcript")
+	}
+
+	opts.Force = true
+	replaced, err := Import(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("forced import: %v", err)
+	}
+	if replaced.SessionID != first.SessionID || replaced.SessionDir != first.SessionDir {
+		t.Fatalf("forced import did not reuse the requested session: %+v", replaced)
+	}
+	rm := recovery.NewRecoveryManager(replaced.SessionDir)
+	defer rm.Close()
+	msgs, err := rm.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("load replaced transcript: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Content != "updated request" {
+		t.Fatalf("unexpected replaced transcript: %+v", msgs)
 	}
 }
 

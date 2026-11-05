@@ -49,6 +49,24 @@ func TestConvertClaudeTranscript_AcceptsStringContentMessages(t *testing.T) {
 	}
 }
 
+func TestConvertClaudeTranscript_CapturesSourceSessionID(t *testing.T) {
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":"this line carries no session id"}}
+{"sessionId":"0196f7a2-1111-7000-8000-000000000001","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}
+{"sessionId":"0196f7a2-1111-7000-8000-000000000001","uuid":"a2","parentUuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"again"}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3", len(msgs))
+	}
+	if report.SourceSessionID != "0196f7a2-1111-7000-8000-000000000001" {
+		t.Fatalf("SourceSessionID=%q, want the first non-empty envelope session id", report.SourceSessionID)
+	}
+}
+
 func TestConvertClaudeTranscript_StructuredThinkingAndTools(t *testing.T) {
 	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}
 {"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reason","signature":"sig"},{"type":"text","text":"hello"},{"type":"tool_use","id":"toolu_1","name":"Shell","input":{"command":"pwd"}}]}}

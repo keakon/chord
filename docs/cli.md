@@ -634,6 +634,8 @@ For OpenCode imports, a compaction the source session applied is mapped, not rep
 
 Recognizable imported tool calls are always converted to the closest current Chord tool card when their arguments can be normalized, including file mutations as `edit`, `apply_patch`, `write`, or `delete`. A record without a usable mapping is kept as the tool call under the source tool's name and arguments, paired with its result, rather than being rewritten: it really ran in the source session, so the trajectory keeps the action it was. Only a record too malformed to name or pair a call (a missing name or call id, or arguments that cannot be encoded) falls back to readable text instead of raw JSON. Converted imported tools do not restore Chord FileTracker snapshots; re-run `read` when you need fresh file context or stale-change warnings before editing imported files.
 
+You can import the same source conversation multiple times, for example to continue it with different models. Each import creates a separate Chord session by default. Use `--sid <id> --force` to replace an existing session.
+
 ### Flags
 
 | Flag                      | Description                                                                                                       |
