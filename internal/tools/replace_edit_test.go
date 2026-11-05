@@ -968,7 +968,7 @@ func TestEditToolAcceptsFilePathAlias(t *testing.T) {
 		t.Fatalf("ValidateToolArgs(filePath) err = %v, want nil", err)
 	}
 	policy := (EditTool{BaseDir: dir}).ConcurrencyPolicy(args)
-	if policy.Resource != "file:"+path || policy.Mode != ConcurrencyModeWrite {
+	if singleResource(policy) != "file:"+path || policy.Mode != ConcurrencyModeWrite {
 		t.Fatalf("ConcurrencyPolicy(filePath) = %#v, want write lock for %q", policy, path)
 	}
 	if got := ExtractEditPathFromArgs(args); got != "demo.txt" {

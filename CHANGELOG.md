@@ -7,6 +7,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Improvements
 
 - Completion reports add `reported_only_in_records` and `observed_only_in_records` summaries when a worker's declared file list and Chord's observed paths can be compared, so the owner can see one-sided records without comparing both lists by hand. The summaries compare retained path spellings only and do not establish missing changes or false reports.
+- Multiple `apply_patch` and `delete` calls in one response run concurrently when their files do not overlap. Conflicting calls within that response keep their order, including calls that touch the same file, a rename endpoint, or an ancestor path. Across agents sharing a checkout, conflicting declared resources are mutually exclusive; execution order follows lease admission.
 
 ## 0.8.3 - 2026-11-05
 

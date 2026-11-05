@@ -116,7 +116,7 @@ type MutationTarget struct {
 }
 
 // ApplyPatchDisplayTarget describes one model-facing file operation for UI
-// display. Paths remain exactly as written in the patch.
+// display. Paths retain their relative spelling after execution text cleanup.
 type ApplyPatchDisplayTarget struct {
 	Kind       MutationKind
 	SourcePath string
@@ -239,9 +239,32 @@ func applyPatchDiffCollectorFromContext(ctx context.Context) *ApplyPatchDiffColl
 
 func (ApplyPatchTool) Name() string     { return "apply_patch" }
 func (ApplyPatchTool) IsReadOnly() bool { return false }
-func (t ApplyPatchTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
-	return ConcurrencyPolicy{Resource: "workspace", Mode: ConcurrencyModeExclusive}
+
+// ConcurrencyPolicy declares every source and destination the patch touches.
+// A patch that cannot be parsed, or whose targets cannot be resolved, keeps the
+// workspace-wide exclusive default so it stays a barrier rather than pretending
+// to have a precise scope it does not have.
+func (t ApplyPatchTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
+	targets, err := ApplyPatchTargets(args, t.BaseDir)
+	if err != nil {
+		return ConcurrencyPolicy{Resources: []string{"workspace"}, Mode: ConcurrencyModeExclusive}
+	}
+	paths := MutationTargetPaths(targets)
+	if len(paths) == 0 {
+		return ConcurrencyPolicy{Resources: []string{"workspace"}, Mode: ConcurrencyModeExclusive}
+	}
+	resources := make([]string, 0, len(paths))
+	for _, path := range paths {
+		resources = append(resources, "file:"+path)
+	}
+	return ConcurrencyPolicy{Resources: resources, Mode: ConcurrencyModeWrite}
 }
+
+// ConcurrencyBatchable admits the call to concurrent batching: the policy is
+// scoped to the patch's files, so patches with disjoint targets may overlap
+// while overlapping targets stay ordered. A patch whose policy falls back to
+// workspace-exclusive remains a serialization boundary.
+func (t ApplyPatchTool) ConcurrencyBatchable(json.RawMessage) bool { return true }
 func (ApplyPatchTool) Description() string {
 	// Opens with the Codex apply_patch description for gpt-5-and-later models,
 	// but omits its FREEFORM sentence: Chord emits apply_patch as either a
@@ -297,7 +320,7 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	// be cleaned safely — reject both and route binary content to a shell
 	// command or script.
 	patchLen := len([]rune(args.Patch))
-	strippedPatch := textclean.StripZeroWidthFormat(textclean.StripOrphanVariationSelectors(args.Patch))
+	strippedPatch := cleanApplyPatchText(args.Patch)
 	cleanedCounts := CountStrippedInvisible(args.Patch, strippedPatch)
 	args.Patch = strippedPatch
 	strippedSelectors := patchLen - len([]rune(args.Patch))
@@ -484,11 +507,17 @@ func ApplyPatchTargets(raw json.RawMessage, baseDir string) ([]MutationTarget, e
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return nil, err
 	}
-	doc, err := ParseApplyPatch(args.Patch)
+	doc, err := ParseApplyPatch(cleanApplyPatchText(args.Patch))
 	if err != nil {
 		return nil, err
 	}
 	return resolveApplyPatchTargets(doc, baseDir)
+}
+
+// Targets used for permissions and locks must undergo the same text cleanup
+// as execution, including operation headers and rename destinations.
+func cleanApplyPatchText(patch string) string {
+	return textclean.StripZeroWidthFormat(textclean.StripOrphanVariationSelectors(patch))
 }
 
 // ApplyPatchDisplayTargets extracts operation paths without resolving or
@@ -504,7 +533,7 @@ func ApplyPatchDisplayTargets(raw json.RawMessage) ([]ApplyPatchDisplayTarget, e
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return nil, err
 	}
-	doc, err := ParseApplyPatch(args.Patch)
+	doc, err := ParseApplyPatch(cleanApplyPatchText(args.Patch))
 	if err != nil {
 		return nil, err
 	}

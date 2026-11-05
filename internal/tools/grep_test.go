@@ -882,10 +882,10 @@ func TestGrepAcceptsScalarPathsAndIncludesWithCoerceNote(t *testing.T) {
 func TestGrepConcurrencyPolicyCoercesScalarPaths(t *testing.T) {
 	scalar := GrepTool{}.ConcurrencyPolicy(json.RawMessage(`{"pattern":"x","paths":"."}`))
 	array := GrepTool{}.ConcurrencyPolicy(json.RawMessage(`{"pattern":"x","paths":["."]}`))
-	if scalar != array {
+	if scalar.Mode != array.Mode || len(scalar.Resources) != 1 || singleResource(scalar) != singleResource(array) {
 		t.Fatalf("scalar policy = %+v, want array-form policy %+v", scalar, array)
 	}
-	if scalar.Resource == "workspace" {
+	if singleResource(scalar) == "workspace" {
 		t.Fatalf("single scalar path should keep a per-path policy, got %+v", scalar)
 	}
 }

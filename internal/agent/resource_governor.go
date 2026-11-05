@@ -474,8 +474,9 @@ func normalizeWorkspaceLeasePolicy(policy tools.ConcurrencyPolicy) tools.Concurr
 	if policy.Mode == "" {
 		policy.Mode = tools.ConcurrencyModeExclusive
 	}
-	if strings.TrimSpace(policy.Resource) == "" {
-		policy.Resource = "workspace"
+	policy.Resources = tools.NormalizeConcurrencyResources(policy.Resources)
+	if len(policy.Resources) == 0 {
+		policy.Resources = []string{"workspace"}
 	}
 	return policy
 }
@@ -489,7 +490,7 @@ func (g *resourceGovernor) dispatchWorkspaceLeasesLocked() {
 			}
 			blockedByEarlier := false
 			for _, earlier := range g.leaseWaiters[:i] {
-				if tools.WorkspaceLeaseConflict(earlier.policy, request.policy) {
+				if earlier.policy.LeaseConflicts(request.policy) {
 					blockedByEarlier = true
 					break
 				}
@@ -513,7 +514,7 @@ func (g *resourceGovernor) dispatchWorkspaceLeasesLocked() {
 
 func (g *resourceGovernor) workspaceLeaseConflictsLocked(policy tools.ConcurrencyPolicy) bool {
 	for _, lease := range g.leases {
-		if lease != nil && !lease.released.Load() && tools.WorkspaceLeaseConflict(lease.policy, policy) {
+		if lease != nil && !lease.released.Load() && lease.policy.LeaseConflicts(policy) {
 			return true
 		}
 	}

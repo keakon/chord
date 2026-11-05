@@ -68,7 +68,7 @@ func ConcurrencyClassForInstance(tool Tool, toolName string, args json.RawMessag
 	if toolConcurrencyBatchable(tool, args) {
 		return ToolConcurrencyClassConcurrent
 	}
-	policy := normalizeConcurrencyPolicy(name, PolicyForInstance(tool, name, args))
+	policy := PolicyForInstance(tool, name, args)
 	if policy.Mode == ConcurrencyModeExclusive {
 		return ToolConcurrencyClassExclusive
 	}

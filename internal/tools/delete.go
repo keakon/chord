@@ -45,10 +45,14 @@ type deleteExecutionResult struct {
 func (t DeleteTool) Name() string { return NameDelete }
 
 func (t DeleteTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	// Delete may target multiple files. Until runtime batching grows native
-	// multi-resource support, keep it conservatively exclusive.
 	return normalizeConcurrencyPolicy(NameDelete, deleteToolConcurrencyPolicyInDir(args, t.BaseDir))
 }
+
+// ConcurrencyBatchable admits the call to concurrent batching: the policy
+// declares every decoded target, so deletes of disjoint files may overlap
+// while overlapping targets stay ordered. A decode failure keeps the exclusive
+// default and remains a serialization boundary.
+func (t DeleteTool) ConcurrencyBatchable(json.RawMessage) bool { return true }
 
 func (t DeleteTool) Description() string {
 	return "Delete one or more explicit files or symlinks. The paths no longer exist after deletion. Requires paths and a short reason. Does not delete directories or wildcard patterns."

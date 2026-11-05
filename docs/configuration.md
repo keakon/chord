@@ -1560,7 +1560,7 @@ mcp:
 
 ### Concurrent tool execution
 
-Calls a model issues in one response are scheduled concurrently when their declared resources do not conflict. This includes MCP calls to the same server and edits to different files; calls that touch the same file or shared resource keep their model-response order. The regular tool-execution limit still bounds how many calls are in flight at once. If a concurrent call fails, the model receives the individual result and can decide whether to retry it, inspect the affected state first, or continue with the other results.
+Calls a model issues in one response are scheduled concurrently when their declared resources do not conflict. This includes MCP calls to the same server, edits to different files, and multiple `apply_patch` or `delete` calls whose targets do not overlap; calls that touch the same file or shared resource keep their model-response order. The regular tool-execution limit still bounds how many calls are in flight at once. If a concurrent call fails, the model receives the individual result and can decide whether to retry it, inspect the affected state first, or continue with the other results.
 
 ### Startup consistency
 

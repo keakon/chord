@@ -229,7 +229,7 @@ func (t HostedTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
 	if !t.spec.ReadOnly {
 		mode = ConcurrencyModeWrite
 	}
-	return ConcurrencyPolicy{Resource: "hosted:" + t.spec.Name, Mode: mode}
+	return ConcurrencyPolicy{Resources: []string{"hosted:" + t.spec.Name}, Mode: mode}
 }
 
 func (t HostedTool) IsAvailable() bool {

@@ -25,7 +25,7 @@ func TestMCPToolDefaultConcurrencyPolicy(t *testing.T) {
 	mgr := testMCPManager(t, ServerConfig{Name: "search", Command: "mcp-server"})
 	tool := testMCPTool(t, mgr, "search", "alpha")
 
-	if policy := tool.ConcurrencyPolicy(nil); policy.Resource != "mcp:search" || policy.Mode != tools.ConcurrencyModeConcurrent || policy.AbortSiblingsOnError {
+	if policy := tool.ConcurrencyPolicy(nil); len(policy.Resources) != 1 || policy.Resources[0] != "mcp:search" || policy.Mode != tools.ConcurrencyModeConcurrent || policy.AbortSiblingsOnError {
 		t.Fatalf("policy = %#v, want mcp:search concurrent without sibling aborts", policy)
 	}
 	if !tool.ConcurrencyBatchable(nil) {
@@ -39,7 +39,7 @@ func TestMCPToolDefaultConcurrencyPolicy(t *testing.T) {
 	// Two calls to one server share the resource; the batch builder can merge
 	// them without turning MCP into a read-only class.
 	other := testMCPTool(t, mgr, "search", "beta")
-	if tools.ConcurrencyConflict(tool.ConcurrencyPolicy(nil), other.ConcurrencyPolicy(nil)) {
+	if tool.ConcurrencyPolicy(nil).Conflicts(other.ConcurrencyPolicy(nil)) {
 		t.Fatal("two calls to the same server must not conflict")
 	}
 }

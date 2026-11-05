@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/keakon/chord/internal/pathutil"
@@ -34,8 +35,10 @@ const (
 	ConcurrencyModeWrite      ConcurrencyMode = "write"
 )
 
+// ConcurrencyPolicy declares every resource one tool invocation touches. All
+// resources share one mode.
 type ConcurrencyPolicy struct {
-	Resource             string
+	Resources            []string
 	Mode                 ConcurrencyMode
 	AbortSiblingsOnError bool
 }
@@ -46,8 +49,8 @@ func defaultConcurrencyPolicy(toolName string) ConcurrencyPolicy {
 		name = "tool"
 	}
 	return ConcurrencyPolicy{
-		Resource: "tool:" + name,
-		Mode:     ConcurrencyModeExclusive,
+		Resources: []string{"tool:" + name},
+		Mode:      ConcurrencyModeExclusive,
 	}
 }
 
@@ -63,45 +66,80 @@ func normalizeConcurrencyPolicy(toolName string, policy ConcurrencyPolicy) Concu
 	if policy.Mode == "" {
 		policy.Mode = ConcurrencyModeExclusive
 	}
-	if strings.TrimSpace(policy.Resource) == "" {
+	policy.Resources = NormalizeConcurrencyResources(policy.Resources)
+	if len(policy.Resources) == 0 {
 		if policy.Mode == ConcurrencyModeExclusive {
 			return defaultConcurrencyPolicy(toolName)
 		}
-		policy.Resource = "global"
+		policy.Resources = []string{"global"}
 	}
 	return policy
 }
 
-func ConcurrencyConflict(a, b ConcurrencyPolicy) bool {
-	a = normalizeConcurrencyPolicy("", a)
-	b = normalizeConcurrencyPolicy("", b)
-	if a.Mode == ConcurrencyModeExclusive || b.Mode == ConcurrencyModeExclusive {
-		return true
+// NormalizeConcurrencyResources trims, drops empty entries, de-duplicates and
+// sorts a resource set. The result is a freshly allocated slice: a queued
+// policy never aliases the caller's memory, so later edits to the input cannot
+// change a request that is already waiting.
+func NormalizeConcurrencyResources(resources []string) []string {
+	if len(resources) == 0 {
+		return nil
 	}
-	if !resourceOverlap(a.Resource, b.Resource) {
-		return false
+	normalized := make([]string, 0, len(resources))
+	seen := make(map[string]struct{}, len(resources))
+	for _, resource := range resources {
+		resource = strings.TrimSpace(resource)
+		if resource == "" {
+			continue
+		}
+		if _, duplicate := seen[resource]; duplicate {
+			continue
+		}
+		seen[resource] = struct{}{}
+		normalized = append(normalized, resource)
 	}
-	return a.Mode == ConcurrencyModeWrite || b.Mode == ConcurrencyModeWrite
+	sort.Strings(normalized)
+	return normalized
 }
 
-// WorkspaceLeaseConflict reports whether two tool executions contend for the
-// same workspace resource. Unlike ConcurrencyConflict — which batches calls
-// inside a single turn and treats exclusive mode as conflicting with
-// everything — this cross-agent variant scopes exclusivity to the declared
-// resource: `process:shell` serializes against other shells but not against
-// reads or writes of unrelated files, and a `workspace` resource still
-// overlaps everything. Tools whose default policy names only `tool:<name>`
-// therefore serialize per tool instead of freezing every other agent.
-//
-// Read and concurrent calls share a resource: neither claims the exclusive
-// right to change it that a write or exclusive call claims.
-func WorkspaceLeaseConflict(a, b ConcurrencyPolicy) bool {
-	a = normalizeConcurrencyPolicy("", a)
-	b = normalizeConcurrencyPolicy("", b)
-	if !resourceOverlap(a.Resource, b.Resource) {
+// Conflicts reports whether this policy conflicts with another call in one
+// model response. Both policies must already be normalized — PolicyForInstance
+// returns them that way — so the comparison never copies or re-sorts the
+// resource sets. Any exclusive call is a batch boundary regardless of what the
+// two sets name; otherwise an overlapping pair with a write on either side
+// conflicts.
+func (p ConcurrencyPolicy) Conflicts(other ConcurrencyPolicy) bool {
+	if p.Mode == ConcurrencyModeExclusive || other.Mode == ConcurrencyModeExclusive {
+		return true
+	}
+	if !resourceSetsOverlap(p.Resources, other.Resources) {
 		return false
 	}
-	return !leaseShareableMode(a.Mode) || !leaseShareableMode(b.Mode)
+	return p.Mode == ConcurrencyModeWrite || other.Mode == ConcurrencyModeWrite
+}
+
+// LeaseConflicts reports whether two executions contend for the same
+// workspace resource. Unlike Conflicts — which batches calls inside a single
+// turn and treats exclusive mode as conflicting with everything — this
+// cross-agent variant scopes exclusivity to the declared resources:
+// `process:shell` serializes against other shells but not against reads or
+// writes of unrelated files, and a `workspace` resource still overlaps
+// everything. Both policies must already be normalized.
+func (p ConcurrencyPolicy) LeaseConflicts(other ConcurrencyPolicy) bool {
+	if !resourceSetsOverlap(p.Resources, other.Resources) {
+		return false
+	}
+	return !leaseShareableMode(p.Mode) || !leaseShareableMode(other.Mode)
+}
+
+func resourceSetsOverlap(a, b []string) bool {
+	for _, left := range a {
+		for _, right := range b {
+			if resourceOverlap(left, right) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // leaseShareableMode reports whether a holder with this mode may share the
@@ -130,24 +168,24 @@ func resourceOverlap(a, b string) bool {
 	}
 	switch {
 	case kindA == "file" && kindB == "file":
-		return sameResourcePath(pathA, pathB)
+		// A file target can be a directory symlink being deleted. Its
+		// descendants depend on that entry even when their final inodes differ.
+		return resourcePathsOverlap(pathA, pathB)
 	case kindA == "path" && kindB == "path":
-		return sameResourcePath(pathA, pathB) || resourcePathContains(pathA, pathB) || resourcePathContains(pathB, pathA)
+		return resourcePathsOverlap(pathA, pathB)
 	case kindA == "path" && kindB == "file":
-		return resourcePathContains(pathA, pathB)
+		return resourcePathsOverlap(pathA, pathB)
 	case kindA == "file" && kindB == "path":
-		return resourcePathContains(pathB, pathA)
+		return resourcePathsOverlap(pathA, pathB)
 	default:
 		return false
 	}
 }
 
-// sameResourcePath reports whether two resource paths name the same physical
-// file. Equal spellings are already known to match; different ones are
-// re-checked through symlinked prefixes and, when both paths exist, the inode,
-// so a directory alias cannot slip past the conflict check.
-func sameResourcePath(a, b string) bool {
-	if a == b {
+// Check entry dependencies before resolving aliases: deleting an ancestor
+// symlink invalidates a descendant spelling even when it points outside it.
+func resourcePathsOverlap(a, b string) bool {
+	if pathContainsResourcePath(a, b) || pathContainsResourcePath(b, a) {
 		return true
 	}
 	resolvedA, resolvedB := a, b
@@ -157,29 +195,12 @@ func sameResourcePath(a, b string) bool {
 	if resolved, ok := pathutil.ResolveSymlinksBestEffort(b); ok {
 		resolvedB = resolved
 	}
-	if resolvedA == resolvedB {
+	if pathContainsResourcePath(resolvedA, resolvedB) || pathContainsResourcePath(resolvedB, resolvedA) {
 		return true
 	}
 	infoA, errA := os.Stat(resolvedA)
 	infoB, errB := os.Stat(resolvedB)
 	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
-}
-
-// resourcePathContains is pathContainsResourcePath after the same best-effort
-// symlink resolution, so a directory alias still contains the files it
-// physically holds.
-func resourcePathContains(basePath, targetPath string) bool {
-	if pathContainsResourcePath(basePath, targetPath) {
-		return true
-	}
-	base, target := basePath, targetPath
-	if resolved, ok := pathutil.ResolveSymlinksBestEffort(base); ok {
-		base = resolved
-	}
-	if resolved, ok := pathutil.ResolveSymlinksBestEffort(target); ok {
-		target = resolved
-	}
-	return pathContainsResourcePath(base, target)
 }
 
 func splitConcurrencyResource(resource string) (kind, path string, ok bool) {
@@ -216,14 +237,28 @@ func filePathConcurrencyPolicyInDir(path string, readOnly bool, baseDir string) 
 	if readOnly {
 		mode = ConcurrencyModeRead
 	}
-	return ConcurrencyPolicy{Resource: "file:" + resolved, Mode: mode}
+	return ConcurrencyPolicy{Resources: []string{"file:" + resolved}, Mode: mode}
 }
 
 func deleteToolConcurrencyPolicyInDir(args json.RawMessage, baseDir string) ConcurrencyPolicy {
-	if _, err := DecodeDeleteRequestInDir(args, baseDir); err != nil {
+	req, err := DecodeDeleteRequestInDir(args, baseDir)
+	if err != nil {
 		return ConcurrencyPolicy{}
 	}
-	return defaultConcurrencyPolicy(NameDelete)
+	resources := make([]string, 0, len(req.Paths))
+	for _, path := range req.Paths {
+		// The decoded paths are the ones execution will remove; absolute form
+		// keeps two agents' spellings of one file comparable.
+		absolute, absErr := filepath.Abs(path)
+		if absErr != nil {
+			return ConcurrencyPolicy{Resources: []string{"workspace"}, Mode: ConcurrencyModeExclusive}
+		}
+		resources = append(resources, "file:"+absolute)
+	}
+	if len(resources) == 0 {
+		return ConcurrencyPolicy{Resources: []string{"workspace"}, Mode: ConcurrencyModeExclusive}
+	}
+	return ConcurrencyPolicy{Resources: resources, Mode: ConcurrencyModeWrite}
 }
 
 func pathToolConcurrencyPolicyInDir(args json.RawMessage, field string, baseDir string) ConcurrencyPolicy {
@@ -236,7 +271,7 @@ func pathToolConcurrencyPolicyInDir(args json.RawMessage, field string, baseDir 
 	}
 	raw, ok := parsed[field]
 	if !ok {
-		return ConcurrencyPolicy{Resource: "workspace", Mode: ConcurrencyModeRead}
+		return ConcurrencyPolicy{Resources: []string{"workspace"}, Mode: ConcurrencyModeRead}
 	}
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
@@ -253,7 +288,7 @@ func pathToolConcurrencyPolicyInDir(args json.RawMessage, field string, baseDir 
 	if resolved == "" {
 		resolved = "."
 	}
-	return ConcurrencyPolicy{Resource: "path:" + resolved, Mode: ConcurrencyModeRead}
+	return ConcurrencyPolicy{Resources: []string{"path:" + resolved}, Mode: ConcurrencyModeRead}
 }
 
 func pathsToolConcurrencyPolicyInDir(args json.RawMessage, field string, baseDir string) ConcurrencyPolicy {
@@ -272,7 +307,7 @@ func pathsToolConcurrencyPolicyInDir(args json.RawMessage, field string, baseDir
 	// gets a precise per-path read policy instead of a workspace-wide one.
 	values, _, err := DecodeStringOrList(raw)
 	if err != nil || len(values) != 1 {
-		return ConcurrencyPolicy{Resource: "workspace", Mode: ConcurrencyModeRead}
+		return ConcurrencyPolicy{Resources: []string{"workspace"}, Mode: ConcurrencyModeRead}
 	}
 	value := strings.TrimSpace(values[0])
 	if value == "" {
@@ -285,7 +320,7 @@ func pathsToolConcurrencyPolicyInDir(args json.RawMessage, field string, baseDir
 	if resolved == "" {
 		resolved = "."
 	}
-	return ConcurrencyPolicy{Resource: "path:" + resolved, Mode: ConcurrencyModeRead}
+	return ConcurrencyPolicy{Resources: []string{"path:" + resolved}, Mode: ConcurrencyModeRead}
 }
 
 func urlToolConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
@@ -299,5 +334,5 @@ func urlToolConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	if url == "" {
 		url = "url:unknown"
 	}
-	return ConcurrencyPolicy{Resource: "url:" + url, Mode: ConcurrencyModeRead}
+	return ConcurrencyPolicy{Resources: []string{"url:" + url}, Mode: ConcurrencyModeRead}
 }

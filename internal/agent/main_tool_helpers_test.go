@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -62,7 +63,7 @@ func TestBuildToolExecutionBatchesSerializesFileAliases(t *testing.T) {
 	}
 	first := (toolExecutionPipeline{registry: registry}).concurrencyPolicyForCall(calls[0])
 	second := (toolExecutionPipeline{registry: registry}).concurrencyPolicyForCall(calls[1])
-	if !tools.WorkspaceLeaseConflict(first, second) {
+	if !first.LeaseConflicts(second) {
 		t.Fatal("the cross-agent lease must serialize one file through a directory alias")
 	}
 	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
@@ -283,7 +284,7 @@ func (t fakeConcurrentTool) ConcurrencyPolicy(json.RawMessage) tools.Concurrency
 	if t.exclusive {
 		mode = tools.ConcurrencyModeExclusive
 	}
-	return tools.ConcurrencyPolicy{Resource: t.resource, Mode: mode}
+	return tools.ConcurrencyPolicy{Resources: []string{t.resource}, Mode: mode}
 }
 func (t fakeConcurrentTool) ConcurrencyBatchable(json.RawMessage) bool { return !t.exclusive }
 
@@ -309,6 +310,96 @@ func TestBuildToolExecutionBatchesMergesDisjointFileWrites(t *testing.T) {
 	}
 	if len(batches[1].Calls) != 1 || batches[1].Calls[0].ID != "3" {
 		t.Fatalf("batch[1] = %#v, want the read of a.go alone", batches[1].Calls)
+	}
+}
+
+func TestBuildToolExecutionBatchesUsesEveryDeclaredResource(t *testing.T) {
+	dir := t.TempDir()
+	registry := tools.NewRegistry()
+	registry.Register(tools.ApplyPatchTool{BaseDir: dir})
+	registry.Register(tools.DeleteTool{BaseDir: dir})
+	registry.Register(tools.WriteTool{BaseDir: dir})
+
+	patch := func(paths ...string) json.RawMessage {
+		var patch strings.Builder
+		patch.WriteString("*** Begin Patch\n")
+		for _, path := range paths {
+			fmt.Fprintf(&patch, "*** Add File: %s\n+package sample\n", path)
+		}
+		patch.WriteString("*** End Patch\n")
+		args, err := json.Marshal(tools.ApplyPatchArgs{Patch: patch.String()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return args
+	}
+	write := func(path string) json.RawMessage {
+		args, err := json.Marshal(map[string]string{"path": path, "content": "sample"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return args
+	}
+	deleteFiles := func(paths ...string) json.RawMessage {
+		args, err := json.Marshal(tools.DeleteRequest{Paths: paths, Reason: "sample"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return args
+	}
+
+	calls := []message.ToolCall{
+		{ID: "patch", Name: tools.NameApplyPatch, Args: patch("a.go", "b.go")},
+		{ID: "write", Name: tools.NameWrite, Args: write("c.go")},
+		{ID: "delete", Name: tools.NameDelete, Args: deleteFiles("d.go")},
+	}
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
+	if len(batches) != 1 || len(batches[0].Calls) != 3 {
+		t.Fatalf("disjoint patch/write/delete batches = %+v, want one batch of three", batches)
+	}
+
+	pipeline := toolExecutionPipeline{registry: registry}
+	for _, tc := range []struct {
+		name  string
+		calls []message.ToolCall
+		want  int
+	}{
+		{
+			name:  "patch and write of one target stay ordered",
+			calls: []message.ToolCall{{ID: "patch", Name: tools.NameApplyPatch, Args: patch("a.go", "b.go")}, {ID: "write", Name: tools.NameWrite, Args: write("b.go")}},
+			want:  2,
+		},
+		{
+			name:  "patch and delete of one target stay ordered",
+			calls: []message.ToolCall{{ID: "patch", Name: tools.NameApplyPatch, Args: patch("a.go", "b.go")}, {ID: "delete", Name: tools.NameDelete, Args: deleteFiles("b.go")}},
+			want:  2,
+		},
+		{
+			name:  "disjoint patches merge",
+			calls: []message.ToolCall{{ID: "one", Name: tools.NameApplyPatch, Args: patch("a.go", "b.go")}, {ID: "two", Name: tools.NameApplyPatch, Args: patch("c.go")}},
+			want:  1,
+		},
+		{
+			name:  "overlapping patches stay ordered",
+			calls: []message.ToolCall{{ID: "one", Name: tools.NameApplyPatch, Args: patch("a.go", "b.go")}, {ID: "two", Name: tools.NameApplyPatch, Args: patch("b.go", "c.go")}},
+			want:  2,
+		},
+		{
+			name:  "disjoint deletes merge",
+			calls: []message.ToolCall{{ID: "one", Name: tools.NameDelete, Args: deleteFiles("a.go")}, {ID: "two", Name: tools.NameDelete, Args: deleteFiles("b.go")}},
+			want:  1,
+		},
+		{
+			name:  "overlapping deletes stay ordered",
+			calls: []message.ToolCall{{ID: "one", Name: tools.NameDelete, Args: deleteFiles("a.go", "b.go")}, {ID: "two", Name: tools.NameDelete, Args: deleteFiles("b.go")}},
+			want:  2,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if batches := pipeline.buildToolExecutionBatches(tc.calls); len(batches) != tc.want {
+				t.Fatalf("batches = %+v, want %d batch(es)", batches, tc.want)
+			}
+		})
 	}
 }
 
@@ -368,7 +459,7 @@ func TestToolBatchAndLeaseUseExecutionBinding(t *testing.T) {
 			if batches := pipeline.buildToolExecutionBatches(calls); len(batches) != 2 {
 				t.Fatalf("conflicting calls batched: %+v", batches)
 			}
-			if !tools.WorkspaceLeaseConflict(pipeline.concurrencyPolicyForCall(calls[0]), pipeline.concurrencyPolicyForCall(calls[1])) {
+			if !pipeline.concurrencyPolicyForCall(calls[0]).LeaseConflicts(pipeline.concurrencyPolicyForCall(calls[1])) {
 				t.Fatal("execution lease missed the same file")
 			}
 			if err := os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0o700); err != nil {
@@ -388,6 +479,69 @@ func TestToolBatchAndLeaseUseExecutionBinding(t *testing.T) {
 				t.Fatal("binding mutated the registry")
 			}
 		})
+	}
+}
+
+func TestConfirmationEditUsesFinalPatchTargetsForLeases(t *testing.T) {
+	root := t.TempDir()
+	registry := tools.NewRegistry()
+	registry.Register(tools.ApplyPatchTool{BaseDir: root})
+	patchArgs := func(path string) json.RawMessage {
+		args, err := json.Marshal(tools.ApplyPatchArgs{Patch: "*** Begin Patch\n*** Add File: " + path + "\n+package sample\n*** End Patch\n"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return args
+	}
+	call := message.ToolCall{ID: "patch", Name: tools.NameApplyPatch, Args: patchArgs("original.go")}
+	ruleset := permissionRuleset(t, "apply_patch: ask")
+	pipeline := toolExecutionPipeline{
+		registry:       registry,
+		toolBaseDir:    root,
+		currentRuleset: func() permission.Ruleset { return ruleset },
+		confirm: func(context.Context, string, string, []string, []string, []permission.Rule, []permission.Rule) (ConfirmResponse, error) {
+			return ConfirmResponse{Approved: true, FinalArgsJSON: string(patchArgs("edited.go"))}, nil
+		},
+	}
+	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
+		t.Fatal(err)
+	}
+	policy := pipeline.concurrencyPolicyForCall(call)
+	want := "file:" + filepath.Join(root, "edited.go")
+	if len(policy.Resources) != 1 || policy.Resources[0] != want || policy.Mode != tools.ConcurrencyModeWrite {
+		t.Fatalf("policy = %#v, want a write of the confirmed target %s", policy, want)
+	}
+}
+
+func TestHookEditUsesFinalDeleteTargetsForLeases(t *testing.T) {
+	root := t.TempDir()
+	registry := tools.NewRegistry()
+	registry.Register(tools.DeleteTool{BaseDir: root})
+	originalArgs, err := json.Marshal(tools.DeleteRequest{Paths: []string{"original.go"}, Reason: "sample"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := message.ToolCall{ID: "delete", Name: tools.NameDelete, Args: originalArgs}
+	pipeline := toolExecutionPipeline{
+		registry:    registry,
+		toolBaseDir: root,
+		fireHook: func(context.Context, string, uint64, string, map[string]any) (*hook.Result, error) {
+			return &hook.Result{Action: hook.ActionModify, Data: map[string]any{
+				"args": map[string]any{"paths": []string{"edited.go"}, "reason": "sample"},
+			}}, nil
+		},
+	}
+	modified, err := pipeline.applyToolHook(context.Background(), &call, &ToolExecutionResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !modified {
+		t.Fatal("hook modification was not applied")
+	}
+	policy := pipeline.concurrencyPolicyForCall(call)
+	want := "file:" + filepath.Join(root, "edited.go")
+	if len(policy.Resources) != 1 || policy.Resources[0] != want || policy.Mode != tools.ConcurrencyModeWrite {
+		t.Fatalf("policy = %#v, want a write of the hook-rewritten target %s", policy, want)
 	}
 }
 
@@ -421,8 +575,8 @@ func TestConfirmationEditsRebindPermissionAndExecution(t *testing.T) {
 			if _, err := pipeline.executeToolForCall(context.Background(), call, &ToolExecutionResult{}); err != nil {
 				t.Fatal(err)
 			}
-			if policy := pipeline.concurrencyPolicyForCall(call); policy.Resource != "file:"+filepath.Join(expectedBase, edited) {
-				t.Fatalf("lease resource = %s", policy.Resource)
+			if resources := pipeline.concurrencyPolicyForCall(call).Resources; len(resources) != 1 || resources[0] != "file:"+filepath.Join(expectedBase, edited) {
+				t.Fatalf("lease resources = %v", resources)
 			}
 		})
 	}

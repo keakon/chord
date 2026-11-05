@@ -265,10 +265,10 @@ func (ShellTool) Name() string { return NameShell }
 // boundary.
 func (t ShellTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	if shellReadOnlyArgsVerdict(args, t.shellType).ReadOnly {
-		return ConcurrencyPolicy{Resource: "process:shell", Mode: ConcurrencyModeRead}
+		return ConcurrencyPolicy{Resources: []string{"process:shell"}, Mode: ConcurrencyModeRead}
 	}
 	return ConcurrencyPolicy{
-		Resource:             "process:shell",
+		Resources:            []string{"process:shell"},
 		Mode:                 ConcurrencyModeExclusive,
 		AbortSiblingsOnError: true,
 	}

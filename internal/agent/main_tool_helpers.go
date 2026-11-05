@@ -347,6 +347,12 @@ func (p toolExecutionPipeline) buildToolExecutionBatches(calls []message.ToolCal
 	if len(calls) == 0 {
 		return nil
 	}
+	if len(calls) == 1 {
+		// A singleton can never share its batch or abort a sibling, so skip
+		// resolving its concurrency policy. Path-scoped tools parse their args
+		// to declare resources; that work belongs to the calls that compare.
+		return []toolExecutionBatch{{Calls: calls}}
+	}
 	batches := make([]toolExecutionBatch, 0, len(calls))
 	for i := 0; i < len(calls); {
 		call := calls[i]
@@ -372,7 +378,7 @@ func (p toolExecutionPipeline) buildToolExecutionBatches(calls []message.ToolCal
 			nextPolicy := tools.PolicyForInstance(nextTool, next.Name, nextArgs)
 			conflict := false
 			for _, existing := range usedPolicies {
-				if tools.ConcurrencyConflict(existing, nextPolicy) {
+				if existing.Conflicts(nextPolicy) {
 					conflict = true
 					break
 				}

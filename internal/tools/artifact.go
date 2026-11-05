@@ -556,7 +556,7 @@ func (ReadArtifactTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolic
 	if path == "" {
 		return ConcurrencyPolicy{}
 	}
-	return ConcurrencyPolicy{Resource: "artifact:" + path, Mode: ConcurrencyModeRead}
+	return ConcurrencyPolicy{Resources: []string{"artifact:" + path}, Mode: ConcurrencyModeRead}
 }
 
 func (ReadArtifactTool) CanRenderBeforeToolUseEnd(json.RawMessage) bool { return true }

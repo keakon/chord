@@ -95,8 +95,8 @@ func TestFileToolConcurrencyPolicyExpandsTilde(t *testing.T) {
 
 	policy := fileToolConcurrencyPolicyInDir(args, true, "")
 	want := "file:" + filepath.Join(home, "demo.txt")
-	if policy.Resource != want {
-		t.Fatalf("Resource = %q, want %q", policy.Resource, want)
+	if singleResource(policy) != want {
+		t.Fatalf("Resources = %v, want %q", policy.Resources, want)
 	}
 	if policy.Mode != ConcurrencyModeRead {
 		t.Fatalf("Mode = %q, want %q", policy.Mode, ConcurrencyModeRead)

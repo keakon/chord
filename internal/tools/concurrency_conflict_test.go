@@ -8,6 +8,13 @@ import (
 	"testing"
 )
 
+func singleResource(policy ConcurrencyPolicy) string {
+	if len(policy.Resources) != 1 {
+		return ""
+	}
+	return policy.Resources[0]
+}
+
 func TestConcurrencyConflictHierarchy(t *testing.T) {
 	tests := []struct {
 		name string
@@ -17,63 +24,63 @@ func TestConcurrencyConflictHierarchy(t *testing.T) {
 	}{
 		{
 			name: "workspace read conflicts with file write",
-			a:    ConcurrencyPolicy{Resource: "workspace", Mode: ConcurrencyModeRead},
-			b:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeWrite},
+			a:    ConcurrencyPolicy{Resources: []string{"workspace"}, Mode: ConcurrencyModeRead},
+			b:    ConcurrencyPolicy{Resources: []string{"file:src/main.go"}, Mode: ConcurrencyModeWrite},
 			want: true,
 		},
 		{
 			name: "directory read conflicts with descendant file write",
-			a:    ConcurrencyPolicy{Resource: "path:src", Mode: ConcurrencyModeRead},
-			b:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeWrite},
+			a:    ConcurrencyPolicy{Resources: []string{"path:src"}, Mode: ConcurrencyModeRead},
+			b:    ConcurrencyPolicy{Resources: []string{"file:src/main.go"}, Mode: ConcurrencyModeWrite},
 			want: true,
 		},
 		{
 			name: "ancestor and descendant directory overlap",
-			a:    ConcurrencyPolicy{Resource: "path:src", Mode: ConcurrencyModeRead},
-			b:    ConcurrencyPolicy{Resource: "path:src/pkg", Mode: ConcurrencyModeWrite},
+			a:    ConcurrencyPolicy{Resources: []string{"path:src"}, Mode: ConcurrencyModeRead},
+			b:    ConcurrencyPolicy{Resources: []string{"path:src/pkg"}, Mode: ConcurrencyModeWrite},
 			want: true,
 		},
 		{
 			name: "separate directories do not overlap",
-			a:    ConcurrencyPolicy{Resource: "path:src", Mode: ConcurrencyModeRead},
-			b:    ConcurrencyPolicy{Resource: "file:test/main.go", Mode: ConcurrencyModeWrite},
+			a:    ConcurrencyPolicy{Resources: []string{"path:src"}, Mode: ConcurrencyModeRead},
+			b:    ConcurrencyPolicy{Resources: []string{"file:test/main.go"}, Mode: ConcurrencyModeWrite},
 			want: false,
 		},
 		{
 			name: "overlapping reads stay concurrent",
-			a:    ConcurrencyPolicy{Resource: "path:src", Mode: ConcurrencyModeRead},
-			b:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeRead},
+			a:    ConcurrencyPolicy{Resources: []string{"path:src"}, Mode: ConcurrencyModeRead},
+			b:    ConcurrencyPolicy{Resources: []string{"file:src/main.go"}, Mode: ConcurrencyModeRead},
 			want: false,
 		},
 		{
 			name: "concurrent calls share the same resource",
-			a:    ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeConcurrent},
-			b:    ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeConcurrent},
+			a:    ConcurrencyPolicy{Resources: []string{"mcp:search"}, Mode: ConcurrencyModeConcurrent},
+			b:    ConcurrencyPolicy{Resources: []string{"mcp:search"}, Mode: ConcurrencyModeConcurrent},
 			want: false,
 		},
 		{
 			name: "concurrent shares a resource with a read",
-			a:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeConcurrent},
-			b:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeRead},
+			a:    ConcurrencyPolicy{Resources: []string{"file:src/main.go"}, Mode: ConcurrencyModeConcurrent},
+			b:    ConcurrencyPolicy{Resources: []string{"file:src/main.go"}, Mode: ConcurrencyModeRead},
 			want: false,
 		},
 		{
 			name: "concurrent conflicts with a write of the same resource",
-			a:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeConcurrent},
-			b:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeWrite},
+			a:    ConcurrencyPolicy{Resources: []string{"file:src/main.go"}, Mode: ConcurrencyModeConcurrent},
+			b:    ConcurrencyPolicy{Resources: []string{"file:src/main.go"}, Mode: ConcurrencyModeWrite},
 			want: true,
 		},
 		{
 			name: "exclusive serializes against a concurrent call on another resource",
-			a:    ConcurrencyPolicy{Resource: "tool:question", Mode: ConcurrencyModeExclusive},
-			b:    ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeConcurrent},
+			a:    ConcurrencyPolicy{Resources: []string{"tool:question"}, Mode: ConcurrencyModeExclusive},
+			b:    ConcurrencyPolicy{Resources: []string{"mcp:search"}, Mode: ConcurrencyModeConcurrent},
 			want: true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ConcurrencyConflict(tc.a, tc.b); got != tc.want {
-				t.Fatalf("ConcurrencyConflict() = %v, want %v", got, tc.want)
+			if got := tc.a.Conflicts(tc.b); got != tc.want {
+				t.Fatalf("Conflicts() = %v, want %v", got, tc.want)
 			}
 		})
 	}
@@ -94,7 +101,7 @@ func TestResourceOverlapResolvesFileAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	aliasTarget := filepath.Join(alias, "target.txt")
-	if !sameResourcePath(target, aliasTarget) {
+	if !resourcePathsOverlap(target, aliasTarget) {
 		t.Fatal("a directory alias must name the same file")
 	}
 	if !resourceOverlap("file:"+target, "file:"+aliasTarget) {
@@ -183,7 +190,7 @@ type fakeMutatingTool struct {
 func (fakeMutatingTool) Name() string     { return "FakeMutating" }
 func (fakeMutatingTool) IsReadOnly() bool { return false }
 func (t fakeMutatingTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
-	return ConcurrencyPolicy{Resource: t.resource, Mode: t.mode}
+	return ConcurrencyPolicy{Resources: []string{t.resource}, Mode: t.mode}
 }
 
 // fakeBatchableMutatingTool additionally opts into concurrent batching through
@@ -221,42 +228,42 @@ func TestConcurrencyClassFollowsBatchableInterface(t *testing.T) {
 }
 
 func TestWorkspaceLeaseConflictScopesExclusiveByResource(t *testing.T) {
-	shell := ConcurrencyPolicy{Resource: "process:shell", Mode: ConcurrencyModeExclusive}
-	question := ConcurrencyPolicy{Resource: "tool:question", Mode: ConcurrencyModeExclusive}
-	fileRead := ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeRead}
-	fileWrite := ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeWrite}
-	otherWrite := ConcurrencyPolicy{Resource: "file:src/other.go", Mode: ConcurrencyModeWrite}
-	workspace := ConcurrencyPolicy{Resource: "workspace", Mode: ConcurrencyModeExclusive}
+	shell := ConcurrencyPolicy{Resources: []string{"process:shell"}, Mode: ConcurrencyModeExclusive}
+	question := ConcurrencyPolicy{Resources: []string{"tool:question"}, Mode: ConcurrencyModeExclusive}
+	fileRead := ConcurrencyPolicy{Resources: []string{"file:src/main.go"}, Mode: ConcurrencyModeRead}
+	fileWrite := ConcurrencyPolicy{Resources: []string{"file:src/main.go"}, Mode: ConcurrencyModeWrite}
+	otherWrite := ConcurrencyPolicy{Resources: []string{"file:src/other.go"}, Mode: ConcurrencyModeWrite}
+	workspace := ConcurrencyPolicy{Resources: []string{"workspace"}, Mode: ConcurrencyModeExclusive}
 
-	if WorkspaceLeaseConflict(shell, fileRead) || WorkspaceLeaseConflict(shell, fileWrite) || WorkspaceLeaseConflict(shell, question) {
+	if shell.LeaseConflicts(fileRead) || shell.LeaseConflicts(fileWrite) || shell.LeaseConflicts(question) {
 		t.Fatal("scoped exclusive lease conflicted with unrelated resources")
 	}
-	if !WorkspaceLeaseConflict(shell, shell) || !WorkspaceLeaseConflict(question, question) {
+	if !shell.LeaseConflicts(shell) || !question.LeaseConflicts(question) {
 		t.Fatal("identical exclusive resources must conflict")
 	}
-	if !WorkspaceLeaseConflict(fileWrite, fileRead) {
+	if !fileWrite.LeaseConflicts(fileRead) {
 		t.Fatal("same-file write/read must conflict")
 	}
-	if WorkspaceLeaseConflict(fileWrite, otherWrite) {
+	if fileWrite.LeaseConflicts(otherWrite) {
 		t.Fatal("disjoint file writes must not conflict")
 	}
-	if !WorkspaceLeaseConflict(workspace, fileRead) || !WorkspaceLeaseConflict(workspace, shell) {
+	if !workspace.LeaseConflicts(fileRead) || !workspace.LeaseConflicts(shell) {
 		t.Fatal("workspace resource must overlap everything")
 	}
-	if WorkspaceLeaseConflict(fileRead, fileRead) {
+	if fileRead.LeaseConflicts(fileRead) {
 		t.Fatal("read/read on the same file must not conflict")
 	}
-	concurrent := ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeConcurrent}
-	if WorkspaceLeaseConflict(concurrent, concurrent) {
+	concurrent := ConcurrencyPolicy{Resources: []string{"mcp:search"}, Mode: ConcurrencyModeConcurrent}
+	if concurrent.LeaseConflicts(concurrent) {
 		t.Fatal("concurrent/concurrent on the same resource must not conflict")
 	}
-	if WorkspaceLeaseConflict(concurrent, ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeRead}) {
+	if concurrent.LeaseConflicts(ConcurrencyPolicy{Resources: []string{"mcp:search"}, Mode: ConcurrencyModeRead}) {
 		t.Fatal("read/concurrent on the same resource must not conflict")
 	}
-	if !WorkspaceLeaseConflict(concurrent, ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeWrite}) {
+	if !concurrent.LeaseConflicts(ConcurrencyPolicy{Resources: []string{"mcp:search"}, Mode: ConcurrencyModeWrite}) {
 		t.Fatal("write/concurrent on the same resource must conflict")
 	}
-	if WorkspaceLeaseConflict(concurrent, fileWrite) {
+	if concurrent.LeaseConflicts(fileWrite) {
 		t.Fatal("concurrent resources must not conflict with unrelated files")
 	}
 }

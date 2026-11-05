@@ -29,8 +29,8 @@ func TestPolicyForInstanceUnwrapsWrappedArgs(t *testing.T) {
 	}
 
 	p := PolicyForInstance(wrappedPolicyTool{}, "WrappedPolicy", wrapped)
-	if p.Resource != "file:/tmp/demo.txt" {
-		t.Fatalf("Resource = %q, want file:/tmp/demo.txt", p.Resource)
+	if singleResource(p) != "file:/tmp/demo.txt" {
+		t.Fatalf("Resources = %v, want file:/tmp/demo.txt", p.Resources)
 	}
 	if p.Mode != ConcurrencyModeRead {
 		t.Fatalf("Mode = %q, want read", p.Mode)

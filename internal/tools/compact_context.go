@@ -740,7 +740,7 @@ func (t CompactContextTool) StrictArguments() bool { return t.validator.WorkerSu
 // ConcurrencyPolicy declares exclusive scheduling: compact_context rewrites
 // session history and must never run alongside sibling tool calls.
 func (CompactContextTool) ConcurrencyPolicy(_ json.RawMessage) ConcurrencyPolicy {
-	return ConcurrencyPolicy{Resource: "tool:" + NameCompactContext, Mode: ConcurrencyModeExclusive}
+	return ConcurrencyPolicy{Resources: []string{"tool:" + NameCompactContext}, Mode: ConcurrencyModeExclusive}
 }
 
 func (t CompactContextTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {

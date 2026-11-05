@@ -82,7 +82,7 @@ func (t *MCPTool) IsReadOnly() bool { return false }
 // ConcurrencyPolicy scopes MCP calls to their server. Calls emitted together
 // in one model response run concurrently as selected by the model.
 func (t *MCPTool) ConcurrencyPolicy(args json.RawMessage) tools.ConcurrencyPolicy {
-	return tools.ConcurrencyPolicy{Resource: "mcp:" + t.serverName, Mode: tools.ConcurrencyModeConcurrent}
+	return tools.ConcurrencyPolicy{Resources: []string{"mcp:" + t.serverName}, Mode: tools.ConcurrencyModeConcurrent}
 }
 
 // ConcurrencyBatchable admits the call to a batch selected by the model. MCP

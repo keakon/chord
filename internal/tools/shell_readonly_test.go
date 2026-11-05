@@ -21,7 +21,7 @@ func TestShellReadOnlyViaToolArgs(t *testing.T) {
 	if !tool.ConcurrencySafeReadOnly(mustArgs(map[string]any{"command": "git log | head -20"})) {
 		t.Fatal("pipeline of reads must be batch-safe")
 	}
-	if policy := tool.ConcurrencyPolicy(mustArgs(map[string]any{"command": "git log | head -20"})); policy.Mode != ConcurrencyModeRead || policy.Resource != "process:shell" || policy.AbortSiblingsOnError {
+	if policy := tool.ConcurrencyPolicy(mustArgs(map[string]any{"command": "git log | head -20"})); policy.Mode != ConcurrencyModeRead || singleResource(policy) != "process:shell" || policy.AbortSiblingsOnError {
 		t.Fatalf("read-only policy = %#v, want process:shell read without sibling aborts", policy)
 	}
 	if tool.ConcurrencySafeReadOnly(mustArgs(map[string]any{"command": "git log && rm -rf x"})) {
@@ -53,27 +53,27 @@ func TestShellReadOnlyLeaseMatrix(t *testing.T) {
 	readShell := policy(NameShell, `{"command":"git log --oneline -20"}`)
 	mutatingShell := policy(NameShell, `{"command":"go test ./..."}`)
 	fileRead := policy(NameRead, `{"path":"README.md"}`)
-	fileWrite := ConcurrencyPolicy{Resource: "file:README.md", Mode: ConcurrencyModeWrite}
+	fileWrite := ConcurrencyPolicy{Resources: []string{"file:README.md"}, Mode: ConcurrencyModeWrite}
 
-	if readShell.Mode != ConcurrencyModeRead || readShell.Resource != "process:shell" {
+	if readShell.Mode != ConcurrencyModeRead || singleResource(readShell) != "process:shell" {
 		t.Fatalf("read-only shell policy = %#v, want process:shell read", readShell)
 	}
 	// Read-only shells batch with file reads and stay clear of file writes
 	// on the batch path; across agents the lease still serializes a read
 	// against a mutating shell on the same process resource.
-	if ConcurrencyConflict(readShell, fileRead) {
+	if readShell.Conflicts(fileRead) {
 		t.Fatal("process-read vs file-read must not conflict")
 	}
-	if ConcurrencyConflict(readShell, fileWrite) {
+	if readShell.Conflicts(fileWrite) {
 		t.Fatal("process-read vs file-write must not conflict on the batch path")
 	}
-	if !ConcurrencyConflict(readShell, mutatingShell) {
+	if !readShell.Conflicts(mutatingShell) {
 		t.Fatal("read-only shell must still conflict with a mutating shell")
 	}
-	if !WorkspaceLeaseConflict(readShell, mutatingShell) {
+	if !readShell.LeaseConflicts(mutatingShell) {
 		t.Fatal("read-only shell lease must conflict with a mutating shell")
 	}
-	if WorkspaceLeaseConflict(readShell, fileRead) {
+	if readShell.LeaseConflicts(fileRead) {
 		t.Fatal("shell lease must not conflict with an unrelated file read")
 	}
 }

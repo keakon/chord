@@ -56,7 +56,7 @@ func (JobOutputTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	if id == "" {
 		return ConcurrencyPolicy{}
 	}
-	return ConcurrencyPolicy{Resource: "job:" + id, Mode: ConcurrencyModeRead}
+	return ConcurrencyPolicy{Resources: []string{"job:" + id}, Mode: ConcurrencyModeRead}
 }
 
 func (JobOutputTool) Description() string {
@@ -303,7 +303,7 @@ func (JobListTool) ConcurrencySafeReadOnly(json.RawMessage) bool { return true }
 // ConcurrencyPolicy declares the listing as the read it is: it inspects the
 // registry, touches no job's read cursor, and must not serialize a turn.
 func (JobListTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
-	return ConcurrencyPolicy{Resource: "tool:job_list", Mode: ConcurrencyModeRead}
+	return ConcurrencyPolicy{Resources: []string{"tool:job_list"}, Mode: ConcurrencyModeRead}
 }
 
 func (JobListTool) Description() string {

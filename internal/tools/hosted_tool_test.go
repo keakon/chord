@@ -423,7 +423,7 @@ func TestHostedToolConcurrencyPolicy(t *testing.T) {
 		t.Fatal("builtin web_search must stay read-only and concurrency-safe")
 	}
 	policy := readTool.ConcurrencyPolicy(nil)
-	if policy.Mode != ConcurrencyModeRead || policy.Resource != "hosted:"+NameWebSearch {
+	if policy.Mode != ConcurrencyModeRead || singleResource(policy) != "hosted:"+NameWebSearch {
 		t.Fatalf("read policy = %#v", policy)
 	}
 
@@ -432,7 +432,7 @@ func TestHostedToolConcurrencyPolicy(t *testing.T) {
 		t.Fatal("a tool that is not read-only must not join read batches")
 	}
 	policy = writeTool.ConcurrencyPolicy(nil)
-	if policy.Mode != ConcurrencyModeWrite || policy.Resource != "hosted:sample_exec" {
+	if policy.Mode != ConcurrencyModeWrite || singleResource(policy) != "hosted:sample_exec" {
 		t.Fatalf("write policy = %#v", policy)
 	}
 

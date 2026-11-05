@@ -68,12 +68,12 @@ func TestResourceGovernorBoundsBorrowedRuntimeDebt(t *testing.T) {
 
 func TestResourceGovernorWorkspaceLeaseScopesExclusiveByResource(t *testing.T) {
 	g := newResourceGovernor(config.OrchestrationConfig{})
-	releaseShell, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: "process:shell", Mode: tools.ConcurrencyModeExclusive})
+	releaseShell, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{"process:shell"}, Mode: tools.ConcurrencyModeExclusive})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// An unrelated file access must not queue behind a running shell command.
-	releaseRead, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: "file:/workspace/a", Mode: tools.ConcurrencyModeRead})
+	releaseRead, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{"file:/workspace/a"}, Mode: tools.ConcurrencyModeRead})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestResourceGovernorWorkspaceLeaseScopesExclusiveByResource(t *testing.T) {
 	// A second shell still serializes on the shared process resource.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := g.acquireWorkspaceLease(ctx, tools.ConcurrencyPolicy{Resource: "process:shell", Mode: tools.ConcurrencyModeExclusive}); err == nil {
+	if _, err := g.acquireWorkspaceLease(ctx, tools.ConcurrencyPolicy{Resources: []string{"process:shell"}, Mode: tools.ConcurrencyModeExclusive}); err == nil {
 		t.Fatal("second shell lease succeeded while the first was held")
 	}
 	releaseShell()
@@ -233,11 +233,11 @@ func TestResourceGovernorLLMReleaseIsIdempotent(t *testing.T) {
 
 func TestResourceGovernorWorkspaceLeasesAllowDisjointWrites(t *testing.T) {
 	g := newResourceGovernor(config.OrchestrationConfig{})
-	releaseA, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: "file:/workspace/a", Mode: tools.ConcurrencyModeWrite})
+	releaseA, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{"file:/workspace/a"}, Mode: tools.ConcurrencyModeWrite})
 	if err != nil {
 		t.Fatal(err)
 	}
-	releaseB, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: "file:/workspace/b", Mode: tools.ConcurrencyModeWrite})
+	releaseB, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{"file:/workspace/b"}, Mode: tools.ConcurrencyModeWrite})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,16 +251,16 @@ func TestResourceGovernorWorkspaceLeasesAllowDisjointWrites(t *testing.T) {
 func TestResourceGovernorWorkspaceLeasesShareConcurrentResources(t *testing.T) {
 	g := newResourceGovernor(config.OrchestrationConfig{})
 	resource := "mcp:search"
-	releaseA, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeConcurrent})
+	releaseA, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{resource}, Mode: tools.ConcurrencyModeConcurrent})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Overlapping concurrent calls and reads share the resource.
-	releaseB, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeConcurrent})
+	releaseB, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{resource}, Mode: tools.ConcurrencyModeConcurrent})
 	if err != nil {
 		t.Fatal(err)
 	}
-	releaseC, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeRead})
+	releaseC, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{resource}, Mode: tools.ConcurrencyModeRead})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestResourceGovernorWorkspaceLeasesShareConcurrentResources(t *testing.T) {
 	// A write to the same resource still waits for the concurrent holders.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := g.acquireWorkspaceLease(ctx, tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeWrite}); err == nil {
+	if _, err := g.acquireWorkspaceLease(ctx, tools.ConcurrencyPolicy{Resources: []string{resource}, Mode: tools.ConcurrencyModeWrite}); err == nil {
 		t.Fatal("write lease succeeded while concurrent leases were held")
 	}
 	releaseA()
@@ -285,7 +285,7 @@ func TestResourceGovernorWorkspaceLeasesShareConcurrentResources(t *testing.T) {
 func TestResourceGovernorWorkspaceLeasesPreserveConflictingWaiterOrder(t *testing.T) {
 	g := newResourceGovernor(config.OrchestrationConfig{})
 	resource := "file:/workspace/a"
-	releaseInitial, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeRead})
+	releaseInitial, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{resource}, Mode: tools.ConcurrencyModeRead})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,14 +296,14 @@ func TestResourceGovernorWorkspaceLeasesPreserveConflictingWaiterOrder(t *testin
 	}
 	writerResult := make(chan leaseResult, 1)
 	go func() {
-		release, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeWrite})
+		release, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{resource}, Mode: tools.ConcurrencyModeWrite})
 		writerResult <- leaseResult{release: release, err: err}
 	}()
 	waitForGovernorSnapshot(t, g, func(snapshot resourceGovernorSnapshot) bool { return snapshot.LeaseQueued == 1 })
 
 	readerResult := make(chan leaseResult, 1)
 	go func() {
-		release, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeRead})
+		release, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{resource}, Mode: tools.ConcurrencyModeRead})
 		readerResult <- leaseResult{release: release, err: err}
 	}()
 	waitForGovernorSnapshot(t, g, func(snapshot resourceGovernorSnapshot) bool { return snapshot.LeaseQueued == 2 })
@@ -334,13 +334,13 @@ func TestResourceGovernorWorkspaceLeasesPreserveConflictingWaiterOrder(t *testin
 
 func TestResourceGovernorWorkspaceLeaseCancellationRemovesWaiter(t *testing.T) {
 	g := newResourceGovernor(config.OrchestrationConfig{})
-	release, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: "workspace", Mode: tools.ConcurrencyModeExclusive})
+	release, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resources: []string{"workspace"}, Mode: tools.ConcurrencyModeExclusive})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := g.acquireWorkspaceLease(ctx, tools.ConcurrencyPolicy{Resource: "file:/workspace/a", Mode: tools.ConcurrencyModeRead}); err == nil {
+	if _, err := g.acquireWorkspaceLease(ctx, tools.ConcurrencyPolicy{Resources: []string{"file:/workspace/a"}, Mode: tools.ConcurrencyModeRead}); err == nil {
 		t.Fatal("conflicting lease acquire succeeded")
 	}
 	if got := g.snapshot(); got.LeaseActive != 1 || got.LeaseQueued != 0 {
@@ -436,5 +436,108 @@ func TestRuntimeGovernorSnapshotExposesRuntimeSlotDrift(t *testing.T) {
 	snap = a.runtimeGovernorSnapshot()
 	if snap.RuntimeInUse != 0 || snap.RuntimeHolders != 0 || snap.RuntimeSlotDrift != 0 {
 		t.Fatalf("after release snapshot = in_use:%d holders:%d drift:%d, want 0/0/0", snap.RuntimeInUse, snap.RuntimeHolders, snap.RuntimeSlotDrift)
+	}
+}
+
+func TestResourceGovernorWorkspaceLeasesUseWholeResourceSet(t *testing.T) {
+	g := newResourceGovernor(config.OrchestrationConfig{})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	policy := func(mode tools.ConcurrencyMode, resources ...string) tools.ConcurrencyPolicy {
+		return tools.ConcurrencyPolicy{Resources: resources, Mode: mode}
+	}
+	releaseAB, err := g.acquireWorkspaceLease(ctx, policy(tools.ConcurrencyModeWrite, "file:/workspace/a", "file:/workspace/b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(releaseAB)
+	releaseC, err := g.acquireWorkspaceLease(ctx, policy(tools.ConcurrencyModeWrite, "file:/workspace/c"))
+	if err != nil {
+		t.Fatalf("disjoint write set waited: %v", err)
+	}
+	t.Cleanup(releaseC)
+	if got := g.snapshot(); got.LeaseActive != 2 || got.LeaseQueued != 0 {
+		t.Fatalf("disjoint set snapshot = %+v, want two active leases", got)
+	}
+
+	for _, blocked := range [][]string{
+		{"file:/workspace/b", "file:/workspace/c"},
+		{"file:/workspace/a"},
+		{"workspace"},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		if _, err := g.acquireWorkspaceLease(ctx, policy(tools.ConcurrencyModeWrite, blocked...)); err == nil {
+			cancel()
+			t.Fatalf("lease for %v bypassed an active resource", blocked)
+		}
+		cancel()
+	}
+	releaseAB()
+	releaseC()
+	if got := g.snapshot(); got.LeaseActive != 0 || got.LeaseQueued != 0 {
+		t.Fatalf("after release = %+v", got)
+	}
+}
+
+func TestResourceGovernorQueuedPolicyOwnsResourceSet(t *testing.T) {
+	g := newResourceGovernor(config.OrchestrationConfig{})
+	waitCtx, cancelWait := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancelWait()
+	releaseBlocker, err := g.acquireWorkspaceLease(waitCtx, tools.ConcurrencyPolicy{
+		Resources: []string{"file:/workspace/a"},
+		Mode:      tools.ConcurrencyModeWrite,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(releaseBlocker)
+
+	input := []string{"file:/workspace/a", "file:/workspace/b"}
+	type leaseResult struct {
+		release func()
+		err     error
+	}
+	result := make(chan leaseResult, 1)
+	go func() {
+		release, err := g.acquireWorkspaceLease(waitCtx, tools.ConcurrencyPolicy{
+			Resources: input,
+			Mode:      tools.ConcurrencyModeWrite,
+		})
+		if err == nil {
+			t.Cleanup(release)
+		}
+		result <- leaseResult{release: release, err: err}
+	}()
+	waitForGovernorSnapshot(t, g, func(snapshot resourceGovernorSnapshot) bool { return snapshot.LeaseQueued == 1 })
+
+	// The queued request must own its resource set: mutating the caller's slice
+	// after enqueue must not change what the request later holds.
+	input[0], input[1] = "file:/workspace/mutated", "file:/workspace/other"
+	releaseBlocker()
+	var queued leaseResult
+	select {
+	case queued = <-result:
+	case <-waitCtx.Done():
+		t.Fatal("queued lease was not granted before the deadline")
+	}
+	if queued.err != nil {
+		t.Fatal(queued.err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	if _, err := g.acquireWorkspaceLease(ctx, tools.ConcurrencyPolicy{Resources: []string{"file:/workspace/b"}, Mode: tools.ConcurrencyModeWrite}); err == nil {
+		cancel()
+		t.Fatal("the queued request lost its original file resource")
+	}
+	cancel()
+	releaseMutated, err := g.acquireWorkspaceLease(waitCtx, tools.ConcurrencyPolicy{Resources: []string{"file:/workspace/mutated"}, Mode: tools.ConcurrencyModeWrite})
+	if err != nil {
+		t.Fatalf("caller slice mutation leaked into the queued request: %v", err)
+	}
+	t.Cleanup(releaseMutated)
+	releaseMutated()
+	queued.release()
+	if got := g.snapshot(); got.LeaseActive != 0 || got.LeaseQueued != 0 {
+		t.Fatalf("after release = %+v", got)
 	}
 }

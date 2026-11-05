@@ -108,7 +108,7 @@ func TestReadOnlyBatchableToolPoliciesStayNonExclusive(t *testing.T) {
 			if policy.Mode == ConcurrencyModeExclusive {
 				t.Fatalf("policy = %#v, want a non-exclusive mode", policy)
 			}
-			if strings.TrimSpace(policy.Resource) == "" {
+			if len(policy.Resources) == 0 {
 				t.Fatalf("policy = %#v, want a named resource", policy)
 			}
 		})
@@ -154,6 +154,8 @@ func TestConcurrentBatchableToolPoliciesStayNonExclusive(t *testing.T) {
 	}{
 		{NameEdit, EditTool{}, `{"path":"tool.go","old_string":"a","new_string":"b"}`},
 		{NameWrite, WriteTool{}, `{"path":"tool.go","content":"x"}`},
+		{NameApplyPatch, ApplyPatchTool{BaseDir: "/tmp"}, `{"patch":"*** Begin Patch\n*** Add File: tool.go\n+package tool\n*** End Patch\n"}`},
+		{NameDelete, DeleteTool{BaseDir: "/tmp"}, `{"paths":["tool.go"],"reason":"test"}`},
 	}
 	_, declared, _ := scanBatchableToolDeclarations(t)
 	covered := make(map[string]string, len(cases)) // receiver type -> case name
@@ -164,7 +166,7 @@ func TestConcurrentBatchableToolPoliciesStayNonExclusive(t *testing.T) {
 			if policy.Mode == ConcurrencyModeExclusive {
 				t.Fatalf("policy = %#v, want a non-exclusive mode", policy)
 			}
-			if strings.TrimSpace(policy.Resource) == "" {
+			if len(policy.Resources) == 0 {
 				t.Fatalf("policy = %#v, want a named resource", policy)
 			}
 		})
@@ -202,10 +204,10 @@ func TestJobOutputPolicyScopesResourceByJob(t *testing.T) {
 	}
 
 	first := policy("job-1")
-	if first.Resource != "job:job-1" || first.Mode != ConcurrencyModeRead {
+	if singleResource(first) != "job:job-1" || first.Mode != ConcurrencyModeRead {
 		t.Fatalf("policy = %#v, want a read of job:job-1", first)
 	}
-	if ConcurrencyConflict(first, policy("job-2")) {
+	if first.Conflicts(policy("job-2")) {
 		t.Fatal("reads of different jobs must batch together")
 	}
 	if empty := PolicyForInstance(tool, NameJobOutput, json.RawMessage(`{}`)); empty.Mode != ConcurrencyModeExclusive {
@@ -216,14 +218,14 @@ func TestJobOutputPolicyScopesResourceByJob(t *testing.T) {
 func TestShellPolicySplitsReadOnlyCommandsFromMutations(t *testing.T) {
 	tool := NewShellTool("bash")
 	readOnly := PolicyForInstance(tool, NameShell, json.RawMessage(`{"command":"git status"}`))
-	if readOnly.Resource != "process:shell" || readOnly.Mode != ConcurrencyModeRead || readOnly.AbortSiblingsOnError {
+	if singleResource(readOnly) != "process:shell" || readOnly.Mode != ConcurrencyModeRead || readOnly.AbortSiblingsOnError {
 		t.Fatalf("read-only shell policy = %#v, want process:shell read without sibling aborts", readOnly)
 	}
 	mutating := PolicyForInstance(tool, NameShell, json.RawMessage(`{"command":"go test ./..."}`))
-	if mutating.Resource != "process:shell" || mutating.Mode != ConcurrencyModeExclusive || !mutating.AbortSiblingsOnError {
+	if singleResource(mutating) != "process:shell" || mutating.Mode != ConcurrencyModeExclusive || !mutating.AbortSiblingsOnError {
 		t.Fatalf("mutating shell policy = %#v, want the exclusive process:shell with sibling aborts", mutating)
 	}
-	if !ConcurrencyConflict(readOnly, mutating) {
+	if !readOnly.Conflicts(mutating) {
 		t.Fatal("a mutating shell must still exclude an allowlisted read-only one")
 	}
 }
