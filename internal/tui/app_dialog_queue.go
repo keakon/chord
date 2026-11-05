@@ -185,21 +185,27 @@ func (m *Model) finishDialog(prevMode Mode, extraCmds ...tea.Cmd) tea.Cmd {
 	if prevMode != ModeInsert && prevMode != ModeNormal {
 		return tea.Batch(append(extraCmds, m.restoreModeWithIME(prevMode))...)
 	}
-	for {
-		next, ok := m.popPendingDialog()
-		if !ok {
-			break
-		}
-		cmd := m.presentPendingDialog(next, prevMode)
-		if m.dialogActive() {
-			return tea.Batch(append(extraCmds, cmd)...)
-		}
-		if cmd != nil {
-			extraCmds = append(extraCmds, cmd)
+	// While the read-only history layer covers the screen, a queued request
+	// stays queued: presenting it would put a live dialog on top of the
+	// history. The request keeps running, and the layer presents it when the
+	// user comes back.
+	if !m.compactionHistoryActive() {
+		for {
+			next, ok := m.popPendingDialog()
+			if !ok {
+				break
+			}
+			cmd := m.presentPendingDialog(next, prevMode)
+			if m.dialogActive() {
+				return tea.Batch(append(extraCmds, cmd)...)
+			}
+			if cmd != nil {
+				extraCmds = append(extraCmds, cmd)
+			}
 		}
 	}
 	extraCmds = append(extraCmds, m.restoreModeWithIME(prevMode), m.confirmQuestionPresentation())
-	if prevMode == ModeInsert {
+	if prevMode == ModeInsert && !m.compactionHistoryActive() {
 		extraCmds = append(extraCmds, m.input.Focus())
 	}
 	return tea.Batch(extraCmds...)
@@ -211,7 +217,10 @@ func (m *Model) enqueueDialog(d pendingDialog) tea.Cmd {
 }
 
 func (m *Model) tryPresentNextDialog() tea.Cmd {
-	if len(m.pendingDialogs) == 0 || m.dialogActive() || m.interactionSuppressed() || (m.mode != ModeInsert && m.mode != ModeNormal && !m.historyActive()) {
+	if len(m.pendingDialogs) == 0 || m.dialogActive() || m.interactionSuppressed() || m.compactionHistoryActive() {
+		return nil
+	}
+	if m.mode != ModeInsert && m.mode != ModeNormal && !m.historyActive() {
 		return nil
 	}
 	if m.historyActive() {

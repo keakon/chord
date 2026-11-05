@@ -66,6 +66,8 @@ const (
 	ActionDiagnostics                 ActionID = "diagnostics"
 	ActionYolo                        ActionID = "yolo"
 	ActionMCP                         ActionID = "mcp"
+	ActionCompactionHistory           ActionID = "compaction_history"
+	ActionCompactionHistoryNext       ActionID = "compaction_history_next"
 )
 
 var actions = []Action{
@@ -116,6 +118,9 @@ var actions = []Action{
 	{ActionDiagnostics, BindingSingle, []string{"ctrl+g"}},
 	{ActionYolo, BindingSingle, []string{"ctrl+y"}},
 	{ActionMCP, BindingSingle, []string{"ctrl+o"}},
+	// Some terminals send word-motion sequences for Alt+arrows.
+	{ActionCompactionHistory, BindingSingle, []string{"alt+left", "alt+b"}},
+	{ActionCompactionHistoryNext, BindingSingle, []string{"alt+right", "alt+f"}},
 }
 
 // Actions returns the complete ordered catalog with independent default slices.

@@ -7,6 +7,12 @@ import (
 )
 
 func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
+	// The read-only history layer owns the keyboard while it is open: no key
+	// reaches the live session, and Ctrl+C leaves the layer instead of
+	// quitting the process.
+	if m.compactionHistoryActive() {
+		return m.handleCompactionHistoryKey(msg)
+	}
 	if m.takeoverInputFrozen() {
 		return m.handleTakeoverKey(msg)
 	}
@@ -15,6 +21,9 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 			return m.handleCtrlC()
 		}
 		return nil
+	}
+	if m.compactionHistoryActionFires(msg) {
+		return m.openCompactionHistory()
 	}
 	// Ctrl+C is handled globally (quit or cancel) before mode-specific handlers.
 	// Some terminals send Ctrl+C as rune 3 (ETX) or as Code=='c'+ModCtrl; match all.

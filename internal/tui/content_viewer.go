@@ -239,16 +239,17 @@ func (m *Model) handleContentViewerSelectionClick(mouse tea.Mouse) bool {
 	}
 
 	now := time.Now()
-	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
-		abs(mouse.X-m.lastClickX) <= mouseClickTolerance &&
-		abs(mouse.Y-m.lastClickY) <= mouseClickTolerance {
-		m.clickCount++
+	s := &m.mouseSelection
+	if now.Sub(s.lastClick) <= doubleClickThreshold &&
+		abs(mouse.X-s.lastX) <= mouseClickTolerance &&
+		abs(mouse.Y-s.lastY) <= mouseClickTolerance {
+		s.clicks++
 	} else {
-		m.clickCount = 1
+		s.clicks = 1
 	}
-	m.lastClickTime = now
-	m.lastClickX = mouse.X
-	m.lastClickY = mouse.Y
+	s.lastClick = now
+	s.lastX = mouse.X
+	s.lastY = mouse.Y
 
 	lines := m.cachedContentViewerLines(m.viewport.width)
 	if line < 0 || line >= len(lines) {
@@ -257,7 +258,7 @@ func (m *Model) handleContentViewerSelectionClick(mouse tea.Mouse) bool {
 	}
 	plain := terminaltext.StripANSI(lines[line])
 
-	if m.clickCount == 2 {
+	if s.clicks == 2 {
 		sCol, eCol := WordBoundsAtCol(plain, col)
 		if sCol < eCol {
 			m.contentViewer.selecting = false
@@ -272,8 +273,8 @@ func (m *Model) handleContentViewerSelectionClick(mouse tea.Mouse) bool {
 		}
 		return true
 	}
-	if m.clickCount >= 3 {
-		m.clickCount = 0
+	if s.clicks >= 3 {
+		s.clicks = 0
 		lineWidth := selectionPlainTextWidth(plain)
 		if lineWidth > 0 {
 			m.contentViewer.selecting = false

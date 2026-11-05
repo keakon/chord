@@ -273,6 +273,20 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	for _, line := range bodyLines {
 		lines = append(lines, "  "+line)
 	}
+	// The card's own door into the archived history it names. The hit is
+	// rebuilt with the card, because renderPrewrappedCard may fold, wrap or
+	// truncate any row.
+	b.compactionEntry = nil
+	if refs := b.compactionSummaryArchiveRefs(); len(refs) > 0 {
+		entryIndex := len(lines)
+		lines = append(lines, "", "  "+currentStyles.StatusHintStyle.Render(compactionCardEntryLabel(len(refs))))
+		originRow, originCol := compactionSummaryCardEntryOrigin(style)
+		b.compactionEntry = &compactionCardEntryHit{
+			line:  originRow + entryIndex + 1,
+			start: originCol,
+			end:   originCol + contentWidth,
+		}
+	}
 	cardBg := currentStyles.Palette.CompactionSummaryBg
 	lines = preserveCardBg(lines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("assistant", b.Focused))

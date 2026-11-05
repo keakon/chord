@@ -106,7 +106,15 @@ func modeNeedsEnglishIME(mode Mode) bool {
 }
 
 func (m *Model) imeSwitchAllowed() bool {
-	return m != nil && m.terminalAppFocused
+	return m != nil && m.terminalAppFocused && !m.imeSwitchSuppressed()
+}
+
+// imeSwitchSuppressed reports whether a terminal IME switch must be withheld.
+// The read-only history layer owns the foreground, so a live mode change must
+// not switch the input method under the user's hands; the switch is applied
+// when the layer closes.
+func (m *Model) imeSwitchSuppressed() bool {
+	return m.compactionHistoryActive()
 }
 
 func (m *Model) reapplyIMEForCurrentModeOnFocus() {
@@ -180,6 +188,11 @@ func (m *Model) runIMESwitchIfTransition(from, to Mode) tea.Cmd {
 	if !modeNeedsEnglishIME(to) {
 		return nil
 	}
+	// While the read-only history layer owns the foreground, a live mode
+	// change must not switch the input method under the user's hands.
+	if m.imeSwitchSuppressed() {
+		return nil
+	}
 	if from == to || m.ime.switchTarget == "" || !m.imeSwitchAllowed() {
 		return nil
 	}
@@ -192,7 +205,7 @@ func (m *Model) runIMESwitchIfTransition(from, to Mode) tea.Cmd {
 
 // runIMERestoreIfNeeded restores the saved input method when entering Insert (uses same im-select binary as switch).
 func (m *Model) runIMERestoreIfNeeded() {
-	if m.ime.beforeNormal == "" {
+	if m.ime.beforeNormal == "" || m.imeSwitchSuppressed() {
 		return
 	}
 	target := m.ime.beforeNormal

@@ -310,6 +310,12 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 	if m.takeoverInputFrozen() && m.mode != ModeQuestion && m.mode != ModeConfirm {
 		return nil
 	}
+	// The read-only history layer owns every non-key input while it is open:
+	// a paste must not reach the composer, and an incoming attachment must
+	// not change the draft the user will get back.
+	if m.compactionHistoryActive() {
+		return nil
+	}
 	switch m.mode {
 	case ModeInputHistorySearch:
 		if pm, ok := msg.(tea.PasteMsg); ok {

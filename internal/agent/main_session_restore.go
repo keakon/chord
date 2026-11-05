@@ -1912,6 +1912,17 @@ func (a *MainAgent) SessionDir() string {
 	return a.sessionDir
 }
 
+// SessionRoot returns the directory that holds this session's directory. It
+// is the boundary a reader of the session's own files must stay inside.
+// Returns an empty string when the paths cannot be resolved.
+func (a *MainAgent) SessionRoot() string {
+	dir, err := a.projectSessionsDir()
+	if err != nil {
+		return ""
+	}
+	return dir
+}
+
 // SessionID returns the unique session identifier for this agent instance.
 // Used to scope session-specific event subscriptions. Goroutine-safe.
 func (a *MainAgent) SessionID() string {

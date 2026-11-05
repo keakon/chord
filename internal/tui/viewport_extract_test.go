@@ -371,9 +371,9 @@ func copyWordAtColumn(t *testing.T, m *Model, block *Block, line int, want strin
 	// The word's own first cell, in the same zero-based column space the click
 	// handler and ExtractSelectionText use.
 	col := selectionPlainTextWidth(before)
-	m.clickCount = 1
-	m.lastClickTime = time.Now()
-	m.lastClickX, m.lastClickY = col, 0
+	m.mouseSelection.clicks = 1
+	m.mouseSelection.lastClick = time.Now()
+	m.mouseSelection.lastX, m.mouseSelection.lastY = col, 0
 	m.handleViewportSelectionClick(tea.Mouse{X: col, Y: 0, Button: tea.MouseLeft}, block, line, col)
 	if !m.hasMouseSelection() {
 		t.Fatalf("double click on %q at line %d line selected nothing", want, line)
@@ -468,9 +468,9 @@ func TestExtractSelectionTextSoftWrapContinuationColumnsAlign(t *testing.T) {
 
 	// Triple-click selects the whole visible line; on a continuation line the
 	// copied text must equal the rendered (stripped) line, not a prefix of it.
-	m.clickCount = 3
-	m.lastClickTime = time.Now()
-	m.lastClickX, m.lastClickY = 1, 0
+	m.mouseSelection.clicks = 3
+	m.mouseSelection.lastClick = time.Now()
+	m.mouseSelection.lastX, m.mouseSelection.lastY = 1, 0
 	m.handleViewportSelectionClick(tea.Mouse{X: 1, Y: 0, Button: tea.MouseLeft}, block, continuation, 1)
 	if !m.hasMouseSelection() {
 		t.Fatal("triple click selected nothing on the continuation line")

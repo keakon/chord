@@ -193,6 +193,13 @@ func (m *Model) confirmQuestionPresentation() tea.Cmd {
 	if m.mode != ModeQuestion || m.question.request == nil || m.question.interacted || m.question.interacting {
 		return nil
 	}
+	// The read-only history layer covers the screen, so the question is not
+	// visible: reporting it here would arm its default-answer timer for a
+	// question the user cannot see. A timer that already started keeps
+	// running; only a new presentation is withheld.
+	if m.compactionHistoryActive() {
+		return nil
+	}
 	q := m.questionRecords[m.question.requestID]
 	if q.Timer != agent.QuestionTimerAwaiting && q.Timer != agent.QuestionTimerSuspended {
 		return nil

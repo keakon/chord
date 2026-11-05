@@ -28,6 +28,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Cmd+V` / paste    | Paste text only; terminal paste events never probe clipboard attachments                       |
 | `Ctrl+U`           | Clear the input box and pending attachments                                                    |
 | `Ctrl+Z` | Undo the last composer edit, including text, inline pastes, and attachments |
+| `Alt+←` | Open the newest pre-compaction snapshot, preserving the draft and cursor |
 | `PgUp` / `PgDown`  | Page the transcript up / down without leaving Insert mode                                      |
 | `Shift+Tab` | Cycle the focused agent view without changing the role. |
 | `Tab`              | Complete the visible slash-command or `@`-mention suggestion; otherwise does nothing            |
@@ -78,6 +79,13 @@ The structural jumps (`}`, `)`, `]` and their counterparts) accept a count prefi
 | `Ctrl+T`  | Open the message directory (jump-to-card overlay)                   |
 | `Ctrl+E`  | Open the error panel                                                |
 | `$`       | Open the usage statistics overlay                                   |
+| `Alt+←`   | Open the newest pre-compaction snapshot                              |
+
+`Alt+←` opens history in both Insert and Normal modes. Within history, `Alt+←` / `Alt+→` visit earlier / later snapshots. Moving forward from the newest returns to the live session, restoring the draft and cursor; `Alt+→` in the live session keeps its mode-specific behavior. Search fields and dialogs keep their editing keys. See [Compaction history browser](usage.md#compaction-history-browser).
+
+The defaults also accept `Alt+b` / `Alt+f`, which terminals such as Ghostty on macOS send for Option+← / Option+→. Remapping an action replaces all of its defaults; an empty list disables it.
+
+History hides the message input and keeps the sidebar and bottom status bar. `Esc` returns to the live session; while searching, it first closes the history search field. The left side of the status bar shows the corresponding Esc hint.
 
 ### Normal mode: search
 
@@ -267,6 +275,8 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `yolo`                     | `["ctrl+y"]`                     |
 | `mcp`                      | `["ctrl+o"]`                     |
 | `diagnostics`              | `["ctrl+g"]`                     |
+| `compaction_history`       | `["alt+left", "alt+b"]` (open history in Insert or Normal mode, or visit an earlier snapshot) |
+| `compaction_history_next`  | `["alt+right", "alt+f"]` (visit a later snapshot, then return to the live session) |
 
 Only the actions you list are overridden; all others fall back to the defaults above.
 

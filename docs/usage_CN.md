@@ -375,7 +375,50 @@ worktree 命令要求 `PATH` 里有 `git`。找不到 git 时，创建或进入 
 
 启用非标准服务等级后，侧边栏会显示当前值。如果切换模型后该等级不再可用，它会以灰色删除线显示。Normal 模式的 `Ctrl+R` 只在当前服务商和模型支持的等级之间切换。
 
-下面几个命令有更多交互细节，单独展开说明。
+下面介绍历史浏览及其他交互面板。
+
+### 压缩历史浏览器
+
+输入模式或普通模式下按 `Alt+←`，打开当前会话最近的压缩前快照；再次按下查看更早的快照。`Alt+→` 查看更近的快照，在最新快照上再按则返回实时会话，恢复输入草稿、光标位置和模式。实时会话中的 `Alt+→` 保持当前模式的按键行为。浏览器一次显示一个快照，内容以普通消息卡片呈现。两个快捷键对应 `config.yaml` 中 `keymap:` 下的 `compaction_history` 和 `compaction_history_next`，可自行修改。
+
+默认绑定还包括 `Alt+b` / `Alt+f`，因此 macOS 上的 Ghostty 等发送按词移动按键的终端，也能用 Option+← / Option+→ 切换历史。自定义绑定会替换对应操作的全部默认键。
+
+压缩摘要卡片自带一个通往它所替换历史的入口：卡片末尾有一行 `View referenced history · 2 archives`。点这一行打开的就是 checkpoint 明确列出的那些归档，绝不会变成会话里最新的一份快照。焦点在该卡片上时按 `Enter` 效果相同；若该卡片还交付过文件，`Enter` 仍优先打开那些文件。checkpoint 只列出一份归档、且本会话仍保有对应快照时，浏览器直接打开该快照，并在状态栏标记 `referenced`。checkpoint 列出多份归档时，浏览器显示来源列表（标题 `Sources named by this checkpoint`），每份归档标注 `available` 或 `no local snapshot`；用 `↑` / `↓` 选择后按 `Enter` 打开。只有 Markdown、或快照已被清理的归档会标为 `no local snapshot`，绝不会换成另一份快照。
+
+**打开期间严格只读。** 不能发送消息、编辑队列、回答确认或提问、fork 会话、切换模型或角色、停止 job、打开文件或执行 shell 命令。实时会话在底层照常运行：已经开始的默认回答计时继续走，权限确认超时仍然照常拒绝，当前任务照常推进。打开或离开这个浏览器，都不会替你回答、拒绝或取消任何请求。
+
+历史沿用原消息区、侧栏和底部状态栏。消息输入框、附件栏和待发队列隐藏，键入或粘贴不会修改草稿，也不会发送消息。侧栏继续显示实时会话信息，可以滚动查看、折叠分组。按 `/` 才会出现独立的历史搜索框。
+
+所有对话框在浏览器打开期间都会被隐藏，包括你进入之前就已经打开的那些。此时到达的请求继续排队，等你离开后再显示。
+
+浏览器内的按键：
+
+- `Esc` 或 `q`：离开浏览器
+- `Ctrl+C`：离开浏览器（不会退出 chord）
+- `Alt+←` / `Alt+→`：切换到更早／更近的快照；在最新快照上向右则返回实时会话
+- `←` / `→`（或 `h` / `l`）：在浏览器内执行同样的导航
+- `↑` / `↓`（或 `k` / `j`）：把焦点移到上一张 / 下一张消息卡片
+- `Ctrl+F` / `Ctrl+B`（或 `PgDn` / `PgUp`）：翻页
+- `g` / `G`：跳到开头 / 结尾
+- `[` / `]`：把焦点移到上一张 / 下一张同类卡片
+- `o` / `Enter` / `Space`：折叠或展开当前卡片
+- `y` 或 `Super+C`：复制选中文本；没有选区时复制当前卡片
+- `/`：在当前快照内搜索
+- `n` / `N`：跳到下一个 / 上一个匹配
+
+用鼠标在卡片上拖动选择文本，双击选词，三击选中一行。图片附件只显示元数据占位。
+
+搜索框的占位提示是 `search this snapshot`。在搜索框里，`q` 和方向键用于编辑查询文本，`Alt+←` / `Alt+→` 按词移动光标。`Esc` 先退出搜索、留在浏览器内。实时会话的搜索框和对话框也保留各自的按键行为，历史快捷键不会抢占。
+
+底部状态栏显示 `HISTORY 2/4`（当前是 4 个可用快照里的第 2 个）。左侧 Esc 提示沿用原状态栏样式：浏览时为 `esc ⇢ live`，搜索时为 `esc ⇢ cancel search`。空间足够时，状态栏还会显示快照文件编号（`snapshot #5`）和实时会话状态：`waiting for confirmation`、`waiting for an answer`、`waiting for a decision`、`running` 或 `idle`。加载进度和错误优先占用这部分空间。窄窗口保留历史标识，空间允许时显示 Esc 提示。
+
+`snapshot #5` 里的编号是压缩尝试的编号，因此可能跳号——它不等于成功压缩的次数。
+
+读取期间正文显示 `Reading the compaction history…`，卡片还在准备时显示 `Preparing history cards 12/300`。读不出来时会说明原因，例如 `The snapshot is empty; there is no history to show`、`The snapshot is damaged; the history cannot be read in full`、`The snapshot path is invalid or was replaced; refusing to read it`、`That snapshot is not available (never applied, or cleaned up)`、`Failed to read the snapshot`。在最早快照上继续向左会保留当前快照，并提示 `Already at the earliest snapshot`；在最新快照上向右会返回实时会话，即使该快照还在加载中。
+
+调整终端宽度时，卡片会按新宽度分批重排，大快照也不会把输入循环卡住：缩放后的第一帧就能看到卡片，其余卡片在后台继续准备，并会回到你原本所在的那张卡片。已经打开的搜索会按新布局重建。
+
+当前会话没有任何已应用的快照时，浏览器直接说明情况（`This session has no compaction history`；若有损坏的状态记录，则是 `This session has no compaction history (N snapshot status records are damaged)`），并原样保留实时会话。
 
 ### 项目记忆（Memory）
 

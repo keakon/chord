@@ -30,21 +30,45 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		return true, effects
 	case agent.ModelSelectEvent:
 		m.inflightDraft = nil
+		if m.compactionHistoryActive() {
+			m.compactionHistory.pendingIntent = compactionHistoryIntent{kind: compactionHistoryIntentModel, model: evt.Target}
+			return true, effects
+		}
 		effects.addFollowup(m.openModelSelectFor(evt.Target))
 		return true, effects
 	case agent.RoleSelectEvent:
 		m.inflightDraft = nil
+		if m.compactionHistoryActive() {
+			m.compactionHistory.pendingIntent = compactionHistoryIntent{kind: compactionHistoryIntentRole}
+			return true, effects
+		}
 		m.openRoleSelect()
 		return true, effects
 	case agent.MCPSelectEvent:
 		m.inflightDraft = nil
+		if m.compactionHistoryActive() {
+			m.compactionHistory.pendingIntent = compactionHistoryIntent{kind: compactionHistoryIntentMCP}
+			return true, effects
+		}
 		m.openMCPSelect()
 		return true, effects
 	case agent.SkillSelectEvent:
 		m.inflightDraft = nil
+		if m.compactionHistoryActive() {
+			m.compactionHistory.pendingIntent = compactionHistoryIntent{kind: compactionHistoryIntentSkill}
+			return true, effects
+		}
 		m.openSkillSelect()
 		return true, effects
 	case agent.SessionSelectEvent:
+		if m.compactionHistoryActive() {
+			m.compactionHistory.pendingIntent = compactionHistoryIntent{
+				kind:       compactionHistoryIntentSession,
+				sessions:   evt.Sessions,
+				prefetched: evt.Prefetched,
+			}
+			return true, effects
+		}
 		effects.addFollowup(m.openSessionSelect(evt.Sessions, evt.Prefetched))
 		return true, effects
 	case agent.SessionSwitchStartedEvent:
@@ -55,6 +79,10 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		}
 		m.beginSessionSwitch(evt.Kind, evt.SessionID)
 		m.mailboxQueue = nil
+		// The session the history belonged to is being replaced: its snapshots
+		// are no longer the user's history, so the layer closes and its
+		// pending load is invalidated.
+		_ = m.disposeCompactionHistory()
 		// Queued and on-screen dialogs belong to the session being replaced;
 		// its requests are already dead by the time the switch starts.
 		effects.addFollowup(m.resetDialogsOnSessionSwitch())

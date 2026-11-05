@@ -425,40 +425,57 @@ func findMatchesAtWidth(blocks []*Block, query string, width int) []MatchPositio
 		return nil
 	}
 
-	lowerQuery := strings.ToLower(query)
 	var matches []MatchPosition
 	lineOffset := 0
 
 	for i, block := range blocks {
-		inspect, temporary := block.inspectionBlock()
-		if inspect == nil {
-			continue
-		}
-		blockLineCount := inspect.LineCount(width)
-		searchableTextLower := inspect.searchableTextLower()
-		candidate := strings.Contains(searchableTextLower, lowerQuery)
-		if !candidate && inspect.Type == BlockAssistant {
-			candidate = assistantMarkdownMayContainQuery(inspect.Content, lowerQuery)
-		}
-		if candidate && blockVisibleForSearch(inspect, width) && !searchDiagnosticArtifactExcluded(inspect.Type, searchableTextLower) {
-			innerOffset, visible := visibleSearchMatchInnerOffset(inspect, query, width)
-			if visible {
-				matches = append(matches, MatchPosition{
-					BlockIndex:  i,
-					BlockID:     inspect.ID,
-					LineOffset:  lineOffset,
-					InnerOffset: innerOffset,
-					Query:       query,
-				})
-			}
-		}
-		if temporary {
-			inspect.InvalidateCache()
-		}
+		blockMatches, blockLineCount := findMatchesInBlockAtWidth(block, i, lineOffset, query, width)
+		matches = append(matches, blockMatches...)
 		lineOffset += blockLineCount
 	}
 
 	return matches
+}
+
+// findMatchesInBlockAtWidth returns the matches inside a single block and the
+// block's rendered line count. lineOffset is the absolute offset of the
+// block's first line within the whole content, so a caller that scans blocks
+// incrementally can keep the offsets continuous across batches.
+//
+// The block may be a spill-cold placeholder: it is inspected through a
+// temporary copy so the scan never mutates the resident block.
+func findMatchesInBlockAtWidth(block *Block, index int, lineOffset int, query string, width int) ([]MatchPosition, int) {
+	if block == nil || query == "" {
+		return nil, 0
+	}
+	inspect, temporary := block.inspectionBlock()
+	if inspect == nil {
+		return nil, 0
+	}
+	blockLineCount := inspect.LineCount(width)
+	lowerQuery := strings.ToLower(query)
+	searchableTextLower := inspect.searchableTextLower()
+	candidate := strings.Contains(searchableTextLower, lowerQuery)
+	if !candidate && inspect.Type == BlockAssistant {
+		candidate = assistantMarkdownMayContainQuery(inspect.Content, lowerQuery)
+	}
+	var matches []MatchPosition
+	if candidate && blockVisibleForSearch(inspect, width) && !searchDiagnosticArtifactExcluded(inspect.Type, searchableTextLower) {
+		innerOffset, visible := visibleSearchMatchInnerOffset(inspect, query, width)
+		if visible {
+			matches = append(matches, MatchPosition{
+				BlockIndex:  index,
+				BlockID:     inspect.ID,
+				LineOffset:  lineOffset,
+				InnerOffset: innerOffset,
+				Query:       query,
+			})
+		}
+	}
+	if temporary {
+		inspect.InvalidateCache()
+	}
+	return matches, blockLineCount
 }
 
 // NextMatch advances the search state to the next match and returns it.

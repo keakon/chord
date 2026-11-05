@@ -165,6 +165,11 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		memoryDegraded = m.agent.MemoryDegraded()
 	}
 	infoPanelVisible := m.mode == ModeStatus || (m.rightPanelVisible && m.mode != ModeHelp)
+	nextEscHint, nextEnterHint := m.nextEscHint(), m.nextEnterHint()
+	if m.compactionHistoryActive() {
+		infoPanelVisible = m.rightPanelVisible
+		nextEnterHint = ""
+	}
 	runningJobs := 0
 	fallbackAgents := 0
 	if !infoPanelVisible {
@@ -186,8 +191,8 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		PendingQuitFP:       strings.TrimSpace(m.pendingQuitFingerprint(now)),
 		ChordDisplay:        m.chord.display(),
 		SearchFP:            m.statusBarSearchFingerprint(),
-		NextEscHint:         m.nextEscHint(),
-		NextEnterHint:       m.nextEnterHint(),
+		NextEscHint:         nextEscHint,
+		NextEnterHint:       nextEnterHint,
 		LoopState:           loopState,
 		YoloEnabled:         m.yoloEnabled(),
 		MemoryEnabled:       memoryEnabled,
@@ -285,6 +290,12 @@ func (m *Model) statusBarModePill(modeText string) string {
 	case ModeModelSelect:
 		modeStyle = currentStyles.ModeModelSelectStyle
 	}
+	if m.compactionHistoryActive() {
+		modeStyle = currentStyles.ModeNormalStyle
+		if m.width < 40 {
+			modeStyle = modeStyle.Padding(0)
+		}
+	}
 	if m.cachedStatusBarModeKey == modeText {
 		return m.cachedStatusBarModePill
 	}
@@ -362,12 +373,25 @@ func (m *Model) buildStatusBarLeadingPills(inputs statusBarInputs) []string {
 	snap := inputs.Snapshot
 	pills := []string{
 		m.statusBarModePill(inputs.ModeText),
-		m.statusBarViewingPill(snap.viewingLabel, snap.viewingColor),
+	}
+	if !m.compactionHistoryActive() {
+		pills = append(pills, m.statusBarViewingPill(snap.viewingLabel, snap.viewingColor))
 	}
 	return m.appendStatusBarPersistencePill(m.appendStatusBarMemoryPill(m.appendStatusBarYoloPill(m.appendStatusBarLoopPill(pills, inputs), inputs), inputs), inputs)
 }
 
 func (m *Model) statusBarSearchPill() string {
+	if m.compactionHistoryActive() {
+		h := &m.compactionHistory
+		if h.searchQuery == "" {
+			return ""
+		}
+		total, current := len(h.search.Matches), h.search.Current+1
+		if total == 0 {
+			current = 0
+		}
+		return currentStyles.PillStyle.Render(fmt.Sprintf("/%s [%d/%d]", h.searchQuery, current, total))
+	}
 	if !m.search.State.Active || m.search.State.Query == "" {
 		return ""
 	}
@@ -380,6 +404,9 @@ func (m *Model) statusBarSearchPill() string {
 }
 
 func (m *Model) statusBarModeLabel() string {
+	if m.compactionHistoryActive() {
+		return m.compactionHistoryModeLabel()
+	}
 	switch m.mode {
 	case ModeInsert:
 		modeText := "INSERT"
@@ -445,6 +472,10 @@ func (m *Model) statusBarModeLabel() string {
 }
 
 func (m *Model) statusBarSearchFingerprint() string {
+	if m.compactionHistoryActive() {
+		h := &m.compactionHistory
+		return fmt.Sprintf("%s|%d|%d", h.searchQuery, len(h.search.Matches), h.search.Current)
+	}
 	if !m.search.State.Active || m.search.State.Query == "" {
 		return ""
 	}
@@ -537,6 +568,11 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	// frozen behind a cache hit.
 	b.WriteByte('|')
 	b.WriteString(m.takeoverStatusTextAt(now))
+	if m.compactionHistoryActive() {
+		b.WriteByte('|')
+		b.WriteString(m.compactionHistoryStatusText())
+		b.WriteString(strconv.FormatBool(m.compactionHistory.searching))
+	}
 	return b.String()
 }
 
@@ -565,7 +601,7 @@ func (m *Model) renderStatusBar() string {
 	m.resetStatusBarCopyRegions()
 
 	// Exit confirmation hint: "press same key again to quit"
-	if m.quit.by != "" && !m.quit.at.IsZero() && time.Since(m.quit.at) < pendingQuitWindow {
+	if !m.compactionHistoryActive() && m.quit.by != "" && !m.quit.at.IsZero() && time.Since(m.quit.at) < pendingQuitWindow {
 		hint := "Press q again to quit"
 		if m.quit.by == "ctrl+c" {
 			hint = "Press Ctrl+C again to quit"
@@ -577,7 +613,7 @@ func (m *Model) renderStatusBar() string {
 	sessionID := snap.sessionID
 
 	// Only show technical details in status bar if InfoPanel is HIDDEN.
-	if !inputs.InfoPanelVisible {
+	if !inputs.InfoPanelVisible && !m.compactionHistoryActive() {
 		effW := max(m.width-statusBarLeftMargin-statusBarRightMargin, 0)
 		var leftW int
 		for _, p := range pills {
@@ -590,7 +626,11 @@ func (m *Model) renderStatusBar() string {
 		pills = append(pills, searchPill)
 	}
 
-	leftPillsKey := statusBarLeftPillsKey(inputs.ModeText, snap.viewingLabel, snap.viewingColor, pills[2:])
+	leadingPillCount := 2
+	if m.compactionHistoryActive() {
+		leadingPillCount = 1
+	}
+	leftPillsKey := statusBarLeftPillsKey(inputs.ModeText, snap.viewingLabel, snap.viewingColor, pills[leadingPillCount:])
 	leftSide := ""
 	leftWidth := 0
 	if m.cachedStatusBarPillsKey == leftPillsKey {
@@ -603,7 +643,7 @@ func (m *Model) renderStatusBar() string {
 		m.cachedStatusBarLeftSide = leftSide
 		m.cachedStatusBarLeftW = leftWidth
 	}
-	if m.chord.active() {
+	if !m.compactionHistoryActive() && m.chord.active() {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
 			leftSide,
@@ -643,7 +683,10 @@ func (m *Model) renderStatusBar() string {
 		escWidth = statusBarGroupGapWidth() + lipgloss.Width(styledHint)
 	}
 	canFitHint := leftWidth+escWidth+activityWidth <= rightStart
-	if inputs.NextEscHint != "" {
+	if m.compactionHistoryActive() {
+		// Keep the exit hint ahead of optional snapshot details.
+		canFitHint = leftWidth+escWidth <= effectiveWidth
+	} else if inputs.NextEscHint != "" {
 		canFitHint = statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, escWidth)
 	}
 	if hint != "" && canFitHint {
@@ -741,6 +784,14 @@ func statusBarActivitySpan(leftWidth, rightStart, activityWidth, effectiveWidth 
 }
 
 func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWidth, leftWidth int) (string, int) {
+	if m.compactionHistoryActive() {
+		if m.width < 60 {
+			return "", 0
+		}
+		text := currentStyles.DimStyle.Render(terminaltext.TruncateOneLine(
+			m.compactionHistoryStatusText(), max(effectiveWidth-leftWidth-16, 0)))
+		return text, lipgloss.Width(text)
+	}
 	statusActiveID := inputs.StatusActiveID
 	statusActivity := inputs.StatusActivity
 	availableCenter := max(effectiveWidth-leftWidth-8, 0)

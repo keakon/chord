@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/chord/internal/imagegen"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -59,7 +60,7 @@ func TestForkHistoryOwnsGeneratedOriginals(t *testing.T) {
 				msg = message.Message{Role: message.RoleAssistant, NativeTools: &message.NativeToolHistory{Calls: []message.HostedCall{{ID: "image-1", Kind: message.HostedCallKindImageGeneration, Result: summary, Parts: []message.ContentPart{part}}}}}
 			}
 			writeForkFixtureJSONL(t, src, "main.pre-compress-1.jsonl", []message.Message{msg})
-			writeForkHistoryStatus(t, src, 1, compactionHistoryStatusApplied)
+			writeForkHistoryStatus(t, src, 1, recovery.CompactionHistoryStatusApplied)
 			writeForkFixtureJSONL(t, src, "main.jsonl", []message.Message{msg})
 			dst, _, _, err := forkSessionAtHistory(src, filepath.Dir(src), t.TempDir(), 0)
 			if err != nil {

@@ -377,7 +377,50 @@ These commands are handled by the local runtime and are not sent to the model as
 
 When a non-standard tier is active, the sidebar shows it. If a model switch makes the selected tier unavailable, it appears dimmed and struck through. In Normal mode, `Ctrl+R` cycles only through tiers supported by the current provider and model.
 
-The following commands have more interactive detail, expanded below.
+The following sections cover history browsing and other interactive views.
+
+### Compaction history browser
+
+In Insert or Normal mode, press `Alt+←` to open the newest pre-compaction snapshot. Press it again to visit an earlier snapshot; `Alt+→` moves toward newer snapshots and returns to the live session after the newest one. Returning restores the input draft, cursor and mode. In the live session, `Alt+→` keeps its mode-specific behavior. The browser shows one snapshot at a time as ordinary message cards. The bindings are configurable as `compaction_history` and `compaction_history_next` under `keymap:` in `config.yaml`.
+
+`Alt+b` / `Alt+f` are also bound by default, so Option+← / Option+→ work in terminals such as Ghostty on macOS that send these word-motion keys. Custom bindings replace the full default list for that action.
+
+A compaction summary card has its own entry into the history it replaced: the card ends with `View referenced history · 2 archives`. Clicking that line opens exactly the archives the checkpoint named — never the newest snapshot of the session. `Enter` on the focused card does the same, unless the card also delivered files, in which case `Enter` keeps opening those. When the checkpoint names a single archive and this session still holds the matching snapshot, the browser opens that snapshot directly and marks it `referenced` in the status bar. When the checkpoint names several archives, the browser shows a source list under `Sources named by this checkpoint`, with every archive marked `available` or `no local snapshot`; choose one with `↑` / `↓` and press `Enter`. An archive that only exists as Markdown, or whose snapshot was cleaned up, is listed as `no local snapshot` — it is never replaced by a different snapshot.
+
+**It is strictly read-only while open.** You cannot send messages, edit the queue, answer confirmations or questions, fork the session, switch model or role, stop jobs, open files, or run shell commands. The live session keeps running underneath: an already-started default-answer timer keeps counting, a permission timeout still rejects, and the current task keeps going. Opening or leaving the browser never answers, rejects, or cancels anything for you.
+
+History uses the usual message area, sidebar and bottom status bar. The message input, attachments and queued drafts are hidden; typing or pasting cannot change the draft or send a message. The sidebar continues showing the live session's information and allows scrolling and section folding. Press `/` to show a separate history search field.
+
+Every dialog is hidden while the browser is open, including ones that were already open before you entered it. A request that arrives while it is open stays queued and is shown when you leave.
+
+Keys inside the browser:
+
+- `Esc` or `q`: leave the browser
+- `Ctrl+C`: leave the browser (it does not quit chord)
+- `Alt+←` / `Alt+→`: switch to an earlier / later snapshot; moving forward from the newest snapshot returns to the live session
+- `←` / `→` (or `h` / `l`): the same navigation within the browser
+- `↑` / `↓` (or `k` / `j`): focus the previous / next message card
+- `Ctrl+F` / `Ctrl+B` (or `PgDn` / `PgUp`): page
+- `g` / `G`: jump to the start / end
+- `[` / `]`: move the focus to the previous / next card of the same type
+- `o` / `Enter` / `Space`: fold or unfold the focused card
+- `y` or `Super+C`: copy selected text, or the focused card when no text is selected
+- `/`: search inside the current snapshot
+- `n` / `N`: jump to the next / previous match
+
+Drag across the cards to select text. Double-click selects a word, and triple-click selects a line. Image attachments appear as metadata placeholders.
+
+The search field's placeholder is `search this snapshot`. Inside the search field, `q` and the arrow keys belong to the query text; `Alt+←` / `Alt+→` move the cursor by word. `Esc` leaves the search first, keeping you in the browser. The history shortcuts also leave the live session's search fields and dialogs to handle their own keys.
+
+The bottom status bar shows `HISTORY 2/4` for the second of four available snapshots. The left-side Esc hint uses the usual status bar style: `esc ⇢ live` when browsing, or `esc ⇢ cancel search` while searching. When space permits, the bar also shows the snapshot file number (`snapshot #5`) and the live session's state: `waiting for confirmation`, `waiting for an answer`, `waiting for a decision`, `running`, or `idle`. Loading progress and errors take priority in that space. Narrow windows keep the history marker; the Esc hint appears when it fits.
+
+The number in `snapshot #5` is the compaction attempt number, so it can have gaps — it is not the number of successful compactions.
+
+While the snapshot is being read, the body shows `Reading the compaction history…`, and while the cards are still being prepared it shows `Preparing history cards 12/300`. A snapshot that cannot be read says why, for example `The snapshot is empty; there is no history to show`, `The snapshot is damaged; the history cannot be read in full`, `The snapshot path is invalid or was replaced; refusing to read it`, `That snapshot is not available (never applied, or cleaned up)`, or `Failed to read the snapshot`. Moving back past the earliest snapshot keeps it open and reports `Already at the earliest snapshot`. Moving forward past the newest returns to the live session, even while that snapshot is loading.
+
+Resizing the terminal re-flows the cards at the new width in bounded batches, so a large snapshot never freezes the input loop. The first frame after a resize already shows cards, the rest are prepared behind it, and your place is kept by the card you were on. A search that was open is rebuilt against the new layout.
+
+When the session has no applied snapshot, the browser says so plainly (`This session has no compaction history`, or `This session has no compaction history (N snapshot status records are damaged)` when status records are broken) and leaves the live session untouched.
 
 ### Project Memory
 

@@ -22,6 +22,11 @@ func (m *Model) normalActivation() tea.Cmd {
 		if len(block.DeliveredFiles) > 0 {
 			return m.openDeliveryFiles(block.DeliveredFiles)
 		}
+		if block.Type == BlockCompactionSummary {
+			// A checkpoint names the archived history it replaced; Enter on
+			// the card opens exactly that history.
+			return m.openCompactionSummaryHistory(block)
+		}
 		if block.Type == BlockAssistant {
 			if links := localFileLinks(block.Content, block.FileLinkBaseDir); len(links) > 0 {
 				return m.openLocalFileLinks(links)
@@ -70,6 +75,9 @@ func (m *Model) nextEnterHint() string {
 	if b != nil {
 		if b.Streaming || b.Type == BlockStatus {
 			return ""
+		}
+		if b.Type == BlockCompactionSummary && len(b.DeliveredFiles) == 0 && len(b.compactionSummaryArchiveRefs()) > 0 {
+			return "view referenced history"
 		}
 		if b.ToolName == tools.NameDelegate {
 			return "open task"

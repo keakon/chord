@@ -68,6 +68,10 @@ type KeyMap struct {
 	Diagnostics []string // export diagnostics bundle
 	Yolo        []string // toggle YOLO permission-bypass mode
 	MCP         []string // open MCP server selector
+
+	// History navigation leaves searches and dialogs in control of their keys.
+	CompactionHistory     []string // open from Normal or Insert mode, or visit an earlier snapshot
+	CompactionHistoryNext []string // visit a later snapshot, then return to the live session
 }
 
 // DefaultKeyMap returns the built-in Vim-style key bindings.

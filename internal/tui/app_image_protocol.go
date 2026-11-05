@@ -80,6 +80,9 @@ func (m *Model) imageProtocolCmd() tea.Cmd {
 }
 
 func (m *Model) imageProtocolCmdWithReason(reason string) tea.Cmd {
+	if m.compactionHistoryActive() {
+		return nil
+	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "unspecified"
@@ -109,6 +112,9 @@ func (m *Model) imageProtocolCmdWithReason(reason string) tea.Cmd {
 }
 
 func (m *Model) imageViewerProtocolCmd() tea.Cmd {
+	if m.compactionHistoryActive() {
+		return nil
+	}
 	v := &m.imageViewer
 	if !v.Open {
 		return nil

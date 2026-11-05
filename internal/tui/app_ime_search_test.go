@@ -535,13 +535,10 @@ func TestOpenModelSelectClearsActiveSearchSession(t *testing.T) {
 
 func TestMouseSelectionRangeConvertsInclusiveDragEndpointToExclusive(t *testing.T) {
 	m := NewModel(nil)
-	m.selStartBlockID = 1
-	m.selStartLine = 0
-	m.selStartCol = 4
-	m.selEndBlockID = 1
-	m.selEndLine = 0
-	m.selEndCol = 13
-	m.selEndInclusiveForCopy = true
+	m.mouseSelection = viewportSelection{
+		active: true, inclusive: true,
+		rangeValue: SelectionRange{StartBlockID: 1, StartCol: 4, EndBlockID: 1, EndCol: 13},
+	}
 
 	sel := m.mouseSelectionRange()
 	if sel.StartCol != 4 || sel.EndCol != 14 {
@@ -551,13 +548,10 @@ func TestMouseSelectionRangeConvertsInclusiveDragEndpointToExclusive(t *testing.
 
 func TestMouseSelectionRangePreservesExclusiveWordSelection(t *testing.T) {
 	m := NewModel(nil)
-	m.selStartBlockID = 1
-	m.selStartLine = 0
-	m.selStartCol = 4
-	m.selEndBlockID = 1
-	m.selEndLine = 0
-	m.selEndCol = 14
-	m.selEndInclusiveForCopy = false
+	m.mouseSelection = viewportSelection{
+		active:     true,
+		rangeValue: SelectionRange{StartBlockID: 1, StartCol: 4, EndBlockID: 1, EndCol: 14},
+	}
 
 	sel := m.mouseSelectionRange()
 	if sel.StartCol != 4 || sel.EndCol != 14 {

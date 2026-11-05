@@ -7,6 +7,12 @@ package tui
 // nearby left-side pending buffer hint, and repeating "esc ⇢ clear <buf>"
 // adds noise and layout churn.
 func (m *Model) nextEscHint() string {
+	if m.compactionHistoryActive() {
+		if m.compactionHistory.searching {
+			return "cancel search"
+		}
+		return "live"
+	}
 	switch m.mode {
 	case ModeSearch:
 		return "cancel search"

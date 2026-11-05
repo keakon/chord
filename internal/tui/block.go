@@ -13,11 +13,12 @@ import (
 
 // BlockImagePart stores render metadata for an attached image preview.
 type BlockImagePart struct {
-	FileName  string
-	ImagePath string
-	MimeType  string
-	Data      []byte
-	Index     int
+	FileName     string
+	ImagePath    string
+	MimeType     string
+	Data         []byte
+	Index        int
+	MetadataOnly bool // Historical attachments never enter the image pipeline.
 
 	cacheKey string // Immutable source key captured by a background image command.
 
@@ -57,6 +58,7 @@ const (
 // Block represents a single visual element in the conversation.
 type Block struct {
 	deliveryHits     []deliveryCardHit
+	compactionEntry  *compactionCardEntryHit
 	FileLinkBaseDir  string
 	DeliveredFiles   []message.DeliveredFile
 	ID               int

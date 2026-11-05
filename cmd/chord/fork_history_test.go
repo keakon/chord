@@ -89,8 +89,8 @@ func TestScanForkHistoryBoundaries(t *testing.T) {
 	dir := t.TempDir()
 	writeForkFixtureJSONL(t, dir, "main.pre-compress-1.jsonl", []message.Message{forkFixtureMessage(message.RoleUser, "a")})
 	writeForkFixtureJSONL(t, dir, "main.pre-compress-2.jsonl", []message.Message{forkFixtureMessage(message.RoleUser, "b")})
-	writeForkHistoryStatus(t, dir, 1, compactionHistoryStatusApplied)
-	writeForkHistoryStatus(t, dir, 2, compactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, dir, 1, recovery.CompactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, dir, 2, recovery.CompactionHistoryStatusApplied)
 	if err := os.WriteFile(filepath.Join(dir, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -189,8 +189,8 @@ func writeForkSourceFixture(t *testing.T, sessionDir string) {
 	if err := os.WriteFile(filepath.Join(sessionDir, "history-2.md"), []byte("# Index\n- 1: User: [Context Summary]\n... archived gen 2 ...\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeForkHistoryStatus(t, sessionDir, 1, compactionHistoryStatusApplied)
-	writeForkHistoryStatus(t, sessionDir, 2, compactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, sessionDir, 1, recovery.CompactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, sessionDir, 2, recovery.CompactionHistoryStatusApplied)
 	if err := os.WriteFile(filepath.Join(sessionDir, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestForkSessionAtHistoryErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeForkFixtureJSONL(t, src, "main.pre-compress-1.jsonl", []message.Message{forkFixtureMessage(message.RoleUser, "u1")})
-	writeForkHistoryStatus(t, src, 1, compactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, src, 1, recovery.CompactionHistoryStatusApplied)
 	if err := os.WriteFile(filepath.Join(src, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +473,7 @@ func TestForkSessionRelocatesImageAttachment(t *testing.T) {
 		},
 	}
 	writeForkFixtureJSONL(t, src, "main.pre-compress-1.jsonl", []message.Message{user})
-	writeForkHistoryStatus(t, src, 1, compactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, src, 1, recovery.CompactionHistoryStatusApplied)
 	if err := os.WriteFile(filepath.Join(src, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +517,7 @@ func TestForkSessionLatestSkipsPendingBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeForkFixtureJSONL(t, src, "main.pre-compress-1.jsonl", []message.Message{forkFixtureMessage(message.RoleUser, "gen1")})
-	writeForkHistoryStatus(t, src, 1, compactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, src, 1, recovery.CompactionHistoryStatusApplied)
 	writeForkFixtureJSONL(t, src, "main.pre-compress-2.jsonl", []message.Message{forkFixtureMessage(message.RoleUser, "gen2-not-yet-applied")})
 	writeForkHistoryStatus(t, src, 2, forkHistoryStatusPendingApply)
 	if err := os.WriteFile(filepath.Join(src, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
@@ -561,7 +561,7 @@ func TestForkSessionMissingAttachmentFails(t *testing.T) {
 		},
 	}
 	writeForkFixtureJSONL(t, src, "main.pre-compress-1.jsonl", []message.Message{user})
-	writeForkHistoryStatus(t, src, 1, compactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, src, 1, recovery.CompactionHistoryStatusApplied)
 	if err := os.WriteFile(filepath.Join(src, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -629,8 +629,8 @@ func TestForkSessionRewritesCheckpointHistoryMap(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, "history-1.md"), []byte("# Index\n- 1: User: u1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeForkHistoryStatus(t, src, 1, compactionHistoryStatusApplied)
-	writeForkHistoryStatus(t, src, 2, compactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, src, 1, recovery.CompactionHistoryStatusApplied)
+	writeForkHistoryStatus(t, src, 2, recovery.CompactionHistoryStatusApplied)
 	if err := os.WriteFile(filepath.Join(src, "main.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

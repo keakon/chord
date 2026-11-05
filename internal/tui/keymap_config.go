@@ -55,6 +55,8 @@ var keyMapSetters = []keyMapSetter{
 	{keybinding.ActionDiagnostics, func(km *KeyMap) *[]string { return &km.Diagnostics }},
 	{keybinding.ActionYolo, func(km *KeyMap) *[]string { return &km.Yolo }},
 	{keybinding.ActionMCP, func(km *KeyMap) *[]string { return &km.MCP }},
+	{keybinding.ActionCompactionHistory, func(km *KeyMap) *[]string { return &km.CompactionHistory }},
+	{keybinding.ActionCompactionHistoryNext, func(km *KeyMap) *[]string { return &km.CompactionHistoryNext }},
 }
 
 // KeyMapFromConfig resolves overrides against the shared action catalog. Empty

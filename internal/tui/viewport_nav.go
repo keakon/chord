@@ -37,6 +37,16 @@ func (v *Viewport) ScrollToBottom() {
 	v.sticky = true
 }
 
+func (v *Viewport) scrollToBlock(id int) {
+	// Use cached line starts instead of building a MessageDirectory, which
+	// would summarize every card on each navigation key.
+	if offset, ok := v.LineOffsetForBlockID(id); ok {
+		v.offset = offset
+		v.clampOffset()
+		v.sticky = v.atBottom()
+	}
+}
+
 // NextMessageBoundary scrolls to the start of the next block.
 func (v *Viewport) NextMessageBoundary() {
 	starts := v.blockStarts()

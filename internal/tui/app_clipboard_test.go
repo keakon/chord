@@ -1098,12 +1098,11 @@ func TestHandleNormalKeyYyIgnoresMouseSelectionAndCopiesFocusedImageCard(t *test
 	m.viewport.AppendBlock(block)
 	m.focusedBlockID = 1
 	m.refreshBlockFocus()
-	m.selStartBlockID = 1
-	m.selStartLine = 4
-	m.selStartCol = 0
-	m.selEndBlockID = 1
-	m.selEndLine = 4
-	m.selEndCol = 10
+	m.mouseSelection = viewportSelection{
+		active: true,
+		rangeValue: SelectionRange{StartBlockID: 1, StartLine: 4,
+			EndBlockID: 1, EndLine: 4, EndCol: 10},
+	}
 
 	if cmd := m.handleNormalKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'})); cmd == nil {
 		t.Fatal("first y of yy should start chord command")
@@ -1380,13 +1379,11 @@ func TestSuperCopyMouseSelectionKeepsLastCharacter(t *testing.T) {
 		t.Fatalf("failed to find rendered inline code in %#v", lines)
 	}
 
-	m.selStartBlockID = 1
-	m.selStartLine = target
-	m.selStartCol = startCol
-	m.selEndBlockID = 1
-	m.selEndLine = target
-	m.selEndCol = startCol + len("app_id/app_secret") - 1
-	m.selEndInclusiveForCopy = true
+	m.mouseSelection = viewportSelection{
+		active: true, inclusive: true,
+		rangeValue: SelectionRange{StartBlockID: 1, StartLine: target, StartCol: startCol,
+			EndBlockID: 1, EndLine: target, EndCol: startCol + len("app_id/app_secret") - 1},
+	}
 
 	cmd := m.handleSuperCopy()
 	if cmd == nil {

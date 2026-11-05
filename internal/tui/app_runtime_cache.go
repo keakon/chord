@@ -164,9 +164,9 @@ func (m *Model) Close() error {
 	m.imageViewer = imageViewerState{}
 	clear(m.kittyImageCache)
 	clear(m.kittyPlacementCache)
-	var firstErr error
+	firstErr := m.disposeCompactionHistory()
 	if m.inputHistoryStore != nil {
-		firstErr = m.inputHistoryStore.Close(context.Background())
+		firstErr = errors.Join(firstErr, m.inputHistoryStore.Close(context.Background()))
 	}
 	m.inputHistoryRuntime.close()
 	if m.viewport != nil {

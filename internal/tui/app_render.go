@@ -81,6 +81,18 @@ func (m *Model) drawFrame(scr uv.Screen, area image.Rectangle) *tea.Cursor {
 		uv.NewStyledString("Goodbye!\n").Draw(scr, area)
 		return nil
 	}
+	if m.compactionHistoryActive() {
+		m.overlayDrawnThisFrame = true
+		m.renderToCache(&m.cachedCompactionHistoryRender, m.renderCompactionHistory(layout.main))
+		m.drawCachedRenderable(scr, layout.main, &m.cachedCompactionHistoryRender)
+		m.drawInfoPanelLayer(scr, layout)
+		if layout.input.Dy() > 0 {
+			uv.NewStyledString(m.renderCompactionHistorySearch(layout.input.Dx())).Draw(scr, layout.input)
+			m.frameContentDirty = true
+		}
+		m.drawFooterLayers(scr, layout)
+		return nil
+	}
 
 	// ---- Base layer ----
 	m.drawBaseLayers(scr, layout)
@@ -203,11 +215,9 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 	}
 }
 
-func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
-	m.drawMainLayer(scr, layout)
-	// Info panel
-	if layout.infoPanel.Dx() > 0 && m.mode != ModeStatus {
-		infoView := m.renderInfoPanel(layout.infoPanel.Dx(), m.viewport.height)
+func (m *Model) drawInfoPanelLayer(scr uv.Screen, layout tuiLayout) {
+	if layout.infoPanel.Dx() > 0 && (m.compactionHistoryActive() || m.mode != ModeStatus) {
+		infoView := m.renderInfoPanel(layout.infoPanel.Dx(), layout.infoPanel.Dy())
 		if m.cachedInfoPanelRender.text != infoView {
 			m.renderToCache(&m.cachedInfoPanelRender, infoView)
 		}
@@ -219,6 +229,11 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 		m.frameContentDirty = true
 		m.cachedInfoPanelRender = cachedRenderable{}
 	}
+}
+
+func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
+	m.drawMainLayer(scr, layout)
+	m.drawInfoPanelLayer(scr, layout)
 
 	// Sync textarea height (safety net; primary sync happens in Update paths).
 	// Keep render-time height semantics aligned with update/layout logic: use
@@ -339,6 +354,17 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 		m.cachedQueueHeight = 0
 		m.cachedQueueKey = ""
 		m.cachedQueueRender = cachedRenderable{}
+	}
+
+	m.drawFooterLayers(scr, layout)
+}
+
+func (m *Model) drawFooterLayers(scr uv.Screen, layout tuiLayout) {
+	if layout.statusSeparator.Dy() > 0 {
+		separator := currentStyles.InputSeparatorDimmedStyle.Render(
+			strings.Repeat(SectionSeparator, max(layout.statusSeparator.Dx()-1, 0)))
+		uv.NewStyledString(separator).Draw(scr, layout.statusSeparator)
+		m.frameContentDirty = true
 	}
 
 	// Toast: transient and short-lived, so keep its frames on the compared

@@ -472,6 +472,11 @@ func (m *Model) mouseHitZones(mouse tea.Mouse) mouseHitZones {
 }
 
 func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
+	// The read-only history layer owns the mouse while it is open, including
+	// while the live session is frozen for transfer.
+	if m.compactionHistoryActive() {
+		return m.handleCompactionHistoryMouse(msg)
+	}
 	if m.takeoverInputFrozen() {
 		return m.handleTakeoverMouse(msg)
 	}
@@ -654,6 +659,13 @@ func (m *Model) handleViewportMouseClick(mouse tea.Mouse, hits mouseHitZones) te
 			return cmd
 		}
 	}
+	if block.Type == BlockCompactionSummary {
+		// The checkpoint's own entry into the archived history it names. A
+		// click on the rest of the card still starts a text selection.
+		if cmd, handled := m.activateCompactionSummaryHistory(block, lineInBlock, hits.viewportCol); handled {
+			return cmd
+		}
+	}
 	col := clampCol(hits.viewportCol, m.viewport.width)
 	if cmd, handled := m.handleViewportSelectionClick(mouse, block, lineInBlock, col); handled {
 		return cmd
@@ -662,52 +674,7 @@ func (m *Model) handleViewportMouseClick(mouse tea.Mouse, hits mouseHitZones) te
 }
 
 func (m *Model) handleViewportSelectionClick(mouse tea.Mouse, block *Block, lineInBlock, col int) (tea.Cmd, bool) {
-	// Double/triple click for word/line selection.
-	now := time.Now()
-	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
-		abs(mouse.X-m.lastClickX) <= mouseClickTolerance &&
-		abs(mouse.Y-m.lastClickY) <= mouseClickTolerance {
-		m.clickCount++
-	} else {
-		m.clickCount = 1
-	}
-	m.lastClickTime = now
-	m.lastClickX = mouse.X
-	m.lastClickY = mouse.Y
-
-	if m.clickCount == 2 {
-		plain, _ := m.viewport.GetLinePlain(block.ID, lineInBlock)
-		sCol, eCol := WordBoundsAtCol(plain, col)
-		if sCol < eCol {
-			m.selStartBlockID = block.ID
-			m.selStartLine = lineInBlock
-			m.selStartCol = sCol
-			m.selEndBlockID = block.ID
-			m.selEndLine = lineInBlock
-			m.selEndCol = eCol
-			m.selEndInclusiveForCopy = false
-			m.mouseDown = false
-		} else {
-			m.startPointSelection(block.ID, lineInBlock, col)
-		}
-		return nil, true
-	}
-	if m.clickCount >= 3 {
-		_, lineWidth := m.viewport.GetLinePlain(block.ID, lineInBlock)
-		m.clickCount = 0
-		if lineWidth > 0 {
-			m.selStartBlockID = block.ID
-			m.selStartLine = lineInBlock
-			m.selStartCol = 0
-			m.selEndBlockID = block.ID
-			m.selEndLine = lineInBlock
-			m.selEndCol = lineWidth
-			m.selEndInclusiveForCopy = false
-			m.mouseDown = false
-		} else {
-			// Empty line: treat as single click (point selection).
-			m.startPointSelection(block.ID, lineInBlock, col)
-		}
+	if m.mouseSelection.begin(m.viewport, block, lineInBlock, col, mouse) {
 		return nil, true
 	}
 
@@ -715,30 +682,16 @@ func (m *Model) handleViewportSelectionClick(mouse tea.Mouse, block *Block, line
 		m.setFocusedViewportBlock(block)
 		if part, ok := block.imagePartAtPoint(lineInBlock, col, m.viewport.width); ok {
 			m.clearMouseSelection()
-			m.mouseDown = false
 			return openBlockImageCmd(m.runtimeImageOpenDir(), block, part, m.imageCaps), true
 		}
 		// Do not scroll on click; only j/k/g/G etc. reposition the view.
 	} else {
 		if part, ok := block.imagePartAtPoint(lineInBlock, col, m.viewport.width); ok {
 			m.clearMouseSelection()
-			m.mouseDown = false
 			return openBlockImageCmd(m.runtimeImageOpenDir(), block, part, m.imageCaps), true
 		}
 	}
-	m.startPointSelection(block.ID, lineInBlock, col)
 	return nil, true
-}
-
-func (m *Model) startPointSelection(blockID, line, col int) {
-	m.mouseDown = true
-	m.selStartBlockID = blockID
-	m.selStartLine = line
-	m.selStartCol = col
-	m.selEndBlockID = blockID
-	m.selEndLine = line
-	m.selEndCol = col
-	m.selEndInclusiveForCopy = true
 }
 
 func (m *Model) setFocusedViewportBlock(block *Block) {
@@ -794,12 +747,9 @@ func (m *Model) handleMouseMotion(mouse tea.Mouse, hits mouseHitZones) tea.Cmd {
 		}
 		return nil
 	}
-	if m.mouseDown && hits.inViewport {
+	if m.mouseSelection.dragging && hits.inViewport {
 		if block, lineInBlock := m.viewportResolveMouse(hits.viewportLine); block != nil {
-			m.selEndBlockID = block.ID
-			m.selEndLine = lineInBlock
-			m.selEndCol = clampCol(hits.viewportCol, m.viewport.width)
-			m.selEndInclusiveForCopy = true
+			m.mouseSelection.extend(block.ID, lineInBlock, clampCol(hits.viewportCol, m.viewport.width))
 		}
 		return nil
 	}
@@ -808,7 +758,7 @@ func (m *Model) handleMouseMotion(mouse tea.Mouse, hits mouseHitZones) tea.Cmd {
 
 func (m *Model) handleMouseRelease(mouse tea.Mouse) tea.Cmd {
 	if mouse.Button == tea.MouseLeft {
-		m.mouseDown = false
+		m.mouseSelection.dragging = false
 		m.inputMouseDown = false
 	}
 	return nil

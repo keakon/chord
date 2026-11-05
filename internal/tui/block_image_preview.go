@@ -10,7 +10,11 @@ func (b *Block) appendImagePreviewLines(finalLines *[]string, contentWidth int, 
 	imagesRendered := false
 	for i := range b.ImageParts {
 		startLine := len(*finalLines)
-		imageLines, renderCols, renderRows, err := renderImageBlock(&b.ImageParts[i], contentWidth, cardBg, currentImageCapabilities())
+		caps := currentImageCapabilities()
+		if b.ImageParts[i].MetadataOnly {
+			caps = TerminalImageCapabilities{}
+		}
+		imageLines, renderCols, renderRows, err := renderImageBlock(&b.ImageParts[i], contentWidth, cardBg, caps)
 		if err != nil {
 			b.ImageParts[i].RenderStartLine = -1
 			b.ImageParts[i].RenderEndLine = -1

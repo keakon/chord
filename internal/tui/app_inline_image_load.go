@@ -35,7 +35,7 @@ type inlineImagesLoadedMsg struct {
 
 // Inline protocols draw into the transcript; dialogs must remain the final layer.
 func (m *Model) inlineImagesAllowed() bool {
-	return (m.mode == ModeNormal || m.mode == ModeInsert || m.mode == ModeSearch) && !m.bottomLeftOverlayDrawn()
+	return !m.compactionHistoryActive() && (m.mode == ModeNormal || m.mode == ModeInsert || m.mode == ModeSearch) && !m.bottomLeftOverlayDrawn()
 }
 
 // Capture viewport state on the main loop; commands only use immutable parts.

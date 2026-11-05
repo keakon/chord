@@ -86,6 +86,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding([]string{statusCommand}, "open runtime overview from input"),
 		helpBinding(km.ErrorPanel, "open error panel"),
 		helpBinding(km.BackgroundJobs, "open background jobs"),
+		helpBinding(km.CompactionHistory, "browse pre-compaction history"),
 		helpBinding(km.SwitchAgent, "switch focused agent (cycle)"),
 		helpBinding(km.SwitchRole, "switch main agent role (main view only)"),
 		helpBinding(km.Stop, "stop active turn and running subagents"),
@@ -133,6 +134,15 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		{
 			Title:    "Normal Mode",
 			Bindings: normalBindings,
+		},
+		{
+			Title: "Compaction History",
+			Bindings: []HelpBinding{
+				helpBinding(km.CompactionHistory, "earlier snapshot"),
+				helpBinding(km.CompactionHistoryNext, "later snapshot, then return to live session"),
+				helpBinding([]string{"esc / q"}, "return to live session"),
+				helpBinding([]string{"/"}, "search this snapshot"),
+			},
 		},
 		{
 			Title: "Search",

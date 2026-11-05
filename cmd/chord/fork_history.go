@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,41 +27,6 @@ import (
 // `chord resume` subcommand and the root `chord --resume` form.
 const forkHistoryFlagHelp = "Fork the session at an applied compaction boundary and resume the fork instead: pass the boundary number (e.g. =2 for history-2) or omit it for the latest applied boundary. The fork's main.jsonl is created from that boundary's pre-compaction main.pre-compress-N.jsonl record for record — the checkpoint summary card included — with message content preserved unchanged except that image/PDF attachments are relocated into the fork and the checkpoint's archived-history paths are repointed at the fork's own copies of the history-*.md archives. Usage and runtime state start fresh, and sub-agent/task state is not carried over. It works while the source session is open in another process."
 
-// compactionHistoryStatusApplied mirrors the agent-side compaction lifecycle
-// constant (compactionHistoryApplied in internal/agent/compaction.go): the
-// boundary scan below must agree with that lifecycle, which flips
-// history-N.status.json from "pending_apply" to "applied" only after the
-// pre-compress rename and the main.jsonl rewrite both completed.
-const compactionHistoryStatusApplied = "applied"
-
-// forkCompactionHistoryStatusPath returns the path of the agent-written status
-// record that accompanies history-N.md and its main.pre-compress-N.jsonl
-// snapshot (the agent derives it from the archive path the same way).
-func forkCompactionHistoryStatusPath(sessionDir string, index int) string {
-	return filepath.Join(sessionDir, fmt.Sprintf("history-%d.status.json", index))
-}
-
-// forkCompactionBoundaryApplied reports whether compaction boundary N was fully
-// applied. A missing status file means the apply never completed (the status
-// record exists before the pre-compress rename and is only flipped to
-// "applied" after the main.jsonl rewrite), so such a snapshot is not forkable.
-func forkCompactionBoundaryApplied(sessionDir string, index int) (bool, error) {
-	data, err := os.ReadFile(forkCompactionHistoryStatusPath(sessionDir, index))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	var meta struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return false, fmt.Errorf("parse compaction status: %w", err)
-	}
-	return meta.Status == compactionHistoryStatusApplied, nil
-}
-
 // forkHistoryBoundary describes one applied compaction generation of a
 // session: boundary N corresponds to main.pre-compress-N.jsonl — the session's
 // complete pre-compaction transcript, archived verbatim when compaction N
@@ -72,45 +36,29 @@ type forkHistoryBoundary struct {
 	preCompressPath string
 }
 
-// scanForkHistoryBoundaries lists the applied compaction boundaries of a
-// session by matching its main.pre-compress-N.jsonl snapshots (produced by
-// the agent's rewriteSessionAfterCompaction rename) against the corresponding
-// history-N.status.json record. A snapshot only counts as a boundary when that
-// record reports status "applied": a snapshot left behind by a crash between
-// the rename and the applied-status write is not offered for forking (the
-// agent's cleanupStalePendingCompactions deliberately keeps a pending status
-// whose backup file exists, in case the apply is still in progress or failed,
-// but that apply has not completed either way, and the flag help text promises
-// the latest *applied* boundary).
+// scanForkHistoryBoundaries adapts the shared applied-boundary discovery to
+// the fork's boundary list. A snapshot left behind by a crash between the
+// rename and the applied-status write is not offered for forking (the agent's
+// cleanupStalePendingCompactions deliberately keeps a pending status whose
+// backup file exists, in case the apply is still in progress or failed, but
+// that apply has not completed either way, and the flag help text promises the
+// latest *applied* boundary). Status records that cannot be read are logged
+// and skipped, as before.
 func scanForkHistoryBoundaries(sessionDir string) ([]forkHistoryBoundary, error) {
-	entries, err := os.ReadDir(sessionDir)
+	snapshots, issues, err := recovery.ScanCompactionHistory(sessionDir)
 	if err != nil {
 		return nil, err
 	}
-	var out []forkHistoryBoundary
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, "main.pre-compress-") || !strings.HasSuffix(name, ".jsonl") {
-			continue
-		}
-		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(name, "main.pre-compress-"), ".jsonl"))
-		if err != nil || n < 1 {
-			continue
-		}
-		applied, err := forkCompactionBoundaryApplied(sessionDir, n)
-		if err != nil {
-			log.Warnf("fork session: unreadable compaction status for boundary history-%d path=%v error=%v", n, forkCompactionHistoryStatusPath(sessionDir, n), err)
-			continue
-		}
-		if !applied {
-			continue
-		}
-		out = append(out, forkHistoryBoundary{index: n, preCompressPath: filepath.Join(sessionDir, name)})
+	for _, issue := range issues {
+		log.Warnf("fork session: unreadable compaction status for boundary history-%d path=%v error=%v", issue.Index, issue.StatusPath, issue.Err)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].index < out[j].index })
+	out := make([]forkHistoryBoundary, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		out = append(out, forkHistoryBoundary{
+			index:           snapshot.Index,
+			preCompressPath: filepath.Join(sessionDir, snapshot.JSONLName),
+		})
+	}
 	return out, nil
 }
 
@@ -417,8 +365,6 @@ func forkMessageNeedsRewrite(msg message.Message, srcDir string) bool {
 	return checkpointHistoryMapHasSourcePath(msg.Content, pathutil.AbbreviateHome(srcDir))
 }
 
-const checkpointHistoryMapHeading = "Archived history files ("
-
 func checkpointHistoryMapHasSourcePath(content, srcPrefix string) bool {
 	if srcPrefix == "" {
 		return false
@@ -426,7 +372,7 @@ func checkpointHistoryMapHasSourcePath(content, srcPrefix string) bool {
 	lines := strings.Split(content, "\n")
 	inHistoryMap := false
 	for _, line := range lines {
-		if strings.HasPrefix(line, checkpointHistoryMapHeading) {
+		if strings.HasPrefix(line, message.CompactionArchiveMapHeading) {
 			inHistoryMap = true
 			continue
 		}
@@ -440,7 +386,7 @@ func checkpointHistoryMapHasSourcePath(content, srcPrefix string) bool {
 			}
 			continue
 		}
-		if strings.HasPrefix(strings.TrimSpace(line), "Each archive begins") {
+		if strings.HasPrefix(strings.TrimSpace(line), message.CompactionArchiveMapEnd) {
 			break
 		}
 	}
@@ -492,7 +438,7 @@ func relocForkCheckpointPaths(msg message.Message, srcDir, newDir string) messag
 	lines := strings.Split(msg.Content, "\n")
 	inHistoryMap := false
 	for i, line := range lines {
-		if strings.HasPrefix(line, checkpointHistoryMapHeading) {
+		if strings.HasPrefix(line, message.CompactionArchiveMapHeading) {
 			inHistoryMap = true
 			continue
 		}
@@ -507,7 +453,7 @@ func relocForkCheckpointPaths(msg message.Message, srcDir, newDir string) messag
 			}
 			continue
 		}
-		if strings.HasPrefix(strings.TrimSpace(line), "Each archive begins") {
+		if strings.HasPrefix(strings.TrimSpace(line), message.CompactionArchiveMapEnd) {
 			break
 		}
 	}

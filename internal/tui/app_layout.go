@@ -85,25 +85,37 @@ func (m *Model) generateLayout(w, h int) tuiLayout {
 	lay := tuiLayout{area: area}
 
 	inputHeight := m.inputAreaHeight()
+	history := m.compactionHistoryActive()
+	if history {
+		inputHeight = 0
+		if m.compactionHistory.searching {
+			inputHeight = 1
+		}
+	}
 	contentEnd := h
 
 	// Status bar always occupies the bottom row.
 	contentEnd -= 1
 	lay.status = image.Rect(0, contentEnd, w, h)
 
+	if history && contentEnd > inputHeight+1 {
+		contentEnd--
+		lay.statusSeparator = image.Rect(0, contentEnd, w, contentEnd+1)
+	}
+
 	contentEnd -= inputHeight
 	lay.input = image.Rect(0, contentEnd, w, contentEnd+inputHeight)
 
 	// Attachment bar: 1 row per attachment (max 5), shown above input
 	attachHeight := min(len(m.attachments), 5)
-	if attachHeight > 0 && inputHeight > 0 {
+	if !history && attachHeight > 0 && inputHeight > 0 {
 		contentEnd -= attachHeight
 		lay.attachments = image.Rect(0, contentEnd, w, contentEnd+attachHeight)
 	}
 
 	// Queue bar: 1 row per queued draft (max 3), shown above attachments/input
 	queueHeight := min(m.queuedMailboxLineCount(), 3)
-	if queueHeight > 0 {
+	if !history && queueHeight > 0 {
 		contentEnd -= queueHeight
 		lay.queue = image.Rect(0, contentEnd, w, contentEnd+queueHeight)
 	}
@@ -120,14 +132,14 @@ func (m *Model) generateLayout(w, h int) tuiLayout {
 	// top and the info panel below. No left-side sidebar any more.
 	panelWidth := 0
 	gap := 0
-	if m.rightPanelVisible && m.mode != ModeHelp && m.mode != ModeStatus {
+	if m.rightPanelVisible && (history || (m.mode != ModeHelp && m.mode != ModeStatus)) {
 		panelWidth = rightPanelWidth
 		gap = rightPanelGap
 	}
 	mainMaxX := w - panelWidth - gap
 	lay.main = image.Rect(0, 0, mainMaxX, contentHeight)
 	lay.infoPanel = image.Rect(w-panelWidth, 0, w, contentHeight)
-	if m.mode == ModeStatus {
+	if !history && m.mode == ModeStatus {
 		lay.infoPanel = lay.main
 		lay.infoPanel.Max.Y = max(lay.infoPanel.Min.Y, lay.infoPanel.Max.Y-1)
 	}

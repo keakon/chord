@@ -146,14 +146,7 @@ func (m *Model) navigateFocusedBlock(dir int) {
 	}
 	m.focusedBlockID = nextID
 	m.refreshBlockFocus()
-	// Position the viewport at the card's start line via the cached block
-	// starts; building a MessageDirectory here would run a full per-block
-	// Summary() pass on every j/k.
-	if lineOffset, ok := m.viewport.LineOffsetForBlockID(m.focusedBlockID); ok {
-		m.viewport.offset = lineOffset
-		m.viewport.clampOffset()
-		m.viewport.sticky = m.viewport.atBottom()
-	}
+	m.viewport.scrollToBlock(nextID)
 }
 
 func (m *Model) revalidateFocusedBlock() {
@@ -250,40 +243,15 @@ func clampCol(col, maxWidth int) int {
 }
 
 func (m *Model) hasMouseSelection() bool {
-	return m.selStartBlockID >= 0 && m.selEndBlockID >= 0
+	return m.mouseSelection.active
 }
 
 func (m *Model) mouseSelectionRange() SelectionRange {
-	r := SelectionRange{
-		StartBlockID: m.selStartBlockID,
-		StartLine:    m.selStartLine,
-		StartCol:     m.selStartCol,
-		EndBlockID:   m.selEndBlockID,
-		EndLine:      m.selEndLine,
-		EndCol:       m.selEndCol,
-	}
-	if !m.selEndInclusiveForCopy {
-		return r
-	}
-	if posLess(r.StartBlockID, r.StartLine, r.StartCol, r.EndBlockID, r.EndLine, r.EndCol) {
-		r.EndCol++
-		return r
-	}
-	if posLess(r.EndBlockID, r.EndLine, r.EndCol, r.StartBlockID, r.StartLine, r.StartCol) {
-		r.StartCol++
-	}
-	return r
+	return m.mouseSelection.copyRange()
 }
 
 func (m *Model) clearMouseSelection() {
-	m.mouseDown = false
-	m.selStartBlockID = -1
-	m.selStartLine = -1
-	m.selStartCol = -1
-	m.selEndBlockID = -1
-	m.selEndLine = -1
-	m.selEndCol = -1
-	m.selEndInclusiveForCopy = false
+	m.mouseSelection.clear()
 }
 
 func (m *Model) statusPathContainsPoint(x, y int) bool {
@@ -319,11 +287,7 @@ func (m *Model) statusSessionContainsPoint(x, y int) bool {
 // viewportSelectionPtr returns a pointer to the current selection range for
 // viewport rendering (highlight), or nil if not selecting.
 func (m *Model) viewportSelectionPtr() *SelectionRange {
-	if m.selStartBlockID < 0 || m.selEndBlockID < 0 {
-		return nil
-	}
-	r := m.mouseSelectionRange()
-	return &r
+	return m.mouseSelection.rangePtr()
 }
 
 // setFocusedBlockFromViewport sets focusedBlockID to the block at the current
@@ -469,15 +433,19 @@ func (m *Model) jumpToLastVisibleBlock() tea.Cmd {
 
 // copyFocusedBlock copies the focused block to clipboard and returns the toast tick cmd.
 func (m *Model) copyFocusedBlock() tea.Cmd {
-	if m.focusedBlockID < 0 {
+	return m.copyViewportBlock(m.viewport, m.focusedBlockID, "Message card copied to clipboard")
+}
+
+func (m *Model) copyViewportBlock(viewport *Viewport, id int, success string) tea.Cmd {
+	if viewport == nil || id < 0 {
 		return m.enqueueToast("Select a message card, then y to copy", "info")
 	}
-	blocks := m.viewport.visibleBlocks()
+	blocks := viewport.visibleBlocks()
 	for _, b := range blocks {
-		if b.ID != m.focusedBlockID {
+		if b.ID != id {
 			continue
 		}
-		b = m.viewport.GetFocusedBlock(b.ID)
+		b = viewport.materialize(b)
 		if b == nil {
 			return nil
 		}
@@ -488,7 +456,7 @@ func (m *Model) copyFocusedBlock() tea.Cmd {
 		if strings.TrimSpace(content) == "" {
 			return m.enqueueToast("This card has no copyable content", "info")
 		}
-		return writeClipboardCmd(content, "Message card copied to clipboard")
+		return writeClipboardCmd(content, success)
 	}
 	return nil
 }

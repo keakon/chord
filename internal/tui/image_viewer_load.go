@@ -37,7 +37,7 @@ type imageViewerLoadedMsg struct {
 
 func (m *Model) prepareImageViewer() tea.Cmd {
 	v := &m.imageViewer
-	if !v.Open {
+	if !v.Open || m.compactionHistoryActive() {
 		return nil
 	}
 	if v.cancel != nil {

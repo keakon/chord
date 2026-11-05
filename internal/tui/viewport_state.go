@@ -22,6 +22,17 @@ func (v *Viewport) SetSpillRecovery(fn func() []*Block) {
 	v.spillRecovery = fn
 }
 
+// SetSticky controls whether the viewport keeps following newly appended
+// content. A read-only browser over a sealed snapshot turns it off: the
+// snapshot never grows, and following the tail would fight the user's own
+// scrolling.
+func (v *Viewport) SetSticky(sticky bool) {
+	if v == nil {
+		return
+	}
+	v.sticky = sticky
+}
+
 func (v *Viewport) SetSize(width, height int) {
 	if width == v.width && height == v.height {
 		return

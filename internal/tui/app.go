@@ -343,6 +343,11 @@ type Model struct {
 	// Fullscreen Markdown content viewer state
 	contentViewer contentViewerState
 
+	// Read-only compaction history browser. It is independent of the live
+	// mode on purpose: opening it must not clear an open viewer, drop the
+	// composer draft, or make the session look idle.
+	compactionHistory compactionHistoryState
+
 	// Pending image attachments (shown above input box, sent with next message)
 	attachments  []Attachment
 	composerUndo composerUndoState
@@ -556,14 +561,15 @@ type compactionBackgroundStatus struct {
 
 // tuiLayout defines the positioning of UI elements for Draw(scr, area).
 type tuiLayout struct {
-	area        image.Rectangle
-	main        image.Rectangle
-	infoPanel   image.Rectangle
-	attachments image.Rectangle // attachment bar (above input, when attachments present)
-	queue       image.Rectangle // queued drafts bar (above attachments/input, when queue non-empty)
-	input       image.Rectangle
-	status      image.Rectangle
-	toast       image.Rectangle
+	area            image.Rectangle
+	main            image.Rectangle
+	infoPanel       image.Rectangle
+	attachments     image.Rectangle // attachment bar (above input, when attachments present)
+	queue           image.Rectangle // queued drafts bar (above attachments/input, when queue non-empty)
+	input           image.Rectangle
+	statusSeparator image.Rectangle
+	status          image.Rectangle
+	toast           image.Rectangle
 }
 
 type toastItem struct {
@@ -632,11 +638,9 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		lastDisplaySequence: make(map[string]int),
 
 		// selectionState
-		focusedBlockID:  -1,
-		zone:            z,
-		selStartBlockID: -1,
-		selEndBlockID:   -1,
-		statusSession:   statusBarCopyRegionState{},
+		focusedBlockID: -1,
+		zone:           z,
+		statusSession:  statusBarCopyRegionState{},
 
 		workingDir:                   workDirSnap.Path,
 		workingDirID:                 workDirSnap.WorktreeID,
@@ -895,6 +899,11 @@ type applyResizeMsg struct{ version int }
 // Update is the central message dispatcher.
 func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	defer func() {
+		if m.compactionHistoryActive() {
+			m.input.Suspend()
+		}
+	}()
+	defer func() {
 		if m.mode == ModeContext && !m.contextOverlay.polling {
 			m.contextOverlay.polling = true
 			m.contextOverlay.generation++
@@ -966,9 +975,13 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 				cmd = tea.Batch(cmd, next)
 			}
 		}
+		cmd = tea.Batch(cmd, m.tryReplayCompactionHistoryIntent())
 	}()
 	m.ensureViewportCallbacks()
 	if cmd, ok := m.handleInputHistoryMessage(msg); ok {
+		return m, cmd
+	}
+	if cmd, ok := m.handleCompactionHistoryMessage(msg); ok {
 		return m, cmd
 	}
 	switch msg := msg.(type) {
@@ -983,6 +996,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 	// -- bootstrap cursor blink ------------------------------------------
 	case focusInputMsg:
+		if m.compactionHistoryActive() {
+			return m, nil
+		}
 		cmd := m.input.Focus()
 		return m, cmd
 
@@ -1211,7 +1227,8 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, m.handleFocusUpdate()
 
 	case tea.WindowSizeMsg:
-		return m, m.handleWindowSizeUpdate(msg)
+		resize := m.handleWindowSizeUpdate(msg)
+		return m, tea.Batch(resize, m.startCompactionHistoryReflow())
 
 	case applyResizeMsg:
 		resize := m.handleApplyResize(msg)
@@ -1219,7 +1236,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		if m.fileViewer.open && m.fileViewer.showing {
 			preview = m.prepareFileViewer()
 		}
-		return m, tea.Batch(resize, preview, m.confirmQuestionPresentation())
+		return m, tea.Batch(resize, preview, m.confirmQuestionPresentation(), m.startCompactionHistoryReflow())
 
 	// -- agent events ----------------------------------------------------
 	case agentEventBatchMsg:
