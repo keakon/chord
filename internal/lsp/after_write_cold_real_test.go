@@ -99,9 +99,14 @@ func TestRealTypeScriptLargeFileIncludesSemanticDiagnostic(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m := NewManager(&config.Config{LSP: config.LSPConfig{
-		"typescript": {Command: server, Args: []string{"--stdio"}, FileTypes: []string{".ts"}},
-	}}, root, nil)
+	// This test checks semantic coverage, not the interactive wait budget.
+	// Real workspace analysis can exceed the default wait under suite load.
+	m := NewManager(&config.Config{
+		LSP: config.LSPConfig{
+			"typescript": {Command: server, Args: []string{"--stdio"}, FileTypes: []string{".ts"}},
+		},
+		Diagnostics: config.DiagnosticsConfig{LSP: config.LSPDiagnosticsConfig{WaitTimeoutMS: new(15000)}},
+	}, root, nil)
 	defer stopManager(m)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
