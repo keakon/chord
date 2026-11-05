@@ -18,6 +18,7 @@ type DiagnosticItem struct {
 	Path       string // absolute path to the SKILL.md file
 	Root       string // absolute path to the skill directory
 	Dir        string // scan directory that produced this row
+	DirIndex   int    // index in the loader's directory list, including repeated paths
 	Meta       *Meta  // nil when the file failed to parse
 	Err        error  // raw parse/read error, nil for valid rows
 	Shadowed   bool   // true when an earlier valid skill already owns the name
@@ -95,7 +96,7 @@ func (l *Loader) ScanMetaDiagnostic() ([]DiagnosticItem, []ScanProblem) {
 	seen := make(map[string]string)
 	var items []DiagnosticItem
 	var problems []ScanProblem
-	for _, dir := range l.dirs {
+	for dirIndex, dir := range l.dirs {
 		info, statErr := os.Stat(dir)
 		if statErr != nil {
 			if !errors.Is(statErr, fs.ErrNotExist) {
@@ -129,10 +130,11 @@ func (l *Loader) ScanMetaDiagnostic() ([]DiagnosticItem, []ScanProblem) {
 			root := filepath.Dir(absPath)
 			if loadErr != nil {
 				items = append(items, DiagnosticItem{
-					Path: absPath,
-					Root: root,
-					Dir:  dir,
-					Err:  loadErr,
+					Path:     absPath,
+					Root:     root,
+					Dir:      dir,
+					DirIndex: dirIndex,
+					Err:      loadErr,
 				})
 				continue
 			}
@@ -142,6 +144,7 @@ func (l *Loader) ScanMetaDiagnostic() ([]DiagnosticItem, []ScanProblem) {
 					Path:       meta.Location,
 					Root:       meta.RootDir,
 					Dir:        dir,
+					DirIndex:   dirIndex,
 					Meta:       meta,
 					Shadowed:   true,
 					ShadowedBy: winner,
@@ -150,11 +153,12 @@ func (l *Loader) ScanMetaDiagnostic() ([]DiagnosticItem, []ScanProblem) {
 			}
 			seen[meta.Name] = meta.Location
 			items = append(items, DiagnosticItem{
-				Name: meta.Name,
-				Path: meta.Location,
-				Root: meta.RootDir,
-				Dir:  dir,
-				Meta: meta,
+				Name:     meta.Name,
+				Path:     meta.Location,
+				Root:     meta.RootDir,
+				Dir:      dir,
+				DirIndex: dirIndex,
+				Meta:     meta,
 			})
 		}
 	}

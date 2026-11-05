@@ -58,7 +58,8 @@ func (SkillTool) Description() string {
 // description budget counts characters so multi-byte text is not penalized.
 const (
 	// SkillListingMaxTotalBytes is the byte budget for the Available Skills
-	// section (not counting the preamble text shared by all tools).
+	// described entries, header and omission notice. The additional names
+	// list is outside this budget.
 	SkillListingMaxTotalBytes = 8192
 	// SkillListingMaxDescCharsPerEntry is the per-skill description budget in
 	// characters, including the "..." appended on truncation.
@@ -104,8 +105,9 @@ const StartupSkillListingHeader = "## Available Skills\nThe `skill` tool can loa
 // SkillListingRenderEntry records what the renderer did with one entry.
 type SkillListingRenderEntry struct {
 	Name string
-	// Description is the text the renderer wrote for this entry.
-	Description string
+	// DescriptionJSON is the exact JSON string written for this entry,
+	// including quotes and escapes. It is empty when no description is listed.
+	DescriptionJSON string
 	// DescriptionTruncated reports that the description did not fit the
 	// per-entry character budget and was shortened.
 	DescriptionTruncated bool
@@ -182,7 +184,7 @@ func BuildStartupSkillListingDetailed(entries []SkillListingEntry, header string
 			body.WriteString(line)
 			shown++
 			record.Listed = true
-			record.Description = truncated
+			record.DescriptionJSON = string(desc)
 			record.DescriptionTruncated = truncated != entry.Desc
 		}
 		if !record.Listed {
@@ -318,9 +320,9 @@ type SkillInvocationParts struct {
 	// Warning is the resource warning block, empty when every declared
 	// resource is present.
 	Warning string
-	// Envelope is everything the result carries besides the body: the
-	// identity tags, the notes, and the warning block.
-	Envelope string
+	// EnvelopeBytes counts all non-body bytes, including the warning block,
+	// any added newline, and the closing tag.
+	EnvelopeBytes int
 }
 
 // FormatSkillInvocationResult renders the tool result of a skill load: the
@@ -359,17 +361,16 @@ func FormatSkillInvocationParts(sk *skill.Skill, args string) SkillInvocationPar
 		sb.WriteString(warning)
 		sb.WriteString("\n")
 	}
-	envelope := sb.String()
 	sb.WriteString(expandedContent)
 	if !strings.HasSuffix(expandedContent, "\n") {
 		sb.WriteString("\n")
 	}
 	sb.WriteString("</skill>")
 	return SkillInvocationParts{
-		Result:   sb.String(),
-		Body:     expandedContent,
-		Warning:  warning,
-		Envelope: envelope,
+		Result:        sb.String(),
+		Body:          expandedContent,
+		Warning:       warning,
+		EnvelopeBytes: sb.Len() - len(expandedContent),
 	}
 }
 

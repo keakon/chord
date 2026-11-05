@@ -144,13 +144,30 @@ paths:
 - `integrity`：`passed` 表示运行时会保留该文件；`failed` 表示会被跳过
  （YAML 写坏了、缺 `name`/`description`、文件读不出）。
 - `load`：正文能不能读出来（`passed`/`failed`/`not_run`）。
-- `visibility`：`builder` ruleset 下是否可见
+- `visibility`：所选角色的 ruleset 下是否可见
  （`visible`/`denied`/`not_checked`）。这一维只看 ruleset：
  `disable-model-invocation` 不属于它，因此只留给显式加载的技能照样报
  `visible`。
 - `resources`：已声明资源的健康状况
-  （`passed`/`failed`/`warning`/`none`）。
+ （`passed`/`failed`/`warning`/`none`）。
 - `shadowed`：是否有更高优先目录的同名 skill 占位。
+
+`--agent <name>` 选择报告采用哪个角色的权限基线，默认是 `builder`。基线就是
+该角色自身的权限规则：不含会话权限覆盖、不含 YOLO，对 worker 也不含父
+agent 的规则，所以 worker 的行是角色自身基线，而不是 worker 运行时的实际权
+限。带外部 backend 的角色不用 Chord 本地技能目录，其行报 `not_applicable`，
+不给可见性结论。角色名不存在时直接失败，而不是当成空规则集。
+
+除这四个维度外，每行还报告模型实际会收到什么：按名加载该 skill 时的
+`allow`/`ask`/`deny`、`Available Skills` 块里保留了什么（描述、缩短的描述、
+只有名字，或什么都没有）、模型能否自行加载、条件 `paths` 的状态、描述原始及
+实际渲染的大小，以及三档分开的体积——`SKILL.md` 源文件、解析正文、空参数下
+的渲染结果。渲染大小是截断前的大小；超过模型工具结果 50 KiB 内联预算的结
+果会标为 `over_inline_budget`。
+
+描述的渲染大小包含 JSON 引号和转义；未输出描述时为零，基线不可用或不适用时
+为 `null`。描述列表的 8 KiB 预算包含标题和省略提示，附加名称列表不占这份
+预算，因此完整启动块可以更大。各字段含义见 [CLI 参考](./cli_CN.md#chord-doctor-skills)。
 
 退出码沿用 `doctor` 家族：有 skill 的 integrity 或 load 失败时返回 `1`，
 检查本身跑不起来时返回 `2`。配置读不出，或扫描出问题（目录不可读、悬空

@@ -412,16 +412,33 @@ chord doctor models --provider openai --all-models --fail-fast
 
 ## `chord doctor skills`
 
-解释配好的 skill 为什么到不了模型。它复用运行时的发现顺序和解析器，只是把无效文件和被遮蔽的同名文件也各留一行，而不是静默跳过。它还会按运行时 glob 的真实遍历面审计目录：目录不可读或符号链接悬空时，会作为扫描问题（`scan_issues`）列出，而不是让它们看起来像空目录。每行有四个独立维度：`integrity`（运行时会不会保留该文件）、`load`（正文能不能读出来）、`visibility`（`builder` ruleset 是否隐藏它）、`resources`（已声明 `resources` 条目的健康状况），同名被更高优先目录占位时另有 `shadowed` 标记。能加载、能读出，不代表模型会选用它。
+解释配好的 skill 为什么到不了模型，以及真到了模型会收到什么。它复用运行时的发现顺序和解析器，只是把无效文件和被遮蔽的同名文件也各留一行，而不是静默跳过。它还会按运行时 glob 的真实遍历面审计目录：目录不可读或符号链接悬空时，会作为扫描问题（`scan_issues`）列出，而不是让它们看起来像空目录。每行有四个独立维度：`integrity`（运行时会不会保留该文件）、`load`（正文能不能读出来）、`visibility`（所选角色的 ruleset 是否隐藏它）、`resources`（已声明 `resources` 条目的健康状况），同名被更高优先目录占位时另有 `shadowed` 标记。能加载、能读出，不代表模型会选用它。
 
-退出码沿用 `doctor` 家族：有 skill 的 integrity 或 load 失败时返回 `1`，检查本身跑不起来时返回 `2`。扫描出问题（目录不可读、悬空符号链接、扫描路径不是目录）同样返回 `2`，并作为 `scan_issues` 列在报告里，而不是中断报告。被拒绝、被遮蔽、资源问题、一共没配 skill 都不影响退出码。
+报告还会说明本次运行所用的配置：内容根、checkout 根、工作目录、所选角色及其配置来源，以及按运行时优先级排列的技能目录。`--agent` 选择用哪个角色的权限基线，默认是 `builder`。角色不存在时直接以退出码 `2` 失败，而不是给出一份回答了别的问题的报告。
+
+基线就是所选角色自身的权限规则：不含会话权限覆盖、不含 YOLO，对 worker 也不含父 agent 的规则，所以 worker 的行描述的是角色自身基线，而不是 worker 运行时的实际权限。跑在外部 backend 上的角色根本不用 Chord 本地技能目录，它们的行报告 `not_applicable`，不给可见性结论。
+
+每行还报告模型实际会收到什么：
+
+- `invocation`：基线下按名加载该 skill 的 `allow` / `ask` / `deny`。可见不等于不用确认。
+- `startup`：`Available Skills` 块里是保留了描述（`listed`）、缩短描述（`listed_truncated`）、只有名字（`name_only`）还是没有（`not_listed`），并给出原因。
+- `model_invocation`：模型能否自行加载（`allowed`），还是只能由显式 `/skill` 加载（`manual_only`）。
+- `paths`：`none`、`conditional`（等待路径匹配）或 `invalid`（附模式错误）。模式非法不会取消按名加载资格。
+- `description`：原始描述与启动列表实际写入内容的大小，分别按字节和 Unicode 码点计数。渲染大小包含 JSON 引号和转义；未输出描述时为零，基线不可用或不适用时为 `null`。`truncated` 表示列表是否写入了缩短的描述，无法判断时为 `null`。
+- `sizes`：分别统计 `SKILL.md` 源文件（含 frontmatter）、解析正文（去掉 frontmatter、CRLF 归一）和空参数下的渲染结果。渲染结果由展开后的正文和包裹组成；`envelope_bytes` 包含资源警告、补上的换行和闭合标签，`warning_bytes` 是其中的警告大小。渲染大小在截断前计量；`over_inline_budget` 标记结果超过模型工具结果 50 KiB 的内联预算。
+- `sidecar`：提供有效 metadata 的 sidecar 文件（如果有）。
+
+报告还会给出启动目录块总量、体积最大的技能，以及最多五条有证据的待检查项。`startup.description_budget_bytes` 是描述列表的 8 KiB 预算，包含标题和省略提示；附加名称列表不占这份预算，因此 `startup.total_bytes` 可以超过它。这些阈值只用于排序：文件很大或被截断都不会改变退出码。
+
+退出码沿用 `doctor` 家族：有 skill 的 integrity 或 load 失败时返回 `1`，检查本身跑不起来时返回 `2`。扫描出问题（目录不可读、悬空符号链接、扫描路径不是目录）同样返回 `2`，并作为 `scan_issues` 列在报告里，而不是中断报告。`--agent` 指定的角色不存在时同样返回 `2`。被拒绝、被遮蔽、资源问题、一共没配 skill 都不影响退出码。
 
 ### Flag
 
-| 参数         | 说明                                               |
-| ------------ | -------------------------------------------------- |
-| `--json`   | 输出机器可读的 JSON 报告                           |
-| `--strict` | ruleset 不可用或某项检查没跑成时也返回 `1`         |
+| 参数              | 说明                                               |
+| ----------------- | -------------------------------------------------- |
+| `--json`          | 输出机器可读的 JSON 报告                           |
+| `--strict`        | ruleset 不可用或某项检查没跑成时也返回 `1`         |
+| `--agent <name>`  | 报告采用哪个角色的权限基线（默认 `builder`）        |
 
 ### 示例
 
@@ -432,6 +449,9 @@ chord doctor skills
 # 机器可读报告，或对未检查到的行也判失败
 chord doctor skills --json
 chord doctor skills --strict
+
+# 诊断另一个已配置角色的基线
+chord doctor skills --agent reviewer
 ```
 
 ## `chord doctor agents`

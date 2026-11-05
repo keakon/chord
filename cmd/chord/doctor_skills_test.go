@@ -295,17 +295,22 @@ func TestRunDoctorSkills_Denied(t *testing.T) {
 	}
 
 	// View consistency: the doctor visible set must match the shared helper.
-	ruleset, _, rulesetErr := buildDoctorSkillsRuleset(projectRoot, os.Getenv("CHORD_CONFIG_HOME"))
-	if rulesetErr != nil {
-		t.Fatalf("ruleset: %v", rulesetErr)
+	baseline := resolveDoctorSkillBaseline(projectRoot, os.Getenv("CHORD_CONFIG_HOME"), "builder")
+	if baseline.Err != nil {
+		t.Fatalf("baseline: %v", baseline.Err)
 	}
-	loader := skill.NewLoader(doctorSkillDirs(projectRoot, os.Getenv("CHORD_CONFIG_HOME"), nil))
+	dirs := ResolveSkillDirs(SkillDirsInput{
+		ContentRoot: projectRoot,
+		WorkDir:     projectRoot,
+		ConfigHome:  os.Getenv("CHORD_CONFIG_HOME"),
+	})
+	loader := skill.NewLoader(SkillDirPaths(dirs))
 	metas, err := loader.ScanMeta()
 	if err != nil {
 		t.Fatalf("ScanMeta: %v", err)
 	}
 	wantVisible := map[string]bool{}
-	for _, meta := range skill.VisibleForRuleset(metas, ruleset) {
+	for _, meta := range skill.VisibleForRuleset(metas, baseline.Ruleset) {
 		wantVisible[meta.Name] = true
 	}
 	for _, reportEntry := range report.Entries {

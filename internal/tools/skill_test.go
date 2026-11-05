@@ -267,8 +267,10 @@ func TestBuildStartupSkillListingDetailedRendersTheSameText(t *testing.T) {
 		{Name: "beta", Desc: strings.Repeat("B", SkillListingMaxDescCharsPerEntry*2)},
 	}
 	detailed := BuildStartupSkillListingDetailed(entries, StartupSkillListingHeader)
-	if detailed.Text != BuildStartupSkillListing(entries, StartupSkillListingHeader) {
-		t.Fatal("the detailed builder must render byte-identical text")
+	want := StartupSkillListingHeader + "- name: \"alpha\"; description: \"Alpha skill\"\n" +
+		"- name: \"beta\"; description: \"" + strings.Repeat("B", SkillListingMaxDescCharsPerEntry-3) + "...\"\n"
+	if detailed.Text != want {
+		t.Fatalf("listing changed:\ngot %q\nwant %q", detailed.Text, want)
 	}
 	if detailed.TotalBytes != len(detailed.Text) {
 		t.Fatalf("total bytes = %d, want %d", detailed.TotalBytes, len(detailed.Text))
@@ -282,8 +284,8 @@ func TestBuildStartupSkillListingDetailedRendersTheSameText(t *testing.T) {
 	if !detailed.Entries[1].DescriptionTruncated {
 		t.Fatal("an overlong description must be reported as truncated")
 	}
-	if detailed.Entries[1].Description != TruncateSkillDesc(entries[1].Desc) {
-		t.Fatal("the reported description must be the truncated text")
+	if detailed.Entries[1].DescriptionJSON != `"`+strings.Repeat("B", SkillListingMaxDescCharsPerEntry-3)+`..."` {
+		t.Fatal("the reported description must be the rendered JSON string")
 	}
 }
 
@@ -330,13 +332,11 @@ func TestBuildStartupSkillListingDetailedReportsTheByteBudget(t *testing.T) {
 
 func TestFormatSkillInvocationPartsSplitsTheResult(t *testing.T) {
 	sk := &skill.Skill{
-		Meta: skill.Meta{
-			Name:        "parts-skill",
-			Description: "Parts skill",
-			Location:    "/tmp/parts-skill/SKILL.md",
-			RootDir:     "/tmp/parts-skill",
-		},
-		Content: "Run `${CHORD_SKILL_DIR}/scripts/check.sh`.\n",
+		Name:        "parts-skill",
+		Description: "Parts skill",
+		Location:    "/tmp/parts-skill/SKILL.md",
+		RootDir:     "/tmp/parts-skill",
+		Content:     "Run `${CHORD_SKILL_DIR}/scripts/check.sh`.\n",
 	}
 	parts := FormatSkillInvocationParts(sk, "")
 	if parts.Result != FormatSkillInvocationResult(sk, "") {
@@ -348,14 +348,45 @@ func TestFormatSkillInvocationPartsSplitsTheResult(t *testing.T) {
 	if strings.Contains(parts.Body, "${CHORD_SKILL_DIR}") {
 		t.Fatalf("the body must not keep the placeholder: %q", parts.Body)
 	}
-	if !strings.HasPrefix(parts.Result, parts.Envelope) {
-		t.Fatal("the envelope must be the head of the result")
-	}
 	if !strings.Contains(parts.Result, parts.Body) {
 		t.Fatal("the result must carry the body")
 	}
-	if len(parts.Envelope)+len(parts.Body) > len(parts.Result) {
-		t.Fatalf("the envelope (%d) and the body (%d) must fit in the result (%d)", len(parts.Envelope), len(parts.Body), len(parts.Result))
+	if parts.EnvelopeBytes+len(parts.Body) != len(parts.Result) {
+		t.Fatalf("envelope (%d) + body (%d) != result (%d)", parts.EnvelopeBytes, len(parts.Body), len(parts.Result))
+	}
+}
+
+func TestFormatSkillInvocationPartsAccountsForAllNonBodyBytes(t *testing.T) {
+	for _, body := range []string{"", "Body", "Body\n", "Run ${CHORD_SKILL_ARGS}.\n"} {
+		t.Run(fmt.Sprintf("body-%q", body), func(t *testing.T) {
+			sk := &skill.Skill{
+				Name: "sample", Location: "/sample/SKILL.md", RootDir: t.TempDir(),
+				Resources: []string{"references/missing.md"},
+				Content:   body,
+			}
+			parts := FormatSkillInvocationParts(sk, "--check")
+			if parts.Warning == "" {
+				t.Fatal("expected a warning for the missing resource")
+			}
+			head, content, ok := strings.Cut(parts.Result, "</notes>\n\n")
+			if !ok {
+				t.Fatal("missing envelope boundary")
+			}
+			head += "</notes>\n\n" + parts.Warning + "\n"
+			content = strings.TrimPrefix(content, parts.Warning+"\n")
+			suffix := "</skill>"
+			if !strings.HasSuffix(parts.Body, "\n") {
+				suffix = "\n" + suffix
+			}
+			if content != parts.Body+suffix {
+				t.Fatalf("body and suffix changed: %q", content)
+			}
+			if parts.EnvelopeBytes != len(head)+len(suffix) ||
+				parts.EnvelopeBytes+len(parts.Body) != len(parts.Result) {
+				t.Fatalf("envelope=%d, head=%d, suffix=%d, body=%d, result=%d",
+					parts.EnvelopeBytes, len(head), len(suffix), len(parts.Body), len(parts.Result))
+			}
+		})
 	}
 }
 

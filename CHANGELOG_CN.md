@@ -7,6 +7,7 @@
 ### 新功能
 
 - `/stats` 在会话范围新增 Tasks 视图：可分别查看每个委派任务自身的调用次数、token 与估算费用，不再依附执行它的 agent 维度。main 行涵盖整个 session，任务跨 attempt 与恢复累计，缺少任务身份的调用归入 untracked。外部 Claude Code 任务单列一组，展示 CLI 自报的累计 token 与费用；该报告可能包含嵌套 agent，不与 Chord 估算合计，CLI 尚未报告费用时显示 `unknown`。
+- `chord doctor skills` 新增 `--agent <name>` 参数，报告所选角色的权限基线、按运行时优先级排列的技能目录，以及模型实际会收到什么：按名加载的 allow/ask/deny、`Available Skills` 条目的状态、模型能否自行加载、条件 `paths` 状态、提供 metadata 的 sidecar，以及三档分开的体积（`SKILL.md` 源文件、解析正文、截断前的渲染结果）。基线是角色自身的规则，因此 worker 的行不等于 worker 运行时的实际权限，外部 backend 角色报 `not_applicable`；角色名不存在时以退出码 `2` 失败。
 
 ### 改进
 

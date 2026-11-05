@@ -412,16 +412,33 @@ chord doctor models --provider openai --all-models --fail-fast
 
 ## `chord doctor skills`
 
-Explain why a configured skill never reaches the model. It reuses the runtime discovery order and parser, but keeps invalid and shadowed files as their own rows instead of skipping them silently. It also audits the directories the runtime glob traverses, so an unreadable directory or a broken symlink shows up as a scan issue instead of looking empty. Each row reports four independent dimensions: `integrity` (whether the runtime keeps the file), `load` (whether the body reads back), `visibility` (whether the `builder` ruleset hides the skill), and `resources` (health of declared `resources` frontmatter entries), plus a `shadowed` flag when a higher-priority directory owns the name. Loading and reading a skill says nothing about whether the model will pick it.
+Explain why a configured skill never reaches the model, and what the model would receive if it did. It reuses the runtime discovery order and parser, but keeps invalid and shadowed files as their own rows instead of skipping them silently. It also audits the directories the runtime glob traverses, so an unreadable directory or a broken symlink shows up as a scan issue instead of looking empty. Each row reports four independent dimensions: `integrity` (whether the runtime keeps the file), `load` (whether the body reads back), `visibility` (whether the selected role's ruleset hides the skill), and `resources` (health of declared `resources` frontmatter entries), plus a `shadowed` flag when a higher-priority directory owns the name. Loading and reading a skill says nothing about whether the model will pick it.
 
-Exit codes follow the `doctor` family: `1` when any skill fails integrity or load, `2` when the check itself cannot run. Scan problems — an unreadable directory, a broken symlink, a scan path that is not a directory — exit `2` and are listed in the report (`scan_issues`) instead of aborting it. Denied skills, shadowed duplicates, resource problems, and an empty skill set do not change the exit code.
+The report also states the configuration it ran under: the content root, the checkout root, the working directory, the selected role and where that role's configuration comes from, and the skill directories in runtime priority order. `--agent` selects the role whose permission baseline the report uses; it defaults to `builder`. An unknown role fails with exit code `2` instead of producing a report that answers a different question.
+
+The baseline is the selected role's own permission rules. It does not include session permission overlays, YOLO, or — for a worker — the parent agent's rules, so a worker row describes the role's own baseline and not the worker's effective runtime permission. A role that runs on an external backend does not use Chord's local skill catalog at all: its rows report `not_applicable` instead of a visibility verdict.
+
+Each row also reports what the model would receive:
+
+- `invocation`: the `allow` / `ask` / `deny` action the baseline yields for a call that loads this skill by name. Visibility is not the same thing as being free of confirmation.
+- `startup`: whether the `Available Skills` block keeps the description (`listed`), a shortened one (`listed_truncated`), only the name (`name_only`), or nothing (`not_listed`), plus the reason.
+- `model_invocation`: whether the model may load the skill on its own (`allowed`) or only an explicit `/skill` may (`manual_only`).
+- `paths`: `none`, `conditional` (waiting for a matching path), or `invalid` with the pattern error. An invalid pattern does not cancel name-based loading.
+- `description`: the raw size and the size actually written in the startup listing, in bytes and Unicode code points. Rendered sizes include JSON quotes and escapes. Entries without a description have zero rendered size; an unavailable or inapplicable baseline yields `null`. `truncated` reports whether the listing wrote a shortened description, or `null` when it could not be evaluated.
+- `sizes`: the `SKILL.md` source file (frontmatter included), the parsed body (frontmatter removed, CRLF normalized), and the rendered result with empty arguments. The rendered result contains the expanded body and the envelope; `envelope_bytes` includes the resource warning, any added newline and the closing tag. `warning_bytes` is a subset of that overhead. The rendered size is measured before truncation; `over_inline_budget` marks a result larger than the 50 KiB inline budget of a model tool result.
+- `sidecar`: the sidecar file that supplied the effective metadata, when there is one.
+
+The startup block total, the largest skills, and up to five evidence-backed items to check are reported as well. `startup.description_budget_bytes` is the 8 KiB budget for described entries, the header and the omission notice. Additional skill names are outside that budget, so `startup.total_bytes` can exceed it. Those thresholds only order the list: a large or truncated skill never changes the exit code.
+
+Exit codes follow the `doctor` family: `1` when any skill fails integrity or load, `2` when the check itself cannot run. Scan problems — an unreadable directory, a broken symlink, a scan path that is not a directory — exit `2` and are listed in the report (`scan_issues`) instead of aborting it. An unknown `--agent` role also exits `2`. Denied skills, shadowed duplicates, resource problems, and an empty skill set do not change the exit code.
 
 ### Flags
 
-| Flag       | Description                                                              |
-| ---------- | ------------------------------------------------------------------------ |
-| `--json`   | Emit a machine-readable JSON report                                      |
-| `--strict` | Also fail when the ruleset is unavailable or a check did not run         |
+| Flag             | Description                                                              |
+| ---------------- | ------------------------------------------------------------------------ |
+| `--json`         | Emit a machine-readable JSON report                                      |
+| `--strict`       | Also fail when the ruleset is unavailable or a check did not run         |
+| `--agent <name>` | Role whose permission baseline the report uses (default: `builder`)      |
 
 ### Examples
 
@@ -432,6 +449,9 @@ chord doctor skills
 # Machine-readable report, or fail on unchecked rows
 chord doctor skills --json
 chord doctor skills --strict
+
+# Diagnose the baseline of another configured role
+chord doctor skills --agent reviewer
 ```
 
 ## `chord doctor agents`

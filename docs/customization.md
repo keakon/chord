@@ -174,13 +174,38 @@ Each row carries four independent dimensions:
 - `integrity`: `passed` means the runtime keeps the file; `failed` means it
   is skipped (bad YAML, missing `name`/`description`, unreadable file).
 - `load`: whether the body reads back (`passed`/`failed`/`not_run`).
-- `visibility`: whether the `builder` ruleset hides the skill
+- `visibility`: whether the selected role's ruleset hides the skill
   (`visible`/`denied`/`not_checked`). This dimension covers the ruleset only:
   `disable-model-invocation` is not part of it, so a manual-only skill still
   reports `visible`.
 - `resources`: health of declared resources
   (`passed`/`failed`/`warning`/`none`).
 - `shadowed`: a same-name skill from a higher-priority directory wins.
+
+`--agent <name>` selects the role whose permission baseline the report uses;
+it defaults to `builder`. The baseline is that role's own permission rules: it
+does not include session permission overlays, YOLO, or — for a worker — the
+parent agent's rules, so a worker row is the role's own baseline and not the
+worker's effective runtime permission. A role with an external backend does
+not use Chord's local skill catalog, so its rows report `not_applicable`
+instead of a visibility verdict. An unknown role name fails instead of
+reporting an empty ruleset.
+
+Beyond the four dimensions, each row reports what the model would receive:
+the `allow`/`ask`/`deny` action for a call that loads the skill by name, what
+the `Available Skills` block keeps (the description, a shortened description,
+only the name, or nothing), whether the model may load the skill on its own,
+the conditional `paths` state, the raw and actually rendered description
+sizes, and three sizes kept apart: the `SKILL.md` source file, the
+parsed body, and the rendered result with empty arguments. The rendered size
+is the size before truncation; a result larger than the 50 KiB inline budget
+of a model tool result is flagged as `over_inline_budget`.
+
+Rendered description sizes include JSON quotes and escapes; absent
+descriptions measure zero, while unavailable or inapplicable baselines yield
+`null`. The 8 KiB description-list budget includes the header and omission
+notice. Additional names are outside it, so the full startup block may be
+larger. See [the CLI reference](./cli.md#chord-doctor-skills) for field details.
 
 Exit codes follow the `doctor` family: `1` when any skill fails integrity or
 load, `2` when the check itself cannot run. That covers unreadable config and

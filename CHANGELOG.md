@@ -7,6 +7,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Features
 
 - `/stats` adds a Tasks view in session scope: see each delegated task's own calls, tokens, and estimated cost, independent of the agent that ran it. The main agent row covers the whole session, tasks accumulate across attempts and restores, and calls without task identity are listed as untracked. Tasks run by an external Claude Code process appear in a separate group with the CLI's cumulative token and cost report, which may include nested agents and is not combined with Chord's estimate; the cost shows `unknown` until the CLI reports it.
+- `chord doctor skills` takes a `--agent <name>` argument and reports the role's permission baseline, the skill directories in runtime priority order, and what the model would actually receive: the allow/ask/deny action for a name-based load, the state of the `Available Skills` entry, whether the model may load the skill on its own, the conditional `paths` state, the sidecar that supplied the metadata, and three sizes kept apart (the `SKILL.md` source file, the parsed body, and the rendered result before truncation). The baseline is the role's own rules, so a worker row is not the worker's effective runtime permission and an external-backend role reports `not_applicable`; an unknown role fails with exit code `2`.
 
 ### Improvements
 
