@@ -230,13 +230,24 @@ func TestPendingSyncReplacementDoesNotInheritOldVersion(t *testing.T) {
 	m, path := newWarmupTestManager(t)
 	key := testKey(m, "gopls")
 	old := pendingOwnerClient(m, "gopls")
+	m.clientsMu.Lock()
 	m.clients[key] = old
+	m.clientsMu.Unlock()
 	if _, err := old.DidChange(context.Background(), path, "package sample\n"); err != nil {
 		t.Fatal(err)
 	}
+	// The ready owner schedules a re-sync right away. Holding the re-sync gate
+	// keeps that goroutine from consuming the entry under the old client before
+	// the replacement is installed.
+	m.pendingResyncMu.Lock()
+	release := sync.OnceFunc(m.pendingResyncMu.Unlock)
+	t.Cleanup(release)
 	m.registerPendingSync(path, "package main\n", WatchedFileChanged, "")
 	replacement := pendingOwnerClient(m, "gopls")
+	m.clientsMu.Lock()
 	m.clients[key] = replacement
+	m.clientsMu.Unlock()
+	release()
 	m.resyncPendingWrites(context.Background())
 	if got := replacement.syncedDocumentVersion(path); got != 1 {
 		t.Fatalf("replacement version=%d, want first sync", got)
