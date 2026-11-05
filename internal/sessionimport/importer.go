@@ -27,11 +27,11 @@ type ImportOptions struct {
 }
 
 type ImportResult struct {
-	ProjectRoot string
-	SessionID   string
-	SessionDir  string
-	Messages    int
-	Report      ImportReport
+	ProjectRoot string       `json:"project_root"`
+	SessionID   string       `json:"session_id"`
+	SessionDir  string       `json:"session_dir"`
+	Messages    int          `json:"messages"`
+	Report      ImportReport `json:"report"`
 }
 
 // Import converts a supported external conversation export into a Chord session.

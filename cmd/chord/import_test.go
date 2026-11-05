@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,59 @@ func TestNewImportCmd_SucceedsWithIDAndRoot(t *testing.T) {
 	}
 	if !strings.Contains(out, "Imported codex session") {
 		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+// The --json summary is a machine-readable contract: its top-level keys use
+// snake_case, matching the keys inside the nested report object and the rest
+// of Chord's JSON outputs. The Go field names must not leak as PascalCase.
+func TestNewImportCmd_JSONTopLevelKeysAreSnakeCase(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	t.Setenv("CHORD_SESSIONS_DIR", "")
+	input := filepath.Join(t.TempDir(), "claude.jsonl")
+	data := []byte(`{"uuid":"u1","sessionId":"src-json-1","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}
+`)
+	if err := os.WriteFile(input, data, 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	cmd := newImportCmd()
+	project := t.TempDir()
+	_ = cmd.Flags().Set("project", project)
+	_ = cmd.Flags().Set("json", "true")
+
+	out, err := captureStdout(t, func() error {
+		return cmd.RunE(cmd, []string{"claude", input})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("decode --json output: %v\n%s", err, out)
+	}
+	for _, key := range []string{"project_root", "session_id", "session_dir", "messages", "report"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("--json output missing %q key: %s", key, out)
+		}
+	}
+	for _, legacy := range []string{"ProjectRoot", "SessionID", "SessionDir", "Messages", "Report"} {
+		if _, ok := decoded[legacy]; ok {
+			t.Fatalf("--json output still exposes PascalCase key %q: %s", legacy, out)
+		}
+	}
+	if got := decoded["messages"].(float64); got != 2 {
+		t.Fatalf("messages = %v, want 2", got)
+	}
+	for _, key := range []string{"project_root", "session_id", "session_dir"} {
+		if s, _ := decoded[key].(string); s == "" {
+			t.Fatalf("--json output has empty %q: %s", key, out)
+		}
+	}
+	if _, ok := decoded["report"].(map[string]any); !ok {
+		t.Fatalf("report is not a JSON object: %s", out)
 	}
 }
 

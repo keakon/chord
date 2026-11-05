@@ -4,6 +4,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Breaking Changes
+
+- `chord import --json` now emits snake_case top-level keys (`project_root`, `session_id`, `session_dir`, `messages`, `report`) instead of the Go field names (`ProjectRoot`, `SessionID`, `SessionDir`, `Messages`, `Report`), matching the snake_case keys inside the nested `report` object and the rest of Chord's machine-readable outputs. Scripts that consume the JSON summary must read the new key names.
+
 ### Features
 
 - Added a read-only compaction history browser: `Alt+←` in Insert or Normal mode opens the newest pre-compaction snapshot. `Alt+←` / `Alt+→` navigate snapshots; moving forward from the newest restores the live session and draft. The defaults also accept `Alt+b` / `Alt+f` for terminals that send those keys for Option+← / Option+→. History uses ordinary message cards with the existing sidebar and bottom status bar, hides the message input, and supports search, text selection and copying. The status bar shows the history position and Esc hint; snapshot details and live session status appear when space permits. While browsing, live tasks and existing request timers continue, but sending messages, answering requests and other live-session actions are blocked. Dialogs stay hidden until you return. A compaction summary opens its referenced archives directly or offers a source list with unavailable snapshots identified. Large snapshots and terminal resizes are processed in bounded batches, preserving your place while keeping input responsive.
