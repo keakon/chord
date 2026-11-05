@@ -103,6 +103,19 @@ const (
 	claudeBlockTypeToolResult       = "tool_result"
 )
 
+// claudeWrappedUserTextPrefixes lists the machine-written tags Claude Code
+// records as user-role text when the user runs a slash command or a local
+// command echoes its output. They are session plumbing rather than user
+// speech. Blocks containing command arguments are retained because those
+// arguments need not appear in a separate expanded message.
+var claudeWrappedUserTextPrefixes = []string{
+	"<command-name>",
+	"<command-message>",
+	"<local-command-stdout>",
+	"<local-command-stderr>",
+	"<local-command-caveat>",
+}
+
 // claudeUnsupportedTranscriptHeader names a transcript entry that carries no
 // safe Chord mapping by the role it was written under, so the fallback reads as
 // a structural fact about the conversation rather than as an import artifact.
@@ -190,7 +203,7 @@ func convertClaudeTranscript(data []byte, reasoningMode string, report *ImportRe
 
 	var out []message.Message
 	for _, node := range chain {
-		msg, skipped, toolRendered, reasoningSkipped, warns, unsupportedToolCalls, err := convertClaudeNode(node, reasoningMode)
+		msg, skipped, toolRendered, reasoningSkipped, warns, unsupportedToolCalls, err := convertClaudeNode(node, reasoningMode, report.Claude)
 		for _, w := range warns {
 			report.warnf("claude line %d: %s", node.Index, w)
 			report.Claude.Diagnostics = append(report.Claude.Diagnostics, fmt.Sprintf("line %d: %s", node.Index, w))
@@ -228,6 +241,11 @@ func convertClaudeTranscript(data []byte, reasoningMode string, report *ImportRe
 		}
 		out = append(out, msg...)
 	}
+	if report.Claude.WrappedUserBlocksSkipped > 0 {
+		warning := fmt.Sprintf("dropped %d wrapped user text block(s); %d user message(s) skipped as a result", report.Claude.WrappedUserBlocksSkipped, report.Claude.WrappedUserLinesSkipped)
+		report.warnf("claude: %s", warning)
+		report.Claude.Diagnostics = append(report.Claude.Diagnostics, warning)
+	}
 	if report.Claude.SidechainMessagesSkipped > 0 {
 		diagnostic := fmt.Sprintf("detected %d sidechain messages; excluded from main import", report.Claude.SidechainMessagesSkipped)
 		report.Claude.Diagnostics = append(report.Claude.Diagnostics, diagnostic)
@@ -235,7 +253,9 @@ func convertClaudeTranscript(data []byte, reasoningMode string, report *ImportRe
 			report.Claude.Diagnostics = append(report.Claude.Diagnostics, fmt.Sprintf("sidechain agents detected: %s", strings.Join(report.Claude.SidechainAgentIDs, ", ")))
 		}
 	}
-	if report.Claude.NonSidechainMessages > 0 && len(out) > 0 && len(out)*2 < report.Claude.NonSidechainMessages {
+	// Compare source records: conversion can drop wrappers or split a user
+	// record into multiple tool results without changing the selected span.
+	if report.Claude.SelectedSpanLength > 0 && report.Claude.SelectedSpanLength*2 < report.Claude.NonSidechainMessages {
 		warning := fmt.Sprintf("selected main conversation span length %d from %d visible non-sidechain messages; transcript may require compaction-aware reconstruction", report.Claude.SelectedSpanLength, report.Claude.NonSidechainMessages)
 		report.warnf("claude: %s", warning)
 		report.Claude.Diagnostics = append(report.Claude.Diagnostics, warning)
@@ -646,7 +666,30 @@ func countClaudeToolUseBlocks(raw json.RawMessage) int {
 	return count
 }
 
-func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Message, skipped bool, toolRendered bool, reasoningSkipped bool, warns []string, unsupportedToolCalls int, err error) {
+// isClaudeWrappedUserText matches wrapper prefixes but keeps blocks whose
+// arguments may be the only record of the user's request.
+func isClaudeWrappedUserText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	for _, prefix := range claudeWrappedUserTextPrefixes {
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+		for {
+			_, rest, found := strings.Cut(trimmed, "<command-args>")
+			if !found {
+				return true
+			}
+			args, rest, closed := strings.Cut(rest, "</command-args>")
+			if !closed || strings.TrimSpace(args) != "" {
+				return false
+			}
+			trimmed = rest
+		}
+	}
+	return false
+}
+
+func convertClaudeNode(node claudeNode, reasoningMode string, stats *ClaudeImportReport) (msgs []message.Message, skipped bool, toolRendered bool, reasoningSkipped bool, warns []string, unsupportedToolCalls int, err error) {
 	var cm claudeMessage
 	if err := json.Unmarshal(node.Envelope.Message, &cm); err != nil {
 		return nil, false, false, false, nil, 0, fmt.Errorf("parse message: %w", err)
@@ -714,6 +757,7 @@ func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Me
 	case claudeRoleUser:
 		user := message.Message{Role: message.RoleUser, Provenance: importedClaudeProvenance()}
 		var toolMsgs []message.Message
+		wrappedBlocks := 0
 		for _, raw := range cm.Content {
 			var block claudeContentBlock
 			if err := json.Unmarshal(raw, &block); err != nil {
@@ -722,6 +766,10 @@ func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Me
 			}
 			switch strings.ToLower(strings.TrimSpace(block.Type)) {
 			case claudeBlockTypeText:
+				if isClaudeWrappedUserText(block.Text) {
+					wrappedBlocks++
+					continue
+				}
 				user.Content = joinNonEmpty(user.Content, block.Text)
 			case claudeBlockTypeToolResult:
 				if strings.TrimSpace(block.ToolUseID) == "" {
@@ -739,7 +787,13 @@ func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Me
 			msgs = append(msgs, user)
 		}
 		msgs = append(msgs, toolMsgs...)
+		stats.WrappedUserBlocksSkipped += wrappedBlocks
 		if len(msgs) == 0 {
+			// Count source records that became empty, not output messages:
+			// a retained tool result means this source record was not skipped.
+			if wrappedBlocks > 0 {
+				stats.WrappedUserLinesSkipped++
+			}
 			return nil, true, toolRendered, reasoningSkipped, warns, 0, nil
 		}
 		return msgs, false, toolRendered, reasoningSkipped, warns, 0, nil

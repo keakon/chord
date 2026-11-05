@@ -147,6 +147,10 @@ func printClaudeImportSummary(w io.Writer, report *sessionimport.ClaudeImportRep
 		fmt.Fprintf(w, ", downgraded_visible=%d", report.DowngradedVisibleEntries)
 	}
 	fmt.Fprintln(w)
+	if report.WrappedUserBlocksSkipped > 0 {
+		fmt.Fprintf(w, "Claude wrapped user text: dropped %d block(s), %d user message(s) skipped as a result\n",
+			report.WrappedUserBlocksSkipped, report.WrappedUserLinesSkipped)
+	}
 	if report.SidechainMessagesSkipped > 0 {
 		fmt.Fprintf(w, "Detected %d sub-agent messages (not imported in current version).\n", report.SidechainMessagesSkipped)
 	}

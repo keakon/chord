@@ -93,6 +93,12 @@ type ClaudeImportReport struct {
 	StructuredToolCalls      int      `json:"structured_tool_calls,omitempty"`
 	StructuredToolResults    int      `json:"structured_tool_results,omitempty"`
 	DowngradedVisibleEntries int      `json:"downgraded_visible_entries,omitempty"`
+	// WrappedUserBlocksSkipped counts the machine-written command wrapper text
+	// blocks (slash-command invocations, local-command output) dropped from
+	// user messages; WrappedUserLinesSkipped counts the messages that carried
+	// nothing else and were skipped whole as a result.
+	WrappedUserBlocksSkipped int      `json:"wrapped_user_blocks_skipped,omitempty"`
+	WrappedUserLinesSkipped  int      `json:"wrapped_user_lines_skipped,omitempty"`
 	Diagnostics              []string `json:"diagnostics,omitempty"`
 }
 
