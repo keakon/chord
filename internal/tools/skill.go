@@ -95,13 +95,68 @@ type SkillListingEntry struct {
 	Name, Desc string
 }
 
+// StartupSkillListingHeader is the preamble the runtime writes above the
+// Available Skills block. The header counts against the section's byte
+// budget, so a diagnostic that measures the block has to use the very same
+// text instead of a shorter stand-in.
+const StartupSkillListingHeader = "## Available Skills\nThe `skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `skill` before proceeding.\n\n"
+
+// SkillListingRenderEntry records what the renderer did with one entry.
+type SkillListingRenderEntry struct {
+	Name string
+	// Description is the text the renderer wrote for this entry.
+	Description string
+	// DescriptionTruncated reports that the description did not fit the
+	// per-entry character budget and was shortened.
+	DescriptionTruncated bool
+	// Listed reports that the entry carries a description line.
+	Listed bool
+	// OmittedReason explains why an entry was reduced to a bare name.
+	OmittedReason string
+}
+
+// Reasons an entry was reduced to a bare name.
+const (
+	// SkillListingOmitEntryLimit marks an entry dropped because the listing
+	// already showed the maximum number of described entries.
+	SkillListingOmitEntryLimit = "entry_limit"
+	// SkillListingOmitByteBudget marks an entry dropped because the section
+	// byte budget was exhausted.
+	SkillListingOmitByteBudget = "byte_budget"
+)
+
+// SkillListing is the rendered startup listing together with the per-entry
+// decisions the renderer made. The decisions are produced by the same budget
+// walk that writes the text, so they cannot drift from it.
+type SkillListing struct {
+	// Text is the rendered section.
+	Text string
+	// Entries holds one record per input entry, in input order.
+	Entries []SkillListingRenderEntry
+	// Shown counts entries rendered with a description line.
+	Shown int
+	// NameOnly counts entries reduced to a bare name in the trailing list.
+	NameOnly int
+	// TotalBytes is the size of Text in bytes.
+	TotalBytes int
+}
+
 // BuildStartupSkillListing builds the Available Skills listing section with
 // truncation budgets.  The header (e.g. "\n\n## Available Skills\n") is
 // included in the total budget, which is measured in bytes.  Returns empty
 // string when no entries remain.
 func BuildStartupSkillListing(entries []SkillListingEntry, header string) string {
+	return BuildStartupSkillListingDetailed(entries, header).Text
+}
+
+// BuildStartupSkillListingDetailed builds the same section as
+// BuildStartupSkillListing and also reports which entries carry a
+// description and which were reduced to a bare name. The diagnostics need
+// that split to explain a truncated listing; a second budget implementation
+// would answer a different question than the runtime does.
+func BuildStartupSkillListingDetailed(entries []SkillListingEntry, header string) SkillListing {
 	if len(entries) == 0 {
-		return ""
+		return SkillListing{}
 	}
 	reserve := len(fmt.Sprintf("%d additional skills are listed by name below.\n", len(entries)))
 	var body strings.Builder
@@ -111,16 +166,29 @@ func BuildStartupSkillListing(entries []SkillListingEntry, header string) string
 	body.WriteString(header)
 	var omitted []string
 	shown := 0
+	rendered := SkillListing{Entries: make([]SkillListingRenderEntry, 0, len(entries))}
 	for _, entry := range entries {
 		name, _ := json.Marshal(entry.Name)
-		desc, _ := json.Marshal(TruncateSkillDesc(entry.Desc))
+		truncated := TruncateSkillDesc(entry.Desc)
+		desc, _ := json.Marshal(truncated)
 		line := fmt.Sprintf("- name: %s; description: %s\n", name, desc)
-		if shown >= SkillListingMaxEntries || body.Len()+len(line)+reserve > SkillListingMaxTotalBytes {
-			omitted = append(omitted, entry.Name)
-			continue
+		record := SkillListingRenderEntry{Name: entry.Name}
+		switch {
+		case shown >= SkillListingMaxEntries:
+			record.OmittedReason = SkillListingOmitEntryLimit
+		case body.Len()+len(line)+reserve > SkillListingMaxTotalBytes:
+			record.OmittedReason = SkillListingOmitByteBudget
+		default:
+			body.WriteString(line)
+			shown++
+			record.Listed = true
+			record.Description = truncated
+			record.DescriptionTruncated = truncated != entry.Desc
 		}
-		body.WriteString(line)
-		shown++
+		if !record.Listed {
+			omitted = append(omitted, entry.Name)
+		}
+		rendered.Entries = append(rendered.Entries, record)
 	}
 	if len(omitted) > 0 {
 		fmt.Fprintf(&body, "%d additional skills are listed by name below.\n", len(omitted))
@@ -130,7 +198,11 @@ func BuildStartupSkillListing(entries []SkillListingEntry, header string) string
 		body.Write(names)
 		body.WriteByte('\n')
 	}
-	return body.String()
+	rendered.Text = body.String()
+	rendered.Shown = shown
+	rendered.NameOnly = len(omitted)
+	rendered.TotalBytes = len(rendered.Text)
+	return rendered
 }
 
 func (t SkillTool) DescriptionForTools(_ map[string]struct{}) string {
@@ -233,14 +305,40 @@ func skillResultField(result, tag string) (string, bool) {
 	return value, value != ""
 }
 
+// SkillInvocationParts carries the pieces a rendered skill result is made of.
+// The envelope and the resource warning are the overhead a load adds on top of
+// the body, so a diagnostic that reports the body size alone would
+// understate what the model actually receives.
+type SkillInvocationParts struct {
+	// Result is the complete rendered result, byte-identical to what
+	// FormatSkillInvocationResult returns.
+	Result string
+	// Body is the placeholder-expanded skill body.
+	Body string
+	// Warning is the resource warning block, empty when every declared
+	// resource is present.
+	Warning string
+	// Envelope is everything the result carries besides the body: the
+	// identity tags, the notes, and the warning block.
+	Envelope string
+}
+
 // FormatSkillInvocationResult renders the tool result of a skill load: the
 // envelope the model reads, including the declared-resource warning block. The
 // model path and the user's explicit load both go through it, so both origins
 // produce one identical result shape — that equivalence is what lets restore,
 // compaction and the TUI treat a user-triggered load exactly like a model call.
 func FormatSkillInvocationResult(sk *skill.Skill, args string) string {
+	return FormatSkillInvocationParts(sk, args).Result
+}
+
+// FormatSkillInvocationParts renders the same result as
+// FormatSkillInvocationResult and exposes its parts, so a caller can measure
+// the body, the envelope and the warning block separately without
+// re-implementing the formatter.
+func FormatSkillInvocationParts(sk *skill.Skill, args string) SkillInvocationParts {
 	if sk == nil {
-		return ""
+		return SkillInvocationParts{}
 	}
 	warning := SkillDeclaredResourceWarningBlock(sk.RootDir, sk.Meta.Resources)
 	expandedContent := substituteSkillPlaceholders(sk.Content, sk.RootDir, args)
@@ -261,12 +359,18 @@ func FormatSkillInvocationResult(sk *skill.Skill, args string) string {
 		sb.WriteString(warning)
 		sb.WriteString("\n")
 	}
+	envelope := sb.String()
 	sb.WriteString(expandedContent)
 	if !strings.HasSuffix(expandedContent, "\n") {
 		sb.WriteString("\n")
 	}
 	sb.WriteString("</skill>")
-	return sb.String()
+	return SkillInvocationParts{
+		Result:   sb.String(),
+		Body:     expandedContent,
+		Warning:  warning,
+		Envelope: envelope,
+	}
 }
 
 // FormatSkillAlreadyLoadedResult renders the answer to a load whose identical

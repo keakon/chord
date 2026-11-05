@@ -261,6 +261,104 @@ func TestSkillListingOversizedFirstName(t *testing.T) {
 	}
 }
 
+func TestBuildStartupSkillListingDetailedRendersTheSameText(t *testing.T) {
+	entries := []SkillListingEntry{
+		{Name: "alpha", Desc: "Alpha skill"},
+		{Name: "beta", Desc: strings.Repeat("B", SkillListingMaxDescCharsPerEntry*2)},
+	}
+	detailed := BuildStartupSkillListingDetailed(entries, StartupSkillListingHeader)
+	if detailed.Text != BuildStartupSkillListing(entries, StartupSkillListingHeader) {
+		t.Fatal("the detailed builder must render byte-identical text")
+	}
+	if detailed.TotalBytes != len(detailed.Text) {
+		t.Fatalf("total bytes = %d, want %d", detailed.TotalBytes, len(detailed.Text))
+	}
+	if detailed.Shown != 2 || detailed.NameOnly != 0 {
+		t.Fatalf("shown = %d, name only = %d, want 2 and 0", detailed.Shown, detailed.NameOnly)
+	}
+	if detailed.Entries[0].DescriptionTruncated {
+		t.Fatal("a short description must not be reported as truncated")
+	}
+	if !detailed.Entries[1].DescriptionTruncated {
+		t.Fatal("an overlong description must be reported as truncated")
+	}
+	if detailed.Entries[1].Description != TruncateSkillDesc(entries[1].Desc) {
+		t.Fatal("the reported description must be the truncated text")
+	}
+}
+
+func TestBuildStartupSkillListingDetailedReportsTheEntryLimit(t *testing.T) {
+	entries := make([]SkillListingEntry, SkillListingMaxEntries+2)
+	for i := range entries {
+		entries[i] = SkillListingEntry{Name: fmt.Sprintf("skill-%02d", i), Desc: "Short"}
+	}
+	detailed := BuildStartupSkillListingDetailed(entries, StartupSkillListingHeader)
+	if detailed.Shown != SkillListingMaxEntries {
+		t.Fatalf("shown = %d, want %d", detailed.Shown, SkillListingMaxEntries)
+	}
+	if detailed.NameOnly != 2 {
+		t.Fatalf("name only = %d, want 2", detailed.NameOnly)
+	}
+	for i := SkillListingMaxEntries; i < len(detailed.Entries); i++ {
+		if detailed.Entries[i].Listed {
+			t.Fatalf("entry %d must not be listed", i)
+		}
+		if detailed.Entries[i].OmittedReason != SkillListingOmitEntryLimit {
+			t.Fatalf("entry %d reason = %q, want %q", i, detailed.Entries[i].OmittedReason, SkillListingOmitEntryLimit)
+		}
+	}
+}
+
+func TestBuildStartupSkillListingDetailedReportsTheByteBudget(t *testing.T) {
+	// Long descriptions exhaust the section budget well before the entry cap.
+	entries := make([]SkillListingEntry, 40)
+	for i := range entries {
+		entries[i] = SkillListingEntry{Name: fmt.Sprintf("skill-%02d", i), Desc: strings.Repeat("X", SkillListingMaxDescCharsPerEntry)}
+	}
+	detailed := BuildStartupSkillListingDetailed(entries, StartupSkillListingHeader)
+	if detailed.Shown >= SkillListingMaxEntries {
+		t.Fatalf("the byte budget should bind before the entry cap, got %d shown", detailed.Shown)
+	}
+	if detailed.NameOnly == 0 {
+		t.Fatal("expected the budget to drop entries")
+	}
+	dropped := detailed.Entries[detailed.Shown]
+	if dropped.OmittedReason != SkillListingOmitByteBudget {
+		t.Fatalf("reason = %q, want %q", dropped.OmittedReason, SkillListingOmitByteBudget)
+	}
+}
+
+func TestFormatSkillInvocationPartsSplitsTheResult(t *testing.T) {
+	sk := &skill.Skill{
+		Meta: skill.Meta{
+			Name:        "parts-skill",
+			Description: "Parts skill",
+			Location:    "/tmp/parts-skill/SKILL.md",
+			RootDir:     "/tmp/parts-skill",
+		},
+		Content: "Run `${CHORD_SKILL_DIR}/scripts/check.sh`.\n",
+	}
+	parts := FormatSkillInvocationParts(sk, "")
+	if parts.Result != FormatSkillInvocationResult(sk, "") {
+		t.Fatal("the parts must render the same result as the plain formatter")
+	}
+	if !strings.Contains(parts.Body, "/tmp/parts-skill/scripts/check.sh") {
+		t.Fatalf("the body must carry the expanded placeholder: %q", parts.Body)
+	}
+	if strings.Contains(parts.Body, "${CHORD_SKILL_DIR}") {
+		t.Fatalf("the body must not keep the placeholder: %q", parts.Body)
+	}
+	if !strings.HasPrefix(parts.Result, parts.Envelope) {
+		t.Fatal("the envelope must be the head of the result")
+	}
+	if !strings.Contains(parts.Result, parts.Body) {
+		t.Fatal("the result must carry the body")
+	}
+	if len(parts.Envelope)+len(parts.Body) > len(parts.Result) {
+		t.Fatalf("the envelope (%d) and the body (%d) must fit in the result (%d)", len(parts.Envelope), len(parts.Body), len(parts.Result))
+	}
+}
+
 func digestTestSkill(root string) *skill.Skill {
 	return &skill.Skill{
 		Name:     "go-expert",
