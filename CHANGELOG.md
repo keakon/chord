@@ -2,6 +2,12 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Improvements
+
+- Completion reports add `reported_only_in_records` and `observed_only_in_records` summaries when a worker's declared file list and Chord's observed paths can be compared, so the owner can see one-sided records without comparing both lists by hand. The summaries compare retained path spellings only and do not establish missing changes or false reports.
+
 ## 0.8.3 - 2026-11-05
 
 ### Highlights

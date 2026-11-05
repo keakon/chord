@@ -133,6 +133,8 @@ A worker reports the checks it actually ran and their results in `complete.summa
 
 The owner report lists the worker's `complete.files_changed` declarations as `reported_files_changed` and paths Chord observed through its tools as `actual_files_changed`. Observed paths take precedence when reviewing attribution, but they describe writes and deletions during the task, not the final diff or code correctness. An empty observed list does not prove that no files changed, and a reported path without an observation does not by itself establish a false report. When Chord cannot fully attribute writes, the report includes `file_attribution_incomplete`.
 
+When the two recorded lists can be compared as text, the report also adds `reported_only_in_records` and `observed_only_in_records` lines listing paths that appear in only one of them (up to three examples each), followed by one `file_list_note` line. The comparison uses the retained path spellings, does not resolve them against the current filesystem, and is omitted when the lists cannot be compared safely, such as when absolute and relative paths are mixed. A difference does not establish that a change is missing or that a self-report was false; `file_attribution_incomplete` can itself produce one.
+
 A compaction checkpoint carries up to 128 observed paths. If there are more, it keeps the incomplete-attribution flag; session restoration merges the retained paths and later observations without recovering paths that the checkpoint omitted. Writes inside external coding-agent processes cannot be attributed to individual files by Chord.
 
 ### Escalation

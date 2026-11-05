@@ -818,12 +818,19 @@ func TestCoordinationSnapshotOmitsCompletionDeliveredByInjectedMailbox(t *testin
 		LastMailboxID:   "worker-1-1",
 		LastSummary:     "research complete",
 		LastUpdatedTurn: 6,
-		LastCompletion:  &CompletionEnvelope{Summary: "research complete", ReportedFilesChanged: []string{"internal/a.go"}},
+		LastCompletion: &CompletionEnvelope{
+			Summary:              "research complete",
+			ReportedFilesChanged: []string{"internal/a.go"},
+			ActualFilesChanged:   []string{"internal/b.go"},
+		},
 	}
 
 	block := a.buildCoordinationSnapshotOverlayForRequest(map[string]struct{}{"worker-1-1": {}})
 	if strings.Contains(block, "task_id: task-1") {
 		t.Fatalf("completed task re-listed although its mailbox is in the request:\n%s", block)
+	}
+	if strings.Contains(block, "reported_only_in_records") {
+		t.Fatalf("elided completion still contributed a file-list diff:\n%s", block)
 	}
 
 	// Control: without the mailbox in the request the same completion is still
@@ -832,6 +839,10 @@ func TestCoordinationSnapshotOmitsCompletionDeliveredByInjectedMailbox(t *testin
 	block = a.buildCoordinationSnapshotOverlayForRequest(nil)
 	if !strings.Contains(block, "task_id: task-1") || !strings.Contains(block, "reported_files_changed: internal/a.go") {
 		t.Fatalf("snapshot missing completion without injected mailbox:\n%s", block)
+	}
+	if !strings.Contains(block, "reported_only_in_records: 1 (internal/a.go)") ||
+		!strings.Contains(block, "observed_only_in_records: 1 (internal/b.go)") {
+		t.Fatalf("snapshot missing the file-list diff without injected mailbox:\n%s", block)
 	}
 }
 

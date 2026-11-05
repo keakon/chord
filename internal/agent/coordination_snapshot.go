@@ -208,6 +208,10 @@ func (a *MainAgent) buildCoordinationSnapshotOverlayForRequest(injectedMailboxID
 				b.WriteString("\n  reported_files_changed: ")
 				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.ReportedFilesChanged))
 			}
+			for _, line := range completionFileDiffLines(rec.LastCompletion, "  ") {
+				b.WriteString("\n")
+				b.WriteString(line)
+			}
 			if len(rec.LastCompletion.RemainingLimitations) > 0 {
 				b.WriteString("\n  remaining_limitations: ")
 				b.WriteString(joinCoordinationSnapshotItems(rec.LastCompletion.RemainingLimitations))

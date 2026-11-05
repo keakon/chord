@@ -195,6 +195,10 @@ func formatSubAgentMailboxInjectionText(msg *SubAgentMailboxMessage) string {
 			b.WriteString("\n- reported_files_changed: ")
 			b.WriteString(strings.Join(msg.Completion.ReportedFilesChanged, ", "))
 		}
+		for _, line := range completionFileDiffLines(msg.Completion, "- ") {
+			b.WriteString("\n")
+			b.WriteString(line)
+		}
 		if len(msg.Completion.RemainingLimitations) > 0 {
 			b.WriteString("\n- remaining_limitations: ")
 			b.WriteString(strings.Join(msg.Completion.RemainingLimitations, ", "))

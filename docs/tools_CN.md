@@ -131,6 +131,8 @@ worker 在 `complete.summary` 中汇报实际运行的检查和结果，用 `rem
 
 上级代理收到的报告用 `reported_files_changed` 列出子代理通过 `complete.files_changed` 自报的文件，用 `actual_files_changed` 列出 Chord 通过工具观测到的路径。复核归属时以观测路径为准；它们记录任务期间的写入和删除，不能证明最终差异或代码正确。观测列表为空不能证明没有修改，自报路径缺少观测也不能单独认定为虚报。无法完整归属写入时，报告会包含 `file_attribution_incomplete`。
 
+两份记录能用文本比较时，报告还会追加 `reported_only_in_records` 和 `observed_only_in_records` 两行，分别列出只出现在一份记录中的路径（每行最多给 3 个例子），最后跟一行 `file_list_note`。比较只看保留的路径写法，不会去当前文件系统解析；绝对路径和相对路径混用等无法安全比较的情况，不显示这几行。差集不能证明漏改，也不能证明自报是虚报；`file_attribution_incomplete` 本身就可能造成差异。
+
 压缩检查点至多携带 128 条观测路径，超限时保留归属不完整标记。会话恢复会合并保留的路径和后续观测，不会找回检查点省略的路径。外部代码代理进程内的写入无法由 Chord 归属到具体文件。
 
 ### 升级

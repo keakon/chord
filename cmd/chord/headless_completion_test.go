@@ -10,7 +10,7 @@ import (
 func TestHeadlessAgentDonePushesCompletionReport(t *testing.T) {
 	event := agent.AgentDoneEvent{
 		TaskID: "task-1", Summary: "Updated files; formatting passed.",
-		Message: "Updated files; formatting passed.\n- actual_files_changed: observed.go\n- reported_files_changed: reported.go\n- remaining_limitations: Integration tests were not run.\n- file_attribution_incomplete: true",
+		Message: "Updated files; formatting passed.\n- actual_files_changed: observed.go\n- reported_files_changed: reported.go\n- reported_only_in_records: 1 (reported.go)\n- observed_only_in_records: 1 (observed.go)\n- file_list_note: Differences compare retained path records only; they do not establish missing changes or false claims.\n- remaining_limitations: Integration tests were not run.\n- file_attribution_incomplete: true",
 	}
 	envelopes := filterHeadlessEvent(event, &headlessState{})
 	if len(envelopes) != 1 {
