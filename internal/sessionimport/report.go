@@ -11,6 +11,7 @@ type ImportReport struct {
 	Source          string    `json:"source"`
 	SourcePath      string    `json:"source_path,omitempty"`
 	SourceSessionID string    `json:"source_session_id,omitempty"`
+	SourceTitle     string    `json:"source_title,omitempty"`
 	ImportedAt      time.Time `json:"imported_at"`
 
 	ReasoningMode string `json:"reasoning_mode,omitempty"`

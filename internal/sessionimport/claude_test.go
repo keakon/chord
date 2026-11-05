@@ -878,3 +878,83 @@ func TestConvertClaudeTranscript_DropsWrapperTextBesideToolResult(t *testing.T) 
 		t.Fatalf("claude report=%+v, want 1 block dropped and no whole message skipped", report.Claude)
 	}
 }
+
+func TestConvertClaudeTranscript_CapturesLastAITitle(t *testing.T) {
+	data := []byte(`{"type":"ai-title","aiTitle":"draft title"}
+{"uuid":"u1","message":{"role":"user","content":"plain question"}}
+{"type":"ai-title","aiTitle":"  final title  "}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("msgs len=%d, want 2: %+v", len(msgs), msgs)
+	}
+	if report.SourceTitle != "final title" {
+		t.Fatalf("SourceTitle=%q, want the trimmed last title", report.SourceTitle)
+	}
+}
+
+func TestConvertClaudeTranscript_BlankAITitleDefersToLaterLine(t *testing.T) {
+	data := []byte(`{"type":"ai-title"}
+{"uuid":"u1","message":{"role":"user","content":"plain question"}}
+{"type":"ai-title","aiTitle":"   "}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+{"type":"ai-title","aiTitle":"kept title"}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("msgs len=%d, want 2: %+v", len(msgs), msgs)
+	}
+	if report.SourceTitle != "kept title" {
+		t.Fatalf("SourceTitle=%q, want the later non-empty title", report.SourceTitle)
+	}
+	if len(report.Warnings) != 0 {
+		t.Fatalf("warnings=%v, want none", report.Warnings)
+	}
+}
+
+func TestConvertClaudeTranscript_NonStringAITitleDoesNotFailImport(t *testing.T) {
+	data := []byte(`{"type":"ai-title","aiTitle":42}
+{"uuid":"u1","message":{"role":"user","content":"plain question"}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("msgs len=%d, want 2: %+v", len(msgs), msgs)
+	}
+	if report.SourceTitle != "" {
+		t.Fatalf("SourceTitle=%q, want empty", report.SourceTitle)
+	}
+	if len(report.Warnings) != 0 {
+		t.Fatalf("warnings=%v, want none", report.Warnings)
+	}
+}
+
+func TestConvertClaudeTranscript_NoAITitleLeavesSourceTitleEmpty(t *testing.T) {
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":"plain question"}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("msgs len=%d, want 2: %+v", len(msgs), msgs)
+	}
+	if report.SourceTitle != "" {
+		t.Fatalf("SourceTitle=%q, want empty", report.SourceTitle)
+	}
+}

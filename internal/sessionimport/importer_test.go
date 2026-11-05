@@ -95,6 +95,9 @@ func TestImport_ClaudeStructured_WritesRecoverableSessionAndReport(t *testing.T)
 	if meta == nil || meta.ImportedFrom == nil || meta.ImportedFrom.Source != "claude" {
 		t.Fatalf("ImportedFrom missing: %+v", meta)
 	}
+	if meta.Title != "" {
+		t.Fatalf("Title=%q, want empty for a transcript without ai-title", meta.Title)
+	}
 
 	data, err := os.ReadFile(filepath.Join(res.SessionDir, "import-report.json"))
 	if err != nil {
@@ -115,6 +118,37 @@ func TestImport_ClaudeStructured_WritesRecoverableSessionAndReport(t *testing.T)
 	}
 	if len(rep.Claude.Diagnostics) == 0 {
 		t.Fatalf("expected claude diagnostics, got none")
+	}
+}
+
+func TestImport_ClaudeAITitleLandsInSessionMeta(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("CHORD_STATE_DIR", stateDir)
+	t.Setenv("CHORD_SESSIONS_DIR", "")
+
+	projectRoot := t.TempDir()
+	input := filepath.Join(t.TempDir(), "claude-transcript.jsonl")
+	if err := os.WriteFile(input, []byte(`{"type":"ai-title","aiTitle":"reviewing unpushed commits"}
+{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}
+`), 0o600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	res, err := Import(context.Background(), ImportOptions{Source: "claude", InputPath: input, ProjectRoot: projectRoot, ReasoningMode: ReasoningStrict})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+
+	meta, err := recovery.LoadSessionMeta(res.SessionDir)
+	if err != nil {
+		t.Fatalf("LoadSessionMeta: %v", err)
+	}
+	if meta == nil || meta.Title != "reviewing unpushed commits" {
+		t.Fatalf("meta title missing: %+v", meta)
+	}
+	if meta.ImportedFrom == nil || meta.ImportedFrom.Source != "claude" {
+		t.Fatalf("ImportedFrom missing: %+v", meta)
 	}
 }
 func TestImport_OpenCode_WritesRecoverableSession(t *testing.T) {

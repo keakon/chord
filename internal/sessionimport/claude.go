@@ -22,6 +22,7 @@ type claudeTranscriptEnvelope struct {
 	IsSidechain       bool            `json:"isSidechain"`
 	AgentID           string          `json:"agentId"`
 	SessionID         string          `json:"sessionId"`
+	AiTitle           json.RawMessage `json:"aiTitle"`
 	Message           json.RawMessage `json:"message"`
 	Content           json.RawMessage `json:"content"`
 }
@@ -174,6 +175,7 @@ func convertClaudeTranscript(data []byte, reasoningMode string, report *ImportRe
 		if report.SourceSessionID == "" {
 			report.SourceSessionID = env.SessionID
 		}
+		captureClaudeSourceTitle(env, report)
 		entry, skipped := classifyClaudeEntry(claudeNode{Envelope: env, Index: lineNo}, report.Claude)
 		if skipped {
 			report.SkippedEntries++
@@ -300,6 +302,25 @@ func classifyClaudeEntry(node claudeNode, stats *ClaudeImportReport) (claudeEntr
 	}
 	stats.MetadataEntries++
 	return claudeEntry{Node: node, Kind: claudeEntryUnsupported, Role: role}, false
+}
+
+// captureClaudeSourceTitle records the transcript's ai-title into the report,
+// keeping the last non-empty value: local transcripts repeat one stable title
+// line after line, and cline also takes the last one, so the last value is the
+// conservative choice even if a source ever rewrites the title mid-session.
+// aiTitle is a content field, so a non-string or empty value skips the line
+// rather than failing the import.
+func captureClaudeSourceTitle(env claudeTranscriptEnvelope, report *ImportReport) {
+	if strings.ToLower(strings.TrimSpace(env.Type)) != "ai-title" {
+		return
+	}
+	var title string
+	if err := importJSONUnmarshal(env.AiTitle, &title); err != nil {
+		return
+	}
+	if title = strings.TrimSpace(title); title != "" {
+		report.SourceTitle = title
+	}
 }
 
 func recordClaudeSidechainAgent(stats *ClaudeImportReport, agentID string) {

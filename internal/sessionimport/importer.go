@@ -125,14 +125,17 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 		resolvedInput = lookup.Path
 	}
 
-	sid, sessionDir, err := writeChordSession(pl.ProjectSessionsDir, opts.SessionID, opts.Force, msgs, report, recovery.SessionMeta{ImportedFrom: &recovery.ImportMeta{
-		Source:          source,
-		SourcePath:      resolvedInput,
-		SourceSessionID: report.SourceSessionID,
-		ImportedAt:      report.ImportedAt,
-		ReasoningMode:   reasoningMode,
-		ReportPath:      "import-report.json",
-	}})
+	sid, sessionDir, err := writeChordSession(pl.ProjectSessionsDir, opts.SessionID, opts.Force, msgs, report, recovery.SessionMeta{
+		Title: report.SourceTitle,
+		ImportedFrom: &recovery.ImportMeta{
+			Source:          source,
+			SourcePath:      resolvedInput,
+			SourceSessionID: report.SourceSessionID,
+			ImportedAt:      report.ImportedAt,
+			ReasoningMode:   reasoningMode,
+			ReportPath:      "import-report.json",
+		},
+	})
 	if err != nil {
 		return nil, err
 	}

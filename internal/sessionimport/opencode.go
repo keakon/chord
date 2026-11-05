@@ -93,11 +93,14 @@ func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportRepo
 	}
 
 	if len(file.Info) > 0 {
-		// Best-effort extract source session id.
+		// Best-effort extract source session metadata.
 		var info map[string]any
 		if err := json.Unmarshal(file.Info, &info); err == nil {
 			if v, ok := firstString(info, "id", "session_id", "sessionId", "sessionID"); ok {
 				report.SourceSessionID = v
+			}
+			if title, ok := firstString(info, "title"); ok {
+				report.SourceTitle = title
 			}
 		}
 	}
