@@ -606,13 +606,26 @@ func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCa
 	if turnID == 0 {
 		turnID = b.agent.currentTurnID()
 	}
+	attr := usageAttribution{
+		AgentID:          agentID,
+		AgentKind:        agentKind,
+		AgentName:        agentName,
+		Purpose:          tool,
+		TurnID:           turnID,
+		SelectedModelRef: selectedRef,
+		RunningModelRef:  runningRef,
+	}
 	if caller != nil && caller.id != "" {
-		agentID, agentKind, agentName = caller.id, "sub", caller.id
-		if sub := b.agent.subAgentByID(caller.id); sub != nil {
-			agentName = sub.agentDefName
+		// The caller resolved this request, so its SubAgent pointer is the
+		// authoritative task identity; do not re-query the runtime by ID or
+		// follow the current focus.
+		attr.AgentID, attr.AgentKind, attr.AgentName = caller.id, agentKindSub, caller.id
+		if sub := caller.sub; sub != nil {
+			attr.AgentName = sub.agentDefName
+			attr.TaskID = sub.taskID
 		}
 	}
-	b.agent.recordUsage(agentID, agentKind, agentName, tool, selectedRef, runningRef, turnID, usage, serviceTier, diagnostic)
+	b.agent.recordUsage(attr, usage, serviceTier, diagnostic)
 }
 
 // hostedObservationFromResponse enforces the success contract and annotates

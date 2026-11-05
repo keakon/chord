@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/golog"
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/executiongate"
@@ -813,11 +814,18 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 		wallReq.wireStreamReducer(streamReducer)
 	}
 	requestOptions := llm.CompleteStreamOptions{
-		OnContinuationUsage: a.continuationUsageObserver(llmClient, requestUsageTarget(wallReq), "main", a.currentAgentName(), "chat", selectedRef, turnID),
-		Diagnostics:         observer,
-		PrepareAttempt:      prepareDirectoryInstructionAttempt(a.directoryInstructions.Load(), requestSeq),
-		NativeTools:         a.nativeRequestPolicy(turn),
-		MCPDeclarations:     a.effectiveRuntimeMCPDeclarations(),
+		OnContinuationUsage: a.continuationUsageObserver(llmClient, requestUsageTarget(wallReq), usageAttribution{
+			AgentID:          identity.MainAgentID,
+			AgentKind:        identity.MainAgentID,
+			AgentName:        a.currentAgentName(),
+			Purpose:          analytics.UsagePurposeChat,
+			TurnID:           turnID,
+			SelectedModelRef: selectedRef,
+		}),
+		Diagnostics:     observer,
+		PrepareAttempt:  prepareDirectoryInstructionAttempt(a.directoryInstructions.Load(), requestSeq),
+		NativeTools:     a.nativeRequestPolicy(turn),
+		MCPDeclarations: a.effectiveRuntimeMCPDeclarations(),
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {
 			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback)
 			if err == nil && updatedMessages != nil {
@@ -1027,7 +1035,15 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 		maps.Copy(cacheDiag, reductionDiag)
 	}
 	if resp.NativeTools == nil && !resp.UsageReported {
-		a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier, cacheDiag)
+		a.recordUsage(usageAttribution{
+			AgentID:          identity.MainAgentID,
+			AgentKind:        identity.MainAgentID,
+			AgentName:        a.currentAgentName(),
+			Purpose:          analytics.UsagePurposeChat,
+			TurnID:           turnID,
+			SelectedModelRef: selectedRef,
+			RunningModelRef:  callStatus.RunningModelRef,
+		}, resp.Usage, callStatus.ServiceTier, cacheDiag)
 	}
 
 	// Hook: on_after_llm_call (after LLM call).

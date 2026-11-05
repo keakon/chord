@@ -1390,6 +1390,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case projectUsageLoadedMsg:
 		return m, m.handleProjectUsageLoaded(msg)
 
+	case taskUsageLoadedMsg:
+		return m, m.handleTasksUsageLoaded(msg)
+
 	case clearPendingQuitMsg:
 		if msg.generation == m.quit.gen {
 			m.clearPendingQuit()

@@ -288,22 +288,33 @@ func (a *MainAgent) recordOversizeRecoveryAnalyticsEvent(action, stage, selected
 	})
 }
 
+// usageAttribution is the runtime identity and request metadata of one billed
+// LLM call. TaskID is a runtime fact captured at the call site; it never comes
+// from model-visible input and stays empty for main-agent calls.
+type usageAttribution struct {
+	AgentID          string
+	AgentKind        string
+	AgentName        string
+	TaskID           string
+	Purpose          string
+	TurnID           uint64
+	SelectedModelRef string
+	RunningModelRef  string
+}
+
+const agentKindSub = "sub"
+
 func (a *MainAgent) recordUsage(
-	agentID string,
-	agentKind string,
-	agentName string,
-	purpose string,
-	selectedModelRef string,
-	runningModelRef string,
-	turnID uint64,
+	attr usageAttribution,
 	usage *message.TokenUsage,
 	serviceTier config.ServiceTier,
 	diagnostic map[string]string,
 ) {
-	if runningModelRef == "" {
-		runningModelRef = selectedModelRef
+	attr.RunningModelRef = strings.TrimSpace(attr.RunningModelRef)
+	if attr.RunningModelRef == "" {
+		attr.RunningModelRef = attr.SelectedModelRef
 	}
-	costCfg := a.lookupModelCost(runningModelRef)
+	costCfg := a.lookupModelCost(attr.RunningModelRef)
 
 	serviceTier = config.NormalizeServiceTier(string(serviceTier))
 	var u message.TokenUsage
@@ -314,13 +325,14 @@ func (a *MainAgent) recordUsage(
 	rawUsage := analytics.UsageSnapshotFromTokenUsage(u)
 	billingUsage := analytics.NormalizeBillingUsage(rawUsage)
 	a.emitUsageEvent(analytics.UsageEvent{
-		AgentID:          agentID,
-		AgentKind:        agentKind,
-		AgentName:        agentName,
-		Purpose:          purpose,
-		TurnID:           turnID,
-		SelectedModelRef: selectedModelRef,
-		RunningModelRef:  runningModelRef,
+		AgentID:          attr.AgentID,
+		AgentKind:        attr.AgentKind,
+		AgentName:        attr.AgentName,
+		TaskID:           attr.TaskID,
+		Purpose:          attr.Purpose,
+		TurnID:           attr.TurnID,
+		SelectedModelRef: attr.SelectedModelRef,
+		RunningModelRef:  attr.RunningModelRef,
 		UsageRaw:         rawUsage,
 		BillingUsage:     billingUsage,
 		Cost:             analytics.CalculateUsageCost(costCfg, billingUsage, serviceTier),

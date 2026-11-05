@@ -32,6 +32,7 @@ func (m *Model) applyUIEffects(e uiEffects) tea.Cmd {
 	if e.invalidateUsage {
 		m.invalidateStatusBarAgentSnapshot()
 		m.invalidateUsageStatsCache()
+		e.addFollowup(m.noteTaskUsageDataChanged())
 		m.cachedInfoPanelFP = ""
 		m.cachedInfoPanelOut = ""
 	}

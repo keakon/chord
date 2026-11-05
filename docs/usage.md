@@ -451,9 +451,11 @@ The export includes every conversation message plus the current session usage st
 Opens an overlay to browse usage data along two axes:
 
 - **Scope**: `Session` (current session) or `Project` (aggregate project stats). Press `s` to toggle.
-- **View**: `Overview`, `Models` (per-model breakdown), `Agents` (per-agent breakdown). Project scope additionally supports `Dates` (per-day breakdown). Press `Tab` / `Shift+Tab` to switch views.
+- **View**: `Overview`, `Models` (per-model breakdown), `Agents` (per-agent breakdown), and `Tasks` (session scope only, direct usage by delegated task). Project scope additionally supports `Dates` (per-day breakdown). Press `Tab` / `Shift+Tab` to switch views.
 
 Session Overview shows: LLM calls, input/output tokens, cache read/write tokens, reasoning tokens, estimated cost, and, once any context compaction has run, its lifecycle counts (for example `applied`, `skipped/model_driven`). Models and Agents views display detailed per-dimension tables.
+
+Session Tasks ranks direct usage per delegated task. The main agent row covers the whole session: the main conversation, compaction, and its native/hosted calls. Each task row counts only that task's own calls and accumulates across attempts, instances, and restores. Chord-estimated usage comes first, followed by a ledger total. Tasks run through an external CLI (such as Claude Code) report their own cumulative tokens and cost and appear in a separate group, because the CLI's numbers may include nested agents; the two sources are neither mixed nor summed. External rows show `—` under Calls because the CLI does not report call counts. Untracked covers non-main calls with no task identity, such as records written before task attribution existed; it is not apportioned to individual tasks. An external task's cost shows `unknown` until the CLI reports it, and a reported zero cost is shown as zero.
 
 Project statistics are auto-aggregated from local sessions directories, with five time ranges: `today`, `7d`, `30d`, `90d`, `all`. Switching to Project may briefly show "loading" before data appears.
 

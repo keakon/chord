@@ -449,9 +449,11 @@ OAuth 发现与令牌请求直接访问公网 HTTPS 授权服务器，不使用�
 打开一个浮层，分两个维度浏览用量数据：
 
 - **范围（Scope）**：`Session`（当前会话）或 `Project`（当前项目的聚合统计）。按 `s` 键切换。
-- **视图（View）**：`Overview`（总览）、`Models`（按模型细分）、`Agents`（按 agent 细分）。Project 额外支持 `Dates`（按日期细分）。按 `Tab` / `Shift+Tab` 切换视图。
+- **视图（View）**：`Overview`（总览）、`Models`（按模型细分）、`Agents`（按 agent 细分）、`Tasks`（仅 Session 范围，按委派任务展示直接用量）。Project 额外支持 `Dates`（按日期细分）。按 `Tab` / `Shift+Tab` 切换视图。
 
 Session Overview 展示：LLM 调用次数、输入/输出 token、缓存读写 token、reasoning token、估算成本；发生过上下文压缩时，还会显示压缩生命周期计数（如 `applied`、`skipped/model_driven`）。Models 和 Agents 视图以表格展示各维度详细拆解。
+
+Session 的 Tasks 视图按委派任务比较直接用量。main 行涵盖整个 session：主对话、上下文压缩及其 native/hosted 调用。每个任务只统计该任务自身的调用，跨 attempt、instance 和恢复累计。Chord 估算的用量排在前一组，并附该组 ledger 总量。通过外部 CLI（如 Claude Code）运行的任务由 CLI 自报累计 token 和费用，单列一组；CLI 的数字可能包含其嵌套 agent，两组既不混排也不相加。外部任务行在 Calls 列显示 `—`，因为 CLI 不提供调用次数。Untracked 是没有任务身份的非 main 调用（例如任务归因出现之前写入的历史记录），不会分摊到具体任务。外部任务在 CLI 报告费用之前显示 `unknown`，已报告的零费用照常显示为零。
 
 Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`30d`、`90d`、`all` 五种时间范围。切换到 Project 时可能短暂显示「加载中」，稍后会展示统计数据。
 

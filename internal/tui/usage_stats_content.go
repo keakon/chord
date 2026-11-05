@@ -51,6 +51,9 @@ func (m *Model) sessionUsageStatsLines(width int) []string {
 		}
 	}
 
+	if m.usageStats.view == statsViewTasks {
+		return m.sessionTaskUsageLines(width)
+	}
 	stats := m.agent.GetUsageStats()
 	switch m.usageStats.view {
 	case statsViewModels:

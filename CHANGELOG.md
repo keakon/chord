@@ -4,6 +4,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Features
+
+- `/stats` adds a Tasks view in session scope: see each delegated task's own calls, tokens, and estimated cost, independent of the agent that ran it. The main agent row covers the whole session, tasks accumulate across attempts and restores, and calls without task identity are listed as untracked. Tasks run by an external Claude Code process appear in a separate group with the CLI's cumulative token and cost report, which may include nested agents and is not combined with Chord's estimate; the cost shows `unknown` until the CLI reports it.
+
 ### Improvements
 
 - Completion reports add `reported_only_in_records` and `observed_only_in_records` summaries when a worker's declared file list and Chord's observed paths can be compared, so the owner can see one-sided records without comparing both lists by hand. The summaries compare retained path spellings only and do not establish missing changes or false reports.

@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/contextdiag"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -30,7 +31,7 @@ func requestUsageTarget(request *requestWallclock) *walltimeTarget {
 	return request.target
 }
 
-func (a *MainAgent) continuationUsageObserver(client *llm.Client, target *walltimeTarget, kind, name, purpose, selected string, turnID uint64) func(llm.ContinuationUsage) {
+func (a *MainAgent) continuationUsageObserver(client *llm.Client, target *walltimeTarget, attr usageAttribution) func(llm.ContinuationUsage) {
 	prices := make(map[string]*config.ModelCost)
 	pool, _ := client.ModelPoolSnapshot()
 	for _, item := range pool {
@@ -48,11 +49,13 @@ func (a *MainAgent) continuationUsageObserver(client *llm.Client, target *wallti
 			}
 		}
 	}
-	id := "main"
+	if attr.AgentID == "" {
+		attr.AgentID = identity.MainAgentID
+	}
 	if target != nil {
-		id = target.agentID
-		name = target.agentName
-		turnID = target.turnID
+		attr.AgentID = target.agentID
+		attr.AgentName = target.agentName
+		attr.TurnID = target.turnID
 	}
 	return func(receipt llm.ContinuationUsage) {
 		var usage message.TokenUsage
@@ -66,7 +69,7 @@ func (a *MainAgent) continuationUsageObserver(client *llm.Client, target *wallti
 		if receipt.Usage == nil {
 			state = contextdiag.Missing
 		}
-		evt := analytics.UsageEvent{EventID: fmt.Sprintf("continuation:%s:%d", receipt.ChainID, receipt.Request), OccurredAt: time.Now(), AgentID: id, AgentKind: kind, AgentName: name, Purpose: purpose, TurnID: turnID, SelectedModelRef: selected, RunningModelRef: receipt.ModelRef, UsageRaw: raw, BillingUsage: billing, Cost: analytics.CalculateUsageCost(price, billing, receipt.ServiceTier), PricingSnapshot: analytics.PricingSnapshotFromCost(price, billing, receipt.ServiceTier), Diagnostic: map[string]string{"chain": receipt.ChainID, "request": fmt.Sprint(receipt.Request), "outcome": receipt.Outcome, "usage_state": state}}
+		evt := analytics.UsageEvent{EventID: fmt.Sprintf("continuation:%s:%d", receipt.ChainID, receipt.Request), OccurredAt: time.Now(), AgentID: attr.AgentID, AgentKind: attr.AgentKind, AgentName: attr.AgentName, TaskID: attr.TaskID, Purpose: attr.Purpose, TurnID: attr.TurnID, SelectedModelRef: attr.SelectedModelRef, RunningModelRef: receipt.ModelRef, UsageRaw: raw, BillingUsage: billing, Cost: analytics.CalculateUsageCost(price, billing, receipt.ServiceTier), PricingSnapshot: analytics.PricingSnapshotFromCost(price, billing, receipt.ServiceTier), Diagnostic: map[string]string{"chain": receipt.ChainID, "request": fmt.Sprint(receipt.Request), "outcome": receipt.Outcome, "usage_state": state}}
 		payload := continuationUsagePayload{target: target, event: evt}
 		if target != nil && target.ledger != nil {
 			err := target.ledger.AppendEvent(evt)

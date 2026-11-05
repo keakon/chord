@@ -611,6 +611,7 @@ type MainAgent struct {
 	admissionPaused          atomic.Bool
 	subAgentMetaPersistMu    sync.Mutex
 	taskRegistryPersistMu    sync.Mutex
+	taskUsageCache           taskUsageCache
 	settlementJournalMu      sync.Mutex
 	agentRequestPersistMu    sync.Mutex
 	taskRegistryPersistHook  func()                   // test-only barrier after snapshot, before durable write

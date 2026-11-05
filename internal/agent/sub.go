@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/executiongate"
@@ -1228,7 +1229,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 			}
 			s.signalWake()
 		})
-		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{OnContinuationUsage: s.parent.continuationUsageObserver(llmClient, requestUsageTarget(wallReq), "sub", s.agentDefName, "chat", llmClient.PrimaryModelRef(), turn.ID), NativeTools: s.nativeRequestPolicy(turn), Diagnostics: observer, PrepareAttempt: prepareDirectoryInstructionAttempt(s.directoryInstructions.Load(), requestSeq)})
+		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{OnContinuationUsage: s.parent.continuationUsageObserver(llmClient, requestUsageTarget(wallReq), usageAttribution{AgentID: s.instanceID, AgentKind: agentKindSub, AgentName: s.agentDefName, TaskID: s.taskID, Purpose: analytics.UsagePurposeChat, TurnID: turn.ID, SelectedModelRef: llmClient.PrimaryModelRef()}), NativeTools: s.nativeRequestPolicy(turn), Diagnostics: observer, PrepareAttempt: prepareDirectoryInstructionAttempt(s.directoryInstructions.Load(), requestSeq)})
 		// Settle the walltime segment before the flush events so the TUI
 		// re-render they trigger sees the updated TIME buckets; finishing at
 		// return would leave the sidebar stale until the next unrelated
@@ -1270,7 +1271,16 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 				}
 			}
 			if resp.NativeTools == nil && !resp.UsageReported {
-				s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage, callStatus.ServiceTier, nil)
+				s.parent.recordUsage(usageAttribution{
+					AgentID:          s.instanceID,
+					AgentKind:        agentKindSub,
+					AgentName:        s.agentDefName,
+					TaskID:           s.taskID,
+					Purpose:          analytics.UsagePurposeChat,
+					TurnID:           turn.ID,
+					SelectedModelRef: selectedRef,
+					RunningModelRef:  runningRef,
+				}, resp.Usage, callStatus.ServiceTier, nil)
 			}
 
 			// Hook: on_after_llm_call.

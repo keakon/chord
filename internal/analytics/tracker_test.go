@@ -771,3 +771,116 @@ func TestAddUsageEventSkipsDiagnosticPurposes(t *testing.T) {
 		t.Fatalf("ByModel = %#v, want empty", stats.ByModel)
 	}
 }
+
+func TestSessionStatsPartitionsTaskUsage(t *testing.T) {
+	tracker := NewUsageTracker()
+	record := func(agentID, taskID string, in, out int64) {
+		raw := UsageSnapshot{InputTokens: in, OutputTokens: out}
+		billing := NormalizeBillingUsage(raw)
+		cost := CalculateUsageCost(&config.ModelCost{Input: 1, Output: 2}, billing, config.ServiceTierStandard).TotalCost
+		tracker.AddUsageEvent(UsageEvent{
+			AgentID:         agentID,
+			TaskID:          taskID,
+			RunningModelRef: "provider-a/model-1",
+			UsageRaw:        raw,
+			BillingUsage:    billing,
+			Cost:            UsageCost{TotalCost: cost},
+		})
+	}
+	record("main", "ignored-task", 100, 10)
+	record("instance-1", "task-a", 200, 20)
+	record("instance-2", "task-a", 300, 30)
+	record("instance-3", "task-b", 400, 40)
+	record("instance-4", "", 500, 50)
+
+	stats := tracker.SessionStats()
+	if stats.LLMCalls != 5 {
+		t.Fatalf("LLMCalls = %d, want 5", stats.LLMCalls)
+	}
+	main := stats.ByAgent["main"]
+	if main == nil || main.LLMCalls != 1 || main.InputTokens != 100 {
+		t.Fatalf("main partition = %+v", main)
+	}
+	taskA := stats.ByTask["task-a"]
+	if taskA == nil || taskA.LLMCalls != 2 || taskA.InputTokens != 500 || taskA.OutputTokens != 50 {
+		t.Fatalf("task-a partition = %+v", taskA)
+	}
+	taskB := stats.ByTask["task-b"]
+	if taskB == nil || taskB.LLMCalls != 1 || taskB.InputTokens != 400 {
+		t.Fatalf("task-b partition = %+v", taskB)
+	}
+	if _, ok := stats.ByTask["ignored-task"]; ok {
+		t.Fatal("main usage must not enter a task partition")
+	}
+	if stats.Untracked == nil || stats.Untracked.LLMCalls != 1 || stats.Untracked.InputTokens != 500 {
+		t.Fatalf("untracked partition = %+v", stats.Untracked)
+	}
+
+	var calls, input, output int64
+	var cost float64
+	partitions := []*AgentStats{main, taskA, taskB, stats.Untracked}
+	for _, p := range partitions {
+		calls += p.LLMCalls
+		input += p.InputTokens
+		output += p.OutputTokens
+		cost += p.EstimatedCost
+	}
+	if calls != stats.LLMCalls || input != stats.InputTokens || output != stats.OutputTokens || !almostEqual(cost, stats.EstimatedCost, 1e-9) {
+		t.Fatalf("partitions do not conserve totals: calls=%d/%d input=%d/%d output=%d/%d cost=%f/%f",
+			calls, stats.LLMCalls, input, stats.InputTokens, output, stats.OutputTokens, cost, stats.EstimatedCost)
+	}
+	if len(stats.ByTask) != 2 {
+		t.Fatalf("ByTask = %#v, want two tasks", stats.ByTask)
+	}
+}
+
+func TestSessionStatsDeepCopiesTaskPartitions(t *testing.T) {
+	tracker := NewUsageTracker()
+	raw := UsageSnapshot{InputTokens: 10, OutputTokens: 2}
+	tracker.AddUsageEvent(UsageEvent{
+		AgentID:         "instance-1",
+		TaskID:          "task-a",
+		RunningModelRef: "provider-a/model-1",
+		UsageRaw:        raw,
+		BillingUsage:    NormalizeBillingUsage(raw),
+	})
+
+	stats := tracker.SessionStats()
+	stats.ByTask["task-a"].InputTokens = 999
+	stats.ByTask["task-a"].ByModel["provider-a/model-1"].Calls = 999
+	stats.Untracked = &AgentStats{LLMCalls: 999}
+
+	again := tracker.SessionStats()
+	if again.ByTask["task-a"].InputTokens != 10 || again.ByTask["task-a"].ByModel["provider-a/model-1"].Calls != 1 {
+		t.Fatalf("tracker mutated through snapshot: %+v", again.ByTask["task-a"])
+	}
+	if again.Untracked != nil {
+		t.Fatalf("tracker untracked mutated through snapshot: %+v", again.Untracked)
+	}
+
+	tracker.RestoreStats(stats)
+	restored := tracker.SessionStats()
+	if restored.ByTask["task-a"].InputTokens != 999 || restored.Untracked == nil {
+		t.Fatalf("RestoreStats did not keep task partitions: %+v", restored)
+	}
+	stats.ByTask["task-a"].InputTokens = 1
+	if tracker.SessionStats().ByTask["task-a"].InputTokens != 999 {
+		t.Fatal("RestoreStats must deep-copy task partitions")
+	}
+}
+
+func TestRecordForAgentUntrackedPartition(t *testing.T) {
+	tracker := NewUsageTracker()
+	tracker.RecordForAgent("main", "provider-a/model-1", nil, message.TokenUsage{InputTokens: 100})
+	tracker.RecordForAgent("instance-1", "provider-a/model-1", nil, message.TokenUsage{InputTokens: 50})
+	stats := tracker.SessionStats()
+	if len(stats.ByTask) != 0 {
+		t.Fatalf("ByTask = %#v, want empty", stats.ByTask)
+	}
+	if stats.Untracked == nil || stats.Untracked.InputTokens != 50 || stats.Untracked.LLMCalls != 1 {
+		t.Fatalf("Untracked = %+v", stats.Untracked)
+	}
+	if stats.InputTokens != 150 {
+		t.Fatalf("session input = %d, want 150", stats.InputTokens)
+	}
+}

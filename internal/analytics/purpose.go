@@ -10,6 +10,11 @@ import "strings"
 // gateway with stream usage reporting disabled legitimately returns zero
 // usage for real calls.
 const (
+	// UsagePurposeChat and UsagePurposeCompaction are the billed request
+	// purposes: they are LLM calls and always enter the usage aggregates.
+	UsagePurposeChat       = "chat"
+	UsagePurposeCompaction = "compaction"
+
 	UsagePurposeCompactionPolicy    = "compaction_policy"
 	UsagePurposeCompactionFailure   = "compaction_failure"
 	UsagePurposeOversizeRecovery    = "oversize_recovery"

@@ -21,12 +21,15 @@ func TestContinuationUsagePinsLedgerAndIgnoresLateUI(t *testing.T) {
 	source := &config.ModelCost{Input: 1, Output: 2}
 	provider := llm.NewProviderConfig("sample", config.ProviderConfig{Models: map[string]config.ModelConfig{"model-1": {Cost: source}}}, nil)
 	client := llm.NewClient(provider, nil, "model-1", 100, "")
-	observer := agent.continuationUsageObserver(client, target, "sub", "worker", "chat", "sample/model-1", 7)
+	observer := agent.continuationUsageObserver(client, target, usageAttribution{AgentID: "worker-1", AgentKind: agentKindSub, AgentName: "worker", TaskID: "task-1", Purpose: analytics.UsagePurposeChat, SelectedModelRef: "sample/model-1", TurnID: 7})
 	source.Input = 99
 	observer(llm.ContinuationUsage{ChainID: "chain", Request: 1, ModelRef: "sample/model-1", Outcome: "checkpoint", UsageState: contextdiag.Partial, Usage: &message.TokenUsage{InputTokens: 1000000}})
 	first := (<-agent.eventCh).Payload.(continuationUsagePayload)
 	if first.event.Cost.TotalCost != 1 || first.event.Diagnostic["usage_state"] != contextdiag.Partial {
 		t.Fatalf("receipt=%+v", first)
+	}
+	if first.event.TaskID != "task-1" || first.event.AgentID != "worker-1" || first.event.TurnID != 7 {
+		t.Fatalf("continuation attribution = %+v", first.event)
 	}
 	agent.handleContinuationUsage(first)
 	if len(visible) != 1 {

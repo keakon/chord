@@ -39,6 +39,9 @@ type AgentStats struct {
 
 // SessionStats holds session-wide aggregated statistics. InputTokens is the
 // uncached input bucket; full prompt input is Input + CacheRead + CacheWrite.
+// ByTask and Untracked split non-main calls into mutually-exclusive billing
+// partitions: a call carrying a task identity lands in ByTask, every other
+// non-main call lands in Untracked, and main calls stay in ByAgent only.
 type SessionStats struct {
 	InputTokens      int64                  `json:"input_tokens"`
 	OutputTokens     int64                  `json:"output_tokens"`
@@ -49,6 +52,8 @@ type SessionStats struct {
 	EstimatedCost    float64                `json:"estimated_cost"`
 	ByModel          map[string]*ModelStats `json:"by_model"`
 	ByAgent          map[string]*AgentStats `json:"by_agent,omitempty"`
+	ByTask           map[string]*AgentStats `json:"by_task,omitempty"`
+	Untracked        *AgentStats            `json:"untracked,omitempty"`
 	// CompactionLifecycle counts context-compaction lifecycle diagnostic
 	// events keyed by "stage/trigger" (e.g. "applied/model_driven",
 	// "skipped/model_driven"). It powers the /stats compaction-frequency
@@ -69,6 +74,7 @@ func NewUsageTracker() *UsageTracker {
 		stats: SessionStats{
 			ByModel: make(map[string]*ModelStats),
 			ByAgent: make(map[string]*AgentStats),
+			ByTask:  make(map[string]*AgentStats),
 		},
 	}
 }
@@ -90,6 +96,8 @@ func (t *UsageTracker) RestoreStats(s SessionStats) {
 		EstimatedCost:       s.EstimatedCost,
 		ByModel:             cloneModelStatsMap(s.ByModel),
 		ByAgent:             cloneAgentStatsMap(s.ByAgent),
+		ByTask:              cloneAgentStatsMap(s.ByTask),
+		Untracked:           cloneAgentStats(s.Untracked),
 		CompactionLifecycle: cloneStringInt64Map(s.CompactionLifecycle),
 	}
 }
@@ -112,28 +120,93 @@ func (t *UsageTracker) RecordForAgent(agentID, model string, cost *config.ModelC
 	t.applyRecordLocked(agentID, model, cost, usage)
 }
 
-func (t *UsageTracker) applyRecordLocked(agentID, model string, cost *config.ModelCost, usage message.TokenUsage) {
-	t.applyUsageSnapshotLocked(agentID, model, cost, UsageSnapshotFromTokenUsage(usage))
+// usageContribution is one billed LLM call, already normalized into
+// mutually-exclusive billing buckets with its recorded cost. Live recording
+// and ledger replay both fold this shape so their totals cannot drift.
+type usageContribution struct {
+	agentID string
+	taskID  string
+	model   string
+	raw     UsageSnapshot
+	billing BillingUsage
+	cost    float64
 }
 
-func (t *UsageTracker) applyUsageSnapshotLocked(agentID, model string, cost *config.ModelCost, raw UsageSnapshot) {
-	agentID = normalizeAgentID(agentID)
+// eventContribution projects a persisted usage event onto the shared
+// aggregation shape. The event's recorded BillingUsage and Cost are used as-is:
+// live tracking, replay, and the session summary must all report what was
+// billed at event time instead of re-pricing with the current config.
+func eventContribution(event UsageEvent) usageContribution {
+	return usageContribution{
+		agentID: event.AgentID,
+		taskID:  event.TaskID,
+		model:   usageModelKey(event),
+		raw:     event.UsageRaw,
+		billing: event.BillingUsage,
+		cost:    event.Cost.TotalCost,
+	}
+}
+
+func (t *UsageTracker) applyRecordLocked(agentID, model string, cost *config.ModelCost, usage message.TokenUsage) {
+	raw := UsageSnapshotFromTokenUsage(usage)
 	billing := NormalizeBillingUsage(raw)
+	t.stats.applyUsage(usageContribution{
+		agentID: agentID,
+		model:   model,
+		raw:     raw,
+		billing: billing,
+		cost:    CalculateUsageCost(cost, billing, config.ServiceTierStandard).TotalCost,
+	})
+}
 
-	t.stats.InputTokens += billing.InputTokens
-	t.stats.OutputTokens += raw.OutputTokens
-	t.stats.CacheReadTokens += billing.CacheReadTokens
-	t.stats.CacheWriteTokens += billing.CacheWriteTokens
-	t.stats.ReasoningTokens += raw.ReasoningTokens
-	t.stats.LLMCalls++
+// applyUsage folds one call into the session total, per-model and per-agent
+// views, and exactly one billing partition. Both live recording and ledger
+// replay route through it so their totals cannot drift.
+func (s *SessionStats) applyUsage(contribution usageContribution) {
+	billing := contribution.billing
+	raw := contribution.raw
+	cost := contribution.cost
 
-	callCost := CalculateUsageCost(cost, billing, config.ServiceTierStandard).TotalCost
-	t.stats.EstimatedCost += callCost
+	s.InputTokens += billing.InputTokens
+	s.OutputTokens += raw.OutputTokens
+	s.CacheReadTokens += billing.CacheReadTokens
+	s.CacheWriteTokens += billing.CacheWriteTokens
+	s.ReasoningTokens += raw.ReasoningTokens
+	s.LLMCalls++
+	s.EstimatedCost += cost
+	addModelUsage(s.ByModel, contribution.model, raw, billing, cost)
 
-	ms, ok := t.stats.ByModel[model]
+	agentID := normalizeAgentID(contribution.agentID)
+	addAgentUsage(s.ByAgent, agentID, contribution.model, raw, billing, cost)
+
+	// Every non-main call lands in exactly one billing partition. The task ID
+	// is a runtime fact, never inferred from AgentKind: a historical record
+	// without that optional field must still be visible as untracked rather
+	// than silently escaping every partition.
+	if agentID == identity.MainAgentID {
+		return
+	}
+	if taskID := strings.TrimSpace(contribution.taskID); taskID != "" {
+		if s.ByTask == nil {
+			s.ByTask = make(map[string]*AgentStats)
+		}
+		addAgentUsage(s.ByTask, taskID, contribution.model, raw, billing, cost)
+		return
+	}
+	if s.Untracked == nil {
+		s.Untracked = &AgentStats{ByModel: make(map[string]*ModelStats)}
+	}
+	addAgentUsageStats(s.Untracked, contribution.model, raw, billing, cost)
+}
+
+func addModelUsage(group map[string]*ModelStats, model string, raw UsageSnapshot, billing BillingUsage, cost float64) {
+	if group == nil {
+		return
+	}
+	ms, ok := group[model]
 	if !ok {
 		ms = &ModelStats{}
-		t.stats.ByModel[model] = ms
+		group[model] = ms
 	}
 	ms.Calls++
 	ms.InputTokens += billing.InputTokens
@@ -141,14 +214,27 @@ func (t *UsageTracker) applyUsageSnapshotLocked(agentID, model string, cost *con
 	ms.CacheReadTokens += billing.CacheReadTokens
 	ms.CacheWriteTokens += billing.CacheWriteTokens
 	ms.ReasoningTokens += raw.ReasoningTokens
-	ms.EstimatedCost += callCost
+	ms.EstimatedCost += cost
+}
 
-	as, ok := t.stats.ByAgent[agentID]
+func addAgentUsage(group map[string]*AgentStats, key, model string, raw UsageSnapshot, billing BillingUsage, cost float64) {
+	if group == nil {
+		return
+	}
+	as, ok := group[key]
 	if !ok {
-		as = &AgentStats{
-			ByModel: make(map[string]*ModelStats),
-		}
-		t.stats.ByAgent[agentID] = as
+		as = &AgentStats{ByModel: make(map[string]*ModelStats)}
+		group[key] = as
+	}
+	addAgentUsageStats(as, model, raw, billing, cost)
+}
+
+func addAgentUsageStats(as *AgentStats, model string, raw UsageSnapshot, billing BillingUsage, cost float64) {
+	if as == nil {
+		return
+	}
+	if as.ByModel == nil {
+		as.ByModel = make(map[string]*ModelStats)
 	}
 	as.InputTokens += billing.InputTokens
 	as.OutputTokens += raw.OutputTokens
@@ -156,20 +242,8 @@ func (t *UsageTracker) applyUsageSnapshotLocked(agentID, model string, cost *con
 	as.CacheWriteTokens += billing.CacheWriteTokens
 	as.ReasoningTokens += raw.ReasoningTokens
 	as.LLMCalls++
-	as.EstimatedCost += callCost
-
-	ams, ok := as.ByModel[model]
-	if !ok {
-		ams = &ModelStats{}
-		as.ByModel[model] = ams
-	}
-	ams.Calls++
-	ams.InputTokens += billing.InputTokens
-	ams.OutputTokens += raw.OutputTokens
-	ams.CacheReadTokens += billing.CacheReadTokens
-	ams.CacheWriteTokens += billing.CacheWriteTokens
-	ams.ReasoningTokens += raw.ReasoningTokens
-	ams.EstimatedCost += callCost
+	as.EstimatedCost += cost
+	addModelUsage(as.ByModel, model, raw, billing, cost)
 }
 
 // AddUsageEvent applies one persisted usage event to the in-memory tracker.
@@ -193,25 +267,7 @@ func (t *UsageTracker) AddUsageEvent(event UsageEvent) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	raw := event.UsageRaw
-	model := strings.TrimSpace(event.RunningModelRef)
-	if model == "" {
-		model = strings.TrimSpace(event.SelectedModelRef)
-	}
-	if model == "" {
-		model = usageKeyOrUnknown(event.ModelID)
-	}
-	costCfg := &config.ModelCost{
-		Input:        event.PricingSnapshot.InputPerMillion,
-		Output:       event.PricingSnapshot.OutputPerMillion,
-		CacheRead:    event.PricingSnapshot.CacheReadPerMillion,
-		CacheWrite:   event.PricingSnapshot.CacheWritePerMillion,
-		CacheWrite1h: event.PricingSnapshot.CacheWrite1hPerMillion,
-	}
-	if event.PricingSnapshot.Source == "" && event.Cost.TotalCost == 0 {
-		costCfg = nil
-	}
-	t.applyUsageSnapshotLocked(event.AgentID, model, costCfg, raw)
+	t.stats.applyUsage(eventContribution(event))
 }
 
 // SessionStatsForAgent returns cumulative token/cost for a single agent ID
@@ -252,6 +308,8 @@ func (t *UsageTracker) SessionStats() SessionStats {
 	snapshot := t.stats
 	snapshot.ByModel = cloneModelStatsMap(t.stats.ByModel)
 	snapshot.ByAgent = cloneAgentStatsMap(t.stats.ByAgent)
+	snapshot.ByTask = cloneAgentStatsMap(t.stats.ByTask)
+	snapshot.Untracked = cloneAgentStats(t.stats.Untracked)
 	snapshot.CompactionLifecycle = cloneStringInt64Map(t.stats.CompactionLifecycle)
 	return snapshot
 }
@@ -404,11 +462,18 @@ func cloneAgentStatsMap(in map[string]*AgentStats) map[string]*AgentStats {
 		if v == nil {
 			continue
 		}
-		cp := *v
-		cp.ByModel = cloneModelStatsMap(v.ByModel)
-		out[k] = &cp
+		out[k] = cloneAgentStats(v)
 	}
 	return out
+}
+
+func cloneAgentStats(in *AgentStats) *AgentStats {
+	if in == nil {
+		return nil
+	}
+	cp := *in
+	cp.ByModel = cloneModelStatsMap(in.ByModel)
+	return &cp
 }
 
 // cloneStringInt64Map returns a fresh copy of a string→count map, keeping the

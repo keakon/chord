@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"context"
 	"image"
 	"slices"
 	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
 )
 
@@ -32,6 +34,7 @@ const (
 	statsViewOverview statsView = iota
 	statsViewModels
 	statsViewAgents
+	statsViewTasks
 	statsViewDates
 )
 
@@ -41,6 +44,8 @@ func (v statsView) label() string {
 		return "Models"
 	case statsViewAgents:
 		return "Agents"
+	case statsViewTasks:
+		return "Tasks"
 	case statsViewDates:
 		return "Dates"
 	default:
@@ -57,6 +62,15 @@ type usageStatsState struct {
 	projectLoading bool
 	projectLoadErr string
 	projectReport  *analytics.ProjectUsageReport
+
+	taskReport        *agent.TaskUsageReport
+	taskReportSession string
+	taskLoadErr       string
+	taskStale         bool
+	taskLoading       bool
+	taskDirty         bool
+	taskSeq           uint64
+	taskCancel        context.CancelFunc
 
 	renderVersion     uint64
 	linesCacheWidth   int
@@ -115,6 +129,7 @@ func (m *Model) openUsageStats() {
 		scope:       statsScopeSession,
 		view:        statsViewOverview,
 		rangeFilter: analytics.StatsRangeAllTime,
+		taskSeq:     m.usageStats.taskSeq,
 	}
 	m.invalidateUsageStatsCache()
 	m.mode = ModeUsageStats
@@ -126,7 +141,9 @@ func (m *Model) closeUsageStats() tea.Cmd {
 		return nil
 	}
 	prevMode := m.usageStats.prevMode
-	m.usageStats = usageStatsState{}
+	m.cancelTasksUsageLoad()
+	// Completed commands may still be queued when the panel is reopened.
+	m.usageStats = usageStatsState{taskSeq: m.usageStats.taskSeq}
 	cmd := m.restoreModeWithIME(prevMode)
 	m.recalcViewportSize()
 	if prevMode == ModeInsert {
@@ -137,11 +154,12 @@ func (m *Model) closeUsageStats() tea.Cmd {
 
 func (m *Model) handleUsageStatsKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+	var cmd tea.Cmd
 	switch key {
 	case "tab":
-		m.cycleUsageStatsView(1)
+		cmd = m.cycleUsageStatsView(1)
 	case "shift+tab":
-		m.cycleUsageStatsView(-1)
+		cmd = m.cycleUsageStatsView(-1)
 	case "s":
 		return m.toggleUsageStatsScope()
 	case "r":
@@ -164,10 +182,11 @@ func (m *Model) handleUsageStatsKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 	m.clampUsageStatsScroll()
-	return nil
+	return cmd
 }
 
 func (m *Model) toggleUsageStatsScope() tea.Cmd {
+	m.cancelTasksUsageLoad()
 	switch m.usageStats.scope {
 	case statsScopeProject:
 		m.usageStats.scope = statsScopeSession
@@ -230,10 +249,10 @@ func nextStatsRange(current analytics.StatsRange) analytics.StatsRange {
 	}
 }
 
-func (m *Model) cycleUsageStatsView(delta int) {
+func (m *Model) cycleUsageStatsView(delta int) tea.Cmd {
 	views := m.currentUsageStatsViews()
 	if len(views) == 0 {
-		return
+		return nil
 	}
 	idx := 0
 	for i, view := range views {
@@ -243,16 +262,24 @@ func (m *Model) cycleUsageStatsView(delta int) {
 		}
 	}
 	idx = (idx + delta + len(views)) % len(views)
+	previous := m.usageStats.view
 	m.usageStats.view = views[idx]
 	m.usageStats.scrollOffset = 0
+	if previous == statsViewTasks && m.usageStats.view != statsViewTasks {
+		m.cancelTasksUsageLoad()
+	}
 	m.invalidateUsageStatsCache()
+	if m.usageStats.view == statsViewTasks {
+		return m.enterTasksUsageView()
+	}
+	return nil
 }
 
 func (m *Model) currentUsageStatsViews() []statsView {
 	if m.usageStats.scope == statsScopeProject {
 		return []statsView{statsViewOverview, statsViewModels, statsViewAgents, statsViewDates}
 	}
-	return []statsView{statsViewOverview, statsViewModels, statsViewAgents}
+	return []statsView{statsViewOverview, statsViewModels, statsViewAgents, statsViewTasks}
 }
 
 func (m *Model) currentUsageStatsScopeSupports(view statsView) bool {

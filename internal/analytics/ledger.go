@@ -35,6 +35,7 @@ type UsageEvent struct {
 	AgentID          string            `json:"agent_id"`
 	AgentKind        string            `json:"agent_kind,omitempty"`
 	AgentName        string            `json:"agent_name,omitempty"`
+	TaskID           string            `json:"task_id,omitempty"`
 	Purpose          string            `json:"purpose,omitempty"`
 	TurnID           uint64            `json:"turn_id,omitempty"`
 	SelectedModelRef string            `json:"selected_model_ref,omitempty"`
@@ -453,56 +454,7 @@ func (l *UsageLedger) scanSessionEvidence() (*sessionScanResult, error) {
 			}
 			return
 		}
-		stats := &res.stats
-		raw := evt.UsageRaw
-		billing := evt.BillingUsage
-		stats.InputTokens += billing.InputTokens
-		stats.OutputTokens += raw.OutputTokens
-		stats.CacheReadTokens += billing.CacheReadTokens
-		stats.CacheWriteTokens += billing.CacheWriteTokens
-		stats.ReasoningTokens += raw.ReasoningTokens
-		stats.LLMCalls++
-		stats.EstimatedCost += evt.Cost.TotalCost
-
-		modelKey := usageModelKey(evt)
-		ms, ok := stats.ByModel[modelKey]
-		if !ok {
-			ms = &ModelStats{}
-			stats.ByModel[modelKey] = ms
-		}
-		ms.Calls++
-		ms.InputTokens += billing.InputTokens
-		ms.OutputTokens += raw.OutputTokens
-		ms.CacheReadTokens += billing.CacheReadTokens
-		ms.CacheWriteTokens += billing.CacheWriteTokens
-		ms.ReasoningTokens += raw.ReasoningTokens
-		ms.EstimatedCost += evt.Cost.TotalCost
-
-		as, ok := stats.ByAgent[agentID]
-		if !ok {
-			as = &AgentStats{ByModel: make(map[string]*ModelStats)}
-			stats.ByAgent[agentID] = as
-		}
-		as.InputTokens += billing.InputTokens
-		as.OutputTokens += raw.OutputTokens
-		as.CacheReadTokens += billing.CacheReadTokens
-		as.CacheWriteTokens += billing.CacheWriteTokens
-		as.ReasoningTokens += raw.ReasoningTokens
-		as.LLMCalls++
-		as.EstimatedCost += evt.Cost.TotalCost
-
-		ams, ok := as.ByModel[modelKey]
-		if !ok {
-			ams = &ModelStats{}
-			as.ByModel[modelKey] = ams
-		}
-		ams.Calls++
-		ams.InputTokens += billing.InputTokens
-		ams.OutputTokens += raw.OutputTokens
-		ams.CacheReadTokens += billing.CacheReadTokens
-		ams.CacheWriteTokens += billing.CacheWriteTokens
-		ams.ReasoningTokens += raw.ReasoningTokens
-		ams.EstimatedCost += evt.Cost.TotalCost
+		res.stats.applyUsage(eventContribution(evt))
 	})
 	return res, err
 }

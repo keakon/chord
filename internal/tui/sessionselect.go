@@ -94,6 +94,7 @@ func (m *Model) beginSessionSwitch(kind, sessionID string) {
 		m.takeover.status = recovery.SessionPauseStatus{}
 	}
 	m.closeInputHistory()
+	m.resetTasksUsageState()
 	if m.memoryPanel.cancel != nil {
 		m.memoryPanel.cancel()
 		m.memoryPanel.seq++

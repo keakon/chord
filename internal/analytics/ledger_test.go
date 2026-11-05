@@ -1356,3 +1356,91 @@ func readDiskSummary(t *testing.T, dir string) SessionUsageSummary {
 	}
 	return summary
 }
+
+func TestLedgerReplayMatchesLiveTaskPartitions(t *testing.T) {
+	dir := t.TempDir()
+	ledger := NewUsageLedger(dir, "/tmp/project")
+	costCfg := &config.ModelCost{Input: 2, Output: 4, CacheRead: 0.5, CacheWrite: 1}
+	events := []UsageEvent{
+		taskUsageEvent("main", "", "provider-a/model-1", UsageSnapshot{InputTokens: 100, OutputTokens: 10}, costCfg),
+		taskUsageEvent("instance-1", "task-a", "provider-a/model-1", UsageSnapshot{InputTokens: 200, OutputTokens: 20, CacheReadTokens: 50}, costCfg),
+		taskUsageEvent("instance-2", "task-a", "provider-b/model-2", UsageSnapshot{InputTokens: 300, OutputTokens: 30, CacheWriteTokens: 40}, costCfg),
+		taskUsageEvent("instance-3", "task-b", "provider-a/model-1", UsageSnapshot{InputTokens: 400, OutputTokens: 40}, costCfg),
+		taskUsageEvent("instance-4", "", "provider-a/model-1", UsageSnapshot{InputTokens: 500, OutputTokens: 50}, costCfg),
+		{
+			AgentID:         "main",
+			Purpose:         UsagePurposeCompactionLifecycle,
+			RunningModelRef: "provider-a/model-1",
+			Diagnostic:      map[string]string{"stage": "applied"},
+		},
+	}
+	live := NewUsageTracker()
+	for i, evt := range events {
+		live.AddUsageEvent(evt)
+		if err := ledger.AppendEvent(evt); err != nil {
+			t.Fatalf("AppendEvent(%d): %v", i, err)
+		}
+	}
+
+	scanned, _, _, _, _, err := ledger.BuildSessionEvidence()
+	if err != nil {
+		t.Fatalf("BuildSessionEvidence: %v", err)
+	}
+	replayed := NewUsageTracker()
+	replayed.RestoreStats(scanned)
+
+	liveStats := live.SessionStats()
+	replayStats := replayed.SessionStats()
+	if liveStats.LLMCalls != 5 || replayStats.LLMCalls != 5 {
+		t.Fatalf("LLMCalls live=%d replay=%d, want 5", liveStats.LLMCalls, replayStats.LLMCalls)
+	}
+	if !almostEqual(liveStats.EstimatedCost, replayStats.EstimatedCost, 1e-9) {
+		t.Fatalf("cost live=%f replay=%f", liveStats.EstimatedCost, replayStats.EstimatedCost)
+	}
+	if len(replayStats.ByTask) != 2 {
+		t.Fatalf("ByTask = %#v, want task-a and task-b", replayStats.ByTask)
+	}
+	for _, taskID := range []string{"task-a", "task-b"} {
+		got, want := replayStats.ByTask[taskID], liveStats.ByTask[taskID]
+		if got == nil || want == nil {
+			t.Fatalf("missing partition for %s: live=%+v replay=%+v", taskID, want, got)
+		}
+		if got.LLMCalls != want.LLMCalls || got.InputTokens != want.InputTokens || got.OutputTokens != want.OutputTokens ||
+			got.CacheReadTokens != want.CacheReadTokens || got.CacheWriteTokens != want.CacheWriteTokens ||
+			!almostEqual(got.EstimatedCost, want.EstimatedCost, 1e-9) {
+			t.Fatalf("%s partition live=%+v replay=%+v", taskID, want, got)
+		}
+	}
+	if replayStats.Untracked == nil || replayStats.Untracked.LLMCalls != 1 || replayStats.Untracked.InputTokens != 500 {
+		t.Fatalf("Untracked = %+v", replayStats.Untracked)
+	}
+	if replayStats.CompactionLifecycle["applied"] != 1 {
+		t.Fatalf("CompactionLifecycle = %#v", replayStats.CompactionLifecycle)
+	}
+
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if summary.UsageTotal.LLMCalls != replayStats.LLMCalls || summary.UsageTotal.InputTokens != replayStats.InputTokens {
+		t.Fatalf("summary total = %+v, replay stats = %+v", summary.UsageTotal, replayStats)
+	}
+	if len(summary.ByAgent) == 0 {
+		t.Fatal("summary should keep agent dimensions")
+	}
+}
+
+func taskUsageEvent(agentID, taskID, model string, raw UsageSnapshot, costCfg *config.ModelCost) UsageEvent {
+	billing := NormalizeBillingUsage(raw)
+	return UsageEvent{
+		AgentID:          agentID,
+		TaskID:           taskID,
+		Purpose:          "chat",
+		RunningModelRef:  model,
+		SelectedModelRef: model,
+		UsageRaw:         raw,
+		BillingUsage:     billing,
+		Cost:             CalculateUsageCost(costCfg, billing, config.ServiceTierStandard),
+		PricingSnapshot:  PricingSnapshotFromCost(costCfg, billing, config.ServiceTierStandard),
+	}
+}

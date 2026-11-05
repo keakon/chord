@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
@@ -82,7 +83,7 @@ func (a *MainAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
 		return nil
 	}
 	journal := recovery.NativeRequestJournal{SessionDir: a.SessionDir(), AgentID: identity.MainAgentID, TurnID: turn.ID, Generation: turn.Epoch}
-	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(a.tools, a.snapshotRuleset(), a.hookEngine, name) }, a.nativeUsageRecorder(identity.MainAgentID, identity.MainAgentID, a.currentAgentName(), turn.ID))
+	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(a.tools, a.snapshotRuleset(), a.hookEngine, name) }, a.nativeUsageRecorder(usageAttribution{AgentID: identity.MainAgentID, AgentKind: identity.MainAgentID, AgentName: a.currentAgentName(), Purpose: analytics.UsagePurposeChat, TurnID: turn.ID}))
 	policy.Preflight = nativeReceiptPreflight(policy.Preflight, a.nativeReceipt.Load())
 	a.configureNativeImagePolicy(policy, turn, a.tools, journal, a.instanceID)
 	policy.Failed = func(receipt *message.NativeToolHistory) {
@@ -100,7 +101,7 @@ func (s *SubAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
 	}
 	var recorder func(llm.NativeRequestRecord, *message.Response, error)
 	if s.parent != nil {
-		recorder = s.parent.nativeUsageRecorder(s.instanceID, "sub", s.agentDefName, turn.ID)
+		recorder = s.parent.nativeUsageRecorder(usageAttribution{AgentID: s.instanceID, AgentKind: agentKindSub, AgentName: s.agentDefName, TaskID: s.taskID, Purpose: analytics.UsagePurposeChat, TurnID: turn.ID})
 	}
 	journal := s.nativeJournal()
 	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(s.tools, s.currentRuleset(), hooks, name) }, recorder)
@@ -155,7 +156,7 @@ func (a *MainAgent) handleNativeReceipt(evt Event) {
 	}
 }
 
-func (a *MainAgent) nativeUsageRecorder(agentID, kind, name string, turnID uint64) func(llm.NativeRequestRecord, *message.Response, error) {
+func (a *MainAgent) nativeUsageRecorder(attr usageAttribution) func(llm.NativeRequestRecord, *message.Response, error) {
 	return func(record llm.NativeRequestRecord, resp *message.Response, err error) {
 		var usage *message.TokenUsage
 		attempt := hostedWireAttempt{response: resp, err: err, reason: hostedAttemptInitial}
@@ -168,7 +169,10 @@ func (a *MainAgent) nativeUsageRecorder(agentID, kind, name string, turnID uint6
 		}
 		diagnostic := hostedAttemptDiagnostics(attempt)
 		diagnostic["native_contract"] = record.Authorization.Contract
-		a.recordUsage(agentID, kind, name, "chat", record.Target, record.Target, turnID, usage, record.ServiceTier, diagnostic)
+		call := attr
+		call.SelectedModelRef = record.Target
+		call.RunningModelRef = record.Target
+		a.recordUsage(call, usage, record.ServiceTier, diagnostic)
 	}
 }
 

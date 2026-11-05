@@ -31,13 +31,16 @@ func TestRecordUsageUsesProvidedServiceTier(t *testing.T) {
 	})
 
 	a.recordUsage(
-		"sub-1",
-		"sub",
-		"worker",
-		"chat",
-		"provider/model",
-		"provider/model",
-		42,
+		usageAttribution{
+			AgentID:          "sub-1",
+			AgentKind:        agentKindSub,
+			AgentName:        "worker",
+			TaskID:           "task-1",
+			Purpose:          analytics.UsagePurposeChat,
+			TurnID:           42,
+			SelectedModelRef: "provider/model",
+			RunningModelRef:  "provider/model",
+		},
 		&message.TokenUsage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
 		config.ServiceTierFast,
 		nil,
@@ -47,6 +50,9 @@ func TestRecordUsageUsesProvidedServiceTier(t *testing.T) {
 		t.Fatalf("events len = %d, want 1", len(events))
 	}
 	event := events[0]
+	if event.TaskID != "task-1" {
+		t.Fatalf("task id = %q, want task-1", event.TaskID)
+	}
 	if event.PricingSnapshot.ServiceTier != config.ServiceTierFast {
 		t.Fatalf("service tier = %q, want %q", event.PricingSnapshot.ServiceTier, config.ServiceTierFast)
 	}

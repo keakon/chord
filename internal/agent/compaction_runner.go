@@ -14,8 +14,10 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent/checkpointfmt"
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/pathutil"
@@ -1026,7 +1028,7 @@ func (a *MainAgent) callCompactionSummary(ctx context.Context, client *llm.Clien
 		[]message.Message{{Role: "user", Content: prompt}},
 		nil,
 		progress.Callback(),
-		llm.CompleteStreamOptions{OnContinuationUsage: a.continuationUsageObserver(client, usageTarget, "main", "", "compaction", client.PrimaryModelRef(), 0)},
+		llm.CompleteStreamOptions{OnContinuationUsage: a.continuationUsageObserver(client, usageTarget, usageAttribution{AgentID: identity.MainAgentID, AgentKind: identity.MainAgentID, Purpose: analytics.UsagePurposeCompaction, SelectedModelRef: client.PrimaryModelRef()})},
 	)
 	if err != nil {
 		return "", fallbackModelRef, err
@@ -1216,7 +1218,14 @@ func (a *MainAgent) finishCompactionCall(client *llm.Client, fallbackModelRef st
 		serviceTier = client.EffectiveServiceTierForModelRef(runningRef)
 	}
 	if !resp.UsageReported {
-		a.recordUsage("main", "main", a.currentAgentName(), "compaction", selectedRef, runningRef, 0, resp.Usage, serviceTier, nil)
+		a.recordUsage(usageAttribution{
+			AgentID:          identity.MainAgentID,
+			AgentKind:        identity.MainAgentID,
+			AgentName:        a.currentAgentName(),
+			Purpose:          analytics.UsagePurposeCompaction,
+			SelectedModelRef: selectedRef,
+			RunningModelRef:  runningRef,
+		}, resp.Usage, serviceTier, nil)
 	}
 	modelRef := fallbackModelRef
 	if strings.TrimSpace(runningRef) != "" {
