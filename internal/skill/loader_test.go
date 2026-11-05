@@ -830,4 +830,90 @@ func TestNoSidecarWhenMissing(t *testing.T) {
 	}
 }
 
+func TestLoadMetaRecordsTheSidecarSource(t *testing.T) {
+	cases := []struct {
+		name    string
+		sidecar string
+		want    string
+	}{
+		{name: "chord.yaml", sidecar: "chord.yaml", want: "chord.yaml"},
+		{name: "agent.yaml", sidecar: "agent.yaml", want: "agent.yaml"},
+		{name: "no sidecar", sidecar: "", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeSkillMDWithFM(t, filepath.Join(dir, "SKILL.md"), map[string]any{
+				"name":        "sidecar-source",
+				"description": "Sidecar source",
+			}, "Body\n")
+			if tc.sidecar != "" {
+				if err := os.WriteFile(filepath.Join(dir, tc.sidecar), []byte("when_to_use: \"from the sidecar\"\n"), 0644); err != nil {
+					t.Fatalf("write sidecar: %v", err)
+				}
+			}
+
+			meta, err := LoadMeta(filepath.Join(dir, "SKILL.md"))
+			if err != nil {
+				t.Fatalf("LoadMeta: %v", err)
+			}
+			if meta.SidecarSource != tc.want {
+				t.Fatalf("sidecar source = %q, want %q", meta.SidecarSource, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadSkillWithSourceReturnsTheRawFileAndTheParsedBody(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "SKILL.md")
+	content := "---\nname: source-skill\ndescription: Source skill\n---\nBody line\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	loaded, raw, err := LoadSkillWithSource(path)
+	if err != nil {
+		t.Fatalf("LoadSkillWithSource: %v", err)
+	}
+	if string(raw) != content {
+		t.Fatalf("raw bytes = %q, want the file content", string(raw))
+	}
+	if loaded.Content != "Body line\n" {
+		t.Fatalf("content = %q, want the body without the frontmatter", loaded.Content)
+	}
+	if loaded.Name != "source-skill" {
+		t.Fatalf("name = %q", loaded.Name)
+	}
+}
+
+func TestLoadSkillWithSourceNormalizesCRLFInTheBodyOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "SKILL.md")
+	content := "---\r\nname: crlf-skill\r\ndescription: CRLF skill\r\n---\r\nBody line\r\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	loaded, raw, err := LoadSkillWithSource(path)
+	if err != nil {
+		t.Fatalf("LoadSkillWithSource: %v", err)
+	}
+	if !strings.Contains(string(raw), "\r\n") {
+		t.Fatalf("the raw bytes must keep the CRLF endings: %q", string(raw))
+	}
+	if strings.Contains(loaded.Content, "\r") {
+		t.Fatalf("the parsed body must be CRLF-normalized: %q", loaded.Content)
+	}
+	if loaded.Content != "Body line\n" {
+		t.Fatalf("content = %q", loaded.Content)
+	}
+}
+
+func TestLoadSkillWithSourceFailsOnAMissingFile(t *testing.T) {
+	if _, _, err := LoadSkillWithSource(filepath.Join(t.TempDir(), "missing", "SKILL.md")); err == nil {
+		t.Fatal("expected an error for a missing file")
+	}
+}
+
 // ---------- WorkDir chain ----------

@@ -36,6 +36,13 @@ type Meta struct {
 	AllowedTools   []string        // optional: tool allowlist for fork context
 	Paths          []string        // optional: conditional activation glob patterns
 	Resources      []string        // optional: files relative to the skill root the body depends on
+	// SidecarSource names the sidecar file that contributed to this metadata
+	// ("chord.yaml" or "agent.yaml"). It is empty when the SKILL.md
+	// frontmatter is the only source. The sidecar never overrides the name
+	// or the description, so an empty SidecarSource does not mean "no
+	// sidecar existed" — a sidecar that only declared unrelated fields still
+	// counts as the source of the effective metadata.
+	SidecarSource string
 	// DisableModelInvocation keeps the skill out of the model-facing catalog:
 	// it never enters the Available Skills block or the skill tool listing, and
 	// only the user's explicit /skill request can load it.
@@ -117,7 +124,15 @@ func LoadMeta(path string) (*Meta, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read skill %s: %w", path, err)
 	}
+	return loadMetaFromData(path, data)
+}
 
+// loadMetaFromData builds the metadata from file content the caller already
+// read. The doctor diagnostics need the raw file and the parsed metadata at
+// the same time; splitting the read from the parse lets them take both from
+// one read instead of reading the file twice and risking a report that
+// mixes two versions of the same skill.
+func loadMetaFromData(path string, data []byte) (*Meta, error) {
 	fm, _, err := parseFrontmatter(string(data))
 	if err != nil {
 		return nil, fmt.Errorf("parse skill %s: %w", path, err)
@@ -128,7 +143,11 @@ func LoadMeta(path string) (*Meta, error) {
 	if fm.Description == "" {
 		return nil, fmt.Errorf("skill %s: missing description in frontmatter", path)
 	}
+	return metaFromFrontmatter(path, fm)
+}
 
+// metaFromFrontmatter builds the metadata for already-parsed frontmatter.
+func metaFromFrontmatter(path string, fm frontmatter) (*Meta, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		absPath = path
@@ -173,36 +192,47 @@ func normalizeContext(s string) string {
 
 // LoadSkill loads a single skill from a SKILL.md file.
 func LoadSkill(path string) (*Skill, error) {
+	sk, _, err := LoadSkillWithSource(path)
+	return sk, err
+}
+
+// LoadSkillWithSource loads a single skill and returns the raw file bytes the
+// parser consumed. A caller that measures both the source file and the parsed
+// body gets them from one read: the two sizes describe the same file, and a
+// second read could land on a different revision of it.
+func LoadSkillWithSource(path string) (*Skill, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read skill %s: %w", path, err)
+		return nil, nil, fmt.Errorf("read skill %s: %w", path, err)
 	}
 
 	fm, content, err := parseFrontmatter(string(data))
 	if err != nil {
-		return nil, fmt.Errorf("parse skill %s: %w", path, err)
+		return nil, nil, fmt.Errorf("parse skill %s: %w", path, err)
 	}
 	if fm.Name == "" {
-		return nil, fmt.Errorf("skill %s: missing name in frontmatter", path)
+		return nil, nil, fmt.Errorf("skill %s: missing name in frontmatter", path)
 	}
 	if fm.Description == "" {
-		return nil, fmt.Errorf("skill %s: missing description in frontmatter", path)
+		return nil, nil, fmt.Errorf("skill %s: missing description in frontmatter", path)
 	}
 
-	meta, err := LoadMeta(path)
+	meta, err := metaFromFrontmatter(path, fm)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	return &Skill{
 		Meta:    *meta,
 		Content: content,
-	}, nil
+	}, data, nil
 }
 
 // loadSidecarMeta reads an optional sidecar metadata file from the skill directory.
 // If a file named chord.yaml (or agent.yaml) exists in the skill's rootDir,
 // its fields are merged into the provided meta (sidecar overrides frontmatter).
+// The file that supplied the effective metadata is recorded in
+// meta.SidecarSource so a diagnostic can show where the metadata came from.
 func loadSidecarMeta(rootDir string, meta *Meta) {
 	// Check both chord.yaml and agent.yaml as sidecar names.
 	for _, name := range []string{"chord.yaml", "agent.yaml"} {
@@ -218,6 +248,7 @@ func loadSidecarMeta(rootDir string, meta *Meta) {
 		if err := yaml.Unmarshal(data, &sidecar); err != nil {
 			continue
 		}
+		meta.SidecarSource = name
 		if sidecar.WhenToUse != "" {
 			meta.WhenToUse = sidecar.WhenToUse
 		}
