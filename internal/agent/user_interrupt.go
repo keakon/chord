@@ -96,6 +96,10 @@ func (s *SubAgent) interruptCurrentTurnWithStatus(status message.ToolResultStatu
 		s.turn.activeToolBatchCancel()
 		s.turn.activeToolBatchCancel = nil
 	}
+	// Close admissions and collect every result that already finished before
+	// the interrupt: a completed result outranks the synthetic failure, while an
+	// admitted call without a result must report outcome_unknown.
+	evidence := s.collectToolSettlement(s.turn)
 	s.turn.PendingToolCalls.Store(0)
 	s.turn.TotalToolCalls.Store(0)
 	s.turn.toolExecutionBatches = nil
@@ -105,12 +109,13 @@ func (s *SubAgent) interruptCurrentTurnWithStatus(status message.ToolResultStatu
 	cancelledStream := s.turn.drainStreamingToolCalls()
 	merged := mergePendingToolCalls(cancelledExec, cancelledStream)
 	merged = s.turn.filterCompletedToolCalls(merged)
+	synthetic, preserved := s.settleInterruptedSubToolCalls(s.turn, evidence, merged)
 
-	persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, merged, status, cause)
+	persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, synthetic, status, cause)
 	if persistedResults > 0 {
 		log.Infof("SubAgent: persisted interrupted tool-call results after interrupt agent=%v turn_id=%v count=%v status=%v", s.instanceID, s.turn.ID, persistedResults, status)
 	}
 	s.parent.emitActivity(s.instanceID, ActivityIdle, "")
-	log.Infof("SubAgent current turn interrupted agent=%v turn_id=%v pending_tools=%v closed_tools=%v status=%v", s.instanceID, s.turn.ID, pending, len(merged), status)
+	log.Infof("SubAgent current turn interrupted agent=%v turn_id=%v pending_tools=%v closed_tools=%v completed_tools=%v status=%v", s.instanceID, s.turn.ID, pending, len(synthetic), preserved, status)
 	return true
 }

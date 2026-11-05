@@ -29,10 +29,15 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 		return
 	}
 
-	// Extract completed speculative tool results before draining
-	var completedResults map[string]*ToolResultPayload
+	// Close admissions and collect every result that already finished before
+	// the failure: a completed usable result outranks the synthetic failure,
+	// while an admitted call without a result must report outcome_unknown.
+	turn.closeToolAdmissions()
+	evidence := turn.takeToolSettlement()
 	if turn.streamingToolExec != nil {
-		completedResults = turn.streamingToolExec.DrainCompletedResults()
+		for callID, result := range turn.streamingToolExec.DrainCompletedResults() {
+			evidence.addReadyResult(callID, result)
+		}
 	}
 
 	streaming := turn.drainStreamingToolCalls()
@@ -53,19 +58,13 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 	turn.toolExecutionBatches = nil
 	turn.nextToolBatch = 0
 
-	// Separate tools into completed vs truly failed
-	var reallyFailed []PendingToolCall
-	completedCount := 0
-	for _, call := range merged {
-		if payload, ok := completedResults[call.CallID]; ok {
-			if a.handleCompletedInterruptedToolResult(call, payload, "not_in_context") {
-				completedCount++
-			}
-		} else {
-			// Tool truly failed
-			reallyFailed = append(reallyFailed, call)
+	reallyFailed, completedCount := closeInterruptedToolCalls(turn, evidence, merged, func(call PendingToolCall, ready any) bool {
+		payload, ok := ready.(*ToolResultPayload)
+		if !ok {
+			return false
 		}
-	}
+		return a.handleCompletedInterruptedToolResult(call, payload, "not_in_context")
+	})
 
 	log.Warnf("failing pending tool calls after terminal turn error turn_id=%v pending_tools=%v failed_tools=%v completed_tools=%v error=%v", turn.ID, pending, len(reallyFailed), completedCount, err)
 
@@ -190,12 +189,17 @@ func persistInterruptedToolResultsInto(
 
 	persisted := 0
 	for _, call := range calls {
+		text := call.TerminalText
+		if text == "" {
+			text = msgText
+		}
 		toolMsg := message.Message{
-			Role:       "tool",
-			ToolCallID: call.CallID,
-			Content:    msgText,
-			ToolStatus: string(status),
-			Audit:      call.Audit.Clone(),
+			Role:              "tool",
+			ToolCallID:        call.CallID,
+			Content:           text,
+			ToolStatus:        string(status),
+			ToolRecoveryState: call.TerminalRecoveryState,
+			Audit:             call.Audit.Clone(),
 		}
 		ctxMgr.Append(toolMsg)
 		if persist(toolMsg) {
@@ -291,6 +295,7 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	rawResult := payload.Result
 	displayResult, contextResult, _, isError := composeToolResultTexts(rawResult, payload.Error)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
+	contextResult = appendExternalOutcomeNote(contextResult, payload.Error)
 	parts := a.toolResultParts(contextResult, payload.Images)
 
 	event := ToolResultEvent{
@@ -470,6 +475,7 @@ func finalizeToolResultTexts(ctx context.Context, turn *Turn, fireHook func(cont
 	displayResult, contextResult, errorText, isError := composeToolResultTexts(rawResult, resultErr)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, audit)
 	contextResult = appendModelContextNote(contextResult, turn.efficiencyNoteForToolResult(callID, name, argsJSON, rawResult, isError))
+	contextResult = appendExternalOutcomeNote(contextResult, resultErr)
 
 	hookResult, hookErr := fireHook(ctx, hook.OnBeforeToolResultAppend, turn.ID, buildBeforeToolResultAppendData(
 		name,
@@ -523,6 +529,12 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		return
 	}
 	if payload.deliveryCommit != nil && payload.deliveryCommit.turn != a.turn {
+		return
+	}
+	// A closeout already settled this call (cancel, failure, replacement), so a
+	// late or duplicate result must not append a second terminal.
+	if a.turn.toolCallSettled(payload.CallID) {
+		log.Debugf("discarding late tool result for settled call turn_id=%v call_id=%v", a.turn.ID, payload.CallID)
 		return
 	}
 	if payload.composedTexts == nil && a.syncToolHooksConfigured() {
@@ -582,6 +594,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		displayResult, contextResult, errorText, isError = composeToolResultTexts(rawResult, payload.Error)
 		contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
 		contextResult = appendModelContextNote(contextResult, a.turn.efficiencyNoteForToolResult(payload.CallID, payload.Name, payload.ArgsJSON, rawResult, isError))
+		contextResult = appendExternalOutcomeNote(contextResult, payload.Error)
 
 		hookResult, hookErr := a.fireHook(a.turn.Ctx, hook.OnBeforeToolResultAppend, a.turn.ID, buildBeforeToolResultAppendData(
 			payload.Name,

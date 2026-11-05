@@ -284,6 +284,10 @@ func (a *MainAgent) checkpointDegradedSubAgents() []string {
 func (a *MainAgent) cancelActiveWork() {
 	a.turnMu.Lock()
 	if a.turn != nil {
+		// Close admissions before cancelling: a call that has not started must not
+		// begin behind shutdown, while the started journal keeps already-admitted
+		// calls classified as outcome_unknown on restore.
+		a.turn.closeToolAdmissions()
 		a.turn.Cancel()
 	}
 	a.turnMu.Unlock()

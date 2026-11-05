@@ -200,6 +200,19 @@ A brief gray pending state after startup can be normal. Run `chord doctor mcp <s
 
 Login, logout, and `doctor --connect` do not change a manual server's enablement. Enable it separately when needed. An authentication error from a business tool is returned to that call; Chord does not silently replay it. See [MCP sign-in](./usage.md#mcp-sign-in-and-connection-diagnostics).
 
+## MCP tool result is unknown
+
+A failed MCP card does not always mean the server refused the operation. When Chord cannot obtain a matching, trustworthy receipt for a request that may already have been sent, the tool result says the outcome is unknown and asks the model to verify the external state before retrying.
+
+Before resending, check:
+
+- the tool result text: a failure that explicitly rules out sending is safe from the delivery angle; an outcome-unknown note is not
+- the server's own records or audit log for the operation's business key; a gateway error or a disconnect can arrive after the server already committed the change
+- whether the turn was cancelled, replaced, or the session ended while the call was running: a cancelled card can still carry an unknown outcome
+- connection diagnostics with `chord doctor mcp <server> --connect` prove connectivity only, not whether the business call committed
+
+A server-reported error (`isError` or a JSON-RPC error) means the server reported failure; it does not guarantee that partial side effects were rolled back. An admitted call is never reported as "never started", and Chord never resends an unknown call automatically. After restoring a session, a call with a started record but no saved result is treated the same way.
+
 ## LSP / MCP rows turn gray after the session is idle
 
 If the right-side environment panel shows LSP or MCP rows in gray after the agent has been idle for a while, that does **not** necessarily mean the integration failed.

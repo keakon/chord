@@ -173,6 +173,9 @@ func (a *MainAgent) abortTurn(t *Turn, pauseMailboxDelivery bool) Event {
 	// Tool goroutines use turn.Ctx.Err() to distinguish a user turn cancellation
 	// from an ordinary batch cancellation; doing this in the opposite order can
 	// let a racing goroutine emit EventToolResult before EventTurnCancelled.
+	// Admissions close first: the closeout that follows uses them to prove which
+	// calls may already have run.
+	t.closeToolAdmissions()
 	t.Cancel()
 	if t.activeToolBatchCancel != nil {
 		t.activeToolBatchCancel()
@@ -547,10 +550,15 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 	pending := turn.PendingToolCalls.Load()
 	a.savePartialAssistantMsgForTurn(turn)
 
-	// Extract completed speculative tool results before draining
-	var completedResults map[string]*ToolResultPayload
+	// Close admissions before draining so a tool that has not started cannot
+	// begin behind the replacement, then collect every result that already
+	// finished so it outranks the interruption.
+	turn.closeToolAdmissions()
+	evidence := turn.takeToolSettlement()
 	if turn.streamingToolExec != nil {
-		completedResults = turn.streamingToolExec.DrainCompletedResults()
+		for callID, result := range turn.streamingToolExec.DrainCompletedResults() {
+			evidence.addReadyResult(callID, result)
+		}
 	}
 
 	cancelledExec := turn.cancelPendingToolCalls()
@@ -558,19 +566,13 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 	merged := mergePendingToolCalls(cancelledExec, cancelledStream)
 	merged = turn.filterCompletedToolCalls(merged)
 
-	// Separate tools into completed vs truly interrupted
-	var reallyInterrupted []PendingToolCall
-	completedCount := 0
-	for _, call := range merged {
-		if payload, ok := completedResults[call.CallID]; ok {
-			if a.handleCompletedInterruptedToolResult(call, payload, "not_in_context") {
-				completedCount++
-			}
-		} else {
-			// Tool was truly interrupted - mark as failed
-			reallyInterrupted = append(reallyInterrupted, call)
+	reallyInterrupted, completedCount := closeInterruptedToolCalls(turn, evidence, merged, func(call PendingToolCall, ready any) bool {
+		payload, ok := ready.(*ToolResultPayload)
+		if !ok {
+			return false
 		}
-	}
+		return a.handleCompletedInterruptedToolResult(call, payload, "not_in_context")
+	})
 
 	if len(reallyInterrupted) > 0 {
 		persistedResults := finalizeInterruptedToolCalls(a.ctxMgr, a.emitToTUI, a.persistInterruptedToolResults, reallyInterrupted, message.ToolStatusError, context.Canceled)
@@ -636,7 +638,8 @@ func (a *MainAgent) newTurn(workID string) {
 		OversizeRecoveryCount: a.newTurnOversizeRecoveryCount,
 	}
 	a.newTurnOversizeRecoveryCount = 0
-	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, ctx, a.emitToTUI, a.executeToolCallSpeculative)
+	a.turn.Ctx = contextWithTurn(ctx, a.turn)
+	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, a.turn.Ctx, a.emitToTUI, a.executeToolCallSpeculative)
 	a.turn.streamingToolExec.SetExecutionGate(a.sessionExecutionGate())
 	a.turn.streamingToolExec.SetEntryBinder(a.bindSpeculativeEntry)
 	a.turn.streamingToolExec.SetWorkDir(a.effectiveToolBaseDir())

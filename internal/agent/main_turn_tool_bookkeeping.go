@@ -59,6 +59,7 @@ func (t *Turn) markToolCallCompleted(callID string) {
 	if t.deliveryCommitCallID == callID {
 		t.deliveryCommitCallID = ""
 	}
+	t.settleToolCallTerminalLocked(callID)
 }
 
 func (t *Turn) filterCompletedToolCalls(calls []PendingToolCall) []PendingToolCall {

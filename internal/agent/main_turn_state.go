@@ -59,6 +59,25 @@ type Turn struct {
 	pendingToolMu        sync.Mutex
 	PendingToolMeta      map[string]PendingToolCall
 	completedToolCallIDs map[string]struct{}
+	// toolAdmissionsClosed stops new tool executions once the turn is being
+	// cancelled or failed; toolAdmissions records the calls already admitted, so
+	// the closeout can prove which calls may have external side effects. Both
+	// are guarded by pendingToolMu.
+	toolAdmissionsClosed bool
+	toolAdmissions       map[string]struct{}
+	// abandonedToolCalls refuses further admission per call after an intent
+	// barrier failure while the turn itself stays alive for the next LLM round.
+	// Unlike admission closeout it is scoped to the calls that round abandoned,
+	// so later rounds can still execute tools. Guarded by pendingToolMu.
+	abandonedToolCalls map[string]struct{}
+	// readyToolResults holds terminal results produced by execution goroutines
+	// but not yet consumed by the event loop. Cancellation preserves these
+	// instead of synthesizing a terminal. Guarded by pendingToolMu.
+	readyToolResults map[string]any
+	// settledToolCalls records calls that already reached a terminal state,
+	// whether consumed normally or closed synthetically, so a late or duplicate
+	// result event cannot append a second terminal. Guarded by pendingToolMu.
+	settledToolCalls map[string]struct{}
 	// streamingToolCalls holds speculative tool metadata from SSE tool_use_start
 	// before the response is finalized. Used only for TUI cancel/fail bookkeeping;
 	// it must never be persisted until merged into PendingToolMeta.
@@ -186,6 +205,13 @@ type PendingToolCall struct {
 	InputText string
 	AgentID   string
 	Audit     *message.ToolArgsAudit
+	// TerminalText overrides the synthetic interruption text a closeout writes
+	// for this call. It carries the conservative "result unknown" wording for a
+	// call that was admitted to execute but never delivered a result.
+	TerminalText string
+	// TerminalRecoveryState classifies the synthetic terminal written for this
+	// call (outcome_unknown for an admitted call without a result).
+	TerminalRecoveryState string
 
 	// inputArgsStale marks ArgsJSON as older than InputText: another freeform
 	// fragment arrived since the canonical {patch} envelope was last built.

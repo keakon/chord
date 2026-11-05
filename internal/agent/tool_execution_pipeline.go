@@ -628,6 +628,13 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	}
 	executionAdmitted = true
 	defer executionLease.Finish()
+	// Admission linearizes with the turn cancellation closeout: whichever wins
+	// decides whether this call may touch the external world. A refused
+	// admission returns before the started journal and the tool body, so the
+	// closeout can prove the call never started.
+	if turn := turnFromContext(ctx); !turn.admitToolExecution(tc.ID) {
+		return execResult, context.Canceled
+	}
 	// Started journal: see recordToolActivityStarted.
 	if err := p.recordToolActivityStarted(tc); err != nil {
 		return execResult, err
@@ -836,6 +843,12 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	executionAdmitted = true
 	defer executionLease.Finish()
+	// See execute(): a refused admission prevents every speculative side effect,
+	// including the started journal, so the call never reaches Execute.
+	if turn := turnFromContext(ctx); !turn.admitToolExecution(tc.ID) {
+		rollbackSpeculativeToolHooks(execResult)
+		return execResult, context.Canceled
+	}
 	// Started journal: mirror execute() so a crash after a speculative file
 	// mutation is classified outcome_unknown during restore, never not_started
 	// ("safe to retry"). TodoWrite stays promote-journaled — its speculative

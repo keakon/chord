@@ -22,7 +22,7 @@ type toolCallResult struct {
 
 type toolCallContent struct {
 	Type     string            `json:"type"`
-	Text     string            `json:"text,omitempty"`
+	Text     *string           `json:"text,omitempty"`
 	Data     string            `json:"data,omitempty"`
 	MimeType string            `json:"mimeType,omitempty"`
 	Name     string            `json:"name,omitempty"`
@@ -73,11 +73,11 @@ func (c *Client) normalizeToolCallResult(ctx context.Context, toolName string, r
 		} else {
 			duplicated := false
 			for _, block := range result.Content {
-				if block.Type != "text" {
+				if block.Type != "text" || block.Text == nil {
 					continue
 				}
 				var candidate bytes.Buffer
-				if json.Compact(&candidate, []byte(block.Text)) == nil && bytes.Equal(candidate.Bytes(), compact.Bytes()) {
+				if json.Compact(&candidate, []byte(*block.Text)) == nil && bytes.Equal(candidate.Bytes(), compact.Bytes()) {
 					duplicated = true
 					break
 				}
@@ -90,8 +90,11 @@ func (c *Client) normalizeToolCallResult(ctx context.Context, toolName string, r
 	for _, block := range result.Content {
 		switch block.Type {
 		case "text":
-			if block.Text != "" {
-				text = append(text, block.Text)
+			if block.Text == nil {
+				return "", nil, fmt.Errorf("mcp tools/call: text content requires a string text")
+			}
+			if *block.Text != "" {
+				text = append(text, *block.Text)
 			}
 		case "image":
 			appendImage(block.Data, block.MimeType)
@@ -140,7 +143,7 @@ func (c *Client) normalizeToolCallResult(ctx context.Context, toolName string, r
 		if joined == "" {
 			joined = "server returned isError without details"
 		}
-		return "", nil, fmt.Errorf("mcp tool error: %s", joined)
+		return "", nil, newCallFailure(callReportedError, fmt.Errorf("mcp tool error: %s", joined))
 	}
 	return joined, images, nil
 }

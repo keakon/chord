@@ -714,11 +714,12 @@ func isTransientSubAgentTransportError(err error) bool {
 		(strings.Contains(msg, "stream") && strings.Contains(msg, "interrupt"))
 }
 
-// failIntentBarrier handles a SubAgent intent-barrier failure: no regular tool
-// body runs. It synthesizes not_started terminal results for the calls that
-// would have run and closes speculative streaming cards, then lets the normal
-// tool-result accounting drive the next LLM round. Persistence health was
-// already degraded by persistMessageBarrier.
+// failIntentBarrier handles a SubAgent intent-barrier failure: no new regular
+// tool body runs. It synthesizes terminal results for the calls that would have
+// run — not_started unless a speculative execution already passed admission,
+// which settles as outcome_unknown — closes speculative streaming cards, then
+// lets the normal tool-result accounting drive the next LLM round. Persistence
+// health was already degraded by persistMessageBarrier.
 func (s *SubAgent) failIntentBarrier(calls []message.ToolCall, cause error) {
 	turn := s.turn
 	if turn == nil || len(calls) == 0 {
@@ -735,10 +736,19 @@ func (s *SubAgent) failIntentBarrier(calls []message.ToolCall, cause error) {
 		emit = s.parent.emitToTUI
 		clearTrace = s.parent.clearToolTraceForCalls
 	}
-	// No tool body may run: discard every speculative execution (valid IDs
-	// included — they are reported not_started below, so committed speculative
-	// writes must roll back), then close the streaming cards. Snapshot before
-	// finalize: finalize drains the streaming list.
+	// Abandon admission before discarding so a speculative entry that already
+	// passed its discard check cannot execute behind this decision. The sampled
+	// admission state decides the terminal classification below: a call that
+	// already reached a tool body may have produced side effects even though its
+	// speculative result is rolled back or dropped.
+	admitted := make(map[string]bool, len(calls))
+	for _, tc := range calls {
+		admitted[tc.ID] = turn.abandonToolCall(tc.ID)
+	}
+	// No tool body may run: discard every speculative execution whose result is
+	// not used (committed speculative writes must roll back), then close the
+	// streaming cards. Snapshot before finalize: finalize drains the streaming
+	// list.
 	streamingSnapshot := turn.snapshotStreamingToolCalls()
 	var discardInfo map[string]StreamingToolDiscardInfo
 	if turn.streamingToolExec != nil {
@@ -764,19 +774,29 @@ func (s *SubAgent) failIntentBarrier(calls []message.ToolCall, cause error) {
 	}
 
 	barrierErr := fmt.Errorf("tool not executed: session persistence failed before the tool started: %w", cause)
+	outcomeUnknownErr := fmt.Errorf("tool result unknown: session persistence failed after the tool started: %w", cause)
 	turn.PendingToolCalls.Store(int32(len(calls)))
 	turn.TotalToolCalls.Store(int32(len(calls)))
 	turn.toolExecutionBatches = nil
 	turn.nextToolBatch = 0
 	turn.activeToolBatchCancel = nil
 	for _, tc := range calls {
-		s.enqueuePromotedToolResult(&toolResult{
+		payload := &toolResult{
 			CallID:        tc.ID,
 			Name:          tc.Name,
 			ArgsJSON:      string(tc.Args),
 			Error:         barrierErr,
 			TurnID:        turn.ID,
 			RecoveryState: message.ToolRecoveryStateNotStarted,
-		})
+		}
+		if admitted[tc.ID] {
+			payload.Result = interruptedToolOutcomeUnknownText
+			payload.Error = outcomeUnknownErr
+			payload.RecoveryState = message.ToolRecoveryStateOutcomeUnknown
+		}
+		if !turn.registerReadyToolResult(tc.ID, payload) {
+			continue
+		}
+		s.enqueuePromotedToolResult(payload)
 	}
 }

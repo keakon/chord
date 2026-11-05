@@ -297,11 +297,14 @@ func (s *SubAgent) startPausedToolCalls(turn *Turn, calls []message.ToolCall) {
 			result := &toolResult{CallID: call.ID, Name: call.Name, ArgsJSON: string(call.Args), TurnID: turn.ID, Error: &executiongate.ErrSessionPaused{}, RecoveryState: message.ToolRecoveryStateNotStarted}
 			if turn.streamingToolExec != nil {
 				if payload, ok, _ := turn.streamingToolExec.Promote(call); ok {
-					result = pausedSubToolResult(payload)
+					result = subToolResultFromPayload(payload)
 					if err := s.commitPromotedToolSideEffects(call, result); err != nil {
 						result.Error = fmt.Errorf("commit paused speculative result: %w", err)
 					}
 				}
+			}
+			if !turn.registerReadyToolResult(call.ID, result) {
+				return
 			}
 			select {
 			case s.toolCh <- result:
@@ -311,7 +314,7 @@ func (s *SubAgent) startPausedToolCalls(turn *Turn, calls []message.ToolCall) {
 	}
 }
 
-func pausedSubToolResult(p *ToolResultPayload) *toolResult {
+func subToolResultFromPayload(p *ToolResultPayload) *toolResult {
 	return &toolResult{CallID: p.CallID, Name: p.Name, ArgsJSON: p.ArgsJSON, Audit: p.Audit, Result: p.Result, Payload: p.Payload, Notes: p.Notes, Images: p.Images, DeliveredFiles: message.CloneDeliveredFiles(p.DeliveredFiles), Error: p.Error, TurnID: p.TurnID, Duration: p.Duration, Diff: p.Diff, DiffAdded: p.DiffAdded, DiffRemoved: p.DiffRemoved, FileCreated: p.FileCreated, LSPReviews: p.LSPReviews, FileState: p.FileState, walltimeTarget: p.walltimeTarget, speculativeHooks: p.speculativeHooks, RecoveryState: p.RecoveryState, SkillActivation: p.SkillActivation, DirectoryDiscovery: p.DirectoryDiscovery}
 }
 

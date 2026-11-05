@@ -164,12 +164,12 @@ type ExecutionHandle struct {
 // remote transport.
 func (h *ExecutionHandle) Call(ctx context.Context, args json.RawMessage) (string, []message.ContentPart, error) {
 	if h == nil {
-		return "", nil, fmt.Errorf("MCP tool: execution handle unavailable")
+		return "", nil, newCallFailure(callNotSent, fmt.Errorf("MCP tool: execution handle unavailable"))
 	}
 	if h.mgr != nil {
 		lease, err := h.mgr.AcquireTool(h.identity, h.remoteName, h.schemaHash)
 		if err != nil {
-			return "", nil, newTransportFailure(err.Error(), SendNotSent, err)
+			return "", nil, newCallFailure(callNotSent, newTransportFailure(err.Error(), SendNotSent, err))
 		}
 		defer lease.Release()
 		callCtx, cancel := context.WithCancel(ctx)
@@ -179,7 +179,7 @@ func (h *ExecutionHandle) Call(ctx context.Context, args json.RawMessage) (strin
 		return lease.Client.CallTool(callCtx, h.remoteName, args)
 	}
 	if h.client == nil {
-		return "", nil, fmt.Errorf("MCP server %q is not connected", h.serverName)
+		return "", nil, newCallFailure(callNotSent, fmt.Errorf("MCP server %q is not connected", h.serverName))
 	}
 	return h.client.CallTool(ctx, h.remoteName, args)
 }

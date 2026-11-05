@@ -1523,12 +1523,18 @@ func (s *SubAgent) newTurn() *Turn {
 	s.turnMu.Lock()
 	defer s.turnMu.Unlock()
 	if s.turn != nil {
+		// Close admissions and collect every result that already finished before
+		// the old turn is cancelled: a completed result outranks the
+		// cancellation, while an admitted call without a result must report
+		// outcome_unknown.
+		evidence := s.collectToolSettlement(s.turn)
 		cancelledExec := s.turn.cancelPendingToolCalls()
 		cancelledStream := s.turn.drainStreamingToolCalls()
 		merged := mergePendingToolCalls(cancelledExec, cancelledStream)
 		merged = s.turn.filterCompletedToolCalls(merged)
-		if len(merged) > 0 {
-			persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, merged, message.ToolStatusCancelled, context.Canceled)
+		synthetic, _ := s.settleInterruptedSubToolCalls(s.turn, evidence, merged)
+		if len(synthetic) > 0 {
+			persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, synthetic, message.ToolStatusCancelled, context.Canceled)
 			if persistedResults > 0 {
 				log.Infof("SubAgent: persisted interrupted tool-call results before starting new turn agent=%v count=%v", s.instanceID, persistedResults)
 			}
@@ -1561,7 +1567,8 @@ func (s *SubAgent) newTurn() *Turn {
 		nextToolBatch:         0,
 		activeToolBatchCancel: nil,
 	}
-	s.turn.streamingToolExec = NewStreamingToolExecutor(s.turn.ID, ctx, s.parent.emitToTUI, s.executeToolCallSpeculative)
+	s.turn.Ctx = contextWithTurn(ctx, s.turn)
+	s.turn.streamingToolExec = NewStreamingToolExecutor(s.turn.ID, s.turn.Ctx, s.parent.emitToTUI, s.executeToolCallSpeculative)
 	s.turn.streamingToolExec.SetEntryBinder(s.bindSpeculativeEntry)
 	s.turn.streamingToolExec.SetExecutionGate(s.sessionExecutionGate())
 	s.turn.streamingToolExec.SetWorkDir(s.effectiveToolBaseDir())

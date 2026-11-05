@@ -186,6 +186,10 @@ Tool results include text and embedded text resources. Images, including embedde
 
 When a server declares `outputSchema`, Chord validates successful `structuredContent` against it. A mismatch, missing structured content, or an invalid or unsupported schema adds a warning while preserving the result text and usable images. The warning does not trigger an automatic retry; check an action's effects before repeating it. Schemas use JSON Schema draft 2020-12 by default or a supported draft declared with `$schema`; references must resolve within the schema document, with no file reads or network requests. Validation checks structure, not factual accuracy.
 
+An MCP failure has three outcomes. When Chord can rule out delivery — invalid arguments, an unavailable connection or authorization, or a rejection before sending — the call fails with its concrete error and no uncertainty note. A valid JSON-RPC error or `isError` receipt is a reported server-side failure; it does not prove the operation was rolled back. If the request may have been sent but no matching, trustworthy receipt arrived — a disconnect or timeout after sending, an error response without a call receipt, a truncated or mismatched result, or a stdio EOF — the result is marked as outcome unknown. The tool card still ends as failed, and the model result tells the model to verify the external state before retrying. Chord does not replay the call automatically.
+
+Cancelling or replacing a turn closes every declared call once. A call that already produced a usable result keeps it; a call that passed execution admission but has no result settles as outcome unknown rather than as "never started". A restored session applies the same rule when the started record exists without a saved result.
+
 ## Related
 
 - [Permissions & Safety](./permissions-and-safety.md)

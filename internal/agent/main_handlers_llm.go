@@ -489,11 +489,12 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 
 // failIntentBarrier handles an intent-barrier failure after the assistant
 // message carrying tool calls could not be made process-crash durable. It must
-// not dispatch any tool body. Instead it synthesizes not_started terminal tool
-// results for every call that would have run, closes speculative streaming
-// cards, degrades the persistence health, and lets the normal tool-result
-// accounting drive the next LLM round (so the model sees the failures instead
-// of orphan tool_calls).
+// not dispatch any new tool body. Instead it synthesizes terminal tool results
+// for every call that would have run — not_started unless a speculative
+// execution already passed admission, which settles as outcome_unknown — closes
+// speculative streaming cards, degrades the persistence health, and lets the
+// normal tool-result accounting drive the next LLM round (so the model sees the
+// failures instead of orphan tool_calls).
 func (a *MainAgent) failIntentBarrier(calls []message.ToolCall, cause error) {
 	turn := a.turn
 	if turn == nil || len(calls) == 0 {
@@ -508,10 +509,19 @@ func (a *MainAgent) failIntentBarrier(calls []message.ToolCall, cause error) {
 		validCallIDs[tc.ID] = struct{}{}
 		pending = append(pending, PendingToolCall{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args)})
 	}
-	// No tool body may run: discard every speculative execution (valid IDs
-	// included — they are reported not_started below, so committed speculative
-	// writes must roll back), then close the streaming cards. Snapshot before
-	// finalize: finalize drains the streaming list.
+	// Abandon admission before discarding so a speculative entry that already
+	// passed its discard check cannot execute behind this decision. The sampled
+	// admission state decides the terminal classification below: a call that
+	// already reached a tool body may have produced side effects even though its
+	// speculative result is rolled back or dropped.
+	admitted := make(map[string]bool, len(pending))
+	for _, call := range pending {
+		admitted[call.CallID] = turn.abandonToolCall(call.CallID)
+	}
+	// No tool body may run: discard every speculative execution whose result is
+	// not used (committed speculative writes must roll back), then close the
+	// streaming cards. Snapshot before finalize: finalize drains the streaming
+	// list.
 	streamingSnapshot := turn.snapshotStreamingToolCalls()
 	var discardInfo map[string]StreamingToolDiscardInfo
 	if turn.streamingToolExec != nil {
@@ -537,6 +547,7 @@ func (a *MainAgent) failIntentBarrier(calls []message.ToolCall, cause error) {
 	}
 
 	barrierErr := fmt.Errorf("tool not executed: session persistence failed before the tool started: %w", cause)
+	outcomeUnknownErr := fmt.Errorf("tool result unknown: session persistence failed after the tool started: %w", cause)
 	turnID := turn.ID
 	turn.PendingToolCalls.Store(int32(len(pending)))
 	turn.TotalToolCalls.Store(int32(len(pending)))
@@ -544,14 +555,23 @@ func (a *MainAgent) failIntentBarrier(calls []message.ToolCall, cause error) {
 	turn.nextToolBatch = 0
 	turn.activeToolBatchCancel = nil
 	for _, call := range pending {
-		a.queueLoopEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{
+		payload := &ToolResultPayload{
 			CallID:        call.CallID,
 			Name:          call.Name,
 			ArgsJSON:      call.ArgsJSON,
 			Error:         barrierErr,
 			TurnID:        turnID,
 			RecoveryState: message.ToolRecoveryStateNotStarted,
-		}})
+		}
+		if admitted[call.CallID] {
+			payload.Result = interruptedToolOutcomeUnknownText
+			payload.Error = outcomeUnknownErr
+			payload.RecoveryState = message.ToolRecoveryStateOutcomeUnknown
+		}
+		if !turn.registerReadyToolResult(call.CallID, payload) {
+			continue
+		}
+		a.queueLoopEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: payload})
 	}
 }
 
@@ -586,6 +606,9 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							result.Error = fmt.Errorf("commit paused speculative result: %w", err)
 						}
 					}
+				}
+				if !turn.registerReadyToolResult(call.ID, result) {
+					return
 				}
 				a.sendEvent(Event{Type: EventToolResult, TurnID: turn.ID, Payload: result})
 			}()
@@ -630,7 +653,11 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					}
 					// Consume and suppress speculative result, then surface the hook error.
 					_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "hook_block")
-					a.queueLoopEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turnID}})
+					blockedPayload := &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turnID}
+					if !turn.registerReadyToolResult(tc.ID, blockedPayload) {
+						continue
+					}
+					a.queueLoopEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: blockedPayload})
 					promoted = true
 					continue
 				case hook.ActionModify:
@@ -663,6 +690,9 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				if err := a.commitPromotedToolSideEffects(effective, payload); err != nil {
 					payload.Error = fmt.Errorf("commit promoted tool side effects: %w", err)
 				}
+				if !turn.registerReadyToolResult(effective.ID, payload) {
+					continue
+				}
 				a.queueLoopEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: payload})
 				continue
 			} else if drift {
@@ -689,7 +719,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 
 						execResult, err := a.executeToolCallWithHook(turn.Ctx, tc, false)
 						completedAt := time.Now()
-						if turn.Ctx.Err() != nil {
+						if turn.Ctx.Err() != nil && !preserveToolResultOnCancellation(execResult, err) {
 							return
 						}
 						var diff agentdiff.Summary
@@ -699,8 +729,18 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							diff = toolExecutionDiff(effectiveCall, execResult)
 						}
 						resultPayload := &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turnID, Duration: toolExecDuration(tc.Name, execResult, completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err), SkillActivation: execResult.SkillActivation, DirectoryDiscovery: execResult.DirectoryDiscovery}
-						resultPayload.composedTexts = finalizeToolResultTexts(turn.Ctx, turn, a.fireHook, resultPayload.CallID, resultPayload.Name, resultPayload.ArgsJSON, resultPayload.Result, resultPayload.Error, resultPayload.Audit, resultPayload.FileState)
-						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: resultPayload})
+						composedPayload := *resultPayload
+						if !turn.registerReadyToolResult(tc.ID, resultPayload) {
+							return
+						}
+						if turn.Ctx.Err() != nil {
+							return
+						}
+						composedPayload.composedTexts = finalizeToolResultTexts(turn.Ctx, turn, a.fireHook, composedPayload.CallID, composedPayload.Name, composedPayload.ArgsJSON, composedPayload.Result, composedPayload.Error, composedPayload.Audit, composedPayload.FileState)
+						if !turn.registerReadyToolResult(tc.ID, &composedPayload) || turn.Ctx.Err() != nil {
+							return
+						}
+						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &composedPayload})
 					}(effective)
 					promoted = true
 					continue
@@ -741,7 +781,11 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 					if turn.Ctx.Err() != nil {
 						return
 					}
-					a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: contextCancelledError(batchCtx), TurnID: turnID}})
+					cancelledPayload := &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: contextCancelledError(batchCtx), TurnID: turnID}
+					if !turn.registerReadyToolResult(tc.ID, cancelledPayload) {
+						return
+					}
+					a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: cancelledPayload})
 					return
 				}
 			}
@@ -749,7 +793,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 
 			execResult, err := a.executeToolCall(batchCtx, tc)
 			completedAt := time.Now()
-			if batchCtx.Err() != nil && turn.Ctx.Err() != nil {
+			if turn.Ctx.Err() != nil && !preserveToolResultOnCancellation(execResult, err) {
 				return
 			}
 			var diff agentdiff.Summary
@@ -785,15 +829,24 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				walltimeTarget: execResult.walltimeTarget,
 				RecoveryState:  execResult.recoveryState(err), SkillActivation: execResult.SkillActivation, DirectoryDiscovery: execResult.DirectoryDiscovery,
 			}
+			// Publish the receipt before a hook can delay it. Compose a separate
+			// payload because cancellation may consume the published one meanwhile.
+			composedPayload := *resultPayload
+			if !turn.registerReadyToolResult(tc.ID, resultPayload) || turn.Ctx.Err() != nil {
+				return
+			}
 			// Hook context is the turn, not the batch: batchCancel above fires
 			// before this line whenever a sibling failed, and a cancelled ctx
 			// makes the append hook's process fail on spawn — silently dropping
 			// every ActionModify in the batch, including the failing call's own.
-			resultPayload.composedTexts = finalizeToolResultTexts(turn.Ctx, turn, a.fireHook, resultPayload.CallID, resultPayload.Name, resultPayload.ArgsJSON, resultPayload.Result, resultPayload.Error, resultPayload.Audit, resultPayload.FileState)
+			composedPayload.composedTexts = finalizeToolResultTexts(turn.Ctx, turn, a.fireHook, composedPayload.CallID, composedPayload.Name, composedPayload.ArgsJSON, composedPayload.Result, composedPayload.Error, composedPayload.Audit, composedPayload.FileState)
+			if !turn.registerReadyToolResult(tc.ID, &composedPayload) || turn.Ctx.Err() != nil {
+				return
+			}
 			a.sendEvent(Event{
 				Type:    EventToolResult,
 				TurnID:  turnID,
-				Payload: resultPayload,
+				Payload: &composedPayload,
 			})
 		}(tc)
 	}

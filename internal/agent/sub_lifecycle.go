@@ -446,9 +446,15 @@ func (s *SubAgent) drainPendingToolFailureSets(err error) (emit []PendingToolCal
 	if s == nil || s.turn == nil {
 		return nil, nil
 	}
+	// Close admissions and collect every result that already finished before the
+	// failure: a completed result outranks the synthetic failure, while an
+	// admitted call without a result must report outcome_unknown.
+	evidence := s.collectToolSettlement(s.turn)
 	streaming := s.turn.drainStreamingToolCalls()
 	failedExec := s.turn.cancelPendingToolCalls()
 	merged := mergePendingToolCalls(streaming, failedExec)
+	merged = s.turn.filterCompletedToolCalls(merged)
+	synthetic, _ := s.settleInterruptedSubToolCalls(s.turn, evidence, merged)
 	if len(merged) == 0 {
 		return nil, nil
 	}
@@ -461,8 +467,18 @@ func (s *SubAgent) drainPendingToolFailureSets(err error) (emit []PendingToolCal
 	s.turn.TotalToolCalls.Store(0)
 	s.turn.toolExecutionBatches = nil
 	s.turn.nextToolBatch = 0
-	log.Warnf("SubAgent: failing pending tool calls after terminal error agent=%v turn_id=%v pending_tools=%v failed_tools=%v error=%v", s.instanceID, s.turn.ID, pending, len(merged), err)
-	return merged, failedExec
+	execSet := make(map[string]struct{}, len(failedExec))
+	for _, call := range failedExec {
+		execSet[call.CallID] = struct{}{}
+	}
+	persist = make([]PendingToolCall, 0, len(synthetic))
+	for _, call := range synthetic {
+		if _, ok := execSet[call.CallID]; ok {
+			persist = append(persist, call)
+		}
+	}
+	log.Warnf("SubAgent: failing pending tool calls after terminal error agent=%v turn_id=%v pending_tools=%v failed_tools=%v error=%v", s.instanceID, s.turn.ID, pending, len(synthetic), err)
+	return synthetic, persist
 }
 
 func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status message.ToolResultStatus, cause error) int {

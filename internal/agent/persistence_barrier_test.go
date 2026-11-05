@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -664,6 +665,53 @@ func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
 	}
 	if synth.ToolStatus != message.ToolStatusError {
 		t.Fatalf("tool status = %q, want error", synth.ToolStatus)
+	}
+}
+
+// TestFailIntentBarrierSettlesAdmittedSpeculativeCallAsOutcomeUnknown covers
+// the window where a speculative execution passed admission before the intent
+// barrier failed. Its result is discarded with the barrier, but the call did
+// reach a tool body, so it must not be reported as not_started.
+func TestFailIntentBarrierSettlesAdmittedSpeculativeCallAsOutcomeUnknown(t *testing.T) {
+	t.Parallel()
+	a := newReadyTestMainAgent(t)
+	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
+	a.newTurn("")
+	if !a.turn.admitToolExecution("call-admitted") {
+		t.Fatal("admitToolExecution() = false before the barrier")
+	}
+
+	payload := &LLMResponsePayload{
+		ToolCalls: []message.ToolCall{
+			{ID: "call-admitted", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.invalid/"}`)},
+		},
+		StopReason: "tool_use",
+	}
+	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: payload})
+
+	awaitSyntheticToolResult(t, a)
+	var admittedMsg message.Message
+	for _, msg := range a.ctxMgr.Snapshot() {
+		if msg.Role == "tool" && msg.ToolCallID == "call-admitted" {
+			admittedMsg = msg
+		}
+	}
+	if admittedMsg.Role != "tool" {
+		t.Fatalf("admitted call has no synthetic result: %#v", a.ctxMgr.Snapshot())
+	}
+	if admittedMsg.ToolRecoveryState != message.ToolRecoveryStateOutcomeUnknown {
+		t.Fatalf("admitted call recovery state = %q, want %q", admittedMsg.ToolRecoveryState, message.ToolRecoveryStateOutcomeUnknown)
+	}
+	if !strings.Contains(admittedMsg.Content, interruptedToolOutcomeUnknownText) {
+		t.Fatalf("admitted call content = %q, want the outcome-unknown note", admittedMsg.Content)
+	}
+	// The barrier only abandons the calls it failed; the turn stays open so the
+	// next LLM round can still execute tools.
+	if a.turn.admitToolExecution("call-admitted") {
+		t.Fatal("abandoned call admitted execution after the barrier failure")
+	}
+	if !a.turn.admitToolExecution("call-next-round") {
+		t.Fatal("turn-wide admission closed by a per-call barrier failure")
 	}
 }
 

@@ -12,6 +12,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Completion reports add `reported_only_in_records` and `observed_only_in_records` summaries when a worker's declared file list and Chord's observed paths can be compared, so the owner can see one-sided records without comparing both lists by hand. The summaries compare retained path spellings only and do not establish missing changes or false reports.
 - Multiple `apply_patch` and `delete` calls in one response run concurrently when their files do not overlap. Conflicting calls within that response keep their order, including calls that touch the same file, a rename endpoint, or an ancestor path. Across agents sharing a checkout, conflicting declared resources are mutually exclusive; execution order follows lease admission.
+- MCP tool failures now separate a request that was never sent, a server-reported error, and a call whose result is unknown. A disconnect, timeout, gateway error, truncated or mismatched response, or stdio EOF that leaves no trustworthy receipt marks the result as unknown and tells the model to verify the external state before retrying instead of presenting an ordinary failure. Cancelling or replacing a turn keeps a completed result and settles an admitted call without one as outcome unknown, never as a call that did not start.
 
 ## 0.8.3 - 2026-11-05
 

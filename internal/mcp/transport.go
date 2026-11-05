@@ -82,15 +82,24 @@ const (
 	stdioKillGrace = 200 * time.Millisecond
 )
 
+// stdioReply carries either a matched JSON-RPC response or a local transport
+// failure. A local failure is never presented as a server JSON-RPC error: the
+// server did not report it, and the call outcome must stay unknown.
+type stdioReply struct {
+	resp JSONRPCResponse
+	err  error
+}
+
 // StdioTransport manages a child process for MCP communication over stdio.
 type StdioTransport struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 
-	mu      sync.Mutex
-	pending map[int]chan JSONRPCResponse
-	closed  bool
+	mu           sync.Mutex
+	pending      map[int]chan stdioReply
+	closed       bool
+	readerExited bool
 
 	// writeMu serialises all writes to stdin so that concurrent Send and
 	// Notify calls cannot interleave bytes and corrupt JSON-RPC frames.
@@ -131,7 +140,7 @@ func NewStdioTransport(ctx context.Context, command string, args []string, env [
 		cmd:     cmd,
 		stdin:   stdinPipe,
 		stdout:  stdoutPipe,
-		pending: make(map[int]chan JSONRPCResponse),
+		pending: make(map[int]chan stdioReply),
 		done:    make(chan struct{}),
 	}
 
@@ -156,11 +165,7 @@ func (t *StdioTransport) readLoop() {
 			continue
 		}
 
-		var resp JSONRPCResponse
-		if err := mcpWireJSON.Unmarshal(line, &resp); err != nil {
-			log.Debugf("mcp stdio: ignoring non-JSON line line=%v", string(line))
-			continue
-		}
+		resp, decodeErr := decodeJSONRPCResponse(line)
 
 		// Notifications from server (ID == 0 with no result) are logged and dropped.
 		if resp.ID == 0 && resp.Result == nil && resp.Error == nil {
@@ -176,7 +181,7 @@ func (t *StdioTransport) readLoop() {
 		t.mu.Unlock()
 
 		if ok {
-			ch <- resp
+			ch <- stdioReply{resp: resp, err: decodeErr}
 		} else {
 			log.Debugf("mcp stdio: no waiter for response id=%v", resp.ID)
 		}
@@ -186,31 +191,31 @@ func (t *StdioTransport) readLoop() {
 		log.Debugf("mcp stdio: reader stopped error=%v", err)
 	}
 
-	// Fail all pending requests.
+	// Settle every waiter with a local transport failure. Requests that
+	// received a response before EOF were already removed from pending and
+	// keep their receipt.
 	t.mu.Lock()
-	for id, ch := range t.pending {
-		ch <- JSONRPCResponse{
-			ID: id,
-			Error: &JSONRPCError{
-				Code:    -32000,
-				Message: "transport closed",
-			},
-		}
-		delete(t.pending, id)
-	}
+	t.readerExited = true
+	pending := t.pending
+	t.pending = make(map[int]chan stdioReply)
 	t.mu.Unlock()
+	cause := fmt.Errorf("mcp stdio: connection closed before a response was received")
+	for _, ch := range pending {
+		ch <- stdioReply{err: cause}
+	}
 }
 
 // Send writes a JSON-RPC request to the process stdin and waits for the
-// matching response from stdout. It respects context cancellation.
+// matching response from stdout. It respects context cancellation; a complete
+// receipt that already arrived is preferred over the cancellation.
 func (t *StdioTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCResponse, error) {
 	t.mu.Lock()
-	if t.closed {
+	if t.closed || t.readerExited {
 		t.mu.Unlock()
-		return JSONRPCResponse{}, fmt.Errorf("mcp stdio: transport closed")
+		return JSONRPCResponse{}, newCallFailure(callNotSent, fmt.Errorf("mcp stdio: transport closed"))
 	}
 
-	ch := make(chan JSONRPCResponse, 1)
+	ch := make(chan stdioReply, 1)
 	t.pending[req.ID] = ch
 	t.mu.Unlock()
 
@@ -218,27 +223,62 @@ func (t *StdioTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCR
 	data, err := sonicjson.ConfigDefault.Marshal(req)
 	if err != nil {
 		t.removePending(req.ID)
-		return JSONRPCResponse{}, fmt.Errorf("mcp stdio: marshal request: %w", err)
+		return JSONRPCResponse{}, newCallFailure(callNotSent, fmt.Errorf("mcp stdio: marshal request: %w", err))
 	}
 	data = append(data, '\n')
 
-	t.writeMu.Lock()
-	_, writeErr := t.stdin.Write(data)
-	t.writeMu.Unlock()
-	if writeErr != nil {
+	// A cancellation observed before the first byte is written proves the
+	// request was not sent. Anything after a successful write cannot.
+	if err := ctx.Err(); err != nil {
 		t.removePending(req.ID)
-		return JSONRPCResponse{}, fmt.Errorf("mcp stdio: write request: %w", writeErr)
+		return JSONRPCResponse{}, newCallFailure(callNotSent, err)
+	}
+
+	t.writeMu.Lock()
+	written, writeErr := t.stdin.Write(data)
+	t.writeMu.Unlock()
+	if writeErr != nil || written != len(data) {
+		t.removePending(req.ID)
+		if written == 0 && writeErr != nil {
+			return JSONRPCResponse{}, newCallFailure(callNotSent, fmt.Errorf("mcp stdio: write request: %w", writeErr))
+		}
+		cause := writeErr
+		if cause == nil {
+			cause = io.ErrShortWrite
+		}
+		return JSONRPCResponse{}, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp stdio: write request: %w", cause))
 	}
 
 	// Wait for response or cancellation.
 	select {
-	case resp := <-ch:
-		return resp, nil
+	case reply := <-ch:
+		if reply.err != nil {
+			return JSONRPCResponse{}, newCallFailure(callOutcomeUnknown, reply.err)
+		}
+		return reply.resp, nil
 	case <-ctx.Done():
 		t.removePending(req.ID)
-		return JSONRPCResponse{}, ctx.Err()
+		// The reader may have delivered a complete receipt before the
+		// cancellation was observed. A valid receipt wins over the cancel.
+		select {
+		case reply := <-ch:
+			if reply.err == nil {
+				return reply.resp, nil
+			}
+		default:
+		}
+		return JSONRPCResponse{}, newCallFailure(callOutcomeUnknown, ctx.Err())
 	case <-t.done:
-		return JSONRPCResponse{}, fmt.Errorf("mcp stdio: transport closed while waiting for response")
+		// The reader settles every waiter before closing done.
+		select {
+		case reply := <-ch:
+			if reply.err == nil {
+				return reply.resp, nil
+			}
+			return JSONRPCResponse{}, newCallFailure(callOutcomeUnknown, reply.err)
+		default:
+			return JSONRPCResponse{}, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp stdio: transport closed while waiting for response"))
+		}
 	}
 }
 
@@ -487,9 +527,13 @@ func readJSONRPCResponse(body io.Reader, contentType string, wantID int) (JSONRP
 	if len(peek) >= 5 && bytes.Equal(peek[:5], []byte("data:")) {
 		return readSSERPCResponse(br, wantID)
 	}
-	var resp JSONRPCResponse
-	if err := mcpWireJSON.NewDecoder(br).Decode(&resp); err != nil {
+	var raw json.RawMessage
+	if err := mcpWireJSON.NewDecoder(br).Decode(&raw); err != nil {
 		return JSONRPCResponse{}, fmt.Errorf("mcp http: decode response: %w", err)
+	}
+	resp, err := decodeJSONRPCResponse(raw)
+	if err != nil {
+		return JSONRPCResponse{}, err
 	}
 	if resp.ID != wantID && wantID != 0 {
 		return JSONRPCResponse{}, fmt.Errorf("mcp http: response id %d, want %d", resp.ID, wantID)
@@ -512,14 +556,11 @@ func readSSERPCResponse(body io.Reader, wantID int) (JSONRPCResponse, error) {
 		if payload == "" || payload == "[DONE]" {
 			continue
 		}
-		var resp JSONRPCResponse
-		if err := mcpWireJSON.UnmarshalFromString(payload, &resp); err != nil {
-			continue
-		}
+		resp, err := decodeJSONRPCResponse([]byte(payload))
 		if resp.ID != wantID {
 			continue
 		}
-		return resp, nil
+		return resp, err
 	}
 	if err := sc.Err(); err != nil {
 		return JSONRPCResponse{}, fmt.Errorf("mcp http: read SSE: %w", err)
@@ -531,16 +572,16 @@ func readSSERPCResponse(body io.Reader, wantID int) (JSONRPCResponse, error) {
 func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCResponse, error) {
 	data, err := sonicjson.ConfigDefault.Marshal(req)
 	if err != nil {
-		return JSONRPCResponse{}, newTransportFailure("mcp http: cannot encode request", SendNotSent, err)
+		return JSONRPCResponse{}, newCallFailure(callNotSent, newTransportFailure("mcp http: cannot encode request", SendNotSent, err))
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(data))
 	if err != nil {
-		return JSONRPCResponse{}, newTransportFailure("mcp http: invalid request", SendNotSent, err)
+		return JSONRPCResponse{}, newCallFailure(callNotSent, newTransportFailure("mcp http: invalid request", SendNotSent, err))
 	}
 	stamp, err := t.prepareRequest(ctx, httpReq)
 	if err != nil {
-		return JSONRPCResponse{}, err
+		return JSONRPCResponse{}, newCallFailure(callNotSent, err)
 	}
 
 	httpResp, err := t.client.Do(httpReq)
@@ -549,17 +590,19 @@ func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCRe
 		if httpResp != nil {
 			evidence = SendResponseReceived
 		}
-		return JSONRPCResponse{}, newTransportFailure("mcp http: request failed", evidence, err)
+		// Reaching Do means the request may already have been delivered; a
+		// transport error or an indistinct response is never a safe retry.
+		return JSONRPCResponse{}, newCallFailure(callOutcomeUnknown, newTransportFailure("mcp http: request failed", evidence, err))
 	}
 	defer httpResp.Body.Close()
 
 	if httpResp.StatusCode != http.StatusOK {
-		return JSONRPCResponse{}, t.observeResponse(ctx, httpResp, stamp, req.Method, req.Params)
+		return JSONRPCResponse{}, newCallFailure(callOutcomeUnknown, t.observeResponse(ctx, httpResp, stamp, req.Method, req.Params))
 	}
 
 	resp, err := readJSONRPCResponse(httpResp.Body, httpResp.Header.Get("Content-Type"), req.ID)
 	if err != nil {
-		return JSONRPCResponse{}, newTransportFailure(httpInvalidProtocolSummary, SendResponseReceived, err)
+		return JSONRPCResponse{}, newCallFailure(callOutcomeUnknown, newTransportFailure(httpInvalidProtocolSummary, SendResponseReceived, err))
 	}
 	if resp.Error == nil {
 		t.rememberSession(httpResp.Header)

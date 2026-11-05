@@ -520,6 +520,8 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 			ArgsJSON:         entry.result.EffectiveArgsJSON,
 			Audit:            entry.result.Audit,
 			Result:           entry.result.Result,
+			Payload:          entry.result.Payload,
+			Notes:            append([]string(nil), entry.result.Notes...),
 			Images:           entry.result.Images,
 			Error:            entry.err,
 			TurnID:           e.turnID,
@@ -532,6 +534,7 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 			FileState:        entry.result.FileState.Clone(),
 			walltimeTarget:   entry.result.walltimeTarget,
 			speculativeHooks: entry.result.speculativeHooks,
+			RecoveryState:    entry.result.recoveryState(entry.err),
 			SkillActivation:  entry.result.SkillActivation, DirectoryDiscovery: entry.result.DirectoryDiscovery,
 		}
 		results[callID] = payload

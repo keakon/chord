@@ -286,13 +286,13 @@ func TestMainAgentHandleToolResultAppendsAdvisoryToContextOnly(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	turnID := a.turn.ID
-	callID := "edit-fail-1"
 	argsJSON := `{"path":"demo.md"}`
 	a.turn.PendingToolCalls.Store(3)
 	a.turn.TotalToolCalls.Store(3)
-	a.turn.recordPendingToolCall(PendingToolCall{CallID: callID, Name: tools.NameEdit, ArgsJSON: argsJSON})
+	a.turn.recordPendingToolCall(PendingToolCall{CallID: "edit-fail-1", Name: tools.NameEdit, ArgsJSON: argsJSON})
+	a.turn.recordPendingToolCall(PendingToolCall{CallID: "edit-fail-2", Name: tools.NameEdit, ArgsJSON: argsJSON})
 
-	fail := func() {
+	fail := func(callID string) {
 		a.handleToolResult(Event{Type: EventToolResult, TurnID: turnID, Payload: &ToolResultPayload{
 			CallID:   callID,
 			Name:     tools.NameEdit,
@@ -301,13 +301,13 @@ func TestMainAgentHandleToolResultAppendsAdvisoryToContextOnly(t *testing.T) {
 			Result:   "",
 		}})
 	}
-	fail()
+	fail("edit-fail-1")
 	msgs := a.GetMessages()
 	last := msgs[len(msgs)-1]
 	if strings.Contains(last.Content, "repeated approximate-match failures") {
 		t.Fatalf("first failure: tool message content = %q, want no advisory yet", last.Content)
 	}
-	fail()
+	fail("edit-fail-2")
 	msgs = a.GetMessages()
 	last = msgs[len(msgs)-1]
 	if !strings.Contains(last.Content, "2 repeated approximate-match failures for demo.md") {
@@ -317,7 +317,7 @@ func TestMainAgentHandleToolResultAppendsAdvisoryToContextOnly(t *testing.T) {
 		t.Fatalf("second failure: tool message content = %q, want the underlying error text to survive alongside the note", last.Content)
 	}
 	// The display result pushed to the TUI never carries the advisory.
-	display := collectToolResultEventResults(t, a, callID)
+	display := collectToolResultEventResults(t, a, "edit-fail-1", "edit-fail-2")
 	for _, r := range display {
 		if strings.Contains(r, "repeated approximate-match failures") {
 			t.Fatalf("TUI display result = %q, want advisory confined to the context result", r)
@@ -333,13 +333,13 @@ func TestSubAgentHandleToolResultAppendsAdvisoryToContext(t *testing.T) {
 	sub := newControllableTestSubAgent(t, a, "edit-retry")
 	sub.newTurn()
 	turnID := sub.turn.ID
-	callID := "sub-edit-fail-1"
 	argsJSON := `{"path":"demo.md"}`
 	sub.turn.PendingToolCalls.Store(3)
 	sub.turn.TotalToolCalls.Store(3)
-	sub.turn.recordPendingToolCall(PendingToolCall{CallID: callID, Name: tools.NameEdit, ArgsJSON: argsJSON})
+	sub.turn.recordPendingToolCall(PendingToolCall{CallID: "sub-edit-fail-1", Name: tools.NameEdit, ArgsJSON: argsJSON})
+	sub.turn.recordPendingToolCall(PendingToolCall{CallID: "sub-edit-fail-2", Name: tools.NameEdit, ArgsJSON: argsJSON})
 
-	fail := func() {
+	fail := func(callID string) {
 		sub.handleToolResult(&toolResult{
 			CallID:   callID,
 			Name:     tools.NameEdit,
@@ -348,14 +348,14 @@ func TestSubAgentHandleToolResultAppendsAdvisoryToContext(t *testing.T) {
 			TurnID:   turnID,
 		})
 	}
-	fail()
-	fail()
+	fail("sub-edit-fail-1")
+	fail("sub-edit-fail-2")
 	msgs := sub.GetMessages()
 	last := msgs[len(msgs)-1]
 	if !strings.Contains(last.Content, "2 repeated approximate-match failures for demo.md") {
 		t.Fatalf("subagent tool message content = %q, want advisory in context result", last.Content)
 	}
-	display := collectToolResultEventResults(t, a, callID)
+	display := collectToolResultEventResults(t, a, "sub-edit-fail-1", "sub-edit-fail-2")
 	for _, r := range display {
 		if strings.Contains(r, "repeated approximate-match failures") {
 			t.Fatalf("subagent TUI display result = %q, want advisory confined to the context result", r)
@@ -514,15 +514,21 @@ func TestEditRetryAdviceSupportsFileAliasAndWrappedArgs(t *testing.T) {
 }
 
 // collectToolResultEventResults drains the TUI output channel for
-// ToolResultEvent display results belonging to a tool call.
-func collectToolResultEventResults(t *testing.T, a *MainAgent, callID string) []string {
+// ToolResultEvent display results belonging to the given tool calls.
+func collectToolResultEventResults(t *testing.T, a *MainAgent, callIDs ...string) []string {
 	t.Helper()
+	wanted := make(map[string]struct{}, len(callIDs))
+	for _, callID := range callIDs {
+		wanted[callID] = struct{}{}
+	}
 	var results []string
 	for {
 		select {
 		case evt := <-a.outputCh:
-			if tre, ok := evt.(ToolResultEvent); ok && tre.CallID == callID {
-				results = append(results, tre.Result)
+			if tre, ok := evt.(ToolResultEvent); ok {
+				if _, ok := wanted[tre.CallID]; ok {
+					results = append(results, tre.Result)
+				}
 			}
 			if len(results) >= 2 {
 				return results

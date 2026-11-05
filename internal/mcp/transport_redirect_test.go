@@ -100,7 +100,7 @@ func TestHTTPTransportFollowsSameOriginRedirectWithHeaders(t *testing.T) {
 		var req JSONRPCRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID})
+		_ = json.NewEncoder(w).Encode(JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{}`)})
 	}))
 	defer final.Close()
 

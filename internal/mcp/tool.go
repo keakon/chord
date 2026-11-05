@@ -95,7 +95,8 @@ func (t *MCPTool) ConcurrencyBatchable(args json.RawMessage) bool { return true 
 func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	result, images, err := t.handle.Call(ctx, args)
 	if err != nil {
-		return "", fmt.Errorf("MCP tool %s/%s: %w", t.serverName, t.remoteName, err)
+		wrapped := fmt.Errorf("MCP tool %s/%s: %w", t.serverName, t.remoteName, err)
+		return "", tools.WrapExternalCallError(wrapped, externalCallOutcome(err))
 	}
 	if len(images) > 0 {
 		if sink, ok := tools.ImageSinkFromContext(ctx); ok {

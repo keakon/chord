@@ -75,7 +75,11 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					msg = hookResult.Message
 				}
 				_, _ = turn.streamingToolExec.DiscardCall(tc.ID, "hook_block")
-				s.enqueuePromotedToolResult(&toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turn.ID})
+				blocked := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Error: fmt.Errorf("tool %q %s", tc.Name, msg), TurnID: turn.ID}
+				if !turn.registerReadyToolResult(tc.ID, blocked) {
+					continue
+				}
+				s.enqueuePromotedToolResult(blocked)
 				continue
 			case hook.ActionModify:
 				if modified, ok := hookResult.Data.(map[string]any); ok {
@@ -122,6 +126,9 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			if err := s.commitPromotedToolSideEffects(effective, tr); err != nil {
 				tr.Error = fmt.Errorf("commit promoted tool side effects: %w", err)
 			}
+			if !turn.registerReadyToolResult(effective.ID, tr) {
+				continue
+			}
 			s.enqueuePromotedToolResult(tr)
 			continue
 		} else if drift {
@@ -138,8 +145,12 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 							if turn.Ctx.Err() != nil {
 								return
 							}
+							cancelled := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: contextCancelledError(batchCtx), TurnID: turn.ID}
+							if !turn.registerReadyToolResult(tc.ID, cancelled) {
+								return
+							}
 							select {
-							case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: contextCancelledError(batchCtx), TurnID: turn.ID}:
+							case s.toolCh <- cancelled:
 							case <-s.parentCtx.Done():
 							}
 							return
@@ -151,7 +162,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					execResult, err := s.executeToolCallWithHook(batchCtx, tc, false)
 					stopHeartbeat()
 					completedAt := time.Now()
-					if batchCtx.Err() != nil && turn.Ctx.Err() != nil {
+					if turn.Ctx.Err() != nil && !preserveToolResultOnCancellation(execResult, err) {
 						return
 					}
 					var diff agentdiff.Summary
@@ -166,9 +177,16 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						}
 					}
 					tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err), SkillActivation: execResult.SkillActivation, DirectoryDiscovery: execResult.DirectoryDiscovery}
-					tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
+					composedResult := *tr
+					if !turn.registerReadyToolResult(tc.ID, tr) || turn.Ctx.Err() != nil {
+						return
+					}
+					composedResult.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, composedResult.CallID, composedResult.Name, composedResult.ArgsJSON, composedResult.Result, composedResult.Error, composedResult.Audit, composedResult.FileState)
+					if !turn.registerReadyToolResult(tc.ID, &composedResult) || turn.Ctx.Err() != nil {
+						return
+					}
 					select {
-					case s.toolCh <- tr:
+					case s.toolCh <- &composedResult:
 					case <-s.parentCtx.Done():
 					}
 				}(effective)
@@ -206,8 +224,12 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					if turn.Ctx.Err() != nil {
 						return
 					}
+					cancelled := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: contextCancelledError(batchCtx), TurnID: turn.ID}
+					if !turn.registerReadyToolResult(tc.ID, cancelled) {
+						return
+					}
 					select {
-					case s.toolCh <- &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: string(tc.Args), Error: contextCancelledError(batchCtx), TurnID: turn.ID}:
+					case s.toolCh <- cancelled:
 					case <-s.parentCtx.Done():
 					}
 					return
@@ -219,7 +241,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			execResult, err := s.executeToolCall(batchCtx, tc)
 			stopHeartbeat()
 			completedAt := time.Now()
-			if batchCtx.Err() != nil && turn.Ctx.Err() != nil {
+			if turn.Ctx.Err() != nil && !preserveToolResultOnCancellation(execResult, err) {
 				return
 			}
 			var diff agentdiff.Summary
@@ -234,9 +256,18 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				}
 			}
 			tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err), SkillActivation: execResult.SkillActivation, DirectoryDiscovery: execResult.DirectoryDiscovery}
-			tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
+			// Keep the receipt available while the hook runs; the closeout may
+			// consume it, so the composed result must be a separate value.
+			composedResult := *tr
+			if !turn.registerReadyToolResult(tc.ID, tr) || turn.Ctx.Err() != nil {
+				return
+			}
+			composedResult.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, composedResult.CallID, composedResult.Name, composedResult.ArgsJSON, composedResult.Result, composedResult.Error, composedResult.Audit, composedResult.FileState)
+			if !turn.registerReadyToolResult(tc.ID, &composedResult) || turn.Ctx.Err() != nil {
+				return
+			}
 			select {
-			case s.toolCh <- tr:
+			case s.toolCh <- &composedResult:
 			case <-s.parentCtx.Done():
 			}
 		}(tc)
@@ -316,6 +347,12 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		log.Debugf("SubAgent: discarding stale tool result agent=%v result_turn=%v current_turn=%v", s.instanceID, result.TurnID, s.currentTurnID())
 		return
 	}
+	// A closeout already settled this call (cancel, failure, replacement), so a
+	// late or duplicate result must not append a second terminal.
+	if s.turn.toolCallSettled(result.CallID) {
+		log.Debugf("SubAgent: discarding late tool result for settled call agent=%v turn_id=%v call_id=%v", s.instanceID, s.turn.ID, result.CallID)
+		return
+	}
 	// A completed tool call is real worker progress: refresh the heartbeat so
 	// a worker that only does tool round trips is never marked as stalled.
 	s.markActivity()
@@ -345,6 +382,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		displayResult, contextResult, errorText, isError = composeToolResultTexts(rawResult, result.Error)
 		contextResult = applyToolArgsAuditToContextResult(contextResult, result.Audit)
 		contextResult = appendModelContextNote(contextResult, s.turn.efficiencyNoteForToolResult(result.CallID, result.Name, result.ArgsJSON, rawResult, isError))
+		contextResult = appendExternalOutcomeNote(contextResult, result.Error)
 
 		hookResult, hookErr := s.fireHook(s.turn.Ctx, hook.OnBeforeToolResultAppend, s.turn.ID, buildBeforeToolResultAppendData(
 			result.Name,
@@ -447,28 +485,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	}
 
 	s.directoryInstructions.Load().collectDiscovery(result.DirectoryDiscovery)
-	toolMsg := message.Message{
-		Role:                      "tool",
-		DeliveredFiles:            successfulDeliveredFiles(result.DeliveredFiles, isError),
-		ToolCallID:                result.CallID,
-		Content:                   contextResult,
-		ToolPayload:               result.Payload,
-		ToolNotes:                 append([]string(nil), result.Notes...),
-		Parts:                     parts,
-		ToolDiff:                  result.Diff,
-		ToolDiffAdded:             result.DiffAdded,
-		ToolDiffRemoved:           result.DiffRemoved,
-		ToolDurationMs:            result.Duration.Milliseconds(),
-		ToolStatus:                string(toolResultStatus(isError)),
-		FileState:                 result.FileState.Clone(),
-		ToolChangedPaths:          append([]string(nil), toolChangedPaths...),
-		FileAttributionIncomplete: fileAttributionIncomplete,
-		LSPReviews:                append([]message.LSPReview(nil), result.LSPReviews...),
-		Audit:                     result.Audit.Clone(),
-		Provenance:                toolProvenanceFromContext(s.ctxMgr, result.CallID),
-		ToolRecoveryState:         result.RecoveryState,
-		SkillActivation:           skillActivationForResult(s.ctxMgr.Snapshot, s.skillActivationView, s.sessionEpoch, s.workDirState.load().Generation, result.Name, result.CallID, result.Error, result.SkillActivation),
-	}
+	toolMsg := s.buildToolResultMessage(result, contextResult, parts, isError, toolChangedPaths, fileAttributionIncomplete)
 	if result.deliveryCommit != nil && result.deliveryCommit.Err == nil {
 		toolMsg = result.deliveryCommit.Message.Clone()
 	}

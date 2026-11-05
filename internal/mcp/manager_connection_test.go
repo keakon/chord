@@ -29,7 +29,7 @@ func readyFakeTransport() *fakeTransport {
 	tr := newFakeTransport()
 	tr.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	tr.onMethod("tools/list", toolsListResult{Tools: []MCPToolDef{{Name: "echo", InputSchema: map[string]any{"type": "object"}}}})
-	tr.onMethod("tools/call", toolCallResult{Content: []toolCallContent{{Type: "text", Text: "ok"}}})
+	tr.onMethod("tools/call", toolCallResult{Content: []toolCallContent{{Type: "text", Text: new("ok")}}})
 	return tr
 }
 

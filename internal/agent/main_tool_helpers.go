@@ -180,7 +180,11 @@ func emitToolExecutionState(emit func(AgentEvent), calls []PendingToolCall, stat
 
 func emitCancelledToolResults(emit func(AgentEvent), calls []PendingToolCall) {
 	for _, call := range calls {
-		emit(ToolResultEvent{CallID: call.CallID, Name: call.Name, ArgsJSON: call.ArgsJSON, Audit: call.Audit.Clone(), Result: "Cancelled", Status: message.ToolStatusCancelled, AgentID: call.AgentID})
+		text := call.TerminalText
+		if text == "" {
+			text = "Cancelled"
+		}
+		emit(ToolResultEvent{CallID: call.CallID, Name: call.Name, ArgsJSON: call.ArgsJSON, Audit: call.Audit.Clone(), Result: text, Status: message.ToolStatusCancelled, AgentID: call.AgentID, RecoveryState: call.TerminalRecoveryState})
 	}
 }
 
@@ -237,7 +241,11 @@ func emitInterruptedToolResultsOrDiscards(emit func(AgentEvent), declared, undec
 func emitFailedToolResults(emit func(AgentEvent), calls []PendingToolCall, err error) {
 	result := toolCallFailureMessage(err)
 	for _, call := range calls {
-		emit(ToolResultEvent{CallID: call.CallID, Name: call.Name, ArgsJSON: call.ArgsJSON, Audit: call.Audit.Clone(), Result: result, Status: message.ToolStatusError, AgentID: call.AgentID})
+		text := call.TerminalText
+		if text == "" {
+			text = result
+		}
+		emit(ToolResultEvent{CallID: call.CallID, Name: call.Name, ArgsJSON: call.ArgsJSON, Audit: call.Audit.Clone(), Result: text, Status: message.ToolStatusError, AgentID: call.AgentID, RecoveryState: call.TerminalRecoveryState})
 	}
 }
 

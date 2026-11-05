@@ -66,6 +66,9 @@ func (r ToolExecutionResult) recoveryState(err error) string {
 	if _, ok := errors.AsType[*llm.HostedOutcomeUnknownError](err); ok {
 		return message.ToolRecoveryStateOutcomeUnknown
 	}
+	if outcome, ok := tools.ExternalCallOutcomeOf(err); ok && outcome == tools.ExternalCallOutcomeUnknown {
+		return message.ToolRecoveryStateOutcomeUnknown
+	}
 	return ""
 }
 

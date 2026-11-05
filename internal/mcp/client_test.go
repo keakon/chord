@@ -185,7 +185,7 @@ func TestClient_CallTool(t *testing.T) {
 	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
-			{Type: "text", Text: "hello world"},
+			{Type: "text", Text: new("hello world")},
 		},
 	})
 
@@ -208,9 +208,9 @@ func TestClient_CallTool_MultipleContent(t *testing.T) {
 	imgBytes := encodeToolPNG(t)
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
-			{Type: "text", Text: "line1"},
+			{Type: "text", Text: new("line1")},
 			{Type: "image", Data: base64.StdEncoding.EncodeToString(imgBytes), MimeType: "image/png"},
-			{Type: "text", Text: "line2"},
+			{Type: "text", Text: new("line2")},
 		},
 	})
 
@@ -250,7 +250,7 @@ func TestClient_CallTool_SkipsUnreadableImage(t *testing.T) {
 	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
-			{Type: "text", Text: "ok"},
+			{Type: "text", Text: new("ok")},
 			{Type: "image", Data: base64.StdEncoding.EncodeToString(make([]byte, 5*1024*1024+1)), MimeType: "image/jpeg"},
 		},
 	})
@@ -277,7 +277,7 @@ func TestClient_CallTool_Error(t *testing.T) {
 	ft.onMethod("tools/call", toolCallResult{
 		IsError: true,
 		Content: []toolCallContent{
-			{Type: "text", Text: "file not found"},
+			{Type: "text", Text: new("file not found")},
 		},
 	})
 
@@ -376,7 +376,7 @@ func TestMCPTool_Execute(t *testing.T) {
 	})
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
-			{Type: "text", Text: "echoed: test"},
+			{Type: "text", Text: new("echoed: test")},
 		},
 	})
 
@@ -1012,7 +1012,7 @@ func TestFullWorkflow_FakeTransport(t *testing.T) {
 	})
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
-			{Type: "text", Text: "file1.txt\nfile2.txt\nfile3.txt"},
+			{Type: "text", Text: new("file1.txt\nfile2.txt\nfile3.txt")},
 		},
 	})
 

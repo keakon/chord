@@ -164,7 +164,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 	var argsMap map[string]any
 	if len(args) > 0 {
 		if err := sonicjson.ConfigDefault.Unmarshal(args, &argsMap); err != nil {
-			return "", nil, fmt.Errorf("mcp tools/call: invalid args JSON: %w", err)
+			return "", nil, newCallFailure(callNotSent, fmt.Errorf("mcp tools/call: invalid args JSON: %w", err))
 		}
 	}
 
@@ -183,21 +183,24 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 		return "", nil, fmt.Errorf("mcp tools/call %s/%s: %w", c.name, toolName, err)
 	}
 	if resp.Error != nil {
-		return "", nil, fmt.Errorf("mcp tools/call %s/%s: %w", c.name, toolName, resp.Error)
+		return "", nil, newCallFailure(callReportedError, fmt.Errorf("mcp tools/call %s/%s: %w", c.name, toolName, resp.Error))
 	}
 
 	if raw := bytes.TrimSpace(resp.Result); len(raw) == 0 || raw[0] != '{' {
-		return "", nil, fmt.Errorf("mcp tools/call %s/%s: result must be an object", c.name, toolName)
+		return "", nil, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp tools/call %s/%s: result must be an object", c.name, toolName))
 	}
 
 	var result toolCallResult
 	if err := mcpLongLivedJSON.Unmarshal(resp.Result, &result); err != nil {
-		return "", nil, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err)
+		return "", nil, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err))
+	}
+	if result.Content == nil && (len(result.StructuredContent) == 0 || bytes.Equal(bytes.TrimSpace(result.StructuredContent), []byte("null"))) {
+		return "", nil, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp tools/call %s/%s: result requires content or structuredContent", c.name, toolName))
 	}
 
 	text, images, err := c.normalizeToolCallResult(ctx, toolName, result)
 	if err != nil {
-		return text, images, err
+		return text, images, newCallFailure(classifyCallFailure(err), err)
 	}
 	if warning := validators.warning(toolName, result.StructuredContent); warning != "" {
 		text = warning + "\n\n" + text

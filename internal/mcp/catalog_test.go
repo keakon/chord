@@ -18,7 +18,7 @@ func TestCatalogExecutionBoundary(t *testing.T) {
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{{Name: "echo", Description: "Echo tool", InputSchema: map[string]any{"type": "object"}}},
 	})
-	ft.onMethod("tools/call", toolCallResult{Content: []toolCallContent{{Type: "text", Text: "ok"}}})
+	ft.onMethod("tools/call", toolCallResult{Content: []toolCallContent{{Type: "text", Text: new("ok")}}})
 
 	ctx := context.Background()
 	cfg := ServerConfig{Name: "manual-srv", URL: "https://mcp.test/mcp", Manual: true}

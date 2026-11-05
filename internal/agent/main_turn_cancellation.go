@@ -101,25 +101,23 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	// at ready, mirroring usage-driven workers.
 	a.clearManualCompactionIntentAndWithdrawNotice()
 
-	// Extract completed speculative tool results before marking as failed
-	var completedResults map[string]*ToolResultPayload
-	if a.turn != nil && a.turn.streamingToolExec != nil {
-		completedResults = a.turn.streamingToolExec.DrainCompletedResults()
-	}
-
-	// Separate tools into completed vs truly cancelled
-	var reallyCancelled []PendingToolCall
-	completedCount := 0
-	for _, call := range a.turn.filterCompletedToolCalls(payload.Calls) {
-		if result, ok := completedResults[call.CallID]; ok {
-			if a.handleCompletedInterruptedToolResult(call, result, "not_in_context") {
-				completedCount++
-			}
-		} else {
-			// Tool was truly cancelled
-			reallyCancelled = append(reallyCancelled, call)
+	// Collect every result that already finished before the cancellation was
+	// handled: a completed usable result outranks the cancel. Calls that were
+	// admitted but produced no result are settled as outcome_unknown instead of
+	// an ordinary cancellation.
+	evidence := a.turn.takeToolSettlement()
+	if a.turn.streamingToolExec != nil {
+		for callID, result := range a.turn.streamingToolExec.DrainCompletedResults() {
+			evidence.addReadyResult(callID, result)
 		}
 	}
+	reallyCancelled, completedCount := closeInterruptedToolCalls(a.turn, evidence, a.turn.filterCompletedToolCalls(payload.Calls), func(call PendingToolCall, ready any) bool {
+		result, ok := ready.(*ToolResultPayload)
+		if !ok {
+			return false
+		}
+		return a.handleCompletedInterruptedToolResult(call, result, "not_in_context")
+	})
 
 	status := message.ToolResultStatus(message.ToolStatusCancelled)
 	if payload.MarkToolCallsFailed {
