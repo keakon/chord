@@ -102,8 +102,8 @@ func TestSupervisorBindsIdentityAndReportsExit(t *testing.T) {
 	if pgid != pid {
 		t.Fatalf("supervised process %d does not lead its own group %d", pid, pgid)
 	}
-	if got := probeGroup(pid, pgid, ""); got != GroupAlive {
-		t.Fatalf("group state = %v, want alive", got)
+	if got, err := probeGroup(pid, pgid, ""); got != GroupAlive || err != nil {
+		t.Fatalf("group state = %v, %v, want alive", got, err)
 	}
 	if err := sup.Stop(20 * time.Second); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -143,8 +143,8 @@ func TestSupervisorCleansUpWhenHostDisappears(t *testing.T) {
 	if err := sup.Wait(); err == nil {
 		t.Fatal("a supervisor that lost its host reported a settled run")
 	}
-	if got := probeGroup(pid, pgid, ""); got != GroupGone {
-		t.Fatalf("group state after host death = %v, want gone", got)
+	if got, err := probeGroup(pid, pgid, ""); got != GroupGone || err != nil {
+		t.Fatalf("group state after host death = %v, %v, want gone", got, err)
 	}
 	receipt := readReceipt(t, receiptDir)
 	if receipt.Reason != ReasonHostGone {
@@ -178,8 +178,8 @@ func TestHostCleansUpWhenSupervisorDies(t *testing.T) {
 	if err := sup.Stop(2 * time.Second); err == nil {
 		t.Fatal("a run no supervisor reported ended without an error")
 	}
-	if got := probeGroup(pid, pgid, ""); got != GroupGone {
-		t.Fatalf("group state after supervisor death = %v, want gone", got)
+	if got, err := probeGroup(pid, pgid, ""); got != GroupGone || err != nil {
+		t.Fatalf("group state after supervisor death = %v, %v, want gone", got, err)
 	}
 }
 
@@ -202,8 +202,8 @@ func TestTerminateGroupRefusesMismatchedIdentity(t *testing.T) {
 	if _, err := terminateGroup(pid, foreign, "", 100*time.Millisecond); !errors.Is(err, ErrIdentityMismatch) {
 		t.Fatalf("terminateGroup with a foreign group = %v, want %v", err, ErrIdentityMismatch)
 	}
-	if got := probeGroup(pid, pgid, ""); got != GroupAlive {
-		t.Fatalf("group state = %v, want alive: a mismatched identity still signalled", got)
+	if got, err := probeGroup(pid, pgid, ""); got != GroupAlive || err != nil {
+		t.Fatalf("group state = %v, %v, want alive: a mismatched identity still signalled", got, err)
 	}
 }
 
@@ -232,8 +232,8 @@ func TestSupervisorEscalatesToSIGKILL(t *testing.T) {
 		t.Fatalf("close lifecycle channel: %v", err)
 	}
 	_ = sup.Wait()
-	if got := probeGroup(pid, pgid, ""); got != GroupGone {
-		t.Fatalf("group state = %v, want gone", got)
+	if got, err := probeGroup(pid, pgid, ""); got != GroupGone || err != nil {
+		t.Fatalf("group state = %v, %v, want gone", got, err)
 	}
 	receipt := readReceipt(t, receiptDir)
 	if !receipt.Cleanup.Terminated || !receipt.Cleanup.Killed || !receipt.Cleanup.Proven {
@@ -483,8 +483,8 @@ func TestLaunchFailureAfterSpawnCleansWholeGroup(t *testing.T) {
 	if !receipt.Cleanup.Proven {
 		t.Fatalf("receipt cleanup = %+v, want proven", receipt.Cleanup)
 	}
-	if got := probeGroup(receipt.PID, receipt.PGID, receipt.StartToken); got != GroupGone {
-		t.Fatalf("group state = %v, want gone", got)
+	if got, err := probeGroup(receipt.PID, receipt.PGID, receipt.StartToken); got != GroupGone || err != nil {
+		t.Fatalf("group state = %v, %v, want gone", got, err)
 	}
 }
 

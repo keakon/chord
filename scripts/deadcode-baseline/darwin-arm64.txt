@@ -19,3 +19,6 @@ github.com/keakon/chord/internal/tools.ResetJobRegistryForTest
 github.com/keakon/chord/internal/testgit.NewRepository
 github.com/keakon/chord/internal/testgit.build
 github.com/keakon/chord/internal/testgit.environment
+
+# externalsupervisor.GroupState.String: platform; live on !unix (terminateGroup formats GroupUnknown with %s), so absent from windows-amd64.txt; the unix cleanup note carries the probe error instead.
+github.com/keakon/chord/internal/externalsupervisor.GroupState.String

@@ -46,11 +46,13 @@ func processIdentity(_ *exec.Cmd) (int, int, string, error) {
 	return 0, 0, "", ErrUnsupportedProcessGroup
 }
 
-func probeGroup(_, _ int, _ string) GroupState { return GroupUnknown }
+func probeGroup(_, _ int, _ string) (GroupState, error) {
+	return GroupUnknown, ErrUnsupportedProcessGroup
+}
 
 func terminateGroup(pid, pgid int, _ string, _ time.Duration) (Cleanup, error) {
 	return Cleanup{}, fmt.Errorf("%w: process group %d of pid %d is %s",
-		ErrUnsupportedProcessGroup, pgid, pid, probeGroup(pid, pgid, ""))
+		ErrUnsupportedProcessGroup, pgid, pid, GroupUnknown)
 }
 
 func setCloseOnExec(_ ...*os.File) {}

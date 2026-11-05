@@ -339,7 +339,8 @@ func (s *Supervisor) GroupGone() bool {
 	s.mu.Lock()
 	startToken := s.startToken
 	s.mu.Unlock()
-	return probeGroup(pid, pgid, startToken) == GroupGone
+	state, _ := probeGroup(pid, pgid, startToken)
+	return state == GroupGone
 }
 
 // KillGroup tears the bound process group down from Chord's side, for the case

@@ -141,8 +141,8 @@ func TestZombieLeaderIdentityAndDescendantCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := probeGroup(pid, pid, token); got != GroupAlive {
-		t.Fatalf("zombie with descendants: %s, want alive", got)
+	if got, err := probeGroup(pid, pid, token); got != GroupAlive || err != nil {
+		t.Fatalf("zombie with descendants: %s, %v, want alive", got, err)
 	}
 	for _, identity := range []struct {
 		pgid  int

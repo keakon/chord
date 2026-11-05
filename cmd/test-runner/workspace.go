@@ -110,19 +110,19 @@ func reapRuns(root string, diagnostics io.Writer) error {
 }
 
 func (r *testRun) ready() error {
+	receipt, err := externalsupervisor.LoadReceipt(r.dir, r.id)
+	if err != nil {
+		return fmt.Errorf("read process cleanup receipt: %w", err)
+	}
+	if !receipt.Cleanup.Proven {
+		return fmt.Errorf("process group cleanup is unproven: %s", receipt.Cleanup.Note)
+	}
 	data, err := os.ReadFile(filepath.Join(r.dir, readyFile))
 	if err != nil {
 		return fmt.Errorf("cleanup evidence unavailable: %w", err)
 	}
 	if string(data) != r.id {
 		return errors.New("cleanup evidence belongs to another run")
-	}
-	receipt, err := externalsupervisor.LoadReceipt(r.dir, r.id)
-	if err != nil {
-		return fmt.Errorf("read process cleanup receipt: %w", err)
-	}
-	if !receipt.Cleanup.Proven {
-		return errors.New("process group cleanup is unproven")
 	}
 	return nil
 }

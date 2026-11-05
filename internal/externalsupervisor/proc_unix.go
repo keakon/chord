@@ -84,28 +84,28 @@ func processIdentity(cmd *exec.Cmd) (pid, pgid int, startToken string, err error
 // pidfd, which is not available on every supported platform. The alternative,
 // refusing every unverifiable group, would leave Chord's own leaked children
 // running and fail the task, so cleanup accepts that narrow window instead.
-func probeGroup(pid, pgid int, startToken string) GroupState {
+func probeGroup(pid, pgid int, startToken string) (GroupState, error) {
 	if pid <= 0 || pgid <= 0 {
-		return GroupUnknown
+		return GroupUnknown, fmt.Errorf("%w: invalid pid %d or group %d", ErrIdentityMismatch, pid, pgid)
 	}
 	actual, token, err := readProcessIdentity(pid)
 	switch {
 	case err == nil:
 		if actual != pgid || (startToken != "" && token != startToken) {
-			return GroupUnknown
+			return GroupUnknown, fmt.Errorf("%w: pid %d has group %d and start token %q, want group %d and start token %q", ErrIdentityMismatch, pid, actual, token, pgid, startToken)
 		}
-		return GroupAlive
+		return GroupAlive, nil
 	case processIdentityGone(err):
 		// Reaping the leader does not end the group: descendants may still
 		// hold it. Only ESRCH from the group probe proves it empty.
 		if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
-			return GroupGone
+			return GroupGone, nil
 		} else if err != nil {
-			return GroupUnknown
+			return GroupUnknown, fmt.Errorf("%w: probe process group %d: %w", ErrIdentityMismatch, pgid, err)
 		}
-		return GroupAlive
+		return GroupAlive, nil
 	default:
-		return GroupUnknown
+		return GroupUnknown, fmt.Errorf("%w: read pid %d: %w", ErrIdentityMismatch, pid, err)
 	}
 }
 
@@ -113,11 +113,11 @@ func probeGroup(pid, pgid int, startToken string) GroupState {
 // after grace if members remain, and a final proof that the group is gone.
 // It refuses to signal an identity that no longer matches.
 func terminateGroup(pid, pgid int, startToken string, grace time.Duration) (Cleanup, error) {
-	switch state := probeGroup(pid, pgid, startToken); state {
+	switch state, err := probeGroup(pid, pgid, startToken); state {
 	case GroupGone:
 		return Cleanup{Proven: true, Note: "process group was already gone"}, nil
 	case GroupUnknown:
-		return Cleanup{}, fmt.Errorf("%w: group state is %s", ErrIdentityMismatch, state)
+		return Cleanup{}, err
 	}
 	cleanup := Cleanup{Terminated: true}
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
@@ -139,14 +139,17 @@ func waitGroupGone(pid, pgid int, startToken string, timeout time.Duration) bool
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
-	for probeGroup(pid, pgid, startToken) != GroupGone {
+	for {
+		if state, _ := probeGroup(pid, pgid, startToken); state == GroupGone {
+			return true
+		}
 		select {
 		case <-ticker.C:
 		case <-deadline.C:
-			return probeGroup(pid, pgid, startToken) == GroupGone
+			state, _ := probeGroup(pid, pgid, startToken)
+			return state == GroupGone
 		}
 	}
-	return true
 }
 
 func processIdentityGone(err error) bool {

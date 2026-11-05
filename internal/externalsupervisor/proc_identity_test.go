@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -44,12 +45,12 @@ func TestProbeGroupRejectsMismatchedStartToken(t *testing.T) {
 	if err != nil {
 		t.Skipf("process start token is unavailable: %v", err)
 	}
-	if got := probeGroup(pid, pid, token); got != GroupAlive {
-		t.Fatalf("probe of the bound identity = %s, want alive", got)
+	if got, err := probeGroup(pid, pid, token); got != GroupAlive || err != nil {
+		t.Fatalf("probe of the bound identity = %s, %v, want alive", got, err)
 	}
 	stale := token + ":recycled"
-	if got := probeGroup(pid, pid, stale); got != GroupUnknown {
-		t.Fatalf("probe with a mismatched token = %s, want unknown", got)
+	if got, err := probeGroup(pid, pid, stale); got != GroupUnknown || !errors.Is(err, ErrIdentityMismatch) || !strings.Contains(err.Error(), stale) || !strings.Contains(err.Error(), "has group") {
+		t.Fatalf("probe with a mismatched token = %s, %v, want unknown with identity details", got, err)
 	}
 	if _, err := terminateGroup(pid, pid, stale, 20*time.Millisecond); !errors.Is(err, ErrIdentityMismatch) {
 		t.Fatalf("cleanup with a mismatched token = %v, want ErrIdentityMismatch", err)
