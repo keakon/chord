@@ -1348,6 +1348,18 @@ func appendJobOutputHeaderDetails(headerLine, pattern, grayPart, summary, elapse
 // a result summary exists, parameters only share the line with an intact
 // pattern + summary pair; otherwise they use the space left by the pattern.
 func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, maxWidth int) string {
+	return appendDiffHeaderSummary(headerLine, mainPart, "", grayPart, summary, maxWidth)
+}
+
+// appendDiffHeaderSummary is appendSearchHeaderSummary for diff cards, whose
+// subject can be the two sides of a move: mainPart carries the source display
+// path and secondaryPart the target, both non-empty only for a move. The arrow
+// is the fact a move header exists to show, so sides are never composed into
+// one string here — that would let a middle truncation spend the shared path
+// prefix on screen while cutting the arrow and both distinguishing segments
+// out of the elided middle (a single-subject mainPart keeps the old
+// middle-truncation behavior).
+func appendDiffHeaderSummary(headerLine, mainPart, secondaryPart, grayPart, summary string, maxWidth int) string {
 	baseWidth := ansi.StringWidth(headerLine)
 	if baseWidth >= maxWidth {
 		return ansi.Truncate(headerLine, maxWidth, "…")
@@ -1357,34 +1369,43 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 		return headerLine
 	}
 	mainPart = sanitizeToolDisplayText(mainPart)
+	secondaryPart = sanitizeToolDisplayText(secondaryPart)
 	summary = sanitizeToolDisplayText(summary)
 	grayPart = terminaltext.SanitizeSGR(grayPart)
+
+	subject := joinMoveSides(mainPart, secondaryPart)
+	subjectWidth := ansi.StringWidth(subject)
+	truncateSubject := func(subjectBudget int) string {
+		if secondaryPart == "" {
+			return truncateToolHeaderMiddle(mainPart, subjectBudget)
+		}
+		return truncateTwoSidedPath(mainPart, secondaryPart, subjectBudget)
+	}
 
 	const minGrayCols = 8
 	const sep = " · "
 	sepWidth := ansi.StringWidth(sep)
 	suffixW := ansi.StringWidth(summary)
 	if summary == "" {
-		if mainPart == "" {
+		if subject == "" {
 			if grayPart == "" {
 				return headerLine
 			}
 			return headerLine + " " + currentStyles.DimStyle.Render(truncateToolHeaderGray(grayPart, budget))
 		}
-		mainWidth := ansi.StringWidth(mainPart)
-		if grayPart == "" || mainWidth >= budget {
-			return headerLine + " " + truncateToolHeaderMiddle(mainPart, budget)
+		if grayPart == "" || subjectWidth >= budget {
+			return headerLine + " " + truncateSubject(budget)
 		}
-		remaining := budget - mainWidth - 1
+		remaining := budget - subjectWidth - 1
 		if remaining < minGrayCols {
-			return headerLine + " " + mainPart
+			return headerLine + " " + subject
 		}
 		if grayWidth := ansi.StringWidth(grayPart); grayWidth > remaining {
 			grayPart = truncateToolHeaderGray(grayPart, remaining)
 		}
-		return headerLine + " " + mainPart + " " + currentStyles.DimStyle.Render(grayPart)
+		return headerLine + " " + subject + " " + currentStyles.DimStyle.Render(grayPart)
 	}
-	if mainPart == "" {
+	if subject == "" {
 		// No subject to hang the option group on, but the group still names
 		// what the call searched (paths/includes) or which arguments were
 		// discarded, so it stays ahead of the count summary when it fits.
@@ -1413,9 +1434,9 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 		suffixW = ansi.StringWidth(summary)
 		patternBudget = budget - suffixW - sepWidth
 	}
-	pattern := mainPart
-	if ansi.StringWidth(mainPart) > patternBudget {
-		pattern = truncateToolHeaderMiddle(mainPart, patternBudget)
+	pattern := subject
+	if subjectWidth > patternBudget {
+		pattern = truncateSubject(patternBudget)
 	}
 	if summary == "" {
 		return headerLine + " " + pattern
@@ -1491,6 +1512,85 @@ func truncateToolHeaderMiddle(s string, maxWidth int) string {
 	leftWidth := (maxWidth - 1) / 2
 	rightWidth := maxWidth - 1 - leftWidth
 	return terminaltext.Cut(s, 0, leftWidth) + "…" + tuiCutRight(s, rightWidth)
+}
+
+// moveArrow marks a move/rename wherever a patch names both sides of one file.
+const moveArrow = " → "
+
+// joinMoveSides composes a two-sided move subject back into one string. The
+// arrow carries spaces so the composed form stays readable wherever it is not
+// truncated side-aware (copy text, directory summaries).
+func joinMoveSides(left, right string) string {
+	if right == "" {
+		return left
+	}
+	return left + moveArrow + right
+}
+
+// truncateTwoSidedPath fits "left → right" into maxWidth. Each side is elided
+// from the left so the tail survives: the basename and the nearest directories
+// answer "which file" far better than the root prefix that every path in the
+// same tree shares — which is exactly the case where a whole-string middle cut
+// would elide the arrow and both distinguishing segments. A side that fits
+// whole keeps the freed budget for the other; only when neither can absorb the
+// deficit alone do the sides split the space evenly.
+func truncateTwoSidedPath(left, right string, maxWidth int) string {
+	arrowWidth := ansi.StringWidth(moveArrow)
+	leftWidth, rightWidth := ansi.StringWidth(left), ansi.StringWidth(right)
+	if leftWidth+arrowWidth+rightWidth <= maxWidth {
+		return left + moveArrow + right
+	}
+	sideBudget := maxWidth - arrowWidth
+	if sideBudget <= 0 {
+		return truncateToolHeaderTail(left+moveArrow+right, maxWidth)
+	}
+	leftFloor := min(leftWidth, pathTailFloorWidth(left))
+	rightFloor := min(rightWidth, pathTailFloorWidth(right))
+	leftBudget, rightBudget := leftWidth, rightWidth
+	switch {
+	case leftWidth >= rightWidth && leftWidth-leftFloor >= leftWidth+rightWidth-sideBudget:
+		leftBudget = sideBudget - rightWidth
+	case rightWidth >= leftWidth && rightWidth-rightFloor >= leftWidth+rightWidth-sideBudget:
+		rightBudget = sideBudget - leftWidth
+	default:
+		leftBudget = sideBudget / 2
+		rightBudget = sideBudget - leftBudget
+	}
+	return truncatePathTail(left, leftBudget) + moveArrow + truncatePathTail(right, rightBudget)
+}
+
+// truncatePathTail elides a long path from the left, keeping its tail. The cut
+// snaps to the next separator when one fits, so the result reads
+// "…/dir/base.ext" instead of opening with a partial segment.
+func truncatePathTail(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= maxWidth {
+		return s
+	}
+	keep := maxWidth - 1 // the marker spends one column
+	if keep <= 0 {
+		return "…"
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != '/' {
+			continue
+		}
+		if ansi.StringWidth(s[i:]) <= keep {
+			return "…" + s[i:]
+		}
+	}
+	return "…" + tuiCutRight(s, keep)
+}
+
+// pathTailFloorWidth is the width of the shortest still-informative tail of a
+// path: the elision marker plus the final segment ("…/name.go").
+func pathTailFloorWidth(path string) int {
+	if i := strings.LastIndexByte(path, '/'); i >= 0 {
+		path = path[i+1:]
+	}
+	return ansi.StringWidth(path) + 1
 }
 
 func tuiCutRight(s string, maxWidth int) string {

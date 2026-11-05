@@ -249,8 +249,8 @@ func TestApplyPatchDeleteCardRelativizesAbsoluteTarget(t *testing.T) {
 	}
 
 	plain := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
-	if !strings.Contains(plain, "✓ apply_patch D .chord/notes/demo.sh · 1 file · -2 lines") {
-		t.Fatalf("expected a relative delete header with its line count, got:\n%s", plain)
+	if !strings.Contains(plain, "✓ apply_patch D .chord/notes/demo.sh · -2 lines") {
+		t.Fatalf("expected a relative delete header with its line count and no redundant file count, got:\n%s", plain)
 	}
 	for _, unwanted := range []string{"obsolete", "secret", workingDir, "↳ M", "↳ D"} {
 		if strings.Contains(plain, unwanted) {
@@ -417,6 +417,92 @@ func TestApplyPatchToolCardShowsNoChangesWithoutPatchPreview(t *testing.T) {
 	}
 }
 
+// A pure move of a file whose two absolute paths share a long prefix used to
+// middle-truncate the "src → dst" subject exactly in its middle: the elided
+// segment swallowed the arrow and both distinguishing parts, leaving what read
+// as a single untouched path. The sides must truncate independently,
+// tail-first, and no "1 file" count may stand in for the move.
+func TestApplyPatchMoveCardKeepsArrowAcrossSharedPrefix(t *testing.T) {
+	const root = "/tmp/chord-apply-patch-verify"
+	args := `{"patch":"*** Begin Patch\n*** Update File: ` + root + `/internal/sessionimport/claude_wrapper_corpus_test.go\n*** Move to: ` + root + `/claude_wrapper_corpus_test.go.txt\n*** End Patch"}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
+		ResultContent: "Applied patch:\nR " + root + "/internal/sessionimport/claude_wrapper_corpus_test.go -> " + root + "/claude_wrapper_corpus_test.go.txt",
+		Diff:          "--- " + root + "/internal/sessionimport/claude_wrapper_corpus_test.go\n+++ " + root + "/claude_wrapper_corpus_test.go.txt\n",
+	}
+
+	plain := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
+	for _, want := range []string{
+		" → ",
+		"sessionimport/claude_wrapper_corpus_test.go",
+		"/tmp/chord-apply-patch-verify/claude_wrapper_corpus_test.go.txt",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected %q in the move header, got:\n%s", want, plain)
+		}
+	}
+	for _, unwanted := range []string{"1 file", "Applied patch"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("expected %q to be absent from a single-file move card, got:\n%s", unwanted, plain)
+		}
+	}
+}
+
+// When the args cannot be parsed into targets the header has no subject at
+// all; the single-file count suppression must not leave it unnamed.
+func TestApplyPatchCardKeepsFileCountWhenHeaderNamesNothing(t *testing.T) {
+	args := `{"patch":""}`
+	block := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
+		ResultContent: "Applied patch:\nM src/demo.go",
+		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+	}
+
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "1 file") {
+		t.Fatalf("a header without a subject must keep the file count, got:\n%s", plain)
+	}
+}
+
+func TestTruncateTwoSidedPathKeepsArrowAndTails(t *testing.T) {
+	left := "/tmp/chord-apply-patch-verify/internal/sessionimport/claude_wrapper_corpus_test.go"
+	right := "/tmp/chord-apply-patch-verify/claude_wrapper_corpus_test.go.txt"
+	if got := truncateTwoSidedPath("src/old.go", "src/new.go", 80); got != "src/old.go → src/new.go" {
+		t.Fatalf("a subject that fits must stay whole, got %q", got)
+	}
+	// Both sides give ground; each cut snaps to a separator and the arrow
+	// survives between the two basenames.
+	if got, want := truncateTwoSidedPath(left, right, 90), "…/claude_wrapper_corpus_test.go → …/claude_wrapper_corpus_test.go.txt"; got != want {
+		t.Fatalf("truncated move = %q, want %q", got, want)
+	}
+	// A side that fits whole keeps the freed budget for the other.
+	if got, want := truncateTwoSidedPath("internal/sessionimport/very_long_name_test.go", "out.go.txt", 40), "…/very_long_name_test.go → out.go.txt"; got != want {
+		t.Fatalf("truncated move = %q, want %q", got, want)
+	}
+}
+
+func TestTruncatePathTail(t *testing.T) {
+	for _, tc := range []struct {
+		in       string
+		maxWidth int
+		want     string
+	}{
+		{"src/a.go", 20, "src/a.go"},
+		{"/var/log/sessionimport/name.go", 16, "…/name.go"},
+		{"/aaaa/bbbb", 3, "…bb"},
+		{"abc", 1, "…"},
+		{"abc", 0, ""},
+	} {
+		if got := truncatePathTail(tc.in, tc.maxWidth); got != tc.want {
+			t.Fatalf("truncatePathTail(%q, %d) = %q, want %q", tc.in, tc.maxWidth, got, tc.want)
+		}
+	}
+}
+
 func TestApplyPatchToolCardHidesPureMoveDiff(t *testing.T) {
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/old.go\n*** Move to: src/new.go\n*** End Patch"}`
 	block := &Block{
@@ -475,6 +561,9 @@ func TestApplyPatchToolCardKeepsMoveDiffWhenRequestHunkLooksNoOp(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected %q in completed move card, got:\n%s", want, plain)
 		}
+	}
+	if strings.Contains(plain, "1 file") {
+		t.Fatalf("a single-file move header must not repeat the file count, got:\n%s", plain)
 	}
 	if strings.Contains(plain, "↳ Requested patch:") || strings.Contains(plain, "*** Begin Patch") {
 		t.Fatalf("expected completed move card to omit the raw request preview, got:\n%s", plain)
@@ -1567,8 +1656,8 @@ func TestApplyPatchCardShowsFileAndDiffSummaryWithoutFolding(t *testing.T) {
 	}
 
 	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if !strings.Contains(plain, "✓ apply_patch src/demo.go · 1 file · +1 -1 lines") {
-		t.Fatalf("apply_patch header must merge file/diff counts; got:\n%s", plain)
+	if !strings.Contains(plain, "✓ apply_patch src/demo.go · +1 -1 lines") {
+		t.Fatalf("apply_patch header must merge the diff counts without repeating the single file; got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "-old") || !strings.Contains(plain, "+new") {
 		t.Fatalf("apply_patch card must show the diff body; got:\n%s", plain)

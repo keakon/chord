@@ -153,7 +153,7 @@ func pluralizeToolCount(noun string, count int) string {
 	return noun + "s"
 }
 
-func (b *Block) fileDiffSummaryLine(applyPatchTargets []tools.ApplyPatchDisplayTarget, displayDiff string) string {
+func (b *Block) fileDiffSummaryLine(applyPatchTargets []tools.ApplyPatchDisplayTarget, displayDiff string, headerNamesFile bool) string {
 	if b == nil {
 		return ""
 	}
@@ -174,7 +174,11 @@ func (b *Block) fileDiffSummaryLine(applyPatchTargets []tools.ApplyPatchDisplayT
 		if files == 0 {
 			files = len(applyPatchTargets)
 		}
-		if files > 0 {
+		// A single-file patch's header already names its target ("path",
+		// "D path", "src → dst"); repeating it as "1 file" spends header width
+		// on a visible fact. The count stays for multi-file patches and for
+		// the fallback where the header could not name anything.
+		if files > 1 || (files == 1 && !headerNamesFile) {
 			parts = append(parts, fmt.Sprintf("%d %s", files, pluralizeToolCount("file", files)))
 		}
 	}

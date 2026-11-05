@@ -132,10 +132,13 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	if applyPatchError {
 		applyPatchSections = splitApplyPatchErrorSections(b.stripResultNotes(b.ResultContent))
 	}
-	// filePath is a header display summary ("a → b", "D path", "path +N files"),
-	// which is not a path; syntax highlighting needs the undecorated target so
-	// lexerForFilePath can resolve the real lexer.
-	filePath, syntaxPath := b.diffToolPathsWithTargets(applyPatchTargets)
+	// headerPath/headerTargetPath form the header display summary ("a → b",
+	// "D path", "path +N files"), which is not a path; syntax highlighting
+	// needs the undecorated target so lexerForFilePath can resolve the real
+	// lexer. A move stays two-sided so the header truncation can protect the
+	// arrow (see appendDiffHeaderSummary).
+	headerPath, headerTargetPath, syntaxPath := b.diffToolHeaderSidesWithTargets(applyPatchTargets)
+	filePath := joinMoveSides(headerPath, headerTargetPath)
 	prefix := b.renderToolPrefix(spinnerFrame)
 	// The card surface spans the full viewport, but wrapped plain-text error /
 	// diagnostic sections keep a readable column: they wrap at the prose cap
@@ -163,20 +166,26 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	// into the header (parameters drop first when narrow); error and cancelled
 	// details stay in the body below.
 	headerSummary := ""
+	// A header that already names its single target ("path", "D path",
+	// "src → dst") carries the whole subject: a "1 file" count would only
+	// repeat it, a pure move leaves the summary intentionally empty, and the
+	// raw result text must not replace the two-sided subject either. Patches
+	// whose header names nothing keep the count and the result-text fallback.
+	headerNamesFile := filePath != "" && toolNameKey(b.ToolName) == tools.NameApplyPatch
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-		headerSummary = b.fileDiffSummaryLine(applyPatchTargets, displayDiff)
+		headerSummary = b.fileDiffSummaryLine(applyPatchTargets, displayDiff, headerNamesFile)
 		if applyPatchNoChanges {
 			if headerSummary != "" {
 				headerSummary += " · "
 			}
 			headerSummary += "No changes"
 		}
-		if headerSummary == "" && strings.TrimSpace(b.ResultContent) != "" {
+		if headerSummary == "" && !headerNamesFile && strings.TrimSpace(b.ResultContent) != "" {
 			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
 			headerSummary = terminaltext.TruncateOneLine(displayResult, cardWidth-26)
 		}
 	}
-	headerLine := appendSearchHeaderSummary(renderToolHeaderLine(prefix, b.ToolName), filePath, mergeHeaderOptions("", headerOpts), headerSummary, cardWidth-4)
+	headerLine := appendDiffHeaderSummary(renderToolHeaderLine(prefix, b.ToolName), headerPath, headerTargetPath, mergeHeaderOptions("", headerOpts), headerSummary, cardWidth-4)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
 	result = append(result, headerLine)
 	diffLines := strings.Split(displayDiff, "\n")
@@ -653,7 +662,7 @@ func (b *Block) applyPatchDiffSectionDisplay(targets []tools.ApplyPatchDisplayTa
 	case newPath == diffSectionDevNull:
 		return "D", oldPath, oldPath
 	case oldPath != newPath:
-		return "R", oldPath + " → " + newPath, newPath
+		return "R", oldPath + moveArrow + newPath, newPath
 	default:
 		return "M", oldPath, oldPath
 	}
@@ -975,7 +984,7 @@ func (b *Block) displayApplyPatchTarget(target tools.ApplyPatchDisplayTarget) (m
 	marker = applyPatchTargetMarker(target)
 	source := b.displayToolPath(target.SourcePath)
 	if target.TargetPath != "" {
-		return marker, source + " → " + b.displayToolPath(target.TargetPath)
+		return marker, source + moveArrow + b.displayToolPath(target.TargetPath)
 	}
 	return marker, source
 }
@@ -1195,15 +1204,27 @@ func (b *Block) diffToolFilePathWithTargets(targets []tools.ApplyPatchDisplayTar
 // turns a card's preview into plain text. The returned path is already
 // display-ready, so callers must not relativize it a second time.
 func (b *Block) diffToolPathsWithTargets(targets []tools.ApplyPatchDisplayTarget) (displayPath, syntaxPath string) {
+	left, right, syntaxPath := b.diffToolHeaderSidesWithTargets(targets)
+	return joinMoveSides(left, right), syntaxPath
+}
+
+// diffToolHeaderSidesWithTargets is diffToolPathsWithTargets with a move
+// subject delivered as its two sides: left is the source display path, right
+// the target display path (with the remaining-files count attached when the
+// patch has more targets), and both are non-empty only for a move — the
+// renderer truncates such a subject side-aware so the arrow survives. Every
+// other subject keeps the combined form in left with right empty.
+func (b *Block) diffToolHeaderSidesWithTargets(targets []tools.ApplyPatchDisplayTarget) (left, right, syntaxPath string) {
 	if toolNameKey(b.ToolName) == tools.NameApplyPatch {
 		if len(targets) == 0 {
 			// No per-file rows exist until the patch parses, so the header names
 			// the first operation and counts the rest.
 			targets = b.unparsedApplyPatchTargets()
 			if len(targets) == 0 {
-				return "", ""
+				return "", "", ""
 			}
-			return b.applyPatchSummaryPath(targets), applyPatchTargetSyntaxPath(targets[0])
+			left, right = b.applyPatchSummarySides(targets)
+			return left, right, applyPatchTargetSyntaxPath(targets[0])
 		}
 		syntaxPath = applyPatchTargetSyntaxPath(targets[0])
 		if len(targets) > 1 {
@@ -1211,9 +1232,10 @@ func (b *Block) diffToolPathsWithTargets(targets []tools.ApplyPatchDisplayTarget
 			// operations without a diff, one section header per diff — so the
 			// header stays a pure summary. Repeating the first target here also
 			// printed the same file count twice ("path +1 files · 2 files").
-			return "", syntaxPath
+			return "", "", syntaxPath
 		}
-		return b.applyPatchSummaryPath(targets), syntaxPath
+		left, right = b.applyPatchSummarySides(targets)
+		return left, right, syntaxPath
 	}
 	if b.ToolName == tools.NameEdit {
 		path := tools.ExtractEditPathFromArgs(json.RawMessage(b.Content))
@@ -1221,30 +1243,46 @@ func (b *Block) diffToolPathsWithTargets(targets []tools.ApplyPatchDisplayTarget
 			path = strings.TrimSpace(tolerantToolArgValue(b.Content, "path"))
 		}
 		if path == "" {
-			return "", ""
+			return "", "", ""
 		}
 		// The model may name the file absolutely; a long prefix (deep tree, long
 		// $HOME, worktree) would push the file name out of the width-clipped
 		// header, so show it relative to the working dir like every other card.
-		return b.displayToolPath(path), path
+		return b.displayToolPath(path), "", path
 	}
 	path := strings.TrimSpace(tolerantToolArgValue(b.Content, "path"))
-	return path, path
+	return path, "", path
 }
 
-// applyPatchSummaryPath names a patch on one line: its first operation plus a
-// count of the rest. It is the only place the files are named wherever no body
-// lists them: a single-file header, the header of a patch that cannot be parsed
-// yet, and the message directory.
-func (b *Block) applyPatchSummaryPath(targets []tools.ApplyPatchDisplayTarget) string {
+// applyPatchSummarySides names a patch on one line, split at the move arrow of
+// its first operation: the source path is left, the target path — plus a count
+// of the remaining operations — is right. It is the only place the files are
+// named wherever no body lists them: a single-file header, the header of a
+// patch that cannot be parsed yet, and the message directory.
+func (b *Block) applyPatchSummarySides(targets []tools.ApplyPatchDisplayTarget) (left, right string) {
 	if len(targets) == 0 {
-		return ""
+		return "", ""
 	}
-	marker, path := b.displayApplyPatchTarget(targets[0])
-	if marker == "D" {
-		path = marker + " " + path
+	rest := ""
+	if n := len(targets) - 1; n > 0 {
+		rest = fmt.Sprintf(" +%d files", n)
 	}
-	return applyPatchPathSummary(path, len(targets))
+	target := targets[0]
+	source := b.displayToolPath(target.SourcePath)
+	if target.TargetPath == "" {
+		if applyPatchTargetMarker(target) == "D" {
+			source = "D " + source
+		}
+		return source + rest, ""
+	}
+	return source, b.displayToolPath(target.TargetPath) + rest
+}
+
+// applyPatchSummaryPath is applyPatchSummarySides composed back into one line;
+// used by one-line summaries that truncate the whole subject themselves.
+func (b *Block) applyPatchSummaryPath(targets []tools.ApplyPatchDisplayTarget) string {
+	left, right := b.applyPatchSummarySides(targets)
+	return joinMoveSides(left, right)
 }
 
 // unparsedApplyPatchTargets resolves the operations visible while the args
@@ -1342,14 +1380,6 @@ func streamingApplyPatchTargets(text string) []tools.ApplyPatchDisplayTarget {
 	}
 	flush()
 	return targets
-}
-
-func applyPatchPathSummary(path string, count int) string {
-	path = strings.TrimSpace(path)
-	if count <= 1 {
-		return path
-	}
-	return fmt.Sprintf("%s +%d files", path, count-1)
 }
 
 // processWorkingDir caches os.Getwd so per-render path shortening does not pay a

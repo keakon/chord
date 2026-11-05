@@ -20,7 +20,6 @@ type streamingApplyPatchCardLayout struct {
 	patch       string
 	lineStarts  []int
 	patchWidth  int
-	filePath    string
 	syntaxPath  string
 	patchStart  int
 	totalLines  int
@@ -104,14 +103,15 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 
 	targets := b.applyPatchTargets()
 	// The header path may be a display summary; keep the undecorated target for
-	// the preview's syntax highlighting (see diffToolPathsWithTargets).
-	filePath, syntaxPath := b.diffToolPathsWithTargets(targets)
+	// the preview's syntax highlighting (see diffToolHeaderSidesWithTargets).
+	headerPath, headerTargetPath, syntaxPath := b.diffToolHeaderSidesWithTargets(targets)
 	prefix := b.renderToolPrefix(spinnerFrame)
-	headerLine := appendSearchHeaderSummary(
+	headerLine := appendDiffHeaderSummary(
 		renderToolHeaderLine(prefix, toolName),
-		filePath,
+		headerPath,
+		headerTargetPath,
 		mergeHeaderOptions("", b.diagnosticHeaderOptions()),
-		b.fileDiffSummaryLine(targets, ""),
+		b.fileDiffSummaryLine(targets, "", joinMoveSides(headerPath, headerTargetPath) != ""),
 		cardWidth-4,
 	)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, false, b.toolExecutionIsRunning())
@@ -152,7 +152,6 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 		patch:      patch,
 		lineStarts: lineStarts,
 		patchWidth: cardWidth - 4,
-		filePath:   filePath,
 		syntaxPath: syntaxPath,
 		patchStart: patchStart,
 		totalLines: total,
