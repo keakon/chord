@@ -23,6 +23,15 @@
   padding-bottom: 1rem;
 }
 
+/* Hero tagline: Starlight caps `.copy > *` at 50ch, tuned for Latin
+   glyphs. A full-width CJK character is ~2x a "0", so 50ch only fits ~25
+   Han chars and the long CJK line splits a word. Use em so both locales
+   can fill the column; 44em clears the current column width, and English
+   wraps naturally when the column is narrower. */
+.hero .copy .tagline {
+  max-width: 44em;
+}
+
 .chord-screenshot {
   margin: 2rem auto;
   max-width: 960px;

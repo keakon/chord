@@ -9,7 +9,7 @@
 
 <p align="center">同一任务实测：耗时和成本约为 Claude Code 的 1/3。</p>
 
-<p align="center">单个会话只占几十兆内存（实测 200 条消息后 39MB），配置不高的电脑也能同时跑多个 Agent。</p>
+<p align="center">单个会话只占几十兆内存，配置不高的电脑也能同时跑多个 Agent。</p>
 
 <p align="center">
   <a href="./docs/quickstart_CN.md">快速开始</a> ·

@@ -4,7 +4,7 @@
 
 Six coding agents each ran the same DeepSWE v1.1 task (adding streaming JSON iteration to `httpx`) on the same model. Chord was fastest and cheapest: 6m37s at an estimated $0.052, about 1/3 of Claude Code's time and cost. See [Performance](./performance.md) for the full comparisons and test conditions.
 
-A session uses tens of megabytes of memory (39MB after 200 messages in our test), so you can run several agents at once even on modest hardware.
+A session uses tens of megabytes of memory, so you can run several agents at once even on modest hardware.
 
 The [Quickstart](./quickstart.md) takes you through installation, model setup, and your first task. See [supported accounts and APIs](./model-choice.md#supported-accounts-and-apis) to check compatibility with your existing keys or accounts. With the default configuration, Chord edits files and runs commands directly; to approve actions before they run, see [Permissions & Safety](./permissions-and-safety.md).
 

@@ -9,7 +9,7 @@
 
 <p align="center">In one measured task: about 1/3 of Claude Code's time and cost.</p>
 
-<p align="center">A session uses tens of megabytes of memory (39MB after 200 messages in our test), so you can run several agents at once even on modest hardware.</p>
+<p align="center">A session uses tens of megabytes of memory, so you can run several agents at once even on modest hardware.</p>
 
 <p align="center">
   <a href="./docs/quickstart.md">Quickstart</a> ·
