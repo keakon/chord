@@ -1,13 +1,12 @@
 package sessionimport
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 type SourceFileLookup struct {
@@ -53,24 +52,6 @@ func resolveImportInputPath(source string, inputPath string, sourceID string, ro
 	}
 }
 
-func findCodexRolloutByID(root string, sourceID string) (string, error) {
-	var matches []string
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d == nil || d.IsDir() {
-			return nil
-		}
-		if !strings.HasPrefix(filepath.Base(path), "rollout-") || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		ok, _ := codexFileContainsSessionID(path, sourceID)
-		if ok {
-			matches = append(matches, path)
-		}
-		return nil
-	})
-	return chooseSingleSourceMatch("codex", sourceID, root, matches)
-}
-
 func findClaudeTranscriptByID(root string, sourceID string) (string, error) {
 	var matches []string
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -86,75 +67,177 @@ func findClaudeTranscriptByID(root string, sourceID string) (string, error) {
 		}
 		return nil
 	})
-	return chooseSingleSourceMatch("claude", sourceID, root, matches)
-}
-
-func chooseSingleSourceMatch(source, sourceID, root string, matches []string) (string, error) {
 	if len(matches) == 0 {
-		if source == "codex" {
-			return "", fmt.Errorf("codex import: no session found for id %q under %q; verify the id with `codex resume %s`, or pass an explicit file path", sourceID, root, sourceID)
-		}
-		return "", fmt.Errorf("%s import: no session found for id %q under %q; verify the id or pass an explicit file path", source, sourceID, root)
+		return "", fmt.Errorf("claude import: no session found for id %q under %q; verify the id or pass an explicit file path", sourceID, root)
 	}
 	sort.Strings(matches)
 	if len(matches) > 1 {
-		return "", fmt.Errorf("%s import: multiple files matched id %q under %q; pass an explicit file path to choose one", source, sourceID, root)
+		return "", fmt.Errorf("claude import: multiple files matched id %q under %q; pass an explicit file path to choose one:\n%s", sourceID, root, strings.Join(matches, "\n"))
 	}
 	return matches[0], nil
 }
 
-// codexFileContainsSessionID reports whether the rollout at path belongs to
-// the given source id. Codex identifies a rollout by the id in its first
-// session_meta line (the thread's own id, also encoded in the filename
-// suffix), which is exactly how `codex resume <id>` resolves a file. The
-// session_id field is intentionally not consulted: in forked/sub-agent
-// rollouts it points back to the parent session, so it matches multiple files
-// for one id. Only the first *readable* session_meta is examined — a forked
-// rollout replays the parent's session_meta on a later line, so matching a
-// later meta would resolve the parent id to both the parent file and the
-// fork. A session_meta whose payload cannot be read says nothing about the
-// rollout's own id, so such lines are skipped instead of aborting the scan.
-func codexFileContainsSessionID(path string, sourceID string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
+// codexRolloutTimestampLayout is the fixed-width timestamp codex embeds in
+// rollout file names. Lexicographic comparison of the 19 rendered characters
+// is chronological, so the string is kept as-is for ordering.
+const codexRolloutTimestampLayout = "2006-01-02T15-04-05"
+
+// codexRolloutFileName is the parsed canonical rollout basename, matching
+// codex's own RolloutFileName parser. Ordinary rollouts encode one id that is
+// both the thread id and the rollout id; reverted threads append an
+// underscore and a distinct rollout id after the stable thread id.
+type codexRolloutFileName struct {
+	Timestamp  string // fixed-width UTC wall clock; lexicographic == chronological
+	ThreadID   string
+	RolloutID  string
+	Compressed bool // the file is a .jsonl.zst sidecar of the rollout
+}
+
+// parseCodexRolloutFileName parses a rollout base name of the form
+// rollout-<YYYY-MM-DDTHH-MM-SS>-<thread-id>[_<rollout-id>].jsonl[.zst].
+// Names that do not match the canonical shape (including non-UUID id
+// segments) report false, mirroring codex's own parser.
+func parseCodexRolloutFileName(name string) (codexRolloutFileName, bool) {
+	parsed := codexRolloutFileName{}
+	if strings.HasSuffix(name, ".zst") {
+		parsed.Compressed = true
+		name = strings.TrimSuffix(name, ".zst")
 	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 2*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var lineObj map[string]json.RawMessage
-		if err := importJSONUnmarshalString(line, &lineObj); err != nil {
-			continue
-		}
-		rawType, ok := lineObj["type"]
-		if !ok {
-			continue
-		}
-		var typeStr string
-		if err := importJSONUnmarshal(rawType, &typeStr); err != nil || typeStr == "" {
-			continue
-		}
-		if typeStr != codexTopLevelTypeSessionMeta {
-			continue
-		}
-		payload := lineObj["payload"]
-		if len(payload) == 0 {
-			continue
-		}
-		var meta struct {
-			ID string `json:"id"`
-		}
-		if err := importJSONUnmarshal(payload, &meta); err != nil || meta.ID == "" {
-			continue
-		}
-		return meta.ID == sourceID, nil
+	core, ok := strings.CutPrefix(name, "rollout-")
+	if !ok {
+		return parsed, false
 	}
-	return false, scanner.Err()
+	core, ok = strings.CutSuffix(core, ".jsonl")
+	if !ok || len(core) < 21 || core[19] != '-' {
+		return parsed, false
+	}
+	parsed.Timestamp = core[:19]
+	if _, err := time.Parse(codexRolloutTimestampLayout, parsed.Timestamp); err != nil {
+		return parsed, false
+	}
+	ids := core[20:]
+	threadID, rolloutID, hasSuffix := strings.Cut(ids, "_")
+	if !hasSuffix {
+		threadID, rolloutID = ids, ids
+	}
+	if !isCodexUUID(threadID) || rolloutID == "" || !isCodexUUID(rolloutID) {
+		return parsed, false
+	}
+	parsed.ThreadID = strings.ToLower(threadID)
+	parsed.RolloutID = strings.ToLower(rolloutID)
+	return parsed, true
+}
+
+// isCodexUUID reports whether s is a canonical 36-character hyphenated UUID,
+// the shape codex writes for thread and rollout ids in file names.
+func isCodexUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		switch i {
+		case 8, 13, 18, 23:
+			if s[i] != '-' {
+				return false
+			}
+		default:
+			c := s[i]
+			if (c < '0' || '9' < c) && (c < 'a' || 'f' < c) && (c < 'A' || 'F' < c) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// codexRolloutMatch is a rollout file found by a codex lookup.
+type codexRolloutMatch struct {
+	Path       string
+	Compressed bool
+}
+
+// findCodexRolloutFile walks the given roots and returns the rollout file the
+// matcher selects, applying codex's newest-file rule: the latest file name
+// timestamp wins, ties break by the greater rollout id (the canonical UUID
+// string compares like its byte order), and a full tie prefers the plain file
+// over its compressed form.
+func findCodexRolloutFile(roots []string, match func(codexRolloutFileName) bool) (codexRolloutMatch, bool) {
+	var best codexRolloutMatch
+	var bestName codexRolloutFileName
+	found := false
+	for _, root := range roots {
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d == nil || d.IsDir() {
+				return nil
+			}
+			parsed, ok := parseCodexRolloutFileName(filepath.Base(path))
+			if !ok || !match(parsed) {
+				return nil
+			}
+			if !found || codexRolloutNameNewer(parsed, bestName) {
+				best = codexRolloutMatch{Path: path, Compressed: parsed.Compressed}
+				bestName = parsed
+				found = true
+			}
+			return nil
+		})
+	}
+	return best, found
+}
+
+// codexRolloutNameNewer reports whether a is strictly newer than b under the
+// (timestamp, rollout id, plain-over-compressed) ordering.
+func codexRolloutNameNewer(a, b codexRolloutFileName) bool {
+	if a.Timestamp != b.Timestamp {
+		return a.Timestamp > b.Timestamp
+	}
+	if a.RolloutID != b.RolloutID {
+		return a.RolloutID > b.RolloutID
+	}
+	return !a.Compressed && b.Compressed
+}
+
+// findCodexRolloutByID follows Codex's filesystem fallback: match the stable
+// thread id before any `_rollout-id` suffix and take the newest filename.
+// Codex itself can prefer a path recorded in SQLite; import does not read it.
+func findCodexRolloutByID(root string, sourceID string) (string, error) {
+	match, found := findCodexRolloutFile([]string{root}, func(name codexRolloutFileName) bool {
+		return strings.EqualFold(name.ThreadID, sourceID)
+	})
+	if !found {
+		return "", fmt.Errorf("codex import: no session found for id %q under %q; verify the id with `codex resume %s`, or pass an explicit file path", sourceID, root, sourceID)
+	}
+	if match.Compressed {
+		return "", fmt.Errorf("codex import: newest rollout for id %q is compressed (%s); compressed rollouts are not supported", sourceID, match.Path)
+	}
+	return match.Path, nil
+}
+
+// findCodexRolloutByRolloutID locates one immutable rollout file by its
+// rollout id across the given roots, mirroring codex's
+// find_rollout_path_by_rollout_id: unlike the thread-id lookup it selects
+// exactly one page and is how codex itself follows SessionMeta.history_base.
+func findCodexRolloutByRolloutID(roots []string, rolloutID string) (codexRolloutMatch, bool) {
+	return findCodexRolloutFile(roots, func(name codexRolloutFileName) bool {
+		return strings.EqualFold(name.RolloutID, rolloutID)
+	})
+}
+
+// codexSearchRoots returns the directories searched for history_base base
+// pages: the explicit --root alone when given, otherwise codex's default
+// sessions and archived_sessions roots.
+func codexSearchRoots(explicitRoot string) []string {
+	if root := strings.TrimSpace(explicitRoot); root != "" {
+		return []string{root}
+	}
+	home := userHomeDir()
+	if home == "" {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, ".codex", "sessions"),
+		filepath.Join(home, ".codex", "archived_sessions"),
+	}
 }
 
 func userHomeDir() string {

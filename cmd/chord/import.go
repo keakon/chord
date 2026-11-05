@@ -126,9 +126,20 @@ func printImportSummary(w io.Writer, source string, res *sessionimport.ImportRes
 	if source == "opencode" && r.OpenCode != nil {
 		printOpenCodeImportSummary(w, r.OpenCode)
 	}
+	if source == "codex" && r.Codex != nil {
+		printCodexImportSummary(w, r.Codex)
+	}
 	if reportPath != "" {
 		fmt.Fprintf(w, "Report: %s\n", reportPath)
 	}
+}
+
+func printCodexImportSummary(w io.Writer, report *sessionimport.CodexImportReport) {
+	if report.HistoryPagesStitched <= 1 {
+		return
+	}
+	fmt.Fprintf(w, "Codex: stitched %d rollout page(s), %d record(s) came from base history pages\n",
+		report.HistoryPagesStitched, report.HistoryItemsFromBase)
 }
 
 func printOpenCodeImportSummary(w io.Writer, report *sessionimport.OpenCodeImportReport) {

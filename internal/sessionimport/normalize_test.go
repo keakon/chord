@@ -64,7 +64,7 @@ func TestConvertCodexRollout_EmptyExecOutputIsReplayable(t *testing.T) {
 	data := codexExecRollout(t, input, "Script completed\nWall time 5.0 seconds\nOutput:\n", "")
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}

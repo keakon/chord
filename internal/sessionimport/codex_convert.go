@@ -57,14 +57,22 @@ type codexRolloutEntry struct {
 	Payload   json.RawMessage
 }
 
-// parseCodexJSONL scans JSONL and returns typed entries.
-func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
+// parseCodexJSONL validates contiguous ordinals across stitched pages, including
+// their metadata records. A nil firstOrdinal preserves standalone legacy input.
+// Bounded data has already been cut at the declared byte offset; its ordinal
+// range must agree with that independent boundary.
+func parseCodexJSONL(data []byte, firstOrdinal *uint64, maxOrdinalExclusive uint64) ([]codexRolloutEntry, string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 
 	var entries []codexRolloutEntry
 	var sessionID string
 	lineNo := 0
+	var nextOrdinal uint64
+	if firstOrdinal != nil {
+		nextOrdinal = *firstOrdinal
+	}
+	recordCount := 0
 	for scanner.Scan() {
 		lineNo++
 		line := strings.TrimSpace(scanner.Text())
@@ -76,6 +84,27 @@ func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 		if err := importJSONUnmarshalString(line, &lineObj); err != nil {
 			return nil, "", fmt.Errorf("codex import: line %d: parse JSON: %w", lineNo, err)
 		}
+
+		if firstOrdinal != nil {
+			var ordinal *uint64
+			if err := importJSONUnmarshal(lineObj["ordinal"], &ordinal); err != nil {
+				return nil, "", fmt.Errorf("codex import: line %d: parse ordinal: %w", lineNo, err)
+			}
+			if ordinal == nil {
+				return nil, "", fmt.Errorf("codex import: line %d: rollout record has no ordinal (legacy rollout format); a history_base chain requires paginated records", lineNo)
+			}
+			if *ordinal != nextOrdinal {
+				return nil, "", fmt.Errorf("codex import: line %d: rollout record ordinal %d is out of sequence (expected %d)", lineNo, *ordinal, nextOrdinal)
+			}
+			nextOrdinal++
+			if nextOrdinal == 0 || (maxOrdinalExclusive > 0 && *ordinal >= maxOrdinalExclusive) {
+				return nil, "", fmt.Errorf("codex import: line %d: ordinal exceeds the history boundary", lineNo)
+			}
+			if recordCount == 0 && pickJSONString(lineObj, "type") != codexTopLevelTypeSessionMeta {
+				return nil, "", fmt.Errorf("codex import: line %d: history page must start with session metadata", lineNo)
+			}
+		}
+		recordCount++
 
 		rawType, ok := lineObj["type"]
 		if !ok {
@@ -99,9 +128,15 @@ func parseCodexJSONL(data []byte) ([]codexRolloutEntry, string, error) {
 				sessionID = meta.ID
 			}
 		}
+		if firstOrdinal != nil && recordCount == 1 && sessionID == "" {
+			return nil, "", fmt.Errorf("codex import: line %d: history page metadata has no session id", lineNo)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, "", fmt.Errorf("codex import: scan JSONL: %w", err)
+	}
+	if firstOrdinal != nil && (recordCount == 0 || (maxOrdinalExclusive > 0 && nextOrdinal != maxOrdinalExclusive)) {
+		return nil, "", fmt.Errorf("codex import: history page is truncated: next ordinal %d, declared boundary %d", nextOrdinal, maxOrdinalExclusive)
 	}
 	return entries, sessionID, nil
 }

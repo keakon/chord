@@ -27,19 +27,20 @@ func TestNewImportCmd_SucceedsWithIDAndRoot(t *testing.T) {
 	t.Setenv("CHORD_STATE_DIR", stateDir)
 	t.Setenv("CHORD_SESSIONS_DIR", "")
 	root := t.TempDir()
-	rollout := filepath.Join(root, "2026", "05", "07", "rollout-1.jsonl")
+	threadID := "019e0000-0000-7000-8000-000000000001"
+	rollout := filepath.Join(root, "2026", "05", "07", "rollout-2026-05-07T04-43-46-"+threadID+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(rollout), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	data := `{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"sess-1"}}
-{"timestamp":"2026-01-01T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}
+	data := `{"timestamp":"2026-05-07T04:43:46Z","ordinal":0,"type":"session_meta","payload":{"id":"` + threadID + `"}}
+{"timestamp":"2026-05-07T04:43:47Z","ordinal":1,"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}
 `
 	if err := os.WriteFile(rollout, []byte(data), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	cmd := newImportCmd()
 	_ = cmd.Flags().Set("project", t.TempDir())
-	_ = cmd.Flags().Set("id", "sess-1")
+	_ = cmd.Flags().Set("id", threadID)
 	_ = cmd.Flags().Set("root", root)
 
 	out, err := captureStdout(t, func() error {

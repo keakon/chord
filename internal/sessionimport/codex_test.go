@@ -14,6 +14,17 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// convertCodexRolloutData converts a single in-memory rollout page, standing
+// in for a rollout file on disk.
+func convertCodexRolloutData(t *testing.T, data []byte, reasoningMode string, report *ImportReport) ([]message.Message, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "rollout-2026-01-01T00-00-00-019e0000-0000-7000-8000-000000000001.jsonl")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write rollout fixture: %v", err)
+	}
+	return convertCodexRollout([]codexPage{{Path: path}}, reasoningMode, report)
+}
+
 func TestCodexTruncateImportedText(t *testing.T) {
 	if got := codexTruncateImportedText("abc", codexImportedNoteMaxBytes); got != "abc" {
 		t.Fatalf("short text changed: %q", got)
@@ -90,7 +101,7 @@ func TestConvertCodexRollout_IgnoresItemJSONL(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -114,7 +125,7 @@ func TestConvertCodexRollout_ParsesNewPayloadSchema(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -164,7 +175,7 @@ func TestConvertCodexRollout_SkipsStartupInstructionUserMessage(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -191,7 +202,7 @@ func TestConvertCodexRollout_StructuredShellTool(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -249,7 +260,7 @@ func TestConvertCodexRollout_UnsupportedToolKeepsSourceCall(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -284,7 +295,7 @@ func TestConvertCodexRollout_MalformedArgumentsWrapToValidJSON(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -323,7 +334,7 @@ func TestConvertCodexRollout_EventMsgDeduplication(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -346,7 +357,7 @@ func TestConvertCodexRollout_FallbackTurnBoundaryByUserMessages(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -365,7 +376,7 @@ func TestConvertCodexRollout_KeepsMappedToolsStructured(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -388,7 +399,7 @@ func TestConvertCodexRollout_AttachesReasoningAndUsage(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningVisible, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningVisible, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -415,7 +426,7 @@ func TestConvertCodexRollout_TurnBoundaries(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -448,7 +459,7 @@ func TestConvertCodexRollout_PairsToolResultByCallOwnerAcrossTurnContextAdvance(
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -476,7 +487,7 @@ func TestConvertCodexRollout_MapsKnownToolAndKeepsUnknownSourceCall(t *testing.T
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -515,7 +526,7 @@ func TestConvertCodexRollout_RealisticFixtureReportAndLineage(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -549,7 +560,7 @@ func TestConvertCodexRollout_WriteToolConvertsToWrite(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -578,7 +589,7 @@ func TestConvertCodexRollout_EditToolConvertsToEdit(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -611,7 +622,7 @@ func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToEdit(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -715,7 +726,7 @@ func TestConvertCodexRollout_ExecCommandConvertsToShell(t *testing.T) {
 	)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -765,7 +776,7 @@ func TestConvertCodexRollout_ExecFailureMarksResultError(t *testing.T) {
 	)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -790,7 +801,7 @@ func TestConvertCodexRollout_ShellFailureMarksResultError(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -818,7 +829,7 @@ func TestConvertCodexRollout_SettledShellKeepsItsBody(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -842,7 +853,7 @@ func TestConvertCodexRollout_YieldedShellKeepsItsEnvelope(t *testing.T) {
 	const envelope = "Chunk ID: 1919aa\nWall time: 10.0000 seconds\nProcess running with session ID 481\nOriginal token count: 2\nOutput:\npartial"
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -865,7 +876,7 @@ func TestConvertCodexRollout_FileContentIsNotDecodedAsShellEnvelope(t *testing.T
 	const content = "Wall time: 0.1000 seconds\nProcess exited with code 1\nOutput:\nrecorded earlier\n"
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -887,7 +898,7 @@ func TestConvertCodexRollout_PayloadWrappedShellFailureMarksResultError(t *testi
 	)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -909,7 +920,7 @@ func TestConvertCodexRollout_PayloadWrappedApplyPatchKeepsItsSummary(t *testing.
 	)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -936,7 +947,7 @@ func TestConvertCodexRollout_HeaderAbovePayloadIsStrippedAndUnwrapped(t *testing
 	)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -958,7 +969,7 @@ func TestConvertCodexRollout_PayloadShapedFileContentIsKept(t *testing.T) {
 	)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -975,7 +986,7 @@ func TestConvertCodexRollout_ExecApplyPatchConvertsToApplyPatch(t *testing.T) {
 	)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -1010,7 +1021,7 @@ func TestConvertCodexRollout_ExecUnmappableNestedToolKeepsSourceCall(t *testing.
 	)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -1042,7 +1053,7 @@ func TestConvertCodexRollout_ExecWithMultipleNestedCallsKeepsSourceCall(t *testi
 	)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -1072,7 +1083,7 @@ func TestConvertCodexRollout_CollaborationToolKeepsSourceCall(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
@@ -1097,7 +1108,7 @@ func TestConvertCodexRollout_WebSearchEndRestoresAsToolCall(t *testing.T) {
 `)
 
 	var report ImportReport
-	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	msgs, err := convertCodexRolloutData(t, data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}

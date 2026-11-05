@@ -53,6 +53,7 @@ type ImportReport struct {
 	// Source-specific diagnostics.
 	Claude   *ClaudeImportReport   `json:"claude,omitempty"`
 	OpenCode *OpenCodeImportReport `json:"opencode,omitempty"`
+	Codex    *CodexImportReport    `json:"codex,omitempty"`
 
 	// Import summary retained for CLI/report display.
 	ToolEntriesRendered int `json:"tool_entries_rendered,omitempty"`
@@ -101,6 +102,26 @@ type ClaudeImportReport struct {
 	WrappedUserBlocksSkipped int      `json:"wrapped_user_blocks_skipped,omitempty"`
 	WrappedUserLinesSkipped  int      `json:"wrapped_user_lines_skipped,omitempty"`
 	Diagnostics              []string `json:"diagnostics,omitempty"`
+}
+
+// CodexImportReport records how a Codex rollout's history_base chain was
+// stitched into one import. Referenced forks (thread/revert, sub-agent
+// spawns) write their inherited history as a chain of pages instead of
+// replaying it, so the counters and page list make the stitched provenance
+// visible and checkable against the source files.
+type CodexImportReport struct {
+	// HistoryPagesStitched counts the rollout pages concatenated into the
+	// import, including the selected page. A page chain that cannot be
+	// followed completely is rejected outright, so any successful import
+	// reports the full chain.
+	HistoryPagesStitched int `json:"history_pages_stitched,omitempty"`
+	// HistoryItemsFromBase counts the rollout records imported from pages
+	// before the selected one — history the source carried over from its
+	// history_base chain rather than recording in the selected page.
+	HistoryItemsFromBase int `json:"history_items_from_base,omitempty"`
+	// Pages lists the stitched rollout files oldest first; the last entry is
+	// the selected page.
+	Pages []string `json:"pages,omitempty"`
 }
 
 func (r *ImportReport) warnf(format string, args ...any) {

@@ -21,6 +21,8 @@
 
 - 全局 config.yaml 尚不存在时，`chord doctor skills` 不再失败：报告改用内置默认值（无额外技能目录）照常产出，项目配置仍然生效，并在 `context.config_note`（文本报告的 `config note:` 行）说明这一回退。全局配置存在但无法解析时，仍以退出码 `2` 失败。
 - `chord import claude` 过滤 Claude Code 的命令包装文本（`<command-name>`、`<command-message>`），以及本地命令输出和提示（`<local-command-stdout>`、`<local-command-stderr>`、`<local-command-caveat>`）。独立的 `<command-args>` 块仍会保留；包装块中的参数非空或参数标签未闭合时，也整块保留，避免丢失命令参数。导入报告分别统计剔除的文本块数和整条跳过的源记录数，并显示一条汇总警告和一行摘要。中断标记、系统提醒及工具结果保持原样。过滤不影响会话选择，也不会触发历史跨度不足的误报；过滤后没有消息的转录会被拒绝。
+- `chord import codex` 导入分叉线程时会拼接完整历史。Codex 把 `thread/revert` 与引用式子代理页写成不重放继承历史的 `history_base` 链；导入会沿链回溯，把基页拼接在选中页之前，并按子页声明的边界截断各基页。引用链无法完整读取时导入失败，包括基页缺失或为 `.jsonl.zst` 压缩格式的情况。`--id` 按会话记录（rollout）文件名里的线程 ID 匹配，选择文件名时间戳最新的一份，同秒平局按记录 ID 排序。这遵循 Codex 的文件名回退规则，不读取会话数据库，因此选择结果可能与 `codex resume` 不同。最新页为压缩格式时会明确报错，不会静默跳过。导入报告与 CLI 摘要记录拼接页数与来自基页的记录数。
+
 ## 0.8.3 - 2026-11-05
 
 ### 亮点

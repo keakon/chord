@@ -71,11 +71,6 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(input)
-	if err != nil {
-		return nil, fmt.Errorf("read input file: %w", err)
-	}
-
 	report := ImportReport{
 		Source:           source,
 		SourcePath:       input,
@@ -87,17 +82,27 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 	var msgs []message.Message
 	switch source {
 	case "claude":
+		data, err := os.ReadFile(input)
+		if err != nil {
+			return nil, fmt.Errorf("read input file: %w", err)
+		}
 		msgs, err = convertClaudeTranscript(data, reasoningMode, &report)
 		if err != nil {
 			return nil, err
 		}
 	case "opencode":
+		data, err := os.ReadFile(input)
+		if err != nil {
+			return nil, fmt.Errorf("read input file: %w", err)
+		}
 		msgs, err = convertOpenCodeExport(data, reasoningMode, &report)
 		if err != nil {
 			return nil, err
 		}
 	case "codex":
-		msgs, err = convertCodexRollout(data, reasoningMode, &report)
+		// Codex reads its own pages: a selected rollout may carry a
+		// history_base chain whose base pages live in other files.
+		msgs, err = convertCodexRolloutFile(input, codexSearchRoots(opts.SourceRoot), reasoningMode, &report)
 		if err != nil {
 			return nil, err
 		}
