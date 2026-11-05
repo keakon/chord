@@ -7,7 +7,6 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/command"
-	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/skill"
 )
 
@@ -54,45 +53,16 @@ func skillLoadDirsForWorkDir(ac *AppContext, workDir string) []string {
 	if ac == nil {
 		return nil
 	}
-	roots := ac.projectSkillRoots(workDir)
-	skillDirs := make([]string, 0, 2*len(roots)+4)
-	if len(roots) > 0 {
-		checkout := roots[0]
-		skillDirs = append(skillDirs,
-			filepath.Join(checkout, ".chord", "skills"),
-			filepath.Join(checkout, ".agents", "skills"))
-		// Walk from the checkout root down to workDir, collecting
-		// .agents/skills at each level. Deeper dirs come first (higher priority
-		// in first-wins deduplication), and the checkout's own chain outranks
-		// the content-root fallback below.
-		skillDirs = append(skillDirs, WorkDirSkillChain(checkout, workDir)...)
-		for _, fallback := range roots[1:] {
-			skillDirs = append(skillDirs,
-				filepath.Join(fallback, ".chord", "skills"),
-				filepath.Join(fallback, ".agents", "skills"))
-		}
+	var extra []string
+	if ac.Cfg != nil {
+		extra = ac.Cfg.Skills.Paths
 	}
-	skillDirs = append(skillDirs, filepath.Join(ac.ConfigHome, "skills"))
-	if ac.Cfg != nil && len(ac.Cfg.Skills.Paths) > 0 {
-		skillDirs = append(skillDirs, ac.Cfg.Skills.Paths...)
-	}
-	return skillDirs
-}
-
-// projectSkillRoots returns the roots project skills are read from, in priority
-// order: the checkout workDir sits in first (a branch may add or override
-// skills), then the content root as the fallback for gitignored project skills
-// the checkout does not contain. The skill loader de-duplicates by skill name,
-// so listing both implements "checkout wins, otherwise content root".
-func (ac *AppContext) projectSkillRoots(workDir string) []string {
-	if ac == nil || strings.TrimSpace(ac.ContentRoot) == "" {
-		return nil
-	}
-	checkoutRoot := pathutil.CheckoutRoot(workDir, ac.ContentRoot)
-	if checkoutRoot == "" || checkoutRoot == ac.ContentRoot {
-		return []string{ac.ContentRoot}
-	}
-	return []string{checkoutRoot, ac.ContentRoot}
+	return SkillDirPaths(ResolveSkillDirs(SkillDirsInput{
+		ContentRoot: ac.ContentRoot,
+		WorkDir:     workDir,
+		ConfigHome:  ac.ConfigHome,
+		Extra:       extra,
+	}))
 }
 
 // WorkDirSkillChain walks from projectRoot to cwd, collecting
