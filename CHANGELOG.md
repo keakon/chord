@@ -16,6 +16,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Multiple `apply_patch` and `delete` calls in one response run concurrently when their files do not overlap. Conflicting calls within that response keep their order, including calls that touch the same file, a rename endpoint, or an ancestor path. Across agents sharing a checkout, conflicting declared resources are mutually exclusive; execution order follows lease admission.
 - MCP tool failures now separate a request that was never sent, a server-reported error, and a call whose result is unknown. A disconnect, timeout, gateway error, truncated or mismatched response, or stdio EOF that leaves no trustworthy receipt marks the result as unknown and tells the model to verify the external state before retrying instead of presenting an ordinary failure. Cancelling or replacing a turn keeps a completed result and settles an admitted call without one as outcome unknown, never as a call that did not start.
 
+### Fixes
+
+- `chord doctor skills` no longer fails when the global config.yaml does not exist yet. The report is produced from the built-in defaults (no extra skill paths), the project config still applies, and the report states the fallback in `context.config_note` (a `config note:` line in the text report). A global config that exists but does not parse still fails with exit code `2`.
+
 ## 0.8.3 - 2026-11-05
 
 ### Highlights

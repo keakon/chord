@@ -462,3 +462,75 @@ func TestRunDoctorSkills_TextReport(t *testing.T) {
 		t.Fatalf("text report should disclaim selection semantics:\n%s", text)
 	}
 }
+
+// A missing global config.yaml must not block the skills report: the check
+// only consumes skills.paths from it, so the built-in defaults are a valid
+// baseline and the report says so.
+func TestRunDoctorSkills_MissingGlobalConfig(t *testing.T) {
+	t.Setenv("CHORD_CONFIG_HOME", t.TempDir()) // no config.yaml inside
+	projectRoot := t.TempDir()
+	t.Chdir(projectRoot)
+	writeDoctorSkill(t, filepath.Join(projectRoot, ".chord", "skills"), "fresh", "Fresh skill", "Body\n")
+
+	report := runDoctorSkillsJSON(t, false)
+	entry := findDoctorSkillEntry(report, "fresh")
+	if entry == nil {
+		t.Fatalf("missing fresh entry: %+v", report.Entries)
+	}
+	if entry.Integrity != "passed" || entry.Visibility != "visible" {
+		t.Fatalf("entry = %+v, want passed and visible", entry)
+	}
+	if report.Context.ConfigNote == "" {
+		t.Fatalf("context should state the config fallback: %+v", report.Context)
+	}
+
+	var text bytes.Buffer
+	if err := runDoctorSkills(doctorSkillsOptions{Out: &text}); err != nil {
+		t.Fatalf("text report: %v", err)
+	}
+	if !strings.Contains(text.String(), "using built-in defaults") {
+		t.Fatalf("text report should state the config fallback:\n%s", text.String())
+	}
+}
+
+// The project config still applies when the global config.yaml is missing.
+func TestRunDoctorSkills_MissingGlobalConfigKeepsProjectSkillPaths(t *testing.T) {
+	t.Setenv("CHORD_CONFIG_HOME", t.TempDir()) // no config.yaml inside
+	projectRoot := t.TempDir()
+	t.Chdir(projectRoot)
+	extraDir := filepath.Join(projectRoot, "extra-skills")
+	writeDoctorSkill(t, extraDir, "extra", "Extra skill", "Body\n")
+	if err := os.MkdirAll(filepath.Join(projectRoot, ".chord"), 0o755); err != nil {
+		t.Fatalf("mkdir project config dir: %v", err)
+	}
+	projectConfig := filepath.Join(projectRoot, ".chord", "config.yaml")
+	if err := os.WriteFile(projectConfig, []byte("skills:\n  paths:\n    - "+extraDir+"\n"), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	report := runDoctorSkillsJSON(t, false)
+	entry := findDoctorSkillEntry(report, "extra")
+	if entry == nil {
+		t.Fatalf("missing extra entry: %+v", report.Entries)
+	}
+	if entry.Source != "extra" {
+		t.Fatalf("source = %q, want extra", entry.Source)
+	}
+}
+
+// A malformed global config.yaml still fails the check; only the missing
+// file falls back to defaults.
+func TestRunDoctorSkills_InvalidGlobalConfigFails(t *testing.T) {
+	setupDoctorConfigHome(t, "skills: [unclosed")
+	t.Chdir(t.TempDir())
+
+	var out bytes.Buffer
+	err := runDoctorSkills(doctorSkillsOptions{Out: &out, JSON: true})
+	exitErr, ok := errors.AsType[cliExitError](err)
+	if !ok || exitErr.code != 2 {
+		t.Fatalf("err = %v, want exit 2", err)
+	}
+	if strings.Contains(out.String(), "\"summary\"") {
+		t.Fatalf("no report should be produced:\n%s", out.String())
+	}
+}

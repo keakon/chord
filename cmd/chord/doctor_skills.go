@@ -290,6 +290,9 @@ type doctorSkillsContext struct {
 	AgentError string `json:"agent_error,omitempty"`
 	// ExtraPaths lists the configured skills.paths entries.
 	ExtraPaths []string `json:"extra_paths,omitempty"`
+	// ConfigNote records a fallback the global config took, such as a missing
+	// config.yaml being replaced by built-in defaults.
+	ConfigNote string `json:"config_note,omitempty"`
 	// RenderArgs is the argument set the diagnostic render used. It is empty
 	// in this version: the report measures the render without arguments.
 	RenderArgs string `json:"render_args"`
@@ -388,6 +391,22 @@ not change the exit code.`,
 	return cmd
 }
 
+// loadDoctorSkillsGlobalConfig loads the global config the skills report runs
+// under. The report only consumes skills.paths from it, so a missing global
+// config.yaml falls back to the built-in defaults — the same baseline a
+// present-but-empty file would decode to — instead of failing the whole check.
+// Any other load problem (a malformed file, an unreadable path) still fails.
+func loadDoctorSkillsGlobalConfig() (*config.Config, string, error) {
+	cfg, err := config.LoadConfig()
+	if err == nil {
+		return cfg, "", nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return config.DefaultConfig(), "global config.yaml not found; using built-in defaults", nil
+	}
+	return nil, "", cliExitError{code: 2, err: wrapConfigLoadError("load config", err)}
+}
+
 // doctorSkillBaseline is the permission baseline the report is evaluated
 // against: one configured role's own permission rules, without session
 // overlays, YOLO, or a worker parent's rules.
@@ -423,9 +442,9 @@ func runDoctorSkills(opts doctorSkillsOptions) error {
 	contentRoot := resolveContentRoot(context.Background(), cwd)
 	configHome, _ := config.ConfigHomeDir()
 
-	cfg, err := config.LoadConfig()
+	cfg, configNote, err := loadDoctorSkillsGlobalConfig()
 	if err != nil {
-		return cliExitError{code: 2, err: wrapConfigLoadError("load config", err)}
+		return err
 	}
 	projectConfigPath := config.ProjectConfigPath(contentRoot)
 	if _, mergedCfg, mergeErr := config.MergeProjectConfig(cfg, projectConfigPath); mergeErr != nil {
@@ -479,9 +498,9 @@ func runDoctorSkills(opts doctorSkillsOptions) error {
 		catalog = append(catalog, item.Meta)
 	}
 
-	scans := make([]doctorSkillScan, 0, len(items))
+	entries := make([]doctorSkillEntry, 0, len(items))
 	for _, item := range items {
-		scans = append(scans, buildDoctorSkillEntry(item, baseline, dirReport[item.DirIndex]))
+		entries = append(entries, buildDoctorSkillEntry(item, baseline, dirReport[item.DirIndex]))
 	}
 
 	startup := doctorSkillsStartup{
@@ -504,12 +523,7 @@ func runDoctorSkills(opts doctorSkillsOptions) error {
 		startup.Shown = listing.Shown
 		startup.NameOnly = listing.NameOnly
 	}
-	applyDoctorSkillStartup(scans, startup, listing, baseline)
-
-	entries := make([]doctorSkillEntry, 0, len(scans))
-	for _, scan := range scans {
-		entries = append(entries, scan.Entry)
-	}
+	applyDoctorSkillStartup(entries, startup, listing, baseline)
 	// The report rows are sorted for readability, but the renderer already
 	// received the loader's order, so the sort cannot change which entries
 	// kept their description.
@@ -533,6 +547,7 @@ func runDoctorSkills(opts doctorSkillsOptions) error {
 			AgentScope:   baseline.Scope,
 			AgentMode:    baseline.Mode,
 			AgentNote:    baseline.Note,
+			ConfigNote:   configNote,
 			RenderArgs:   "",
 		},
 		Dirs:    dirReport,
@@ -581,15 +596,6 @@ func runDoctorSkills(opts doctorSkillsOptions) error {
 		}
 	}
 	return nil
-}
-
-// doctorSkillScan holds one scanned skill: the report row plus the data the
-// row was measured from.
-type doctorSkillScan struct {
-	Entry  doctorSkillEntry
-	Meta   *skill.Meta
-	Loaded *skill.Skill
-	Source []byte
 }
 
 // resolveDoctorSkillBaseline resolves one configured role's own permission
@@ -677,9 +683,8 @@ func displayDoctorSkillName(entry doctorSkillEntry) string {
 }
 
 // buildDoctorSkillEntry builds one report row and the measurements behind it.
-func buildDoctorSkillEntry(item skill.DiagnosticItem, baseline doctorSkillBaseline, dir doctorSkillDir) doctorSkillScan {
-	scan := doctorSkillScan{}
-	entry := &scan.Entry
+func buildDoctorSkillEntry(item skill.DiagnosticItem, baseline doctorSkillBaseline, dir doctorSkillDir) doctorSkillEntry {
+	entry := doctorSkillEntry{}
 	entry.Path = item.Path
 	entry.Root = item.Root
 	entry.Shadowed = item.Shadowed
@@ -702,10 +707,9 @@ func buildDoctorSkillEntry(item skill.DiagnosticItem, baseline doctorSkillBaseli
 			entry.Reason = doctorSkillReasonParseError
 		}
 		entry.Detail = item.Err.Error()
-		return scan
+		return entry
 	}
 
-	scan.Meta = item.Meta
 	entry.Name = item.Meta.Name
 	entry.Integrity = doctorSkillIntegrityPassed
 	entry.Sidecar = item.Meta.SidecarSource
@@ -751,8 +755,6 @@ func buildDoctorSkillEntry(item skill.DiagnosticItem, baseline doctorSkillBaseli
 		entry.Detail = loadErr.Error()
 	} else {
 		entry.Load = doctorSkillLoadPassed
-		scan.Loaded = loaded
-		scan.Source = source
 		entry.Sizes = doctorSkillSizeMetrics(loaded, source)
 	}
 
@@ -770,7 +772,7 @@ func buildDoctorSkillEntry(item skill.DiagnosticItem, baseline doctorSkillBaseli
 		if entry.Resources == "" {
 			entry.Resources = "none"
 		}
-		return scan
+		return entry
 	}
 
 	switch {
@@ -810,7 +812,7 @@ func buildDoctorSkillEntry(item skill.DiagnosticItem, baseline doctorSkillBaseli
 			}
 		}
 	}
-	return scan
+	return entry
 }
 
 // doctorSkillSizeMetrics measures the three sizes the report keeps apart: the
@@ -865,7 +867,7 @@ func doctorSkillListingEntries(catalog []*skill.Meta, ruleset permission.Ruleset
 
 // applyDoctorSkillStartup records, per skill, whether the startup listing
 // keeps its description, reduces it to a name, or omits it.
-func applyDoctorSkillStartup(scans []doctorSkillScan, startup doctorSkillsStartup, listing tools.SkillListing, baseline doctorSkillBaseline) {
+func applyDoctorSkillStartup(entries []doctorSkillEntry, startup doctorSkillsStartup, listing tools.SkillListing, baseline doctorSkillBaseline) {
 	// The listing holds one record per input entry in input order, so the
 	// records line up with the startup catalog the renderer received.
 	listed := make(map[string]tools.SkillListingRenderEntry, len(listing.Entries))
@@ -874,8 +876,8 @@ func applyDoctorSkillStartup(scans []doctorSkillScan, startup doctorSkillsStartu
 			listed[record.Name] = record
 		}
 	}
-	for i := range scans {
-		entry := &scans[i].Entry
+	for i := range entries {
+		entry := &entries[i]
 		if startup.Available || entry.Shadowed || entry.Integrity == doctorSkillIntegrityFailed {
 			entry.Description.RenderedBytes = new(0)
 			entry.Description.RenderedChars = new(0)
@@ -1099,6 +1101,9 @@ func renderDoctorSkillsText(out io.Writer, report doctorSkillsReport) {
 	fmt.Fprintf(out, "  workdir: %s\n", report.Context.WorkDir)
 	if report.Context.ConfigHome != "" {
 		fmt.Fprintf(out, "  config home: %s\n", report.Context.ConfigHome)
+	}
+	if report.Context.ConfigNote != "" {
+		fmt.Fprintf(out, "  config note: %s\n", report.Context.ConfigNote)
 	}
 	fmt.Fprintf(out, "  role: %s (source: %s, scope: %s)\n", report.Context.Agent, report.Context.AgentSource, report.Context.AgentScope)
 	if report.Context.AgentNote != "" {
