@@ -160,7 +160,7 @@ func TestGeminiStreamCapturesThoughtSignatures(t *testing.T) {
 		`data: {"candidates":[{"content":{"parts":[{"text":"thinking...","thought":true,"thoughtSignature":"sig-text"}]}}]}`,
 		`data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{"path":"a.go"}},"thoughtSignature":"sig-fc"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseGeminiSSEStream(strings.NewReader(sse), nil, nil)
 	if err != nil {
@@ -218,7 +218,7 @@ func TestGeminiStreamPreservesSignatureOnlyPart(t *testing.T) {
 		`data: {"candidates":[{"content":{"parts":[{"text":"answer"}]}}]}`,
 		`data: {"candidates":[{"content":{"parts":[{"text":"","thoughtSignature":"sig-final"}]} ,"finishReason":"STOP"}]}`,
 		"",
-	}, "\n")
+	}, "\n\n")
 	resp, err := parseGeminiSSEStream(strings.NewReader(sse), nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestGeminiStreamPreservesSignedPartBoundaries(t *testing.T) {
 		`data: {"candidates":[{"content":{"parts":[{"text":"first","thoughtSignature":"sig-1"}]}}]}`,
 		`data: {"candidates":[{"content":{"parts":[{"text":"second","thoughtSignature":"sig-2"}]} ,"finishReason":"STOP"}]}`,
 		"",
-	}, "\n")
+	}, "\n\n")
 	resp, err := parseGeminiSSEStream(strings.NewReader(sse), nil, nil)
 	if err != nil {
 		t.Fatal(err)

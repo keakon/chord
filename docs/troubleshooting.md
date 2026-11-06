@@ -103,6 +103,12 @@ A `400 invalid_responses_request` or `invalid codex request` means the endpoint 
 
 HTTP LLM dumps include `request_headers` for selected protocol and session headers after request overrides. Credential values are redacted and unrecognized headers are omitted. Compare these headers with the endpoint's requirements when the request body looks correct.
 
+### Streaming gateway format errors
+
+An SSE event ends with a blank line. Multiple `data:` lines within that event are joined with a newline and decoded as one JSON payload. A gateway sending independent JSON messages must put a blank line between them. Chord accepts LF, CRLF, and CR line endings, a leading UTF-8 BOM, and fields with or without the optional space after the colon.
+
+For repeated JSON parse errors or missing events, inspect the gateway's raw HTTP stream, including blank lines; parsed LLM dumps do not retain the original framing. An MCP result requires a complete SSE event. If it is interrupted or invalid and the call reports outcome unknown, check the external service before retrying.
+
 ### `prompt_cache_options is not supported on this model`
 
 Chord does not send explicit prompt-cache fields by default. If you enabled the explicit prompt-cache switches on a GPT-5.6-or-later Responses model and the endpoint does not implement them, it rejects `prompt_cache_options` or `prompt_cache_breakpoint` and fails the request. Set `send_prompt_cache_breakpoint: false` to drop the markers and the top-level field together, or `send_prompt_cache_options: false` to drop only the top-level field while keeping the markers. The endpoint's automatic (implicit) caching still applies. See the `compat.responses.*` rows in [Provider field reference](./configuration.md#provider-field-reference).

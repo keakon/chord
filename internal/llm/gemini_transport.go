@@ -187,24 +187,22 @@ func (g *GeminiProvider) streamGeminiHop(ctx context.Context, frozen geminiFroze
 	}
 	cr := NewProviderChunkTimeoutReader(reader, g.provider, 20*time.Minute, cancel)
 	defer cr.Stop()
-	scanner := bufio.NewScanner(cr)
-	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), geminiContinuationSSEMaxLineBytes)
-	waitingToken := false
-	for scanner.Scan() {
-		if !waitingToken && cb != nil {
-			waitingToken = true
-			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
+	decoder := newLLMSSEReader(cr, cb, geminiContinuationSSEMaxLineBytes, nil)
+	var readErr error
+	for {
+		event, err := decoder.Next()
+		if event.Data == nil {
+			if err != io.EOF {
+				readErr = err
+			}
+			break
 		}
-		line := scanner.Bytes()
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
-		}
-		data := bytes.TrimSpace(line[5:])
+		data := bytes.TrimSpace(event.Data)
 		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
 			continue
 		}
-		state.progressBytes += int64(len(line) + 1)
-		state.progressEvents++
+		state.progressBytes += event.DataBytes
+		state.progressEvents += event.DataLines
 		if cb != nil {
 			cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: state.progressBytes, Events: state.progressEvents}})
 		}
@@ -230,7 +228,7 @@ func (g *GeminiProvider) streamGeminiHop(ctx context.Context, frozen geminiFroze
 	}
 	result.FinishReason = state.finish
 	if result.Err == nil && state.finish == "" {
-		result.Err = scanner.Err()
+		result.Err = readErr
 		if errors.Is(result.Err, bufio.ErrTooLong) {
 			result.Err = &GeminiContinuationError{Reason: "size_limit"}
 		}

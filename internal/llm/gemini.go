@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -798,8 +797,7 @@ var geminiToolCallSeq = func() *atomic.Uint64 {
 }()
 
 func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
+	decoder := newLLMSSEReader(reader, cb, sseMaxTokenSize, nil)
 	streamToken := geminiToolCallSeq.Add(1)
 	var resp message.Response
 	var content strings.Builder
@@ -810,9 +808,9 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	var nextToolIndex int
 	var continuationToken string
 	var sawDataLine bool
-	var gotData bool
 	var progressBytes int64
 	var progressEvents int64
+	var readErr error
 
 	flushContent := func() { resp.Content = content.String() }
 	finishThinking := func() {
@@ -827,20 +825,19 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		}
 	}
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if !gotData && cb != nil {
-			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
-			gotData = true
-		}
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
+	for {
+		event, err := decoder.Next()
+		if event.Data == nil {
+			if err != io.EOF {
+				readErr = err
+			}
+			break
 		}
 		sawDataLine = true
-		data := bytes.TrimSpace(line[len("data:"):])
+		data := bytes.TrimSpace(event.Data)
 		if cb != nil {
-			progressBytes += int64(len(line) + 1)
-			progressEvents++
+			progressBytes += event.DataBytes
+			progressEvents += event.DataLines
 			cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
 		}
 		if collector != nil {
@@ -940,7 +937,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 		}
 	}
 	textParts.Flush()
-	if err := scanner.Err(); err != nil {
+	if err := readErr; err != nil {
 		flushContent()
 		if canRecoverPartialResponsesAfterError(err) {
 			if partial := markInterruptedTextResponse(&resp); partial != nil {

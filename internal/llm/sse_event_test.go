@@ -20,6 +20,9 @@ func TestSSEDataLineTerminatesEvent(t *testing.T) {
 		{name: "combined non terminal", data: `{"type":"response.output_text.delta","delta":"x"}`, want: false},
 		{name: "standard non terminal", eventTypeHint: "message_delta", data: `{"type":"message_delta"}`, want: false},
 		{name: "invalid json", eventTypeHint: "message_stop", data: `{`, want: false},
+		{name: "leading whitespace", data: " \t" + `{"type":"response.completed"}`, want: true},
+		{name: "payload overrides terminal hint", eventTypeHint: "response.completed", data: `{"type":"response.output_text.delta","delta":"x"}`, want: false},
+		{name: "payload overrides other hint", eventTypeHint: "response.output_text.delta", data: `{"type":"response.completed"}`, want: true},
 	}
 
 	for _, tc := range cases {

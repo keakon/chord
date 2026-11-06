@@ -9,13 +9,13 @@ import (
 )
 
 func TestParseOpenAISSEStreamLargeDataLine(t *testing.T) {
-	content := strings.Repeat("x", sseInitialBufferSize*2)
+	content := strings.Repeat("x", 8*1024)
 	stream := strings.Join([]string{
 		`data: {"id":"chatcmpl-large","model":"test","choices":[{"index":0,"delta":{"content":"` + content + `"}}]}`,
 		`data: {"id":"chatcmpl-large","model":"test","choices":[{"index":0,"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -35,7 +35,7 @@ func TestParseOpenAISSEStreamErrorEventAfterTextReturnsAPIError(t *testing.T) {
 		`data: {"id":"chatcmpl-test","model":"gpt-test","choices":[{"index":0,"delta":{"content":"text"}}]}`,
 		`data: {"error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
 		"",
-	}, "\n")
+	}, "\n\n")
 	_, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr.Code != "upstream_connection_error" {
@@ -63,7 +63,7 @@ func TestParseOpenAISSEStream_ThinkingToolcallMarkerHit(t *testing.T) {
 		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -96,7 +96,7 @@ func TestParseOpenAISSEStream_ThinkingToolcallMarkerSplitAcrossChunks(t *testing
 		`data: {"id":"chatcmpl-test","model":"kimi-k2.5","choices":[{"index":0,"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestParseOpenAISSEStream_NormalToolCallsWithoutReasoning_LeavesReasoningCon
 		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -147,7 +147,7 @@ func TestParseOpenAISSEStream_DoesNotEmitToolCallbacksForMalformedToolCall(t *te
 		`data: {"id":"chatcmpl-test","model":"glm","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	var callbacks []string
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), func(delta message.StreamDelta) {
@@ -176,7 +176,7 @@ func TestParseOpenAISSEStream_EmitsPairedCallbacksForValidToolCall(t *testing.T)
 		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	var events []string
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), func(delta message.StreamDelta) {
@@ -225,7 +225,7 @@ func TestParseOpenAISSEStream_InterruptedTextDropsPartialToolAndReasoning(t *tes
 		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read"}}]}}]}`,
 		`data: {"id":"chatcmpl-test","model":"gpt-5.5-mini","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]}}]}`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -249,7 +249,7 @@ func TestParseOpenAISSEStream_DoneWithoutFinishReasonIsNotNormalSuccess(t *testi
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -271,7 +271,7 @@ func TestParseOpenAISSEStream_DoneWithoutFinishReasonKeepsToolCalls(t *testing.T
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read","arguments":"{\"path\":\"/repo/README.md\"}"}}]}}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -313,7 +313,7 @@ func TestParseOpenAISSEStreamOptions_InferFinishReasonTruncatedToolArgsStaysInte
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"content":"partial answer"}}]}`,
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Read","arguments":"{\"path\":"}}]}}]}`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, true)
 	if err != nil {
@@ -353,7 +353,7 @@ func TestParseOpenAISSEStreamOptions_InferFinishReasonToolCalls(t *testing.T) {
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"x\"}"}}]}}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, true)
 	if err != nil {

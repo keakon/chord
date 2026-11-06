@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -22,6 +21,7 @@ import (
 	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
+	"github.com/keakon/chord/internal/sse"
 )
 
 // OpenAIProvider implements streaming completion against the OpenAI Chat Completions API.
@@ -971,8 +971,9 @@ func hasThinkingToolcallMarkers(text string) bool {
 }
 
 func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector *SSECollector, inferFinishReason bool) (*message.Response, error) {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
+	decoder := newLLMSSEReader(reader, cb, sseMaxTokenSize, func(event sse.Event) bool {
+		return bytes.Equal(bytes.TrimSpace(event.Data), []byte("[DONE]"))
+	})
 
 	var (
 		resp      message.Response
@@ -984,7 +985,6 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 		// inThinking tracks whether we are currently inside a reasoning_content
 		inThinking     bool
 		truncated      bool
-		gotData        bool
 		progressBytes  int64
 		progressEvents int64
 		// reasoningBuf accumulates full reasoning_content text so that when
@@ -999,6 +999,7 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 		reasoningTail string
 		// sawDataLine tracks whether we saw at least one SSE data line.
 		sawDataLine bool
+		readErr     error
 	)
 	flushContent := func() {
 		if content.Len() == 0 {
@@ -1008,23 +1009,21 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 		resp.Content = content.String()
 	}
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-
-		if !gotData && cb != nil {
-			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
-			gotData = true
+	for {
+		event, err := decoder.Next()
+		if event.Data == nil {
+			if err != io.EOF {
+				readErr = err
+			}
+			break
 		}
 
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
-		}
 		sawDataLine = true
 
-		data := bytes.TrimSpace(line[len("data:"):])
+		data := bytes.TrimSpace(event.Data)
 		if cb != nil {
-			progressBytes += int64(len(line) + 1)
-			progressEvents++
+			progressBytes += event.DataBytes
+			progressEvents += event.DataLines
 			cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
 		}
 
@@ -1274,7 +1273,7 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := readErr; err != nil {
 		flushContent()
 		if canRecoverPartialResponsesAfterError(err) {
 			if partial := markInterruptedTextResponse(&resp); partial != nil {

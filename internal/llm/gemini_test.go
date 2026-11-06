@@ -59,7 +59,7 @@ func TestParseGeminiSSEStreamErrorEventAfterTextReturnsAPIError(t *testing.T) {
 		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"text"}]}}]}`,
 		`data: {"error":{"code":503,"message":"backend failed","status":"UNAVAILABLE"}}`,
 		"",
-	}, "\n")
+	}, "\n\n")
 	_, err := parseGeminiSSEStream(strings.NewReader(stream), nil, nil)
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr.Code != "503" {
@@ -159,7 +159,7 @@ func TestParseGeminiSSEStream(t *testing.T) {
 		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"hello "}]}}]}`,
 		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"world"},{"functionCall":{"name":"lookup","args":{"q":"x"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"cachedContentTokenCount":4,"totalTokenCount":30,"thoughtsTokenCount":3}}`,
 		``,
-	}, "\n")
+	}, "\n\n")
 
 	var events []message.StreamDelta
 	resp, err := parseGeminiSSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {

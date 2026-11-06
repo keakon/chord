@@ -1,8 +1,6 @@
 package llm
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +9,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/sse"
 )
 
 // StreamCallback is the function signature for receiving streaming deltas.
@@ -239,19 +238,18 @@ func anthropicSSECacheWriteUsage(usage sseUsage) (cacheWrite, cacheWrite1h int) 
 // assembled Response when the stream completes, or an error if the stream
 // fails.
 func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector, captureHosted bool, emitEvents bool) (response *message.Response, parseErr error) {
-	scanner := bufio.NewScanner(reader)
-	// Allow lines up to 1MB for large JSON payloads.
-	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
+	decoder := newLLMSSEReader(reader, cb, sseMaxTokenSize, func(event sse.Event) bool {
+		return event.Type == "message_stop" && json.Valid(event.Data)
+	})
 
 	var (
-		eventType      string
 		resp           message.Response
 		blocks         = make(map[int]*contentBlock)
 		nativeCapture  anthropicHostedCapture
 		hostedByToolID = make(map[string]int) // hosted tool_use id → call index
-		gotData        bool
 		progressBytes  int64
 		progressEvents int64
+		readErr        error
 	)
 
 	if captureHosted {
@@ -263,244 +261,230 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		}()
 	}
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for {
+		event, err := decoder.Next()
+		if event.Data == nil {
+			if err != io.EOF {
+				readErr = err
+			}
+			break
+		}
+		eventType := event.Type
 
-		if !gotData && cb != nil {
-			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
-			gotData = true
+		data := event.Data
+		if cb != nil {
+			progressBytes += event.DataBytes
+			progressEvents += event.DataLines
+			cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
+			if emitEvents && eventType != "" {
+				cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "anthropic." + eventType}})
+			}
 		}
 
-		// Event type line.
-		if after, ok := bytes.CutPrefix(line, []byte("event: ")); ok {
-			eventType = string(after)
-			continue
+		// Record raw SSE data for dump if collector is present.
+		if collector != nil {
+			collector.Add(fmt.Sprintf("%s: %s", eventType, data))
 		}
 
-		// Data line.
-		if data, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
-			if cb != nil {
-				progressBytes += int64(len(line) + 1)
-				progressEvents++
-				cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
-				if emitEvents && eventType != "" {
-					cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "anthropic." + eventType}})
-				}
+		if captureHosted {
+			if err := nativeCapture.capture(&resp, eventType, data); err != nil {
+				return &resp, err
 			}
-
-			// Record raw SSE data for dump if collector is present.
-			if collector != nil {
-				collector.Add(fmt.Sprintf("%s: %s", eventType, data))
+		}
+		switch eventType {
+		case "message_start":
+			var ev sseMessageStart
+			if err := json.Unmarshal(data, &ev); err != nil {
+				return nil, fmt.Errorf("parse message_start: %w", err)
 			}
-
-			if captureHosted {
-				if err := nativeCapture.capture(&resp, eventType, data); err != nil {
-					return &resp, err
-				}
+			if resp.Usage == nil {
+				resp.Usage = &message.TokenUsage{}
 			}
-			switch eventType {
-			case "message_start":
-				var ev sseMessageStart
-				if err := json.Unmarshal(data, &ev); err != nil {
-					return nil, fmt.Errorf("parse message_start: %w", err)
-				}
-				if resp.Usage == nil {
-					resp.Usage = &message.TokenUsage{}
-				}
-				applyAnthropicSSEUsage(resp.Usage, ev.Message.Usage, false)
+			applyAnthropicSSEUsage(resp.Usage, ev.Message.Usage, false)
 
-			case "content_block_start":
-				var ev sseContentBlockStart
-				if err := json.Unmarshal(data, &ev); err != nil {
-					return nil, fmt.Errorf("parse content_block_start: %w", err)
+		case "content_block_start":
+			var ev sseContentBlockStart
+			if err := json.Unmarshal(data, &ev); err != nil {
+				return nil, fmt.Errorf("parse content_block_start: %w", err)
+			}
+			block := &contentBlock{
+				blockType:  ev.ContentBlock.Type,
+				hostedCall: -1,
+			}
+			switch ev.ContentBlock.Type {
+			case "text":
+				block.text.WriteString(ev.ContentBlock.Text)
+				if cb != nil && ev.ContentBlock.Text != "" {
+					cb(message.StreamDelta{
+						Type: message.StreamDeltaText,
+						Text: ev.ContentBlock.Text,
+					})
 				}
-				block := &contentBlock{
-					blockType:  ev.ContentBlock.Type,
-					hostedCall: -1,
-				}
-				switch ev.ContentBlock.Type {
-				case "text":
-					block.text.WriteString(ev.ContentBlock.Text)
-					if cb != nil && ev.ContentBlock.Text != "" {
-						cb(message.StreamDelta{
-							Type: message.StreamDeltaText,
-							Text: ev.ContentBlock.Text,
-						})
-					}
-				case "tool_use":
-					block.toolID = ev.ContentBlock.ID
-					block.toolName = ev.ContentBlock.Name
-					// Only emit start when id/name are present. content_block_stop and
-					// the EOF fallback discard tool calls with empty id/name without
-					// emitting ToolUseEnd, so emitting start here would leave an orphan
-					// start the reducer/TUI never closes.
-					if cb != nil && block.toolID != "" && block.toolName != "" {
-						cb(message.StreamDelta{
-							Type: message.StreamDeltaToolUseStart,
-							ToolCall: &message.ToolCallDelta{
-								ID:   ev.ContentBlock.ID,
-								Name: ev.ContentBlock.Name,
-							},
-						})
-					}
-					if p, ok := reader.(chunkPhaser); ok {
-						p.SetChunkTimeout(SlowPhaseChunkTimeout)
-					}
-				case anthropicServerToolUseBlock:
-					if p, ok := reader.(chunkPhaser); ok {
-						p.SetChunkTimeout(SlowPhaseChunkTimeout)
-					}
-					// Server-side calls belong to hosted sub-requests or explicit
-					// preauthorized main requests. Capture them as receipts; they
-					// must never enter the client-tool dispatcher.
-					block.toolID = ev.ContentBlock.ID
-					block.toolName = ev.ContentBlock.Name
-					block.hostedCall = appendAnthropicHostedCall(&resp, ev.ContentBlock.ID, ev.ContentBlock.Name, anthropicServerToolUseBlock, ev.ContentBlock.Input)
-					if block.toolID != "" && block.hostedCall >= 0 {
-						hostedByToolID[block.toolID] = block.hostedCall
-					}
-				case message.StreamDeltaThinking:
-					block.thinking.WriteString(ev.ContentBlock.Thinking)
-					if ev.ContentBlock.Signature != "" {
-						block.signature = ev.ContentBlock.Signature
-					}
-					if cb != nil && ev.ContentBlock.Thinking != "" {
-						cb(message.StreamDelta{
-							Type: message.StreamDeltaThinking,
-							Text: ev.ContentBlock.Thinking,
-						})
-					}
-					if p, ok := reader.(chunkPhaser); ok {
-						p.SetChunkTimeout(SlowPhaseChunkTimeout)
-					}
-				case "redacted_thinking":
-					// Encrypted reasoning arrives whole in the start event; it must be
-					// preserved and replayed verbatim for the conversation to remain valid.
-					block.redacted = ev.ContentBlock.Data
-				default:
-					if strings.HasSuffix(ev.ContentBlock.Type, anthropicHostedResultSuffix) {
-						// Hosted results arrive whole in the start event. They are
-						// paired into the sub-request observation; the main conversation
-						// history never carries them.
-						recordAnthropicHostedResult(&resp, hostedByToolID, ev.ContentBlock.Type, ev.ContentBlock.ToolUseID, ev.ContentBlock.Content)
-					}
-				}
-				blocks[ev.Index] = block
-
-			case "content_block_delta":
-				var ev sseContentBlockDelta
-				if err := json.Unmarshal(data, &ev); err != nil {
-					return nil, fmt.Errorf("parse content_block_delta: %w", err)
-				}
-				block, ok := blocks[ev.Index]
-				if !ok {
-					continue
-				}
-				switch ev.Delta.Type {
-				case "text_delta":
-					block.text.WriteString(ev.Delta.Text)
-					if cb != nil {
-						cb(message.StreamDelta{
-							Type: message.StreamDeltaText,
-							Text: ev.Delta.Text,
-						})
-					}
-				case "input_json_delta":
-					block.toolInput.WriteString(ev.Delta.PartialJSON)
-					// Suppress delta for blocks with empty id/name; their start was
-					// never emitted and the call will be discarded at stop/EOF.
-					// Input carries this delta's fragment only: consumers
-					// accumulate, so re-sending the accumulated args on every
-					// delta would be quadratic in the arguments' size.
-					if cb != nil && block.blockType == "tool_use" && block.toolID != "" && block.toolName != "" && ev.Delta.PartialJSON != "" {
-						cb(message.StreamDelta{
-							Type: message.StreamDeltaToolUseDelta,
-							ToolCall: &message.ToolCallDelta{
-								ID:    block.toolID,
-								Name:  block.toolName,
-								Input: ev.Delta.PartialJSON,
-							},
-						})
-					}
-				case "thinking_delta":
-					block.thinking.WriteString(ev.Delta.Thinking)
-					if cb != nil {
-						cb(message.StreamDelta{
-							Type: message.StreamDeltaThinking,
-							Text: ev.Delta.Thinking,
-						})
-					}
-				case "signature_delta":
-					// Signature is stored for replay; not shown to the user.
-					block.signature = ev.Delta.Signature
-				}
-
-			case "content_block_stop":
-				var ev sseContentBlockStop
-				if err := json.Unmarshal(data, &ev); err != nil {
-					return nil, fmt.Errorf("parse content_block_stop: %w", err)
+			case "tool_use":
+				block.toolID = ev.ContentBlock.ID
+				block.toolName = ev.ContentBlock.Name
+				// Only emit start when id/name are present. content_block_stop and
+				// the EOF fallback discard tool calls with empty id/name without
+				// emitting ToolUseEnd, so emitting start here would leave an orphan
+				// start the reducer/TUI never closes.
+				if cb != nil && block.toolID != "" && block.toolName != "" {
+					cb(message.StreamDelta{
+						Type: message.StreamDeltaToolUseStart,
+						ToolCall: &message.ToolCallDelta{
+							ID:   ev.ContentBlock.ID,
+							Name: ev.ContentBlock.Name,
+						},
+					})
 				}
 				if p, ok := reader.(chunkPhaser); ok {
-					p.SetChunkTimeout(DefaultChunkTimeout)
+					p.SetChunkTimeout(SlowPhaseChunkTimeout)
 				}
-				block, ok := blocks[ev.Index]
-				if !ok {
-					continue
+			case anthropicServerToolUseBlock:
+				if p, ok := reader.(chunkPhaser); ok {
+					p.SetChunkTimeout(SlowPhaseChunkTimeout)
 				}
-				appendAnthropicStreamBlock(&resp, block, false, cb)
-				delete(blocks, ev.Index)
+				// Server-side calls belong to hosted sub-requests or explicit
+				// preauthorized main requests. Capture them as receipts; they
+				// must never enter the client-tool dispatcher.
+				block.toolID = ev.ContentBlock.ID
+				block.toolName = ev.ContentBlock.Name
+				block.hostedCall = appendAnthropicHostedCall(&resp, ev.ContentBlock.ID, ev.ContentBlock.Name, anthropicServerToolUseBlock, ev.ContentBlock.Input)
+				if block.toolID != "" && block.hostedCall >= 0 {
+					hostedByToolID[block.toolID] = block.hostedCall
+				}
+			case message.StreamDeltaThinking:
+				block.thinking.WriteString(ev.ContentBlock.Thinking)
+				if ev.ContentBlock.Signature != "" {
+					block.signature = ev.ContentBlock.Signature
+				}
+				if cb != nil && ev.ContentBlock.Thinking != "" {
+					cb(message.StreamDelta{
+						Type: message.StreamDeltaThinking,
+						Text: ev.ContentBlock.Thinking,
+					})
+				}
+				if p, ok := reader.(chunkPhaser); ok {
+					p.SetChunkTimeout(SlowPhaseChunkTimeout)
+				}
+			case "redacted_thinking":
+				// Encrypted reasoning arrives whole in the start event; it must be
+				// preserved and replayed verbatim for the conversation to remain valid.
+				block.redacted = ev.ContentBlock.Data
+			default:
+				if strings.HasSuffix(ev.ContentBlock.Type, anthropicHostedResultSuffix) {
+					// Hosted results arrive whole in the start event. They are
+					// paired into the sub-request observation; the main conversation
+					// history never carries them.
+					recordAnthropicHostedResult(&resp, hostedByToolID, ev.ContentBlock.Type, ev.ContentBlock.ToolUseID, ev.ContentBlock.Content)
+				}
+			}
+			blocks[ev.Index] = block
 
-			case "message_delta":
-				var ev sseMessageDelta
-				if err := json.Unmarshal(data, &ev); err != nil {
-					return nil, fmt.Errorf("parse message_delta: %w", err)
+		case "content_block_delta":
+			var ev sseContentBlockDelta
+			if err := json.Unmarshal(data, &ev); err != nil {
+				return nil, fmt.Errorf("parse content_block_delta: %w", err)
+			}
+			block, ok := blocks[ev.Index]
+			if !ok {
+				continue
+			}
+			switch ev.Delta.Type {
+			case "text_delta":
+				block.text.WriteString(ev.Delta.Text)
+				if cb != nil {
+					cb(message.StreamDelta{
+						Type: message.StreamDeltaText,
+						Text: ev.Delta.Text,
+					})
 				}
-				resp.StopReason = ev.Delta.StopReason
-				if resp.Usage == nil {
-					resp.Usage = &message.TokenUsage{}
+			case "input_json_delta":
+				block.toolInput.WriteString(ev.Delta.PartialJSON)
+				// Suppress delta for blocks with empty id/name; their start was
+				// never emitted and the call will be discarded at stop/EOF.
+				// Input carries this delta's fragment only: consumers
+				// accumulate, so re-sending the accumulated args on every
+				// delta would be quadratic in the arguments' size.
+				if cb != nil && block.blockType == "tool_use" && block.toolID != "" && block.toolName != "" && ev.Delta.PartialJSON != "" {
+					cb(message.StreamDelta{
+						Type: message.StreamDeltaToolUseDelta,
+						ToolCall: &message.ToolCallDelta{
+							ID:    block.toolID,
+							Name:  block.toolName,
+							Input: ev.Delta.PartialJSON,
+						},
+					})
 				}
-				// Per the Anthropic streaming spec, message_delta.usage carries
-				// cumulative output/input/cache counts. Official endpoints emit
-				// input/cache in message_start and send 0 here, while some
-				// compatible gateways (e.g. ModelGate) report them only in
-				// message_delta. Adopt any non-zero value so usage is not lost,
-				// without letting an explicit 0 clobber the message_start values.
-				applyAnthropicSSEUsage(resp.Usage, ev.Usage, true)
-
-			case "message_stop":
-				// Stream complete. Return the assembled response.
-				finalizeHostedObservation(&resp)
-				return &resp, nil
-
-			case message.StreamDeltaError:
-				var ev sseError
-				if err := json.Unmarshal(data, &ev); err != nil {
-					return nil, fmt.Errorf("parse error event: %w", err)
+			case "thinking_delta":
+				block.thinking.WriteString(ev.Delta.Thinking)
+				if cb != nil {
+					cb(message.StreamDelta{
+						Type: message.StreamDeltaThinking,
+						Text: ev.Delta.Thinking,
+					})
 				}
-				// A mid-stream provider error event keeps whatever text already
-				// streamed on screen (no rollback) and flows back as the provider
-				// error so the retry layer keeps retrying until success or cancel.
-				return nil, &APIError{
-					Origin:  APIErrorOriginSSEEvent,
-					Code:    ev.Error.Code,
-					Type:    ev.Error.Type,
-					Param:   ev.Error.Param,
-					Message: ev.Error.Message,
-				}
-
-			case "ping":
-				// Keep-alive; ignore.
+			case "signature_delta":
+				// Signature is stored for replay; not shown to the user.
+				block.signature = ev.Delta.Signature
 			}
 
-			// Reset event type after processing data.
-			eventType = ""
-			continue
+		case "content_block_stop":
+			var ev sseContentBlockStop
+			if err := json.Unmarshal(data, &ev); err != nil {
+				return nil, fmt.Errorf("parse content_block_stop: %w", err)
+			}
+			if p, ok := reader.(chunkPhaser); ok {
+				p.SetChunkTimeout(DefaultChunkTimeout)
+			}
+			block, ok := blocks[ev.Index]
+			if !ok {
+				continue
+			}
+			appendAnthropicStreamBlock(&resp, block, false, cb)
+			delete(blocks, ev.Index)
+
+		case "message_delta":
+			var ev sseMessageDelta
+			if err := json.Unmarshal(data, &ev); err != nil {
+				return nil, fmt.Errorf("parse message_delta: %w", err)
+			}
+			resp.StopReason = ev.Delta.StopReason
+			if resp.Usage == nil {
+				resp.Usage = &message.TokenUsage{}
+			}
+			// Per the Anthropic streaming spec, message_delta.usage carries
+			// cumulative output/input/cache counts. Official endpoints emit
+			// input/cache in message_start and send 0 here, while some
+			// compatible gateways (e.g. ModelGate) report them only in
+			// message_delta. Adopt any non-zero value so usage is not lost,
+			// without letting an explicit 0 clobber the message_start values.
+			applyAnthropicSSEUsage(resp.Usage, ev.Usage, true)
+
+		case "message_stop":
+			// Stream complete. Return the assembled response.
+			finalizeHostedObservation(&resp)
+			return &resp, nil
+
+		case message.StreamDeltaError:
+			var ev sseError
+			if err := json.Unmarshal(data, &ev); err != nil {
+				return nil, fmt.Errorf("parse error event: %w", err)
+			}
+			// A mid-stream provider error event keeps whatever text already
+			// streamed on screen (no rollback) and flows back as the provider
+			// error so the retry layer keeps retrying until success or cancel.
+			return nil, &APIError{
+				Origin:  APIErrorOriginSSEEvent,
+				Code:    ev.Error.Code,
+				Type:    ev.Error.Type,
+				Param:   ev.Error.Param,
+				Message: ev.Error.Message,
+			}
+
+		case "ping":
+			// Keep-alive; ignore.
 		}
-
-		// Empty lines are event separators; just continue.
 	}
-
-	readErr := scanner.Err()
 
 	// If we reach EOF without a message_stop event, first collect any in-progress
 	// text blocks. This can happen if the connection drops or the model hits

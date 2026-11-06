@@ -6,6 +6,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Breaking Changes
 
+- Streaming gateways must separate SSE events with a blank line. Consecutive `data:` lines are one payload; gateways sending separate JSON messages on consecutive lines must add event delimiters. Incomplete MCP SSE frames are reported as outcome unknown.
 - Session imports and streaming provider responses now reject unescaped control characters inside JSON strings. Exporters and providers must encode tabs and line breaks as `\t` and `\n`.
 - `chord import --json` now emits snake_case top-level keys (`project_root`, `session_id`, `session_dir`, `messages`, `report`) instead of the Go field names (`ProjectRoot`, `SessionID`, `SessionDir`, `Messages`, `Report`), matching the snake_case keys inside the nested `report` object and the rest of Chord's machine-readable outputs. Scripts that consume the JSON summary must read the new key names.
 
@@ -26,6 +27,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Streaming responses and HTTP MCP now handle multiline SSE data, UTF-8 BOMs, and CR-only line endings. Anthropic events also accept `event:` after `data:`. Responses payloads with leading JSON whitespace retain their event type, preventing dropped events or tool arguments appearing as reply text.
+- HTTP MCP waits for a complete SSE event before accepting a response, so invalid trailing data within that event cannot be reported as success.
+- Anthropic SSE streams whose `event:` / `data:` field names omit the optional space after the colon are parsed correctly. Such streams previously failed with `SSE stream ended without message_stop event`.
 - HTTP MCP responses with trailing data or a body read error are reported as outcome unknown instead of success. Verify the external state before retrying.
 - File move cards retain the arrow and recognizable source and destination names when long paths share a prefix.
 - `chord doctor skills` no longer fails when the global config.yaml does not exist yet. The report is produced from the built-in defaults (no extra skill paths), the project config still applies, and the report states the fallback in `context.config_note` (a `config note:` line in the text report). A global config that exists but does not parse still fails with exit code `2`.

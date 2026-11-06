@@ -21,7 +21,7 @@ func TestParseOpenAISSEStream_ThinkingEndBeforeToolUse(t *testing.T) {
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	var deltas []message.StreamDelta
 	cb := func(delta message.StreamDelta) {
@@ -76,7 +76,7 @@ func TestParseOpenAISSEStream_ThinkingEndNotEmittedWhenNoToolCalls(t *testing.T)
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	var thinkingEndCount int
 	cb := func(delta message.StreamDelta) {
@@ -109,7 +109,7 @@ func TestParseOpenAISSEStream_ThinkingEndNotDoubleEmittedWithToolAndContent(t *t
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	var thinkingEndCount int
 	cb := func(delta message.StreamDelta) {
@@ -139,7 +139,7 @@ func TestParseOpenAISSEStream_PreservesReasoningContentWithoutMarkers(t *testing
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -197,7 +197,7 @@ func TestParseOpenAISSEStream_AcceptsReasoningAliasesWithoutDuplication(t *testi
 				`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}]}`,
 				`data: [DONE]`,
 				"",
-			}, "\n")
+			}, "\n\n")
 
 			var thinkingDeltas []string
 			var thinkingEndCount int
@@ -234,7 +234,7 @@ func TestParseOpenAISSEStream_IgnoresNonStringReasoningAliases(t *testing.T) {
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -264,7 +264,7 @@ func TestParseOpenAISSEStream_AliasSwitchMidStreamContinuesOneThinkingBlock(t *t
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	var thinkingDeltas []string
 	var thinkingEndCount int
@@ -299,7 +299,7 @@ func TestParseOpenAISSEStream_AggregatesPromptCacheUsage(t *testing.T) {
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":10855,"completion_tokens":42,"total_tokens":10897,"prompt_cache_hit_tokens":10752,"prompt_cache_miss_tokens":103}}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -325,7 +325,7 @@ func TestParseOpenAISSEStream_AggregatesDeepSeekCacheReadUsage(t *testing.T) {
 		`data: {"id":"chatcmpl-test","model":"deepseek-v4-flash","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":72531,"completion_tokens":120,"total_tokens":72651,"cache_read_tokens":31232,"completion_tokens_details":{"reasoning_tokens":17}}}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -354,7 +354,7 @@ func TestParseOpenAISSEStream_AggregatesOpenAIPromptTokenDetails(t *testing.T) {
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":2048,"completion_tokens":8,"total_tokens":2056,"prompt_tokens_details":{"cached_tokens":1024,"cache_write_tokens":256}}}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
@@ -383,7 +383,7 @@ func TestParseOpenAISSEStream_NoThinkingEndWithoutReasoning(t *testing.T) {
 		`data: {"id":"chatcmpl-test","model":"sample/test-model","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
 		"",
-	}, "\n")
+	}, "\n\n")
 
 	var thinkingEndCount int
 	cb := func(delta message.StreamDelta) {

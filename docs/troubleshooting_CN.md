@@ -103,6 +103,12 @@ curl -I https://api.openai.com/v1
 
 HTTP LLM dump 的 `request_headers` 保存部分协议及会话请求头，内容反映请求覆盖配置生效后的值。凭据值会被隐藏，未识别的请求头不会保存。请求体看起来正确时，可将这些请求头与端点要求对照检查。
 
+### 流式网关格式错误
+
+SSE 事件以空行结束。同一事件内的多条 `data:` 行会以换行拼接，再作为一份 JSON 数据解码；网关发送独立 JSON 消息时，必须在消息之间加空行。Chord 支持 LF、CRLF 和单独 CR 换行，也接受开头的 UTF-8 BOM；字段冒号后的空格可有可无。
+
+反复出现 JSON 解析错误或事件缺失时，请检查网关原始 HTTP 流中的空行；解析后的模型请求转储不保留原始分帧。MCP 结果必须来自完整 SSE 事件。事件中断或数据无效、调用显示结果未知时，重试前先核对外部服务是否已经执行。
+
 ### `prompt_cache_options is not supported on this model`
 
 Chord 默认不发送显式缓存字段。如果你在 GPT-5.6 及之后的 Responses 模型上开启了显式缓存开关，而端点不实现这些字段，它会拒绝 `prompt_cache_options` 或 `prompt_cache_breakpoint`，导致请求失败。设置 `send_prompt_cache_breakpoint: false` 可同时去掉标记和顶层字段；设置 `send_prompt_cache_options: false` 则只去掉顶层字段、保留标记。此时端点的自动（隐式）缓存仍然生效。参见[Provider 字段参考](./configuration_CN.md#provider-字段参考)中的 `compat.responses.*` 条目。

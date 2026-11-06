@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
@@ -19,6 +18,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/reasoningtext"
+	"github.com/keakon/chord/internal/sse"
 )
 
 // Event-specific types for Responses API streaming events.
@@ -431,7 +431,11 @@ func (s responsesPartialCompletionState) outputItemsComplete() bool {
 
 func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCallback, collector *SSECollector, turnState *ResponsesTurnState, turnStateID string, freeform bool, captureHosted bool, visibleReasoningText bool) (response *message.Response, nativeItems []responsesInputItem, parseErr error) {
 	phaser, _ := reader.(chunkPhaser)
-	br := bufio.NewReaderSize(reader, sseInitialBufferSize)
+	decoder := newLLMSSEReader(reader, cb, 0, func(event sse.Event) bool {
+		// Multiline events wait for their boundary instead of reparsing every
+		// growing JSON prefix to recognize an early terminal event.
+		return event.DataLines == 1 && sseDataLineTerminatesEvent(event.Data, event.Type, responsesTerminalSSEEvents)
+	})
 
 	var (
 		resp            message.Response
@@ -442,13 +446,10 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		incompleteCalls = make(map[string]bool)                      // explicit incomplete status blocks terminal recovery
 		hostedCalls     = make(map[string]*responsesHostedCallState) // hosted item id → dedup state
 		truncated       bool
-		gotData         bool
 		sawDataLine     bool
-		lastEventType   string // for standard SSE: event type from preceding "event:" line
 		outputItems     []responsesInputItem
 		partial         responsesPartialCompletionState
 		dataChunkIndex  int
-		eventDataParts  [][]byte
 		progressBytes   int64
 		progressEvents  int64
 		providerErr     error
@@ -482,15 +483,9 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		resp.Content = joined
 	}
 
-	flushEvent := func(readErr error) (*message.Response, []responsesInputItem, bool, error) {
-		if len(eventDataParts) == 0 {
-			lastEventType = ""
-			return nil, nil, false, nil
-		}
-		data := joinSSEDataParts(eventDataParts)
-		eventTypeHint := lastEventType
-		eventDataParts = nil
-		lastEventType = ""
+	flushEvent := func(event sse.Event, readErr error) (*message.Response, []responsesInputItem, bool, error) {
+		data := event.Data
+		eventTypeHint := event.Type
 
 		// [DONE] signals end of stream even if the trailing blank line is missing.
 		if bytes.Equal(data, []byte("[DONE]")) {
@@ -510,7 +505,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 			return nil, nil, false, nil
 		}
 
-		// Resolve event type and payload: combined {"type","data"} or use last event + raw data.
+		// Resolve event type and payload: combined {"type","data"} or the frame's event field and raw data.
 		eventType, eventData, err := parseResponsesEvent(data, eventTypeHint, streamDiag)
 		if err != nil {
 			if readErr != nil {
@@ -557,68 +552,35 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 	}
 
 	for {
-		line, readErr := readSSELine(br)
-		if readErr == nil || len(line) > 0 {
-			if !gotData && cb != nil {
-				cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaWaitingToken}})
-				gotData = true
+		event, readErr := decoder.Next()
+		if event.Data != nil {
+			sawDataLine = true
+			if cb != nil {
+				progressBytes += event.DataBytes
+				progressEvents += event.DataLines
+				cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
 			}
-			switch {
-			case len(line) == 0:
-				outResp, outItems, done, err := flushEvent(nil)
-				if err != nil {
-					return nil, nil, err
-				}
-				if done {
-					return outResp, outItems, nil
-				}
-			case bytes.HasPrefix(line, []byte("event:")):
-				lastEventType = string(bytes.TrimSpace(line[len("event:"):]))
-			case bytes.HasPrefix(line, []byte("data:")):
-				sawDataLine = true
-				data := line[len("data:"):]
-				if len(data) > 0 && data[0] == ' ' {
-					data = data[1:]
-				}
-				if cb != nil {
-					progressBytes += int64(len(line) + 1)
-					progressEvents++
-					cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
-				}
-				dataChunkIndex++
-				// data is a fresh per-line slice from readSSELine; appending
-				// it directly skips a redundant byte copy per SSE line.
-				eventDataParts = append(eventDataParts, data)
-				if collector != nil {
-					collector.Add(string(data))
-				}
-				if sseDataLineTerminatesEvent(data, lastEventType, responsesTerminalSSEEvents) {
-					outResp, outItems, done, err := flushEvent(nil)
-					if err != nil {
-						return nil, nil, err
-					}
-					if done {
-						return outResp, outItems, nil
-					}
-				}
+			dataChunkIndex++
+			if collector != nil {
+				collector.Add(string(event.Data))
 			}
-		}
-		if readErr != nil {
-			if len(eventDataParts) > 0 {
-				outResp, outItems, done, err := flushEvent(readErr)
-				if err != nil {
+			outResp, outItems, done, err := flushEvent(event, readErr)
+			if err != nil {
+				if readErr != nil {
 					flushContent()
 					if canRecoverPartialResponsesAfterReadError(err, &resp) {
 						if partialResp, partialItems, ok := finishPartialResponsesResponse(&resp, &outputItems, partial, true, freeform); ok {
 							return partialResp, partialItems, nil
 						}
 					}
-					return nil, nil, err
 				}
-				if done {
-					return outResp, outItems, nil
-				}
+				return nil, nil, err
 			}
+			if done {
+				return outResp, outItems, nil
+			}
+		}
+		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
 				break
 			}
@@ -1388,35 +1350,6 @@ func parseResponsesProviderErrorEvent(eventType string, eventData []byte) (*APIE
 	return apiErr, nil
 }
 
-func readSSELine(r *bufio.Reader) ([]byte, error) {
-	line, err := r.ReadBytes('\n')
-	line = bytes.TrimSuffix(line, []byte("\n"))
-	line = bytes.TrimSuffix(line, []byte("\r"))
-	return line, err
-}
-
-func joinSSEDataParts(parts [][]byte) []byte {
-	if len(parts) == 0 {
-		return nil
-	}
-	if len(parts) == 1 {
-		return parts[0]
-	}
-	total := 0
-	for _, part := range parts {
-		total += len(part)
-	}
-	total += len(parts) - 1
-	out := make([]byte, 0, total)
-	for i, part := range parts {
-		if i > 0 {
-			out = append(out, '\n')
-		}
-		out = append(out, part...)
-	}
-	return out
-}
-
 // parseResponsesEvent parses an SSE event into type and data.
 // Supports: (1) {"type":"event.name","data":{...}} — payload in "data";
 // (2) {"type":"event.name","item":...,"output_index":0} — official format, payload siblings of "type" (no "data" key);
@@ -1429,6 +1362,7 @@ func joinSSEDataParts(parts [][]byte) []byte {
 // text channel and persist tool arguments as assistant content. The frame
 // label only decides events whose payload carries no type of its own.
 func parseResponsesEvent(data []byte, eventTypeFromLine string, diag *responsesStreamDiagnostics) (eventType string, eventData json.RawMessage, err error) {
+	data = bytes.TrimLeft(data, " \t\r\n")
 	if len(data) == 0 || data[0] != '{' {
 		return eventTypeFromLine, json.RawMessage(data), nil
 	}

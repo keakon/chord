@@ -6,6 +6,7 @@
 
 ### 不兼容变更
 
+- 流式网关必须用空行分隔 SSE 事件。连续的 `data:` 行属于同一份数据；逐行发送独立 JSON 消息的网关需要补上事件分隔符。未完整结束的 MCP SSE 帧会被标为结果未知。
 - 会话导入和模型流式响应不再接受 JSON 字符串中的裸控制字符。导出程序和服务端须把制表符、换行编码为 `\t`、`\n`。
 - `chord import --json` 的顶层键改为 snake_case（`project_root`、`session_id`、`session_dir`、`messages`、`report`），不再使用 Go 字段名（`ProjectRoot`、`SessionID`、`SessionDir`、`Messages`、`Report`），与嵌套 `report` 对象内部及 Chord 其他机器可读输出的键名风格一致。消费该 JSON 输出的脚本需要改用新键名。
 
@@ -26,6 +27,9 @@
 
 ### 修复
 
+- 流式响应和 HTTP MCP 支持多行 SSE 数据、UTF-8 BOM 及单独 CR 换行。Anthropic 事件允许 `event:` 出现在 `data:` 之后；Responses 数据中的 JSON 前导空白不再导致事件丢失或工具参数混入回复正文。
+- HTTP MCP 收到完整 SSE 事件后才接受响应，同一事件后续数据无效时不再误报成功。
+- Anthropic SSE 流的 `event:` / `data:` 字段省略冒号后的可选空格时也能正确解析；此前这类流会报 `SSE stream ended without message_stop event` 失败。
 - HTTP MCP 响应包含尾随数据或读取响应体出错时，调用会标为结果未知，不再报告成功。重试前须先核对外部状态。
 - 文件移动卡片在长路径共用前缀时仍保留箭头和可辨认的源、目标名称。
 - 全局 config.yaml 尚不存在时，`chord doctor skills` 不再失败：报告改用内置默认值（无额外技能目录）照常产出，项目配置仍然生效，并在 `context.config_note`（文本报告的 `config note:` 行）说明这一回退。全局配置存在但无法解析时，仍以退出码 `2` 失败。

@@ -174,7 +174,7 @@ func TestParseOpenAISSEStreamChatThinkingState(t *testing.T) {
 		`data: {"choices":[{"delta":{"thinking_blocks":[{"type":"thinking","thinking":"plan","signature":"sig-block"},{"type":"redacted_thinking","data":"payload"}]}}]}`,
 		`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
-	}, "\n")
+	}, "\n\n")
 
 	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {

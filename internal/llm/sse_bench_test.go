@@ -52,7 +52,7 @@ var openAICallbackFixedFixture = []byte(strings.Join([]string{
 	`data: {"id":"chatcmpl-fixed","model":"gpt-5.5-mini","choices":[{"index":0,"finish_reason":"tool_calls"}]}`,
 	`data: [DONE]`,
 	"",
-}, "\n"))
+}, "\n\n"))
 
 var responsesCallbackFixedFixture = []byte(strings.Join([]string{
 	`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Shell"}}`,
@@ -109,7 +109,7 @@ var geminiCallbackFixedFixture = func() []byte {
 		`data: {"candidates":[{"content":{"parts":[{"text":"final"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":130,"totalTokenCount":142}}`,
 		"",
 	)
-	return []byte(strings.Join(lines, "\n"))
+	return []byte(strings.Join(lines, "\n\n"))
 }()
 
 var (
@@ -503,7 +503,7 @@ func scanOnlySSEFixture(fixture sseBenchFixture) error {
 		line := scanner.Text()
 		switch fixture.Provider {
 		case "anthropic":
-			if strings.HasPrefix(line, "event: ") || strings.HasPrefix(line, "data: ") || line == "" {
+			if strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "data:") || line == "" {
 				continue
 			}
 		case "openai", "responses", "responses_ws":

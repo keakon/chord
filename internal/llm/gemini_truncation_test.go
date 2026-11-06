@@ -18,7 +18,7 @@ func TestGeminiTruncationPreservesTextAfterToolCall(t *testing.T) {
 			chunk := `data: {"candidates":[{"content":{"parts":[{"text":"before"},{"functionCall":{"name":"sample_tool","args":{}}},{"text":"after"}]}`
 			if separateFinish {
 				chunk += `}]}`
-				chunk += "\n" + `data: {"candidates":[{"finishReason":"MAX_TOKENS"}]}`
+				chunk += "\n\n" + `data: {"candidates":[{"finishReason":"MAX_TOKENS"}]}`
 			} else {
 				chunk += `,"finishReason":"MAX_TOKENS"}]}`
 			}

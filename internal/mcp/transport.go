@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/sse"
 )
 
 // ---------------------------------------------------------------------------
@@ -548,17 +550,19 @@ func readJSONRPCResponse(body io.Reader, contentType string, wantID int) (JSONRP
 }
 
 func readSSERPCResponse(body io.Reader, wantID int) (JSONRPCResponse, error) {
-	sc := bufio.NewScanner(body)
-	sc.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, ":") {
-			continue
+	decoder := sse.NewReader(body, 10*1024*1024, nil)
+	for {
+		event, err := decoder.Next()
+		if err != nil {
+			if err == io.EOF && event.Data == nil {
+				return JSONRPCResponse{}, fmt.Errorf("mcp http: no JSON-RPC response with id %d in SSE stream", wantID)
+			}
+			if err == io.EOF {
+				err = io.ErrUnexpectedEOF
+			}
+			return JSONRPCResponse{}, fmt.Errorf("mcp http: read SSE: %w", err)
 		}
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		payload := strings.TrimSpace(string(event.Data))
 		if payload == "" || payload == "[DONE]" {
 			continue
 		}
@@ -568,10 +572,6 @@ func readSSERPCResponse(body io.Reader, wantID int) (JSONRPCResponse, error) {
 		}
 		return resp, err
 	}
-	if err := sc.Err(); err != nil {
-		return JSONRPCResponse{}, fmt.Errorf("mcp http: read SSE: %w", err)
-	}
-	return JSONRPCResponse{}, fmt.Errorf("mcp http: no JSON-RPC response with id %d in SSE stream", wantID)
 }
 
 // Send posts a JSON-RPC request and reads the response.

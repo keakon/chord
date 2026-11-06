@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 )
 
-const (
-	sseInitialBufferSize = 4 * 1024
-	sseMaxTokenSize      = 1024 * 1024
-)
+const sseMaxTokenSize = 1024 * 1024
 
 type sseEventTypeEnvelope struct {
 	Type string `json:"type"`
@@ -19,18 +16,12 @@ type sseEventTypeEnvelope struct {
 // or HTTP EOF. It supports both combined JSON event lines that carry a top-level
 // type and standard SSE lines whose event type came from a preceding event: line.
 func sseDataLineTerminatesEvent(data []byte, eventTypeHint string, terminalEventTypes map[string]struct{}) bool {
+	data = bytes.TrimLeft(data, " \t\r\n")
 	if bytes.Equal(data, []byte("[DONE]")) {
 		return true
 	}
 	if len(terminalEventTypes) == 0 {
 		return false
-	}
-	if eventTypeHint != "" {
-		if _, ok := terminalEventTypes[eventTypeHint]; !ok {
-			return false
-		}
-		var payload json.RawMessage
-		return json.Unmarshal(data, &payload) == nil
 	}
 	if len(data) == 0 || data[0] != '{' {
 		return false
@@ -38,6 +29,9 @@ func sseDataLineTerminatesEvent(data []byte, eventTypeHint string, terminalEvent
 	var raw sseEventTypeEnvelope
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return false
+	}
+	if raw.Type == "" {
+		raw.Type = eventTypeHint
 	}
 	_, ok := terminalEventTypes[raw.Type]
 	return ok
