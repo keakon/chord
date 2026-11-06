@@ -50,23 +50,7 @@ func TestCacheReclaimedOnlyAfterLastCommand(t *testing.T) {
 	}
 	assertCacheUsers(t, base, 2)
 
-	bucket := filepath.Join(base, "cache", "go-build", "00")
-	if err := os.MkdirAll(bucket, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	entry := filepath.Join(bucket, fmt.Sprintf("%064x-d", 1))
-	f, err := os.Create(entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Truncate(11 << 20); err != nil {
-		t.Fatal(err)
-	}
-	_ = f.Close()
-	old := time.Now().Add(-8 * time.Hour)
-	if err := os.Chtimes(entry, old, old); err != nil {
-		t.Fatal(err)
-	}
+	entry := largeCacheEntry(t, base)
 	_ = first.Process.Signal(syscall.SIGTERM)
 	_ = waitCommand(t, first)
 	assertCacheUsers(t, base, 1)
@@ -79,6 +63,53 @@ func TestCacheReclaimedOnlyAfterLastCommand(t *testing.T) {
 	if _, err := os.Stat(entry); !os.IsNotExist(err) {
 		t.Fatalf("idle cache not reclaimed: %v", err)
 	}
+}
+
+func largeCacheEntry(t *testing.T, base string) string {
+	t.Helper()
+	bucket := filepath.Join(base, "cache", "go-build", "00")
+	if err := os.MkdirAll(bucket, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(bucket, fmt.Sprintf("%064x-d", 1))
+	f, err := os.Create(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(9 << 30); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	return entry
+}
+
+func TestKilledRunnerReclaimsCacheWithoutNextCommand(t *testing.T) {
+	base := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "started")
+	cmd := runnerCommand(t, base, os.Args[0], "child-fixture", "hold", marker)
+	startCommand(t, cmd)
+	work := string(awaitFile(t, marker))
+	entry := largeCacheEntry(t, base)
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = waitCommand(t, cmd)
+	awaitFile(t, filepath.Join(filepath.Dir(work), readyFile))
+	timeout := time.NewTimer(10 * time.Second)
+	defer timeout.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(entry); os.IsNotExist(err) {
+			break
+		}
+		select {
+		case <-timeout.C:
+			t.Fatal("supervisor did not reclaim idle cache")
+		case <-ticker.C:
+		}
+	}
+	assertCacheUsers(t, base, 0)
 }
 
 func TestManagedEnvironmentOverridesOnlyOwnedVariables(t *testing.T) {

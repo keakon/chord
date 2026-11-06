@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
-	"time"
 )
 
 // Cache keeps build data separate from persistent usage records.
@@ -107,9 +106,9 @@ func (c *Cache) lock(nonblocking bool) (*os.File, error) {
 	return file, nil
 }
 
-// Trim tries an idle-only scan, at most once an hour. Usage records survive
-// process death: acquiring the lock alone is never proof that the cache is idle.
-func (c *Cache) Trim(now time.Time) (Result, error) {
+// Trim enforces the idle cache budget. Usage records survive process death:
+// acquiring the lock alone is never proof that the cache is idle.
+func (c *Cache) Trim() (Result, error) {
 	lock, err := c.lock(true)
 	if errors.Is(err, syscall.EWOULDBLOCK) {
 		return Result{}, nil
@@ -125,21 +124,5 @@ func (c *Cache) Trim(now time.Time) (Result, error) {
 	if len(users) > 0 {
 		return Result{Users: len(users)}, nil
 	}
-	stamp := filepath.Join(c.root, "last-trim")
-	if info, err := os.Stat(stamp); err == nil {
-		if age := now.Sub(info.ModTime()); age >= 0 && age < time.Hour {
-			return Result{}, nil
-		}
-	}
-	result, err := c.trim(now, defaultPolicy)
-	if err != nil {
-		return result, err
-	}
-	if err := os.WriteFile(stamp, nil, 0o600); err != nil {
-		return result, fmt.Errorf("record build cache trim: %w", err)
-	}
-	if err := os.Chtimes(stamp, now, now); err != nil {
-		return result, fmt.Errorf("date build cache trim: %w", err)
-	}
-	return result, nil
+	return c.trim(defaultPolicy)
 }

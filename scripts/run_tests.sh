@@ -30,18 +30,10 @@ mkdir -p "$cache"
 build_dir="$(mktemp -d "$cache/.build.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 GOOS="$host_os" GOARCH="$host_arch" "$go_command" build -o "$build_dir/test-runner" ./cmd/test-runner
-# os.Executable is used to launch the supervisor. A different worktree must
-# never replace that path with a different build between those two launches.
 build_id="$("$go_command" tool buildid "$build_dir/test-runner")"
 build_id="${build_id//\//_}"
 if [[ -z "$build_id" || "$build_id" == *[^a-zA-Z0-9_-]* ]]; then
 	echo "test-runner: invalid executable build ID" >&2
 	exit 1
 fi
-mkdir -p "$cache/$build_id"
-if [[ ! -x "$cache/$build_id/test-runner" ]]; then
-	mv "$build_dir/test-runner" "$cache/$build_id/test-runner"
-fi
-rm -rf "$build_dir"
-trap - EXIT
-exec "$cache/$build_id/test-runner" "$@"
+exec "$build_dir/test-runner" --cache-runner "$cache" "$build_id" "$@"

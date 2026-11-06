@@ -161,30 +161,36 @@ children; the Go build cache stays separate. Concurrent runs keep their own
 directories. The runner executable is built for the host and cached under
 `GOCACHE/chord-test-runner` before the test workspace is created.
 Each build ID has its own executable path, so concurrent worktrees keep using
-the supervisor from the same build. The bootstrap compilation uses Go's normal
-cleanup; it is not supervised by the runner it is building.
+the supervisor from the same build. A file lock protects each build while a
+runner uses it. Cleanup keeps the most recently used build across all worktrees
+and any builds still in use; it runs when a runner selects or releases a build.
+The bootstrap compilation uses Go's normal cleanup; it is not supervised by
+the runner it is building.
 
-On Unix, project test commands share a build cache at
+On Unix, project build and test commands share a build cache at
 `~/Library/Caches/chord/build-cache/go-build` on macOS, or
 `${XDG_CACHE_HOME:-$HOME/.cache}/chord/build-cache/go-build` on Linux.
 This applies to `make test`, `test-fast`, `race`, `race-fast`, `test-cover`,
-`stress`, and `bench-tui`, including their directly invoked scripts.
+`stress`, and `bench-tui`, including their directly invoked scripts, and to
+`make build`, `vet`, `staticcheck`, `gopls-install`, `gopls-check`,
+`modernize-check`, and `deadcode-check`.
 They append `-trimpath` to the existing `GOFLAGS`, so identical sources and
 compiler settings reuse compiled packages across worktrees. Race and coverage
 builds still have separate artifacts. The first run warms this cache; raw Go
 commands and editors continue using their configured cache.
 
-The runner registers cache use before launching the command. Once all users
-have finished, it scans at most once an hour and removes ordinary cache files
-larger than 10 MiB whose recorded last use is over seven hours old. Go updates
-that timestamp at most once an hour. Above 30 GiB, the scan also removes smaller
-old entries, oldest first, toward a 20 GiB target. Recent entries remain protected,
-so these are soft limits. Fuzz corpora, cached executable directories and tool
-installations are left alone. The cache is on disk; the RAM disk holds only
+The runner registers cache use before launching the command. After the last
+user finishes, cleanup counts ordinary Go cache files and cached executable
+directories. Above 8 GiB of logical file data, it removes the least recently used
+entries until at most 6 GiB remains. Go updates use timestamps at most once an
+hour, so the ordering is approximate. Active commands can temporarily exceed
+the budget. Fuzz corpora, tool installations, and the separate module download
+cache (`GOMODCACHE`) are left alone. The cache is on disk; the RAM disk holds only
 per-command scratch files.
 
 Usage records survive a killed runner. Its supervisor releases them only after
-proving command cleanup. An unproven cleanup retains its record under
+proving command cleanup and then attempts cache eviction, even if the runner
+has exited. An unproven cleanup retains its record under
 `chord/build-cache/users`, blocks automatic cache eviction, and leaves later
 builds usable. The runner reports its retained record's path when it exits.
 A skipped trim can also mean another command is still running.

@@ -48,7 +48,7 @@ func newCache(t *testing.T) *Cache {
 func TestTrimProtectsEveryRegisteredUser(t *testing.T) {
 	c := newCache(t)
 	now := time.Now()
-	old := fixture(t, c, 1, 11<<20, now.Add(-8*time.Hour))
+	big := fixture(t, c, 1, 9<<30, now.Add(-8*time.Hour))
 	ids := []string{strings.Repeat("a", 32), strings.Repeat("b", 32)}
 	for _, id := range ids {
 		if err := c.Begin(id); err != nil {
@@ -56,33 +56,29 @@ func TestTrimProtectsEveryRegisteredUser(t *testing.T) {
 		}
 	}
 	for i, id := range ids {
-		result, err := c.Trim(now)
+		result, err := c.Trim()
 		if err != nil || result.Scanned || result.Users != len(ids)-i {
 			t.Fatalf("trim while in use: %+v, %v", result, err)
 		}
-		if _, err := os.Stat(old); err != nil {
+		if _, err := os.Stat(big); err != nil {
 			t.Fatal("removed active cache entry:", err)
 		}
 		if err := c.End(id); err != nil {
 			t.Fatal(err)
 		}
 	}
-	result, err := c.Trim(now)
-	if err != nil || result.Removed != 1 {
+	result, err := c.Trim()
+	if err != nil || result.Removed != 1 || result.After != 0 {
 		t.Fatalf("idle trim: %+v, %v", result, err)
 	}
-	// Newly expired data is not scanned again until the interval passes.
-	old = fixture(t, c, 2, 11<<20, now.Add(-8*time.Hour))
-	result, err = c.Trim(now.Add(time.Minute))
-	if err != nil || result.Scanned {
-		t.Fatalf("unthrottled trim: %+v, %v", result, err)
+	// The next run is scanned immediately; under budget nothing is evicted.
+	small := fixture(t, c, 2, 11, now)
+	result, err = c.Trim()
+	if err != nil || result.Removed != 0 || result.After != 11 {
+		t.Fatalf("under-budget trim: %+v, %v", result, err)
 	}
-	if _, err := os.Stat(old); err != nil {
+	if _, err := os.Stat(small); err != nil {
 		t.Fatal(err)
-	}
-	result, err = c.Trim(now.Add(time.Hour))
-	if err != nil || result.Removed != 1 {
-		t.Fatalf("next trim: %+v, %v", result, err)
 	}
 }
 
@@ -95,20 +91,20 @@ func TestUnknownUsageSurvivesReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := reopened.Trim(time.Now())
+	result, err := reopened.Trim()
 	if err != nil || result.Users != 1 || result.Scanned {
 		t.Fatalf("lost durable protection: %+v, %v", result, err)
 	}
 }
 
-func TestTrimAgeSizeBudgetAndProtectedFiles(t *testing.T) {
+func TestTrimEvictsLeastRecentlyUsedAndProtectsForeignFiles(t *testing.T) {
 	c := newCache(t)
 	now := time.Now()
 	old := now.Add(-8 * time.Hour)
-	largeOld := fixture(t, c, 1, 11, old)
-	smallOld := fixture(t, c, 2, 5, old)
+	oldest := fixture(t, c, 1, 11, old)
+	second := fixture(t, c, 2, 5, old)
+	middle := fixture(t, c, 4, 11, now.Add(-7*time.Hour))
 	hot := fixture(t, c, 3, 40, now)
-	atBoundary := fixture(t, c, 4, 11, now.Add(-7*time.Hour))
 	invalid := filepath.Join(c.Dir(), "00", "not-a-cache-entry-d")
 	if err := os.WriteFile(invalid, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
@@ -126,33 +122,54 @@ func TestTrimAgeSizeBudgetAndProtectedFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result, err := c.trim(now, policy{large: 10, high: 30, low: 20, age: 7 * time.Hour})
-	if err != nil || result.Before != 67 || result.After != 51 || result.Removed != 2 || !result.OverBudget {
+	result, err := c.trim(policy{high: 60, low: 45})
+	if err != nil || result.Before != 67 || result.After != 40 || result.Removed != 3 || result.OverBudget {
 		t.Fatalf("trim: %+v, %v", result, err)
 	}
-	for _, path := range []string{largeOld, smallOld} {
+	for _, path := range []string{oldest, second, middle} {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("old entry retained: %s: %v", path, err)
 		}
 	}
-	for _, path := range []string{hot, atBoundary, invalid, outside, link} {
+	for _, path := range []string{hot, invalid, outside, link} {
 		if _, err := os.Lstat(path); err != nil {
 			t.Fatalf("protected entry changed: %s: %v", path, err)
 		}
 	}
 }
 
-func TestLargeEntriesExpireBelowBudget(t *testing.T) {
+func TestTrimKeepsEntriesBelowBudget(t *testing.T) {
 	c := newCache(t)
 	now := time.Now()
 	fixture(t, c, 1, 11, now.Add(-8*time.Hour))
 	small := fixture(t, c, 2, 5, now.Add(-8*time.Hour))
-	result, err := c.trim(now, policy{large: 10, high: 30, low: 20, age: 7 * time.Hour})
-	if err != nil || result.Removed != 1 || result.After != 5 {
+	result, err := c.trim(policy{high: 100, low: 50})
+	if err != nil || result.Removed != 0 || result.After != 16 || result.OverBudget {
 		t.Fatalf("trim: %+v, %v", result, err)
 	}
 	if _, err := os.Stat(small); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTrimKeepsNewestUnderFrequentBuilds(t *testing.T) {
+	c := newCache(t)
+	now := time.Now()
+	var paths []string
+	for i := range 10 {
+		paths = append(paths, fixture(t, c, i+1, 10, now.Add(time.Duration(i)*time.Minute)))
+	}
+	result, err := c.trim(policy{high: 30, low: 10})
+	if err != nil || result.Before != 100 || result.After != 10 || result.Removed != 9 || result.OverBudget {
+		t.Fatalf("trim: %+v, %v", result, err)
+	}
+	for _, path := range paths[:9] {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("old entry retained: %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(paths[9]); err != nil {
+		t.Fatalf("newest entry evicted: %v", err)
 	}
 }
 
@@ -163,9 +180,99 @@ func TestTrimDefersWhileRegistryLocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lock.Close()
-	result, err := c.Trim(time.Now())
+	result, err := c.Trim()
 	if err != nil || result.Scanned {
 		t.Fatalf("trim did not defer: %+v %v", result, err)
+	}
+}
+
+func TestTrimCountsExecutableDirectoriesByLastUse(t *testing.T) {
+	c := newCache(t)
+	now := time.Now()
+	executable := func(key int, size int, used time.Time) string {
+		t.Helper()
+		name := fmt.Sprintf("%064x-d", key)
+		dir := filepath.Join(c.Dir(), name[:2], name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		binary := filepath.Join(dir, "sample")
+		if err := os.WriteFile(binary, make([]byte, size), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// Only the outer directory tracks executable cache use.
+		if err := os.Chtimes(binary, now.Add(-48*time.Hour), now.Add(-48*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(dir, used, used); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	old := executable(1, 40, now.Add(-24*time.Hour))
+	hot := executable(2, 40, now)
+	ordinary := fixture(t, c, 3, 30, now.Add(-time.Hour))
+	result, err := c.trim(policy{high: 100, low: 50})
+	if err != nil || result.Before != 110 || result.After != 40 || result.Removed != 2 {
+		t.Fatalf("executable budget: %+v, %v", result, err)
+	}
+	for _, path := range []string{old, ordinary} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("old entry retained: %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(hot, "sample")); err != nil {
+		t.Fatalf("hot executable removed: %v", err)
+	}
+}
+
+func TestTrimProtectsForeignExecutableShapes(t *testing.T) {
+	c := newCache(t)
+	outside := filepath.Join(t.TempDir(), "sample")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var protected []string
+	for i, shape := range []string{"symlink", "nested", "multiple", "action"} {
+		name := fmt.Sprintf("%064x-d", i+1)
+		if shape == "action" {
+			name = fmt.Sprintf("%064x-a", i+1)
+		}
+		dir := filepath.Join(c.Dir(), name[:2], name)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "sample")
+		switch shape {
+		case "symlink":
+			if err := os.Symlink(outside, path); err != nil {
+				t.Fatal(err)
+			}
+		case "nested":
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			if err := os.WriteFile(path, []byte("keep"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if shape == "multiple" {
+				if err := os.WriteFile(filepath.Join(dir, "other"), []byte("keep"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		protected = append(protected, path)
+	}
+	fixture(t, c, 5, 100, time.Now())
+	result, err := c.trim(policy{high: 10, low: 5})
+	if err != nil || result.Before != 100 || result.After != 0 || result.Removed != 1 {
+		t.Fatalf("foreign entries counted: %+v, %v", result, err)
+	}
+	for _, path := range append(protected, outside) {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("protected path removed: %s: %v", path, err)
+		}
 	}
 }
 

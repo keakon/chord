@@ -87,7 +87,7 @@ func reapRuns(root string, diagnostics io.Writer) error {
 		}
 		// Do not create missing lock files: incomplete registration is not
 		// evidence that another process has stopped using the directory.
-		lock, err := openLock(filepath.Join(dir, activeLock), syscall.O_RDWR, true)
+		lock, err := openLock(filepath.Join(dir, activeLock), syscall.O_RDWR, syscall.LOCK_EX|syscall.LOCK_NB)
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			continue
 		}
@@ -161,20 +161,20 @@ func privateDirectory(path string) error {
 }
 
 func lockFile(path string, nonblocking bool) (*os.File, error) {
-	return openLock(path, syscall.O_CREAT|syscall.O_RDWR, nonblocking)
+	operation := syscall.LOCK_EX
+	if nonblocking {
+		operation |= syscall.LOCK_NB
+	}
+	return openLock(path, syscall.O_CREAT|syscall.O_RDWR, operation)
 }
 
-func openLock(path string, flags int, nonblocking bool) (*os.File, error) {
+func openLock(path string, flags, operation int) (*os.File, error) {
 	fd, err := syscall.Open(path, flags|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open lock %s: %w", path, err)
 	}
 	file := os.NewFile(uintptr(fd), path)
-	flags = syscall.LOCK_EX
-	if nonblocking {
-		flags |= syscall.LOCK_NB
-	}
-	if err := syscall.Flock(fd, flags); err != nil {
+	if err := syscall.Flock(fd, operation); err != nil {
 		_ = file.Close()
 		return nil, fmt.Errorf("lock %s: %w", path, err)
 	}

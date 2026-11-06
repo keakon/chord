@@ -25,6 +25,13 @@ func supervise(args []string) int {
 	if _, err := syscall.Setsid(); err != nil {
 		return 1
 	}
+	diagnosticFD, err := syscall.Dup(externalsupervisor.ChildStderrFD)
+	if err != nil {
+		return 1
+	}
+	syscall.CloseOnExec(diagnosticFD)
+	diagnostics := os.NewFile(uintptr(diagnosticFD), "cache-diagnostics")
+	defer diagnostics.Close()
 	dir, id := args[0], args[1]
 	done := make(chan error, 2)
 	for _, fd := range []int{externalsupervisor.ChildStdoutFD, externalsupervisor.ChildStderrFD} {
@@ -64,6 +71,9 @@ func supervise(args []string) int {
 	if err := os.Rename(tmp, filepath.Join(dir, readyFile)); err != nil {
 		return 1
 	}
+	// The runner may already be dead. Keep reclamation with the process that
+	// proves cleanup; no operation below may recreate the run directory.
+	trimBuildCache(cache, diagnostics)
 	return code
 }
 

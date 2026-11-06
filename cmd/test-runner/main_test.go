@@ -28,10 +28,21 @@ func TestMain(m *testing.M) {
 		case "runner-fixture":
 			signals := make(chan os.Signal, 2)
 			signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-			code, _ := runCommand(os.Args[2], filepath.Join(os.Args[2], "cache"), os.Args[3:], signals, os.Stdout, os.Stderr)
+			code, _ := runCommand(os.Args[2], filepath.Join(os.Args[2], "cache"), "", os.Args[3:], signals, os.Stdout, os.Stderr)
 			os.Exit(code)
 		case "child-fixture":
 			os.Exit(childFixture(os.Args[2:]))
+		case "runner-cache-fixture":
+			_, use, err := cacheRunner(os.Args[2], os.Args[3], os.Args[4])
+			if err != nil {
+				os.Exit(1)
+			}
+			if err := os.WriteFile(os.Args[5], []byte("ready"), 0o600); err != nil {
+				os.Exit(1)
+			}
+			time.Sleep(20 * time.Second)
+			_ = use.Close()
+			os.Exit(0)
 		}
 	}
 	os.Exit(m.Run())

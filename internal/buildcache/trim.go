@@ -13,14 +13,16 @@ import (
 )
 
 type policy struct {
-	large, high, low int64
-	age              time.Duration
+	high, low int64
 }
 
-var defaultPolicy = policy{large: 10 << 20, high: 30 << 30, low: 20 << 30, age: 7 * time.Hour}
+// Frequent builds must not grow the shared cache without bound. Eviction is
+// least-recently-modified first, so the newest entries survive; recent work
+// only pays for rebuilding what fell outside the budget.
+var defaultPolicy = policy{high: 8 << 30, low: 6 << 30}
 
-// Result reports logical bytes of ordinary Go cache files, excluding tools,
-// fuzz corpora and metadata. Targets are soft: recent files are always retained.
+// Result reports logical bytes of Go cache entries, including executable
+// directories but excluding tools, fuzz corpora and metadata.
 type Result struct {
 	Scanned    bool
 	Before     int64
@@ -34,11 +36,12 @@ type entry struct {
 	path string
 	size int64
 	time time.Time
+	dir  bool
 }
 
-func (c *Cache) trim(now time.Time, p policy) (Result, error) {
+func (c *Cache) trim(p policy) (Result, error) {
 	result := Result{Scanned: true}
-	var candidates []entry
+	var entries []entry
 	for i := range 256 {
 		dir := filepath.Join(c.Dir(), fmt.Sprintf("%02x", i))
 		info, err := os.Lstat(dir)
@@ -63,36 +66,39 @@ func (c *Cache) trim(now time.Time, p policy) (Result, error) {
 			if err != nil {
 				return result, fmt.Errorf("inspect cache entry: %w", err)
 			}
-			if !stat.Mode().IsRegular() {
+			path := filepath.Join(dir, file.Name())
+			size, ok, err := cacheEntrySize(path, stat)
+			if err != nil {
+				return result, err
+			}
+			if !ok {
 				continue
 			}
-			result.Before += stat.Size()
-			if now.Sub(stat.ModTime()) > p.age {
-				candidates = append(candidates, entry{filepath.Join(dir, file.Name()), stat.Size(), stat.ModTime()})
-			}
+			result.Before += size
+			entries = append(entries, entry{path, size, stat.ModTime(), stat.IsDir()})
 		}
 	}
 	result.After = result.Before
-	slices.SortFunc(candidates, func(a, b entry) int {
-		if (a.size > p.large) != (b.size > p.large) {
-			if a.size > p.large {
-				return -1
-			}
-			return 1
-		}
+	if result.Before <= p.high {
+		return result, nil
+	}
+	slices.SortFunc(entries, func(a, b entry) int {
 		if order := a.time.Compare(b.time); order != 0 {
 			return order
 		}
 		return cmp.Compare(a.path, b.path)
 	})
-	pressure := result.Before > p.high
-	for _, file := range candidates {
-		// Old large archives expire even below the budget. Under pressure,
-		// smaller old entries can also be evicted, but never recent ones.
-		if file.size <= p.large && (!pressure || result.After <= p.low) {
-			continue
+	for _, file := range entries {
+		if result.After <= p.low {
+			break
 		}
-		if err := os.Remove(file.path); err != nil {
+		var err error
+		if file.dir {
+			err = os.RemoveAll(file.path)
+		} else {
+			err = os.Remove(file.path)
+		}
+		if err != nil {
 			return result, fmt.Errorf("remove cache entry: %w", err)
 		}
 		result.After -= file.size
@@ -100,6 +106,29 @@ func (c *Cache) trim(now time.Time, p policy) (Result, error) {
 	}
 	result.OverBudget = result.After > p.high
 	return result, nil
+}
+
+func cacheEntrySize(path string, info os.FileInfo) (int64, bool, error) {
+	if info.Mode().IsRegular() {
+		return info.Size(), true, nil
+	}
+	if !info.IsDir() || !strings.HasSuffix(info.Name(), "-d") {
+		return 0, false, nil
+	}
+	// Go stores an executable as a single regular file inside its output-ID
+	// directory. Other shapes are not ours to remove.
+	files, err := os.ReadDir(path)
+	if err != nil {
+		return 0, false, fmt.Errorf("read cached executable: %w", err)
+	}
+	if len(files) != 1 {
+		return 0, false, nil
+	}
+	executable, err := files[0].Info()
+	if err != nil {
+		return 0, false, fmt.Errorf("inspect cached executable: %w", err)
+	}
+	return executable.Size(), executable.Mode().IsRegular(), nil
 }
 
 func cacheName(name string) bool {

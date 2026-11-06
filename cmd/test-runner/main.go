@@ -26,10 +26,13 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == externalsupervisor.CommandName {
 		os.Exit(supervise(os.Args[2:]))
 	}
-	os.Exit(runMain(os.Args[1:]))
+	if len(os.Args) > 1 && os.Args[1] == cacheRunnerFlag {
+		os.Exit(runCached(os.Args[2:]))
+	}
+	os.Exit(runMain(os.Args[1:], ""))
 }
 
-func runMain(args []string) int {
+func runMain(args []string, executable string) int {
 	defaultTemp := len(args) > 0 && args[0] == "--default-temp"
 	if defaultTemp {
 		args = args[1:]
@@ -60,7 +63,7 @@ func runMain(args []string) int {
 		fmt.Fprintln(os.Stderr, "test-runner: resolve cache directory:", err)
 		return 1
 	}
-	code, cleaned := runCommand(base, filepath.Join(cacheBase, "chord", "build-cache"), args, signals, os.Stdout, os.Stderr)
+	code, cleaned := runCommand(base, filepath.Join(cacheBase, "chord", "build-cache"), executable, args, signals, os.Stdout, os.Stderr)
 	if cleaned && !defaultTemp {
 		release := exec.Command("./scripts/test_tmpdir.sh", "--release", base)
 		release.Stderr = os.Stderr
@@ -74,7 +77,7 @@ func runMain(args []string) int {
 	return code
 }
 
-func runCommand(base, cacheRoot string, args []string, signals <-chan os.Signal, stdout, stderr io.Writer) (code int, cleaned bool) {
+func runCommand(base, cacheRoot, executable string, args []string, signals <-chan os.Signal, stdout, stderr io.Writer) (code int, cleaned bool) {
 	run, err := newRun(base, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "test-runner:", err)
@@ -90,12 +93,15 @@ func runCommand(base, cacheRoot string, args []string, signals <-chan os.Signal,
 		fmt.Fprintln(stderr, "test-runner:", err)
 		return 1, run.remove() == nil
 	}
+	trimOnReturn := true
 	defer func() {
 		record := filepath.Join(cacheRoot, "users", run.id)
 		if _, err := os.Lstat(record); err == nil {
 			fmt.Fprintf(stderr, "test-runner: retained cache usage record %s; automatic eviction remains blocked; verify command cleanup before removing the record\n", record)
 		}
-		trimBuildCache(cache, stderr)
+		if trimOnReturn {
+			trimBuildCache(cache, stderr)
+		}
 	}()
 	remove := func() bool {
 		if err := cache.End(run.id); err != nil {
@@ -113,14 +119,16 @@ func runCommand(base, cacheRoot string, args []string, signals <-chan os.Signal,
 		return signalCode(sig), remove()
 	default:
 	}
-	self, err := os.Executable()
-	if err != nil {
-		fmt.Fprintln(stderr, "test-runner: locate executable:", err)
-		return 1, remove()
+	if executable == "" {
+		executable, err = os.Executable()
+		if err != nil {
+			fmt.Fprintln(stderr, "test-runner: locate executable:", err)
+			return 1, remove()
+		}
 	}
 	fmt.Fprintf(stdout, "test-runner: TMPDIR=%s\n", run.work())
 	sup, err := externalsupervisor.Start(externalsupervisor.Config{
-		Command: []string{self, externalsupervisor.CommandName, run.dir, run.id, cacheRoot},
+		Command: []string{executable, externalsupervisor.CommandName, run.dir, run.id, cacheRoot},
 		RunID:   run.id, ReceiptDir: run.dir, KillGrace: cleanupGrace,
 		Child: externalsupervisor.ChildSpec{
 			Command: args[0], Args: args[1:], Env: testEnvironment(run.work(), cache.Dir()),
@@ -192,6 +200,9 @@ finished:
 		}
 		return code, false
 	}
+	// A successful supervisor exit includes its cache scan. Retry here when
+	// cancellation or a failed launch may have interrupted that scan.
+	trimOnReturn = err != nil
 	cleaned = remove()
 	if !cleaned && code == 0 {
 		code = 1
@@ -236,7 +247,7 @@ func testEnvironment(work, cacheDir string) []string {
 }
 
 func trimBuildCache(cache *buildcache.Cache, diagnostics io.Writer) {
-	result, err := cache.Trim(time.Now())
+	result, err := cache.Trim()
 	switch {
 	case err != nil:
 		fmt.Fprintln(diagnostics, "test-runner: cache cleanup deferred:", err)
@@ -247,6 +258,6 @@ func trimBuildCache(cache *buildcache.Cache, diagnostics io.Writer) {
 			float64(result.Before-result.After)/(1<<30), result.Removed, float64(result.After)/(1<<30))
 	}
 	if result.OverBudget {
-		fmt.Fprintln(diagnostics, "test-runner: cache remains above 30 GiB; recent entries are protected")
+		fmt.Fprintln(diagnostics, "test-runner: cache remains over budget after cleanup")
 	}
 }

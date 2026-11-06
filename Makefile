@@ -8,6 +8,7 @@ SHELL := /bin/bash
 GO ?= go
 PKGS ?= ./...
 LOCAL ?= github.com/keakon/chord
+RUN_GO = CHORD_GO='$(GO)' bash scripts/run_tests.sh --default-temp
 
 GOIMPORTS ?= goimports
 STATICCHECK ?= staticcheck
@@ -30,7 +31,7 @@ preflight: fmt-check deps-check vet staticcheck gopls-check modernize-check dead
 
 # Release-style build: pure Go (no cgo), path-trimmed, and stripped.
 build:
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w" -o chord ./cmd/chord/
+	CGO_ENABLED=0 $(RUN_GO) $(GO) build -trimpath -ldflags "-s -w" -o chord ./cmd/chord/
 
 # fmt / fmt-check cover every Go file Git tracks or would add. Ignored private
 # trees (for example .chord/) must never block the gate or get rewritten by it.
@@ -74,16 +75,16 @@ race-fast:
 	@CHORD_GO='$(GO)' bash scripts/run_tests.sh ./scripts/check_ci_race.sh $(PKGS)
 
 vet:
-	$(GO) vet $(PKGS)
+	$(RUN_GO) $(GO) vet $(PKGS)
 
 staticcheck:
-	$(STATICCHECK) -checks 'all,-ST1000' $(PKGS)
+	$(RUN_GO) $(STATICCHECK) -checks 'all,-ST1000' $(PKGS)
 
 # Keep cache paths in shell quotes so Make does not split paths with spaces.
 gopls-install:
 	@if [[ ! -x '$(GOPLS_DIR)/gopls' ]]; then \
 		mkdir -p '$(GOPLS_DIR)' && \
-		GOOS=$(shell $(GO) env GOHOSTOS) GOARCH=$(shell $(GO) env GOHOSTARCH) GOBIN='$(GOPLS_DIR)' $(GO) install golang.org/x/tools/gopls@$(GOPLS_VERSION); \
+		GOOS=$(shell $(GO) env GOHOSTOS) GOARCH=$(shell $(GO) env GOHOSTARCH) GOBIN='$(GOPLS_DIR)' $(RUN_GO) $(GO) install golang.org/x/tools/gopls@$(GOPLS_VERSION); \
 	fi
 
 ifeq ($(GOPLS),$(GOPLS_DIR)/gopls)
@@ -91,13 +92,13 @@ GOPLS_DEP := gopls-install
 endif
 
 gopls-check: $(GOPLS_DEP)
-	CHORD_GO='$(GO)' GOPLS='$(GOPLS)' ./scripts/check_gopls.sh $(PKGS)
+	GOPLS='$(GOPLS)' $(RUN_GO) ./scripts/check_gopls.sh $(PKGS)
 
 modernize-check:
-	$(MODERNIZE) -test $(PKGS)
+	$(RUN_GO) $(MODERNIZE) -test $(PKGS)
 
 deadcode-check:
-	./scripts/check_deadcode.sh
+	$(RUN_GO) ./scripts/check_deadcode.sh
 
 docs-check:
 	./scripts/check_docs_consistency.sh
