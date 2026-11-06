@@ -115,12 +115,18 @@ jobs:
         uses: lycheeverse/lychee-action@v2
         with:
           # Scan docs and top-level user-facing markdown; skip the synced website copy.
+          # Accepted non-2xx codes are server-side rejections or transient failures,
+          # not broken URLs: 403 = anti-bot/permission, 429 = rate limit, 5xx = outage.
+          # Keep those URLs in the scan so DNS failures and real 4xx still fail.
+          # Never cache 429/5xx for 30 days: transient states must be rechecked on
+          # the next run instead of being frozen as successful.
           args: >-
             --no-progress
             --cache
             --max-cache-age 30d
             --max-concurrency 16
-            --accept 200,206,429
+            --accept 100..=103,200..=299,403,429,500..=599
+            --cache-exclude-status 429,500..=599
             docs/
             README.md
             README_CN.md

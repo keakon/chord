@@ -430,7 +430,7 @@ scan set as GitHub Actions:
 
 ```bash
 brew install lychee  # macOS, first time only
-lychee --no-progress --cache --max-cache-age 30d --max-concurrency 16 --accept 200,206,429 docs/ README.md README_CN.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
+lychee --no-progress --cache --max-cache-age 30d --max-concurrency 16 --accept 100..=103,200..=299,403,429,500..=599 --cache-exclude-status 429,500..=599 docs/ README.md README_CN.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
 ```
 
 `make docs-check` verifies docs consistency; it does not run the `lychee` link checker.
