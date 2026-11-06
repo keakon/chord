@@ -27,6 +27,10 @@ import (
 const (
 	checkpointWorklogHeading         = "## Checkpoint Worklog"
 	checkpointRepositoryStateHeading = "## Repository State"
+	checkpointWorklogFilesTitle      = "Files touched"
+	checkpointWorklogCommandsTitle   = "Shell tool outcomes"
+	checkpointWorklogIntro           = "Observed file mutations and shell tool outcomes from the archived segment since the previous checkpoint. This is a historical snapshot; newer runtime state and tool results take precedence. Shell tool success does not prove that a background process has finished."
+	checkpointWorklogOmittedNote     = "- Earlier worklog entries omitted; full details are in archived history."
 
 	// compactWorklogMax* bound each worklog block. The blocks keep their tails:
 	// the newest entries are what the continuation needs, and a long session
@@ -221,18 +225,18 @@ func renderCheckpointWorklog(worklog checkpointWorklog) string {
 		for _, file := range files {
 			rows = append(rows, checkpointWorklogItem(file.Verb+" "+file.Path))
 		}
-		blocks = append(blocks, renderCheckpointWorklogBlock("Files touched", rows, filesOmitted))
+		blocks = append(blocks, renderCheckpointWorklogBlock(checkpointWorklogFilesTitle, rows, filesOmitted))
 	}
 	if len(commands) > 0 {
 		rows := make([]string, 0, len(commands))
 		for _, command := range commands {
 			rows = append(rows, checkpointWorklogItem(command))
 		}
-		blocks = append(blocks, renderCheckpointWorklogBlock("Shell tool outcomes", rows, commandsOmitted))
+		blocks = append(blocks, renderCheckpointWorklogBlock(checkpointWorklogCommandsTitle, rows, commandsOmitted))
 	}
 	var sb strings.Builder
 	sb.WriteString(checkpointWorklogHeading)
-	sb.WriteString("\nObserved file mutations and shell tool outcomes from the archived segment since the previous checkpoint. This is a historical snapshot; newer runtime state and tool results take precedence. Shell tool success does not prove that a background process has finished.\n\n")
+	sb.WriteString("\n" + checkpointWorklogIntro + "\n\n")
 	sb.WriteString(strings.Join(blocks, "\n\n"))
 	return sb.String()
 }
@@ -294,7 +298,7 @@ func boundedCheckpointWorklog(worklog checkpointWorklog, budget int, estimateTok
 	for {
 		section := renderCheckpointWorklog(worklog)
 		if omitted && section != "" {
-			section += "\n\n- Earlier worklog entries omitted; full details are in archived history."
+			section += "\n\n" + checkpointWorklogOmittedNote
 		}
 		if estimateTokens(section) <= budget {
 			return section

@@ -7,6 +7,8 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+const checkpointToolErrorReason = "This records a past failure, not its current resolution status; check later outcomes before treating it as a blocker."
+
 func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 	if msg.IsCompactionSummary {
 		return
@@ -58,7 +60,7 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 			item := buildEvidenceItem(
 				evidenceToolError,
 				"Latest failing tool result",
-				"This looks like a current blocker; preserving the exact error helps the next continuation avoid guessing.",
+				checkpointToolErrorReason,
 				"runtime tool result",
 				requesttrim.TextSnippet(text, 800),
 			)

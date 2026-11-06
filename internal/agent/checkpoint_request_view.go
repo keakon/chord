@@ -18,12 +18,13 @@ func projectCheckpointRequests(messages []message.Message) []message.Message {
 		if msg.Role != message.RoleUser || !msg.IsCompactionSummary || len(msg.Parts) != 0 {
 			continue
 		}
-		var body string
+		body := msg.Content
 		if msg.CompactionSummaryMode == compactionSummaryModeModelDriven {
-			body = checkpointRequestBody(msg.Content, msg.CompactionRequestSources)
+			body = checkpointRequestBody(body, msg.CompactionRequestSources)
 		} else {
-			body = deduplicateCheckpointRequest(msg.Content, msg.CompactionRequestSources)
+			body = deduplicateCheckpointRequest(body, msg.CompactionRequestSources)
 		}
+		body = projectCheckpointScaffolding(body, msg.CompactionSummaryMode == compactionSummaryModeModelDriven)
 		if body == msg.Content {
 			continue
 		}

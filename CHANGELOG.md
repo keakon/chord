@@ -17,6 +17,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Reduced context usage after compaction by omitting file-operation lists, folding successful shell-call logs, and removing empty summary sections from model requests. Saved summaries and archives retain the full records.
 - Reduced binary size and temporary memory allocations while decoding streaming responses.
 - Claude and OpenCode imports retain source session titles in `/resume` and the terminal title, making imported conversations easier to identify. Titles are also included in `--dry-run --json` output.
 - Completion reports add `reported_only_in_records` and `observed_only_in_records` summaries when a worker's declared file list and Chord's observed paths can be compared, so the owner can see one-sided records without comparing both lists by hand. The summaries compare retained path spellings only and do not establish missing changes or false reports.

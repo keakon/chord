@@ -11,6 +11,9 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+const checkpointArchivePointer = "- Precise archived history is listed under the checkpoint wrapper's archived history files."
+const checkpointNoUserConstraints = "- No preserved user constraints."
+
 // buildModelDrivenCheckpointSummary renders the deterministic checkpoint
 // sections. Current User Request comes from the authoritative runtime
 // resolver (real user messages / Done-rejected reasons in message order, with
@@ -60,7 +63,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	constraints := renderEvidenceKindForFallback(&compactionInput{
 		EvidenceItems:         bundle.evidenceItems,
 		OriginalRequestSource: checkpointRequestSource(bundle.originalRequest),
-	}, evidenceUserCorrection, "- No preserved user constraints.")
+	}, evidenceUserCorrection, checkpointNoUserConstraints)
 	completed := renderModelStateList(req.Args.Completed, "(none reported by the model)")
 	// Completed work is the primary readable home for facts that are already
 	// done. Do not repeat an identical item in decisions or open issues; keep
@@ -116,7 +119,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{checkpointfmt.KeyDecisionsHeading, decisions},
 		// Intentional placeholder body: this builder selects no key files, so the
 		// section only points at the wrapper's archived history list.
-		{"## Files and Evidence", "- Precise archived history is listed under the checkpoint wrapper's archived history files."},
+		{"## Files and Evidence", checkpointArchivePointer},
 		{"## Externalized State", stateFiles},
 		{"## Planned Externalized State", plannedStateFiles},
 		{"## Evidence References", evidenceRefs},

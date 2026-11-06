@@ -697,7 +697,7 @@ func compactContextToolProperties() map[string]any {
 		"retired_items": map[string]any{
 			"type": "array", "maxItems": 40,
 			"items":       map[string]any{"type": "string", "minLength": 1},
-			"description": "Exact text of earlier completed, decision, open issue or claim entries that are resolved or superseded. Retiring only clears the entries it names: it never removes runtime facts or user instructions, and an entry that matches nothing is harmless. Omission alone never deletes an entry.",
+			"description": "Copy exact earlier completed, decision, open issue or claim entries here when resolving or replacing them. A newer progress entry does not replace an older one automatically; omission alone never deletes it. Retirement removes only matching entries, never runtime facts or user instructions; nonmatches are harmless.",
 		},
 		"state_files": map[string]any{
 			"type":     "array",

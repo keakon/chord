@@ -207,9 +207,10 @@ func TestCheckpointRequestSourcesRuntimeBuilders(t *testing.T) {
 		strings.Contains(projected, retainedRecentMessagesHeading) {
 		t.Fatalf("runtime builder produced repeated instruction blocks:\n%s", projected)
 	}
-	// The current request is the only correction, so the folded section keeps
-	// its empty placeholder instead of repeating the request excerpt.
-	if section, ok := checkpointfmt.Section(projected, checkpointfmt.UserConstraintsHeading); !ok || strings.Contains(section, request) {
-		t.Fatalf("user constraints repeated the folded request:\n%s", projected)
+	if _, ok := checkpointfmt.Section(projected, checkpointfmt.UserConstraintsHeading); ok {
+		t.Fatalf("empty folded constraints section retained:\n%s", projected)
+	}
+	if strings.Contains(projected, "## Checkpoint Carry Notices") {
+		t.Fatalf("archive wrapper mistaken for carry notices:\n%s", projected)
 	}
 }

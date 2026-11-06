@@ -455,6 +455,8 @@ func writeEvidenceExcerptBlock(sb *strings.Builder, excerpt string) {
 	sb.WriteByte('\n')
 }
 
+const checkpointModelDrivenModeNote = "Earlier conversation was compacted into this model-driven context checkpoint. The checkpoint was built deterministically from runtime facts (current request, todos, subagents, background objects, anchors, and the newest real messages retained below) and the continuation state the model submitted through the compact_context tool; no summarization model was called. The archived history files below remain the authoritative record.\n"
+
 // buildCompactionCheckpointMessage renders the checkpoint message: the summary
 // body between the [Context Summary] / [Context compressed] markers, then the
 // wrapper (mode note, archived-history map, retained recent messages, evidence
@@ -473,7 +475,7 @@ func buildCompactionCheckpointMessage(summary string, historyRefs []string, mode
 	case message.CompactionSummaryModeStructuredFallback:
 		sb.WriteString("Earlier conversation was compacted using a structured fallback summary after model summarization was weak or unavailable.\n")
 	case compactionSummaryModeModelDriven:
-		sb.WriteString("Earlier conversation was compacted into this model-driven context checkpoint. The checkpoint was built deterministically from runtime facts (current request, todos, subagents, background objects, anchors, and the newest real messages retained below) and the continuation state the model submitted through the compact_context tool; no summarization model was called. The archived history files below remain the authoritative record.\n")
+		sb.WriteString(checkpointModelDrivenModeNote)
 	default:
 		sb.WriteString("Earlier conversation was compacted into the summary above.\n")
 	}

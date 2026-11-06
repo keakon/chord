@@ -298,7 +298,7 @@ func TestEvidenceToolErrorPackSkipsSupersededTrackerCandidate(t *testing.T) {
 		a.addToolEvidenceCandidate(buildEvidenceItem(
 			evidenceToolError,
 			"Latest failing tool result",
-			"This looks like a current blocker; preserving the exact error helps the next continuation avoid guessing.",
+			checkpointToolErrorReason,
 			"tool result",
 			requesttrim.TextSnippet(strings.TrimSpace(msg.Content), 800),
 		), msg)

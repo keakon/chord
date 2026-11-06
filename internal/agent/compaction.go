@@ -838,7 +838,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 				item := buildEvidenceItem(
 					evidenceToolError,
 					"Latest failing tool result",
-					"This looks like a current blocker; preserving the exact error helps the next continuation avoid guessing.",
+					checkpointToolErrorReason,
 					fmt.Sprintf("message %d (tool result)", i+1),
 					requesttrim.TextSnippet(text, 800),
 				)
