@@ -526,8 +526,16 @@ func readJSONRPCResponse(body io.Reader, contentType string, wantID int) (JSONRP
 		return readSSERPCResponse(br, wantID)
 	}
 	var raw json.RawMessage
-	if err := json.NewDecoder(br).Decode(&raw); err != nil {
+	decoder := json.NewDecoder(br)
+	if err := decoder.Decode(&raw); err != nil {
 		return JSONRPCResponse{}, fmt.Errorf("mcp http: decode response: %w", err)
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return JSONRPCResponse{}, fmt.Errorf("mcp http: read response end: %w", err)
+		}
+		return JSONRPCResponse{}, fmt.Errorf("mcp http: multiple JSON values in response")
 	}
 	resp, err := decodeJSONRPCResponse(raw)
 	if err != nil {

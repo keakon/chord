@@ -26,6 +26,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- HTTP MCP responses with trailing data or a body read error are reported as outcome unknown instead of success. Verify the external state before retrying.
 - File move cards retain the arrow and recognizable source and destination names when long paths share a prefix.
 - `chord doctor skills` no longer fails when the global config.yaml does not exist yet. The report is produced from the built-in defaults (no extra skill paths), the project config still applies, and the report states the fallback in `context.config_note` (a `config note:` line in the text report). A global config that exists but does not parse still fails with exit code `2`.
 - `chord import claude` filters Claude Code's command wrapper text (`<command-name>`, `<command-message>`) and local-command output and caveats (`<local-command-stdout>`, `<local-command-stderr>`, `<local-command-caveat>`). Standalone `<command-args>` blocks and wrappers containing nonempty or unclosed argument tags are retained so command parameters are not lost. The import report counts removed text blocks and source records skipped entirely, with one aggregate warning and a summary line. Interrupt markers, system reminders and tool results are preserved. Filtering does not affect conversation selection or trigger a shortened-history warning; transcripts with no remaining messages are rejected.

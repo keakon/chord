@@ -26,6 +26,7 @@
 
 ### 修复
 
+- HTTP MCP 响应包含尾随数据或读取响应体出错时，调用会标为结果未知，不再报告成功。重试前须先核对外部状态。
 - 文件移动卡片在长路径共用前缀时仍保留箭头和可辨认的源、目标名称。
 - 全局 config.yaml 尚不存在时，`chord doctor skills` 不再失败：报告改用内置默认值（无额外技能目录）照常产出，项目配置仍然生效，并在 `context.config_note`（文本报告的 `config note:` 行）说明这一回退。全局配置存在但无法解析时，仍以退出码 `2` 失败。
 - `chord import claude` 过滤 Claude Code 的命令包装文本（`<command-name>`、`<command-message>`），以及本地命令输出和提示（`<local-command-stdout>`、`<local-command-stderr>`、`<local-command-caveat>`）。独立的 `<command-args>` 块仍会保留；包装块中的参数非空或参数标签未闭合时，也整块保留，避免丢失命令参数。导入报告分别统计剔除的文本块数和整条跳过的源记录数，并显示一条汇总警告和一行摘要。中断标记、系统提醒及工具结果保持原样。过滤不影响会话选择，也不会触发历史跨度不足的误报；过滤后没有消息的转录会被拒绝。
