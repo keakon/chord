@@ -15,7 +15,7 @@ func decodeJSONRPCResponse(raw []byte) (JSONRPCResponse, error) {
 		Error   json.RawMessage `json:"error"`
 	}
 	var resp JSONRPCResponse
-	if err := mcpWireJSON.Unmarshal(raw, &wire); err != nil {
+	if err := json.Unmarshal(raw, &wire); err != nil {
 		return resp, fmt.Errorf("decode JSON-RPC response: %w", err)
 	}
 	if wire.ID != nil {
@@ -34,7 +34,7 @@ func decodeJSONRPCResponse(raw []byte) (JSONRPCResponse, error) {
 			Message *string         `json:"message"`
 			Data    json.RawMessage `json:"data"`
 		}
-		if err := mcpWireJSON.Unmarshal(wire.Error, &detail); err != nil {
+		if err := json.Unmarshal(wire.Error, &detail); err != nil {
 			return resp, fmt.Errorf("decode JSON-RPC error: %w", err)
 		}
 		if detail.Code == nil || detail.Message == nil {
@@ -42,7 +42,7 @@ func decodeJSONRPCResponse(raw []byte) (JSONRPCResponse, error) {
 		}
 		resp.Error = &JSONRPCError{Code: *detail.Code, Message: *detail.Message}
 		if detail.Data != nil {
-			if err := mcpWireJSON.Unmarshal(detail.Data, &resp.Error.Data); err != nil {
+			if err := json.Unmarshal(detail.Data, &resp.Error.Data); err != nil {
 				return resp, fmt.Errorf("decode JSON-RPC error data: %w", err)
 			}
 		}

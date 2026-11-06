@@ -1,12 +1,9 @@
 package mcp
 
 import (
-	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
-
-	sonicjson "github.com/bytedance/sonic"
 )
 
 var mcpJSONRPCBenchRequest = JSONRPCRequest{
@@ -25,7 +22,8 @@ var mcpJSONRPCBenchRequest = JSONRPCRequest{
 
 var mcpJSONRPCBenchResponseBytes = []byte(`{"jsonrpc":"2.0","id":42,"result":{"content":[{"type":"text","text":"` + strings.Repeat("x", 4096) + `"}],"isError":false}}`)
 
-func BenchmarkJSONRPCMarshalStdlib(b *testing.B) {
+func BenchmarkJSONRPCMarshal(b *testing.B) {
+	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := json.Marshal(mcpJSONRPCBenchRequest); err != nil {
 			b.Fatal(err)
@@ -33,82 +31,34 @@ func BenchmarkJSONRPCMarshalStdlib(b *testing.B) {
 	}
 }
 
-func BenchmarkJSONRPCMarshalSonic(b *testing.B) {
+func BenchmarkJSONRPCResponseDecode(b *testing.B) {
+	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := sonicjson.ConfigDefault.Marshal(mcpJSONRPCBenchRequest); err != nil {
+		if _, err := decodeJSONRPCResponse(mcpJSONRPCBenchResponseBytes); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkJSONRPCMarshalSonicStd(b *testing.B) {
-	for b.Loop() {
-		if _, err := sonicjson.ConfigStd.Marshal(mcpJSONRPCBenchRequest); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkJSONRPCResponseDecodeStdlib(b *testing.B) {
-	for b.Loop() {
-		var resp JSONRPCResponse
-		if err := json.Unmarshal(mcpJSONRPCBenchResponseBytes, &resp); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkJSONRPCResponseDecodeSonic(b *testing.B) {
-	for b.Loop() {
-		var resp JSONRPCResponse
-		if err := sonicjson.ConfigDefault.Unmarshal(mcpJSONRPCBenchResponseBytes, &resp); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkJSONRPCResponseDecodeSonicStream(b *testing.B) {
-	for b.Loop() {
-		var resp JSONRPCResponse
-		if err := mcpWireJSON.NewDecoder(bytes.NewReader(mcpJSONRPCBenchResponseBytes)).Decode(&resp); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkJSONRPCResponseDecodeSonicStd(b *testing.B) {
-	for b.Loop() {
-		var resp JSONRPCResponse
-		if err := sonicjson.ConfigStd.Unmarshal(mcpJSONRPCBenchResponseBytes, &resp); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkJSONRPCToolCallResultDecodeSonic(b *testing.B) {
-	var resp JSONRPCResponse
-	if err := sonicjson.ConfigDefault.Unmarshal(mcpJSONRPCBenchResponseBytes, &resp); err != nil {
-		b.Fatal(err)
-	}
-	b.ResetTimer()
-	for b.Loop() {
-		var result toolCallResult
-		if err := sonicjson.ConfigDefault.Unmarshal(resp.Result, &result); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkJSONRPCToolCallResultDecodeSonicCopyString(b *testing.B) {
-	var resp JSONRPCResponse
-	if err := sonicjson.ConfigDefault.Unmarshal(mcpJSONRPCBenchResponseBytes, &resp); err != nil {
-		b.Fatal(err)
-	}
-	b.ResetTimer()
-	for b.Loop() {
-		var result toolCallResult
-		if err := mcpLongLivedJSON.Unmarshal(resp.Result, &result); err != nil {
-			b.Fatal(err)
-		}
+func BenchmarkJSONRPCToolCallResultDecode(b *testing.B) {
+	for _, size := range []struct {
+		name  string
+		bytes int
+	}{{"4KiB", 4 << 10}, {"1MiB", 1 << 20}} {
+		raw := []byte(`{"jsonrpc":"2.0","id":42,"result":{"content":[{"type":"text","text":"` + strings.Repeat("x", size.bytes) + `"}],"isError":false}}`)
+		b.Run(size.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(raw)))
+			for b.Loop() {
+				resp, err := decodeJSONRPCResponse(raw)
+				if err != nil {
+					b.Fatal(err)
+				}
+				var result toolCallResult
+				if err := json.Unmarshal(resp.Result, &result); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

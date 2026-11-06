@@ -35,6 +35,12 @@ func TestUnwrapEnvelope(t *testing.T) {
 		{"invalid canonical field does not fall back", `{"patch":null,"input":"*** Delete File: b.txt"}`, `{"patch":null,"input":"*** Delete File: b.txt"}`},
 		{"unrelated nested JSON untouched", `{"input":"{\"patch\":123}"}`, `{"input":"{\"patch\":123}"}`},
 		{"unknown large number ignored", `{"input":"*** Begin Patch","extra":1e1000}`, "*** Begin Patch"},
+		{"duplicate field uses last value", `{"input":"ignored","input":"*** Begin Patch"}`, "*** Begin Patch"},
+		{"trailing object delimiter rejected", `{"input":"*** Begin Patch"}}`, `{"input":"*** Begin Patch"}}`},
+		{"trailing array delimiter rejected", `{"input":"*** Begin Patch"}]`, `{"input":"*** Begin Patch"}]`},
+		{"trailing value rejected", `{"input":"*** Begin Patch"} null`, `{"input":"*** Begin Patch"} null`},
+		{"trailing whitespace accepted", "{\"input\":\"*** Begin Patch\"} \t\n", "*** Begin Patch"},
+		{"invalid UTF-8 replaced", "{\"input\":\"*** Begin Patch\xff\"}", "*** Begin Patch\ufffd"},
 		{"unescaped control character rejected", "{\"input\":\"*** Begin Patch\n\"}", "{\"input\":\"*** Begin Patch\n\"}"},
 		{"empty text untouched", "", ""},
 	}

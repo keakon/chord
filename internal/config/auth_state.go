@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	sonicjson "github.com/bytedance/sonic"
 )
 
 // OAuthStateKey identifies a persisted OAuth runtime state entry.
@@ -102,14 +100,13 @@ func LoadAuthState(path string) (AuthStateFile, error) {
 
 // ParseAuthState parses raw auth.state JSON bytes. It returns an empty file
 // when the payload is blank so callers can treat "no file" and "empty file"
-// uniformly without re-reading from disk. Auth state is written by Chord, so it
-// uses sonic's default fast decoder rather than a stricter wire-protocol config.
+// uniformly without re-reading from disk.
 func ParseAuthState(data []byte) (AuthStateFile, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return make(AuthStateFile), nil
 	}
 	var raw AuthStateFile
-	if err := sonicjson.ConfigDefault.Unmarshal(data, &raw); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
 	}
 	return normalizeAuthStateFile(raw), nil

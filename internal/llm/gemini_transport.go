@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	sonicjson "github.com/bytedance/sonic"
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
@@ -256,12 +255,11 @@ func redactGeminiErrorMessage(value, token string) string {
 	return strings.ReplaceAll(value, token, "[redacted]")
 }
 
-// decodeGeminiStreamChunk centralizes decoding. Sonic's Unmarshal([]byte)
-// copies the buffer internally, so decoded strings are owned regardless of the
-// caller's buffer lifetime — journals retain chunk strings safely.
+// decodeGeminiStreamChunk decodes strings independently of the caller's buffer
+// so journals can retain them after the next read.
 func decodeGeminiStreamChunk(data []byte) (geminiStreamChunk, error) {
 	var chunk geminiStreamChunk
-	if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
+	if err := json.Unmarshal(data, &chunk); err != nil {
 		return chunk, fmt.Errorf("invalid Gemini stream chunk")
 	}
 	return chunk, nil

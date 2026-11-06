@@ -524,9 +524,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			}
 			gotData = true
 		}
-		// Parse the envelope once: parseResponsesEvent already extracts the
-		// event type with sonic, so the old standalone type-only decode was a
-		// redundant second decode per message.
+		// Reuse the envelope's event type instead of decoding it separately.
 		eventType, eventData, err := parseResponsesEvent(msg, "", streamDiag)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: %v", errCodexWSInvalidEventJSON, err)

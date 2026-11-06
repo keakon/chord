@@ -16,8 +16,6 @@ import (
 	"sync"
 	"time"
 
-	sonicjson "github.com/bytedance/sonic"
-
 	"github.com/keakon/golog/log"
 )
 
@@ -220,7 +218,7 @@ func (t *StdioTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCR
 	t.mu.Unlock()
 
 	// Marshal and write.
-	data, err := sonicjson.ConfigDefault.Marshal(req)
+	data, err := json.Marshal(req)
 	if err != nil {
 		t.removePending(req.ID)
 		return JSONRPCResponse{}, newCallFailure(callNotSent, fmt.Errorf("mcp stdio: marshal request: %w", err))
@@ -291,7 +289,7 @@ func (t *StdioTransport) Notify(_ context.Context, notif JSONRPCNotification) er
 	}
 	t.mu.Unlock()
 
-	data, err := sonicjson.ConfigDefault.Marshal(notif)
+	data, err := json.Marshal(notif)
 	if err != nil {
 		return fmt.Errorf("mcp stdio: marshal notification: %w", err)
 	}
@@ -528,7 +526,7 @@ func readJSONRPCResponse(body io.Reader, contentType string, wantID int) (JSONRP
 		return readSSERPCResponse(br, wantID)
 	}
 	var raw json.RawMessage
-	if err := mcpWireJSON.NewDecoder(br).Decode(&raw); err != nil {
+	if err := json.NewDecoder(br).Decode(&raw); err != nil {
 		return JSONRPCResponse{}, fmt.Errorf("mcp http: decode response: %w", err)
 	}
 	resp, err := decodeJSONRPCResponse(raw)
@@ -570,7 +568,7 @@ func readSSERPCResponse(body io.Reader, wantID int) (JSONRPCResponse, error) {
 
 // Send posts a JSON-RPC request and reads the response.
 func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCResponse, error) {
-	data, err := sonicjson.ConfigDefault.Marshal(req)
+	data, err := json.Marshal(req)
 	if err != nil {
 		return JSONRPCResponse{}, newCallFailure(callNotSent, newTransportFailure("mcp http: cannot encode request", SendNotSent, err))
 	}
@@ -612,7 +610,7 @@ func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCRe
 
 // Notify sends a JSON-RPC notification via HTTP POST (fire-and-forget).
 func (t *HTTPTransport) Notify(ctx context.Context, notif JSONRPCNotification) error {
-	data, err := sonicjson.ConfigDefault.Marshal(notif)
+	data, err := json.Marshal(notif)
 	if err != nil {
 		return newTransportFailure("mcp http: cannot encode notification", SendNotSent, err)
 	}

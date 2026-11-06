@@ -917,7 +917,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 					if len(args) == 0 {
 						args = json.RawMessage("{}")
 					}
-					acc := &openAIToolAccumulator{id: id, name: name, thoughtSignature: cloneLongLivedLLMString(part.ThoughtSignature)}
+					acc := &openAIToolAccumulator{id: id, name: name, thoughtSignature: part.ThoughtSignature}
 					acc.args.Write(args)
 					toolCalls[idx] = acc
 					textParts.Flush()
@@ -929,7 +929,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				}
 			}
 			if candidate.FinishReason != "" {
-				resp.StopReason = cloneLongLivedLLMString(candidate.FinishReason)
+				resp.StopReason = candidate.FinishReason
 				// Truncation may remove replay parts and invalidate the open index.
 				textParts.Flush()
 				finalizeGeminiToolCalls(toolCalls, &resp, cb, candidate.FinishReason == "MAX_TOKENS")
@@ -1010,7 +1010,7 @@ func finalizeGeminiToolCalls(toolCalls map[int]*openAIToolAccumulator, resp *mes
 			log.Warnf("malformed Gemini tool call arguments tool=%v id=%v raw_args=%v", acc.name, acc.id, string(args))
 			args = json.RawMessage(MalformedArgsSentinel)
 		}
-		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{ID: cloneLongLivedLLMString(acc.id), Name: cloneLongLivedLLMString(acc.name), Args: args, ThoughtSignature: acc.thoughtSignature})
+		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{ID: acc.id, Name: acc.name, Args: args, ThoughtSignature: acc.thoughtSignature})
 		if cb != nil {
 			// The arguments already streamed as a ToolUseDelta fragment when the
 			// functionCall part arrived; the end delta carries identity only, so
@@ -1058,7 +1058,7 @@ func (a *geminiTextPartAccumulator) append(part geminiPart) {
 		if part.ThoughtSignature == "" {
 			return
 		}
-		a.close(cloneLongLivedLLMString(part.ThoughtSignature))
+		a.close(part.ThoughtSignature)
 		return
 	}
 	a.Flush()
@@ -1067,7 +1067,7 @@ func (a *geminiTextPartAccumulator) append(part geminiPart) {
 	a.resp.GeminiParts = append(a.resp.GeminiParts, message.GeminiReplayPart{Type: partType})
 	a.text.WriteString(part.Text)
 	if part.ThoughtSignature != "" {
-		a.close(cloneLongLivedLLMString(part.ThoughtSignature))
+		a.close(part.ThoughtSignature)
 	}
 }
 

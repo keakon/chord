@@ -2,21 +2,12 @@
 package patchinput
 
 import (
+	"encoding/json"
 	"strings"
-
-	sonicjson "github.com/bytedance/sonic"
 )
 
 // MaxEnvelopeLayers bounds the nested string envelopes accepted around a patch.
 const MaxEnvelopeLayers = 4
-
-// Patches enter history and TUI caches; copy strings so an extracted value
-// cannot retain its whole envelope, and validate external string input.
-var envelopeJSON = sonicjson.Config{
-	CopyString:     true,
-	ValidateString: true,
-	UseNumber:      true,
-}.Froze()
 
 // UnwrapEnvelope returns the patch inside a complete JSON string envelope using
 // patch or input fields. The patch field takes precedence when both exist.
@@ -30,8 +21,9 @@ func UnwrapEnvelope(text string) string {
 		if !strings.HasPrefix(trimmed, "{") {
 			return original
 		}
-		var obj map[string]any
-		if err := envelopeJSON.UnmarshalFromString(trimmed, &obj); err != nil {
+		// Unrelated fields may contain numbers outside float64's range.
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
 			return original
 		}
 		raw, ok := obj["patch"]
@@ -41,8 +33,8 @@ func UnwrapEnvelope(text string) string {
 		if !ok {
 			return original
 		}
-		value, ok := raw.(string)
-		if !ok {
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
 			return original
 		}
 		if strings.HasPrefix(strings.TrimSpace(value), "***") {

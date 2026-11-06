@@ -6,6 +6,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Breaking Changes
 
+- Session imports and streaming provider responses now reject unescaped control characters inside JSON strings. Exporters and providers must encode tabs and line breaks as `\t` and `\n`.
 - `chord import --json` now emits snake_case top-level keys (`project_root`, `session_id`, `session_dir`, `messages`, `report`) instead of the Go field names (`ProjectRoot`, `SessionID`, `SessionDir`, `Messages`, `Report`), matching the snake_case keys inside the nested `report` object and the rest of Chord's machine-readable outputs. Scripts that consume the JSON summary must read the new key names.
 
 ### Features
@@ -16,6 +17,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Reduced binary size and temporary memory allocations while decoding streaming responses.
 - Claude and OpenCode imports retain source session titles in `/resume` and the terminal title, making imported conversations easier to identify. Titles are also included in `--dry-run --json` output.
 - Completion reports add `reported_only_in_records` and `observed_only_in_records` summaries when a worker's declared file list and Chord's observed paths can be compared, so the owner can see one-sided records without comparing both lists by hand. The summaries compare retained path spellings only and do not establish missing changes or false reports.
 - Multiple `apply_patch` and `delete` calls in one response run concurrently when their files do not overlap. Conflicting calls within that response keep their order, including calls that touch the same file, a rename endpoint, or an ancestor path. Across agents sharing a checkout, conflicting declared resources are mutually exclusive; execution order follows lease admission.

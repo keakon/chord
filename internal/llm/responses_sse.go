@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	sonicjson "github.com/bytedance/sonic"
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/httpheader"
@@ -795,7 +794,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		var added responseOutputItemAdded
-		if err := responsesRetainedJSON.Unmarshal(eventData, &added); err != nil {
+		if err := json.Unmarshal(eventData, &added); err != nil {
 			log.Debugf("responses: skip unparseable output_item.added err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -883,7 +882,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.output_text.delta":
 		var delta responseOutputTextDelta
-		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
+		if err := json.Unmarshal(eventData, &delta); err != nil {
 			return nil, nil, false, fmt.Errorf("parse output_text.delta: %w", err)
 		}
 		deltaIdx := delta.OutputIndex
@@ -912,7 +911,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			ItemID       string  `json:"item_id"`
 			Text         *string `json:"text"`
 		}
-		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+		if err := json.Unmarshal(eventData, &done); err != nil {
 			return nil, nil, false, fmt.Errorf("parse output_text.done: %w", err)
 		}
 		index := done.OutputIndex
@@ -937,7 +936,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.function_call_arguments.delta":
 		var delta responseFunctionCallArgumentsDelta
-		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
+		if err := json.Unmarshal(eventData, &delta); err != nil {
 			return nil, nil, false, fmt.Errorf("parse function_call_arguments.delta: %w", err)
 		}
 		deltaIdx := delta.OutputIndex
@@ -972,7 +971,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		// response.output_item.done, which also skips its own end emission
 		// via endEmitted.
 		var done responseFunctionCallArgumentsDone
-		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+		if err := json.Unmarshal(eventData, &done); err != nil {
 			return nil, nil, false, fmt.Errorf("parse function_call_arguments.done: %w", err)
 		}
 		doneIdx := done.OutputIndex
@@ -986,7 +985,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.custom_tool_call_input.delta":
 		var delta responseCustomToolCallInputDelta
-		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
+		if err := json.Unmarshal(eventData, &delta); err != nil {
 			return nil, nil, false, fmt.Errorf("parse custom_tool_call_input.delta: %w", err)
 		}
 		if delta.Delta == "" {
@@ -1027,7 +1026,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		// fully streamed, so emit tool_use_end early. Final arguments still come
 		// from response.output_item.done.
 		var done responseCustomToolCallInputDone
-		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+		if err := json.Unmarshal(eventData, &done); err != nil {
 			return nil, nil, false, fmt.Errorf("parse custom_tool_call_input.done: %w", err)
 		}
 		if done.ItemID == "" {
@@ -1052,7 +1051,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_summary_text.delta":
 		var delta responseReasoningSummaryTextDelta
-		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
+		if err := json.Unmarshal(eventData, &delta); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_summary_text.delta err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1067,7 +1066,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_summary_text.done":
 		var done responseReasoningSummaryTextDone
-		if err := responsesRetainedJSON.Unmarshal(eventData, &done); err != nil {
+		if err := json.Unmarshal(eventData, &done); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_summary_text.done err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1095,18 +1094,12 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_text.delta":
 		var delta responseReasoningTextDelta
-		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
+		if err := json.Unmarshal(eventData, &delta); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_text.delta err=%v", err)
 			return nil, nil, false, nil
 		}
 		if delta.Delta != "" {
-			if state.resp.ReasoningContent == "" {
-				// Concatenating with an empty string can reuse the decoded
-				// field, pinning its event when no later delta arrives.
-				state.resp.ReasoningContent = cloneLongLivedLLMString(delta.Delta)
-			} else {
-				state.resp.ReasoningContent += delta.Delta
-			}
+			state.resp.ReasoningContent += delta.Delta
 			if state.visibleReasoningText {
 				if state.pendingVisibleReasoning != nil {
 					state.pendingVisibleReasoning.WriteString(delta.Delta)
@@ -1124,7 +1117,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_text.done":
 		var done responseReasoningTextDone
-		if err := responsesRetainedJSON.Unmarshal(eventData, &done); err != nil {
+		if err := json.Unmarshal(eventData, &done); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_text.done err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1144,7 +1137,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		var done responseOutputItemDone
-		if err := responsesRetainedJSON.Unmarshal(eventData, &done); err != nil {
+		if err := json.Unmarshal(eventData, &done); err != nil {
 			log.Debugf("responses: skip unparseable output_item.done err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1288,7 +1281,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.completed":
 		var completed responseCompleted
-		if err := responsesRetainedJSON.Unmarshal(eventData, &completed); err != nil {
+		if err := json.Unmarshal(eventData, &completed); err != nil {
 			return nil, nil, false, fmt.Errorf("parse completed: %w", err)
 		}
 		respObj := completed.Response
@@ -1326,7 +1319,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.incomplete":
 		var incomplete responseIncomplete
-		if err := responsesRetainedJSON.Unmarshal(eventData, &incomplete); err != nil {
+		if err := json.Unmarshal(eventData, &incomplete); err != nil {
 			return nil, nil, false, fmt.Errorf("parse incomplete: %w", err)
 		}
 		respObj := incomplete.Response
@@ -1358,19 +1351,9 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 	return nil, nil, false, nil
 }
 
-// Retained items, thinking text and errors escape the current SSE event.
-// Copy their strings so small IDs/types cannot keep an entire payload alive.
-var responsesRetainedJSON = sonicjson.Config{CopyString: true}.Froze()
-
-// responsesSSEUnmarshal decodes transient event envelopes and deltas. Callers
-// retaining decoded strings use responsesRetainedJSON or clone at the boundary.
-func responsesSSEUnmarshal(data []byte, v any) error {
-	return sonicjson.ConfigDefault.Unmarshal(data, v)
-}
-
 func parseResponsesProviderErrorEvent(eventType string, eventData []byte) (*APIError, error) {
 	var payload responsesProviderErrorPayload
-	if err := responsesRetainedJSON.Unmarshal(eventData, &payload); err != nil {
+	if err := json.Unmarshal(eventData, &payload); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", eventType, err)
 	}
 	errObj := payload.Error
@@ -1450,7 +1433,7 @@ func parseResponsesEvent(data []byte, eventTypeFromLine string, diag *responsesS
 		return eventTypeFromLine, json.RawMessage(data), nil
 	}
 	var raw responsesEventEnvelope
-	if err := responsesSSEUnmarshal(data, &raw); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return "", nil, err
 	}
 	if raw.Type == "" {

@@ -17,7 +17,6 @@ import (
 
 	"github.com/keakon/chord/internal/texttruncate"
 
-	sonicjson "github.com/bytedance/sonic"
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/httpheader"
@@ -250,7 +249,7 @@ func (a *reasoningAlias) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	var value string
-	if err := sonicjson.ConfigDefault.Unmarshal(data, &value); err != nil {
+	if err := json.Unmarshal(data, &value); err != nil {
 		return err
 	}
 	*a = reasoningAlias(value)
@@ -1081,7 +1080,7 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 		}
 
 		var chunk openAIStreamChunk
-		if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
+		if err := json.Unmarshal(data, &chunk); err != nil {
 			return nil, fmt.Errorf("parse stream chunk: %w", err)
 		}
 		if chunk.Error != nil {
@@ -1190,7 +1189,7 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 				// compatibility endpoint returns it with the first function
 				// call of the step); keep the last non-empty copy.
 				if sig := openAIToolCallThoughtSignature(tc); sig != "" {
-					acc.thoughtSignature = cloneLongLivedLLMString(sig)
+					acc.thoughtSignature = sig
 				}
 				// Subsequent chunks carry argument fragments.
 				//
@@ -1202,7 +1201,7 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 				// bytes, not nested-quoted escaped text.
 				if len(tc.Function.Arguments) > 0 {
 					var frag string
-					if err := sonicjson.ConfigDefault.Unmarshal(tc.Function.Arguments, &frag); err == nil {
+					if err := json.Unmarshal(tc.Function.Arguments, &frag); err == nil {
 						acc.args.WriteString(frag)
 					} else {
 						// Fallback: some proxies send raw JSON instead of a string.
@@ -1228,7 +1227,7 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 
 			// Handle finish reason — finalize all accumulated tool calls.
 			if choice.FinishReason != nil {
-				resp.StopReason = cloneLongLivedLLMString(*choice.FinishReason)
+				resp.StopReason = *choice.FinishReason
 				switch *choice.FinishReason {
 				case "tool_calls":
 					finalizeToolCalls(toolCalls, &resp, cb, false)
@@ -1416,10 +1415,10 @@ func finalizeToolCalls(
 		}
 		log.Debugf("finalized tool call tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-			ID:               cloneLongLivedLLMString(acc.id),
-			Name:             cloneLongLivedLLMString(acc.name),
+			ID:               acc.id,
+			Name:             acc.name,
 			Args:             args,
-			ThoughtSignature: cloneLongLivedLLMString(acc.thoughtSignature),
+			ThoughtSignature: acc.thoughtSignature,
 		})
 		if cb != nil {
 			cb(message.StreamDelta{

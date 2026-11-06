@@ -190,25 +190,21 @@ func TestGeminiFixedSSEParseAllocsGuard(t *testing.T) {
 	// The per-chunk JSON decode dominates the allocation count, so a merge
 	// regression that re-copies the accumulated text per delta shows up in
 	// bytes, not counts: at 1000 deltas it would multiply bytesPerOp several
-	// times over the linear bound below. Under the race detector Sonic swaps
-	// in its non-JIT compatibility decoder, which inflates byte measurements
-	// by orders of magnitude, so the byte bound applies to normal builds only.
+	// times over the linear bound below.
 	const maxAllocs = 9500
 	if allocs > maxAllocs {
 		t.Fatalf("fixed Gemini SSE parse allocs = %.0f, want ≤%d", allocs, maxAllocs)
 	}
-	if !raceBuildEnabled {
-		bytesPerOp := testing.Benchmark(func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				if _, err := parseGeminiSSEStream(bytes.NewReader(geminiCallbackFixedFixture), nil, nil); err != nil {
-					b.Fatal(err)
-				}
+	bytesPerOp := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			if _, err := parseGeminiSSEStream(bytes.NewReader(geminiCallbackFixedFixture), nil, nil); err != nil {
+				b.Fatal(err)
 			}
-		}).AllocedBytesPerOp()
-		const maxBytesPerOp = 3 * 1024 * 1024
-		if bytesPerOp > maxBytesPerOp {
-			t.Fatalf("fixed Gemini SSE parse bytes/op = %d, want ≤%d", bytesPerOp, maxBytesPerOp)
 		}
+	}).AllocedBytesPerOp()
+	const maxBytesPerOp = 3 * 1024 * 1024
+	if bytesPerOp > maxBytesPerOp {
+		t.Fatalf("fixed Gemini SSE parse bytes/op = %d, want ≤%d", bytesPerOp, maxBytesPerOp)
 	}
 }
 
@@ -400,7 +396,7 @@ func BenchmarkSSEParseReplay(b *testing.B) {
 		b.Fatalf("load SSE benchmark corpus: %v", err)
 	}
 	if len(corpora) == 0 {
-		b.Skip("no SSE benchmark corpus found under the local dump corpus directory")
+		b.Skip("set CHORD_SSE_BENCH_DUMPS to a directory of LLM dumps for replay")
 	}
 
 	providers := make([]string, 0, len(corpora))
@@ -538,12 +534,16 @@ func loadSSEBenchCorpora() (map[string]sseBenchCorpus, error) {
 }
 
 func buildSSEBenchCorpora() (map[string]sseBenchCorpus, error) {
-	dumpsDir := filepath.Join("..", "..", ".chord", "llm_dumps")
+	dumpsDir := os.Getenv("CHORD_SSE_BENCH_DUMPS")
+	if dumpsDir == "" {
+		return nil, nil
+	}
+	return readSSEBenchCorpora(dumpsDir)
+}
+
+func readSSEBenchCorpora(dumpsDir string) (map[string]sseBenchCorpus, error) {
 	entries, err := os.ReadDir(dumpsDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("read dumps dir: %w", err)
 	}
 
@@ -555,7 +555,7 @@ func buildSSEBenchCorpora() (map[string]sseBenchCorpus, error) {
 		path := filepath.Join(dumpsDir, entry.Name())
 		meta, err := readSSEBenchDumpMeta(path)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read dump %s: %w", path, err)
 		}
 		if len(meta.SSEChunks) == 0 {
 			continue
@@ -589,11 +589,11 @@ func buildSSEBenchCorpora() (map[string]sseBenchCorpus, error) {
 		for _, cand := range selected {
 			meta, err := readSSEBenchDumpMeta(cand.path)
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("read selected dump %s: %w", cand.path, err)
 			}
 			body, err := reconstructSSEBenchmarkBody(cand.provider, meta.SSEChunks)
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("reconstruct dump %s: %w", cand.path, err)
 			}
 			fixture := sseBenchFixture{
 				Name:       fixtureNameFromCandidate(cand, candidates),
@@ -603,13 +603,16 @@ func buildSSEBenchCorpora() (map[string]sseBenchCorpus, error) {
 				BodyBytes:  body,
 			}
 			if _, err := parseSSEBenchFixture(fixture); err != nil {
-				continue
+				return nil, fmt.Errorf("replay dump %s: %w", cand.path, err)
 			}
 			fixtures = append(fixtures, fixture)
 		}
 		if len(fixtures) > 0 {
 			corpora[provider] = sseBenchCorpus{Entries: fixtures}
 		}
+	}
+	if len(corpora) == 0 {
+		return nil, fmt.Errorf("no supported streaming dumps in %s", dumpsDir)
 	}
 	return corpora, nil
 }

@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	sonicjson "github.com/bytedance/sonic"
 )
 
 var anthropicSSEBenchPayloads = []string{
@@ -16,80 +14,31 @@ var anthropicSSEBenchPayloads = []string{
 	`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":128}}`,
 }
 
-func BenchmarkAnthropicSSEEventDecodeStdlib(b *testing.B) {
+func BenchmarkAnthropicSSEEventDecode(b *testing.B) {
+	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
-		decodeAnthropicSSEBenchPayloadStdlib(anthropicSSEBenchPayloads[i%len(anthropicSSEBenchPayloads)])
+		if err := decodeAnthropicSSEBenchPayload(anthropicSSEBenchPayloads[i%len(anthropicSSEBenchPayloads)]); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
-func BenchmarkAnthropicSSEEventDecodeSonic(b *testing.B) {
-	for i := 0; b.Loop(); i++ {
-		decodeAnthropicSSEBenchPayloadSonicDefault(anthropicSSEBenchPayloads[i%len(anthropicSSEBenchPayloads)])
-	}
-}
-
-func BenchmarkAnthropicSSEEventDecodeSonicStd(b *testing.B) {
-	for i := 0; b.Loop(); i++ {
-		decodeAnthropicSSEBenchPayloadSonicStd(anthropicSSEBenchPayloads[i%len(anthropicSSEBenchPayloads)])
-	}
-}
-
-func decodeAnthropicSSEBenchPayloadStdlib(data string) {
+func decodeAnthropicSSEBenchPayload(data string) error {
 	switch {
 	case strings.Contains(data, `"message_start"`):
 		var ev sseMessageStart
-		_ = json.Unmarshal([]byte(data), &ev)
+		return json.Unmarshal([]byte(data), &ev)
 	case strings.Contains(data, `"content_block_start"`):
 		var ev sseContentBlockStart
-		_ = json.Unmarshal([]byte(data), &ev)
+		return json.Unmarshal([]byte(data), &ev)
 	case strings.Contains(data, `"content_block_delta"`):
 		var ev sseContentBlockDelta
-		_ = json.Unmarshal([]byte(data), &ev)
+		return json.Unmarshal([]byte(data), &ev)
 	case strings.Contains(data, `"content_block_stop"`):
 		var ev sseContentBlockStop
-		_ = json.Unmarshal([]byte(data), &ev)
+		return json.Unmarshal([]byte(data), &ev)
 	default:
 		var ev sseMessageDelta
-		_ = json.Unmarshal([]byte(data), &ev)
-	}
-}
-
-func decodeAnthropicSSEBenchPayloadSonicDefault(data string) {
-	switch {
-	case strings.Contains(data, `"message_start"`):
-		var ev sseMessageStart
-		_ = sonicjson.ConfigDefault.UnmarshalFromString(data, &ev)
-	case strings.Contains(data, `"content_block_start"`):
-		var ev sseContentBlockStart
-		_ = sonicjson.ConfigDefault.UnmarshalFromString(data, &ev)
-	case strings.Contains(data, `"content_block_delta"`):
-		var ev sseContentBlockDelta
-		_ = sonicjson.ConfigDefault.UnmarshalFromString(data, &ev)
-	case strings.Contains(data, `"content_block_stop"`):
-		var ev sseContentBlockStop
-		_ = sonicjson.ConfigDefault.UnmarshalFromString(data, &ev)
-	default:
-		var ev sseMessageDelta
-		_ = sonicjson.ConfigDefault.UnmarshalFromString(data, &ev)
-	}
-}
-
-func decodeAnthropicSSEBenchPayloadSonicStd(data string) {
-	switch {
-	case strings.Contains(data, `"message_start"`):
-		var ev sseMessageStart
-		_ = sonicjson.ConfigStd.UnmarshalFromString(data, &ev)
-	case strings.Contains(data, `"content_block_start"`):
-		var ev sseContentBlockStart
-		_ = sonicjson.ConfigStd.UnmarshalFromString(data, &ev)
-	case strings.Contains(data, `"content_block_delta"`):
-		var ev sseContentBlockDelta
-		_ = sonicjson.ConfigStd.UnmarshalFromString(data, &ev)
-	case strings.Contains(data, `"content_block_stop"`):
-		var ev sseContentBlockStop
-		_ = sonicjson.ConfigStd.UnmarshalFromString(data, &ev)
-	default:
-		var ev sseMessageDelta
-		_ = sonicjson.ConfigStd.UnmarshalFromString(data, &ev)
+		return json.Unmarshal([]byte(data), &ev)
 	}
 }

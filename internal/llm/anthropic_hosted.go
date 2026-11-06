@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	sonicjson "github.com/bytedance/sonic"
-
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -77,9 +75,9 @@ func newAnthropicHostedRequest(model, systemPrompt, query string, ht *HostedTool
 func appendAnthropicHostedCall(resp *message.Response, id, name, kind string, input json.RawMessage) int {
 	obs := ensureHostedObservation(resp)
 	call := message.HostedCall{
-		ID:   cloneLongLivedLLMString(id),
-		Name: cloneLongLivedLLMString(name),
-		Kind: cloneLongLivedLLMString(kind),
+		ID:   id,
+		Name: name,
+		Kind: kind,
 	}
 	call.Input = anthropicHostedInputRaw(input)
 	obs.Calls = append(obs.Calls, call)
@@ -153,7 +151,7 @@ func anthropicHostedResultError(blockType string, content json.RawMessage) strin
 		Type      string `json:"type"`
 		ErrorCode string `json:"error_code"`
 	}
-	if err := sonicjson.ConfigDefault.Unmarshal(trimmed, &errObj); err != nil {
+	if err := json.Unmarshal(trimmed, &errObj); err != nil {
 		return blockType + ": unparsable result content"
 	}
 	if errObj.ErrorCode != "" {

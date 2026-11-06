@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	sonicjson "github.com/bytedance/sonic"
-
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -47,18 +45,15 @@ func (c *anthropicHostedCapture) capture(resp *message.Response, eventType strin
 	if eventType != "content_block_start" && eventType != "content_block_delta" && eventType != "content_block_stop" && eventType != "message_start" && eventType != "message_delta" {
 		return nil
 	}
-	// Sonic's no-copy decoding aliases its internal per-call copy of the line;
-	// only values that outlive this line escape: container IDs and RawMessage
-	// fields, which are cloned below before they are retained.
-	if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
+	if err := json.Unmarshal(data, &ev); err != nil {
 		return fmt.Errorf("capture hosted native event: %w", err)
 	}
 	obs := ensureHostedObservation(resp)
 	if ev.Message.Container.ID != "" {
-		obs.Container = strings.Clone(ev.Message.Container.ID)
+		obs.Container = ev.Message.Container.ID
 	}
 	if ev.Delta.Container.ID != "" {
-		obs.Container = strings.Clone(ev.Delta.Container.ID)
+		obs.Container = ev.Delta.Container.ID
 	}
 	switch eventType {
 	case "content_block_start":
@@ -67,7 +62,7 @@ func (c *anthropicHostedCapture) capture(resp *message.Response, eventType strin
 			c.complete = make(map[int]json.RawMessage)
 		}
 		b := &anthropicNativeBlock{}
-		if err := sonicjson.ConfigDefault.Unmarshal(cloneHostedRaw(ev.Block), &b.fields); err != nil {
+		if err := json.Unmarshal(ev.Block, &b.fields); err != nil {
 			return fmt.Errorf("capture hosted native block: %w", err)
 		}
 		for field, dst := range map[string]*strings.Builder{"text": &b.text, "thinking": &b.thinking, "signature": &b.signature} {

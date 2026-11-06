@@ -8,8 +8,6 @@ import (
 	"io"
 	"strings"
 
-	sonicjson "github.com/bytedance/sonic"
-
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
@@ -17,15 +15,6 @@ import (
 
 // StreamCallback is the function signature for receiving streaming deltas.
 type StreamCallback func(delta message.StreamDelta)
-
-// Copy small decoded fields that are stored in message.Response so they do not
-// keep larger parser inputs alive for the whole TUI session.
-func cloneLongLivedLLMString(s string) string {
-	if s == "" {
-		return ""
-	}
-	return strings.Clone(s)
-}
 
 // --- SSE JSON structures for Anthropic streaming ---
 
@@ -172,8 +161,8 @@ func appendAnthropicStreamBlock(resp *message.Response, block *contentBlock, tru
 				args = json.RawMessage(MalformedArgsSentinel)
 			}
 			resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-				ID:   cloneLongLivedLLMString(block.toolID),
-				Name: cloneLongLivedLLMString(block.toolName),
+				ID:   block.toolID,
+				Name: block.toolName,
 				Args: args,
 			})
 			emitToolEnd = true
@@ -312,7 +301,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 			switch eventType {
 			case "message_start":
 				var ev sseMessageStart
-				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
+				if err := json.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse message_start: %w", err)
 				}
 				if resp.Usage == nil {
@@ -322,7 +311,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "content_block_start":
 				var ev sseContentBlockStart
-				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
+				if err := json.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse content_block_start: %w", err)
 				}
 				block := &contentBlock{
@@ -373,7 +362,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				case message.StreamDeltaThinking:
 					block.thinking.WriteString(ev.ContentBlock.Thinking)
 					if ev.ContentBlock.Signature != "" {
-						block.signature = cloneLongLivedLLMString(ev.ContentBlock.Signature)
+						block.signature = ev.ContentBlock.Signature
 					}
 					if cb != nil && ev.ContentBlock.Thinking != "" {
 						cb(message.StreamDelta{
@@ -387,7 +376,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				case "redacted_thinking":
 					// Encrypted reasoning arrives whole in the start event; it must be
 					// preserved and replayed verbatim for the conversation to remain valid.
-					block.redacted = cloneLongLivedLLMString(ev.ContentBlock.Data)
+					block.redacted = ev.ContentBlock.Data
 				default:
 					if strings.HasSuffix(ev.ContentBlock.Type, anthropicHostedResultSuffix) {
 						// Hosted results arrive whole in the start event. They are
@@ -400,7 +389,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "content_block_delta":
 				var ev sseContentBlockDelta
-				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
+				if err := json.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse content_block_delta: %w", err)
 				}
 				block, ok := blocks[ev.Index]
@@ -443,12 +432,12 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					}
 				case "signature_delta":
 					// Signature is stored for replay; not shown to the user.
-					block.signature = cloneLongLivedLLMString(ev.Delta.Signature)
+					block.signature = ev.Delta.Signature
 				}
 
 			case "content_block_stop":
 				var ev sseContentBlockStop
-				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
+				if err := json.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse content_block_stop: %w", err)
 				}
 				if p, ok := reader.(chunkPhaser); ok {
@@ -463,10 +452,10 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "message_delta":
 				var ev sseMessageDelta
-				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
+				if err := json.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse message_delta: %w", err)
 				}
-				resp.StopReason = cloneLongLivedLLMString(ev.Delta.StopReason)
+				resp.StopReason = ev.Delta.StopReason
 				if resp.Usage == nil {
 					resp.Usage = &message.TokenUsage{}
 				}
@@ -485,7 +474,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case message.StreamDeltaError:
 				var ev sseError
-				if err := sonicjson.ConfigDefault.Unmarshal(data, &ev); err != nil {
+				if err := json.Unmarshal(data, &ev); err != nil {
 					return nil, fmt.Errorf("parse error event: %w", err)
 				}
 				// A mid-stream provider error event keeps whatever text already

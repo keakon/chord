@@ -351,7 +351,7 @@ func decodeSealedSnapshot(ctx context.Context, r io.Reader, size int64) ([]messa
 		}
 		record++
 		var msg message.Message
-		if err := recoverySessionJSON.Unmarshal(line, &msg); err != nil {
+		if err := json.Unmarshal(line, &msg); err != nil {
 			return nil, fmt.Errorf("%w: record %d: %w", ErrCompactionSnapshotParse, record, err)
 		}
 		messages = append(messages, msg)

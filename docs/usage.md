@@ -291,6 +291,10 @@ Currently supported sources:
 - `codex`: Codex rollout JSONL (typically under `~/.codex/sessions/**/rollout-*.jsonl`)
 - `claude`: Claude Code transcript JSONL (typically under `~/.claude/projects/**/<sessionId>.jsonl`)
 
+Input must use valid JSON syntax. Inside strings, escape tabs and line breaks
+as `\t` and `\n`; literal control characters are rejected. Unknown fields are
+ignored where the source format permits them.
+
 Example (OpenCode):
 
 ```bash

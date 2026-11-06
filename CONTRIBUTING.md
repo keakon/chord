@@ -324,6 +324,19 @@ discover newer releases. Run `make model-catalog-check` at any time, or set
 
 ## Performance-sensitive changes
 
+LLM stream replay uses an explicit corpus directory. Point it at a session's
+`dumps/llm` directory or a directory containing selected LLM dump JSON files:
+
+```bash
+CHORD_SSE_BENCH_DUMPS=/absolute/path/to/dumps/llm \
+  bash scripts/run_tests.sh go test ./internal/llm -run '^$' \
+  -bench '^BenchmarkSSEParseReplay$' -benchmem -benchtime=100ms -count=3
+```
+
+Without `CHORD_SSE_BENCH_DUMPS`, replay is skipped and fixed-fixture benchmarks
+remain available. An explicit corpus that is missing, empty, malformed, or
+cannot replay fails the benchmark. Keep private dump contents out of commits.
+
 `./scripts/bench_tui_regression.sh` is the canonical validation entry point for TUI hot paths — it combines correctness tests, alloc guards, and the stable micro-benchmark set, and accepts two result files for a `benchstat` comparison:
 
 ```bash

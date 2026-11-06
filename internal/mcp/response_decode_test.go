@@ -32,6 +32,8 @@ func TestCallToolReceiptValidationAcrossTransports(t *testing.T) {
 		{name: "missing protocol version", body: `{"id":%d,"result":{"content":[]}}`, want: callOutcomeUnknown},
 		{name: "invalid content in reported error", body: `{"jsonrpc":"2.0","id":%d,"result":{"content":[{"type":"text"}],"isError":true}}`, want: callOutcomeUnknown},
 		{name: "empty content", body: `{"jsonrpc":"2.0","id":%d,"result":{"content":[]}}`, success: true},
+		{name: "bare control character", body: "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a\tb\"}]}}", want: callOutcomeUnknown},
+		{name: "duplicate text uses last value", body: `{"jsonrpc":"2.0","id":%d,"result":{"content":[{"type":"text","text":"first","text":"last"}]}}`, success: true},
 		{name: "structured content only", body: `{"jsonrpc":"2.0","id":%d,"result":{"structuredContent":{"created":true}}}`, success: true},
 		{name: "null structured without content", body: `{"jsonrpc":"2.0","id":%d,"result":{"structuredContent":null}}`, want: callOutcomeUnknown},
 		{name: "bad image with valid text", body: `{"jsonrpc":"2.0","id":%d,"result":{"content":[{"type":"text","text":"created"},{"type":"image","data":"?","mimeType":"image/png"}]}}`, success: true},

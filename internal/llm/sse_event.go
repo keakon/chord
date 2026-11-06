@@ -3,8 +3,6 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
-
-	sonicjson "github.com/bytedance/sonic"
 )
 
 const (
@@ -32,13 +30,13 @@ func sseDataLineTerminatesEvent(data []byte, eventTypeHint string, terminalEvent
 			return false
 		}
 		var payload json.RawMessage
-		return sonicjson.ConfigDefault.Unmarshal(data, &payload) == nil
+		return json.Unmarshal(data, &payload) == nil
 	}
 	if len(data) == 0 || data[0] != '{' {
 		return false
 	}
 	var raw sseEventTypeEnvelope
-	if err := sonicjson.ConfigDefault.Unmarshal(data, &raw); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return false
 	}
 	_, ok := terminalEventTypes[raw.Type]

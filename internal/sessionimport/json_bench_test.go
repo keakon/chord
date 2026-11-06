@@ -5,27 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	sonicjson "github.com/bytedance/sonic"
 )
 
 var codexJSONLBenchLines = buildCodexJSONLBenchLines(256)
 
-func BenchmarkCodexJSONLLineDecodeStdlib(b *testing.B) {
-	for i := 0; b.Loop(); i++ {
-		line := codexJSONLBenchLines[i%len(codexJSONLBenchLines)]
-		var lineObj map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(line), &lineObj); err != nil {
-			b.Fatal(err)
-		}
-		var typ string
-		if err := json.Unmarshal(lineObj["type"], &typ); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkCodexJSONLLineDecodeSonic(b *testing.B) {
+func BenchmarkCodexJSONLLineDecode(b *testing.B) {
+	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
 		line := codexJSONLBenchLines[i%len(codexJSONLBenchLines)]
 		var lineObj map[string]json.RawMessage
@@ -34,20 +19,6 @@ func BenchmarkCodexJSONLLineDecodeSonic(b *testing.B) {
 		}
 		var typ string
 		if err := importJSONUnmarshal(lineObj["type"], &typ); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkCodexJSONLLineDecodeSonicStd(b *testing.B) {
-	for i := 0; b.Loop(); i++ {
-		line := codexJSONLBenchLines[i%len(codexJSONLBenchLines)]
-		var lineObj map[string]json.RawMessage
-		if err := sonicjson.ConfigStd.UnmarshalFromString(line, &lineObj); err != nil {
-			b.Fatal(err)
-		}
-		var typ string
-		if err := sonicjson.ConfigStd.Unmarshal(lineObj["type"], &typ); err != nil {
 			b.Fatal(err)
 		}
 	}

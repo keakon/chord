@@ -4,39 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
-
-	sonicjson "github.com/bytedance/sonic"
 )
 
 var authStateBenchBytes = buildAuthStateBenchBytes(64)
 
-func BenchmarkParseAuthStateStdlib(b *testing.B) {
+func BenchmarkParseAuthState(b *testing.B) {
+	b.ReportAllocs()
 	for b.Loop() {
-		var raw AuthStateFile
-		if err := json.Unmarshal(authStateBenchBytes, &raw); err != nil {
+		if _, err := ParseAuthState(authStateBenchBytes); err != nil {
 			b.Fatal(err)
 		}
-		_ = normalizeAuthStateFile(raw)
-	}
-}
-
-func BenchmarkParseAuthStateSonic(b *testing.B) {
-	for b.Loop() {
-		var raw AuthStateFile
-		if err := sonicjson.ConfigDefault.Unmarshal(authStateBenchBytes, &raw); err != nil {
-			b.Fatal(err)
-		}
-		_ = normalizeAuthStateFile(raw)
-	}
-}
-
-func BenchmarkParseAuthStateSonicStd(b *testing.B) {
-	for b.Loop() {
-		var raw AuthStateFile
-		if err := sonicjson.ConfigStd.Unmarshal(authStateBenchBytes, &raw); err != nil {
-			b.Fatal(err)
-		}
-		_ = normalizeAuthStateFile(raw)
 	}
 }
 

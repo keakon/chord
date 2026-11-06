@@ -26,7 +26,7 @@ func finalizeHostedObservation(resp *message.Response) {
 		return
 	}
 	if resp.Hosted.Summary == "" {
-		resp.Hosted.Summary = cloneLongLivedLLMString(resp.Content)
+		resp.Hosted.Summary = resp.Content
 	}
 	if resp.Hosted.Usage == nil {
 		resp.Hosted.Usage = resp.Usage

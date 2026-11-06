@@ -289,6 +289,8 @@ Chord 支持把外部 coding agent 的历史会话导入为可恢复的 session�
 - `codex`：Codex rollout JSONL（通常位于 `~/.codex/sessions/**/rollout-*.jsonl`）
 - `claude`：Claude Code transcript JSONL（通常位于 `~/.claude/projects/**/<sessionId>.jsonl`）
 
+输入须符合 JSON 语法。字符串中的制表符和换行应写成 `\t`、`\n`，不能直接插入控制字符；源格式允许的未知字段会被忽略。
+
 示例：
 
 ```bash

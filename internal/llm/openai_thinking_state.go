@@ -79,14 +79,14 @@ func thinkingBlocksFromCarrier(blocks []anthropicContent) []message.ThinkingBloc
 	for _, block := range blocks {
 		switch block.Type {
 		case "redacted_thinking":
-			data := cloneLongLivedLLMString(block.Data)
+			data := block.Data
 			if strings.TrimSpace(data) == "" {
 				continue
 			}
 			out = append(out, message.ThinkingBlock{Data: data})
 		case "thinking":
-			thinking := cloneLongLivedLLMString(block.Thinking)
-			signature := cloneLongLivedLLMString(block.Signature)
+			thinking := block.Thinking
+			signature := block.Signature
 			if strings.TrimSpace(thinking) == "" && strings.TrimSpace(signature) == "" {
 				continue
 			}

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	sonicjson "github.com/bytedance/sonic"
-
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
@@ -156,7 +154,7 @@ func recordResponsesHostedItem(resp *message.Response, calls map[string]*respons
 		return
 	}
 	var item responsesHostedItem
-	if err := sonicjson.ConfigDefault.Unmarshal(raw, &item); err != nil {
+	if err := json.Unmarshal(raw, &item); err != nil {
 		return
 	}
 	if terminalEvent {
@@ -180,9 +178,9 @@ func recordResponsesHostedItem(resp *message.Response, calls map[string]*respons
 		state.used = true
 		state.index = len(obs.Calls)
 		obs.Calls = append(obs.Calls, message.HostedCall{
-			ID:   cloneLongLivedLLMString(item.ID),
-			Name: cloneLongLivedLLMString(responsesHostedToolName(item.Type)),
-			Kind: cloneLongLivedLLMString(item.Type),
+			ID:   item.ID,
+			Name: responsesHostedToolName(item.Type),
+			Kind: item.Type,
 		})
 	}
 	if state.index < 0 || state.index >= len(obs.Calls) {
@@ -190,7 +188,7 @@ func recordResponsesHostedItem(resp *message.Response, calls map[string]*respons
 	}
 	call := &obs.Calls[state.index]
 	if item.Name != "" {
-		call.Name = cloneLongLivedLLMString(item.Name)
+		call.Name = item.Name
 	}
 	if len(item.Arguments) > 0 {
 		call.Input = cloneHostedRaw(item.Arguments)
@@ -209,7 +207,7 @@ func recordResponsesHostedItem(resp *message.Response, calls map[string]*respons
 			status = "in_progress"
 		}
 	}
-	call.Status = cloneLongLivedLLMString(status)
+	call.Status = status
 	if !terminalEvent {
 		return
 	}
@@ -250,7 +248,7 @@ func responsesHostedRawItem(eventData []byte) (json.RawMessage, bool) {
 	var payload struct {
 		Item json.RawMessage `json:"item"`
 	}
-	if err := responsesSSEUnmarshal(eventData, &payload); err != nil || len(payload.Item) == 0 {
+	if err := json.Unmarshal(eventData, &payload); err != nil || len(payload.Item) == 0 {
 		return nil, false
 	}
 	return payload.Item, true
@@ -264,7 +262,7 @@ func recordResponsesHostedOutputItems(resp *message.Response, calls map[string]*
 			Output []json.RawMessage `json:"output"`
 		} `json:"response"`
 	}
-	if err := responsesSSEUnmarshal(eventData, &payload); err != nil {
+	if err := json.Unmarshal(eventData, &payload); err != nil {
 		return
 	}
 	for _, raw := range payload.Response.Output {

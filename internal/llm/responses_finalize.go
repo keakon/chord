@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	sonicjson "github.com/bytedance/sonic"
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
@@ -56,7 +55,7 @@ func canonicalApplyPatchArgs(raw json.RawMessage) json.RawMessage {
 		var obj struct {
 			Patch *string `json:"patch"`
 		}
-		if err := sonicjson.ConfigStd.Unmarshal(text, &obj); err == nil && obj.Patch != nil {
+		if err := json.Unmarshal(text, &obj); err == nil && obj.Patch != nil {
 			patch = patchinput.UnwrapEnvelope(*obj.Patch)
 			if patch == *obj.Patch {
 				return text
@@ -258,8 +257,8 @@ func recoverResponsesToolCallsFromOutput(resp *message.Response, output []respon
 		args = unwrapJSONString(args)
 		log.Warnf("responses: recovering tool call from response.completed output (output_item.added was missed) tool=%v call_id=%v", out.Name, callID)
 		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-			ID:   cloneLongLivedLLMString(callID),
-			Name: cloneLongLivedLLMString(out.Name),
+			ID:   callID,
+			Name: out.Name,
 			Args: args,
 		})
 		if cb != nil {
@@ -332,8 +331,8 @@ func finalizeOneResponsesToolCall(
 	}
 	log.Debugf("finalized tool call (responses API) tool=%v id=%v args=%v", acc.name, acc.id, string(args))
 	resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-		ID:   cloneLongLivedLLMString(acc.id),
-		Name: cloneLongLivedLLMString(acc.name),
+		ID:   acc.id,
+		Name: acc.name,
 		Args: args,
 	})
 	if cb != nil && acc.streamStartEmitted && !acc.endEmitted {
@@ -374,7 +373,7 @@ func discardUnfinishedResponsesToolCalls(
 func unwrapJSONString(raw json.RawMessage) json.RawMessage {
 	for len(raw) > 0 && raw[0] == '"' {
 		var s string
-		if err := responsesSSEUnmarshal(raw, &s); err != nil {
+		if err := json.Unmarshal(raw, &s); err != nil {
 			break
 		}
 		raw = json.RawMessage(s)

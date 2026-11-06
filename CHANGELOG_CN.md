@@ -6,6 +6,7 @@
 
 ### 不兼容变更
 
+- 会话导入和模型流式响应不再接受 JSON 字符串中的裸控制字符。导出程序和服务端须把制表符、换行编码为 `\t`、`\n`。
 - `chord import --json` 的顶层键改为 snake_case（`project_root`、`session_id`、`session_dir`、`messages`、`report`），不再使用 Go 字段名（`ProjectRoot`、`SessionID`、`SessionDir`、`Messages`、`Report`），与嵌套 `report` 对象内部及 Chord 其他机器可读输出的键名风格一致。消费该 JSON 输出的脚本需要改用新键名。
 
 ### 新功能
@@ -16,6 +17,7 @@
 
 ### 改进
 
+- 缩小二进制体积，减少解码流式响应时的临时内存分配。
 - 导入 Claude 和 OpenCode 会话时保留源标题，用于 `/resume` 列表和终端标题，方便辨认导入的会话。`--dry-run --json` 输出也包含提取到的标题。
 - worker 自报文件与 Chord 观测路径可比较时，完成汇报会追加 `reported_only_in_records` 和 `observed_only_in_records` 摘要，方便上级代理直接看到只出现在一侧的记录，不必手工比对两份列表。摘要只比较保留的路径写法，不能证明漏改或虚报。
 - 同一响应中的多个 `apply_patch` 和 `delete` 调用，在目标文件不重叠时可以并发执行。涉及同一文件、重命名两端或祖先路径的冲突调用，仍保持该响应中的顺序。多个代理共享同一工作区时，声明的冲突资源互斥，执行顺序由资源租约的授予顺序决定。

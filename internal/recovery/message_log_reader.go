@@ -3,21 +3,12 @@ package recovery
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 
-	sonicjson "github.com/bytedance/sonic"
-
 	"github.com/keakon/chord/internal/message"
 )
-
-// recoverySessionJSON decodes the session's own JSONL records back into the
-// long-lived message history, so decoded strings must not retain the read
-// buffer (CopyString). Records are written by Chord itself, so string content
-// is not re-validated beyond what decoding already rejects.
-var recoverySessionJSON = sonicjson.Config{
-	CopyString: true,
-}.Froze()
 
 // errTruncatedRecord marks a final record that is missing its newline and does
 // not decode: the tail of a crash mid-write.
@@ -52,7 +43,7 @@ func (r *messageLogReader) next(msg *message.Message) error {
 			}
 			continue
 		}
-		if err := recoverySessionJSON.Unmarshal(line, msg); err != nil {
+		if err := json.Unmarshal(line, msg); err != nil {
 			if !terminated {
 				return errTruncatedRecord
 			}

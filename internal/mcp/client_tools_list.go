@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/keakon/golog/log"
@@ -48,7 +49,7 @@ func (c *Client) ListTools(ctx context.Context) ([]MCPToolDef, error) {
 		}
 		totalBytes += len(resp.Result)
 		var result toolsListResult
-		if err := mcpLongLivedJSON.Unmarshal(resp.Result, &result); err != nil {
+		if err := json.Unmarshal(resp.Result, &result); err != nil {
 			return nil, fmt.Errorf("mcp tools/list %s: decode: %w", c.name, err)
 		}
 		if result.Tools == nil {
