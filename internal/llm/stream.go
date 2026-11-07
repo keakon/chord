@@ -2,15 +2,28 @@ package llm
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"strings"
+
+	jsonv2 "encoding/json/v2"
 
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/sse"
 )
+
+// lenientDecode unmarshals an SSE event payload whose struct captures raw
+// provider payloads (tool arguments, hosted result blocks) as json.RawMessage.
+// The v1 decoder accepted duplicate members and invalid UTF-8 inside those
+// captures and kept the bytes verbatim; the two options reproduce exactly that
+// tolerance on the v2 engine so relay variants cannot kill a stream the v1
+// parser accepted.
+func lenientDecode(data []byte, target any) error {
+	return jsonv2.Unmarshal(data, target, jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
+}
 
 // StreamCallback is the function signature for receiving streaming deltas.
 type StreamCallback func(delta message.StreamDelta)
@@ -294,7 +307,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		switch eventType {
 		case "message_start":
 			var ev sseMessageStart
-			if err := json.Unmarshal(data, &ev); err != nil {
+			if err := jsonv2.Unmarshal(data, &ev); err != nil {
 				return nil, fmt.Errorf("parse message_start: %w", err)
 			}
 			if resp.Usage == nil {
@@ -304,7 +317,10 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 		case "content_block_start":
 			var ev sseContentBlockStart
-			if err := json.Unmarshal(data, &ev); err != nil {
+			// The block captures tool arguments and hosted results as raw JSON;
+			// keep the v1 tolerance for duplicate members and invalid UTF-8
+			// inside those captures (see lenientDecode).
+			if err := lenientDecode(data, &ev); err != nil {
 				return nil, fmt.Errorf("parse content_block_start: %w", err)
 			}
 			block := &contentBlock{
@@ -382,7 +398,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 		case "content_block_delta":
 			var ev sseContentBlockDelta
-			if err := json.Unmarshal(data, &ev); err != nil {
+			if err := jsonv2.Unmarshal(data, &ev); err != nil {
 				return nil, fmt.Errorf("parse content_block_delta: %w", err)
 			}
 			block, ok := blocks[ev.Index]
@@ -430,7 +446,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 		case "content_block_stop":
 			var ev sseContentBlockStop
-			if err := json.Unmarshal(data, &ev); err != nil {
+			if err := jsonv2.Unmarshal(data, &ev); err != nil {
 				return nil, fmt.Errorf("parse content_block_stop: %w", err)
 			}
 			if p, ok := reader.(chunkPhaser); ok {
@@ -445,7 +461,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 		case "message_delta":
 			var ev sseMessageDelta
-			if err := json.Unmarshal(data, &ev); err != nil {
+			if err := jsonv2.Unmarshal(data, &ev); err != nil {
 				return nil, fmt.Errorf("parse message_delta: %w", err)
 			}
 			resp.StopReason = ev.Delta.StopReason
@@ -467,7 +483,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 		case message.StreamDeltaError:
 			var ev sseError
-			if err := json.Unmarshal(data, &ev); err != nil {
+			if err := jsonv2.Unmarshal(data, &ev); err != nil {
 				return nil, fmt.Errorf("parse error event: %w", err)
 			}
 			// A mid-stream provider error event keeps whatever text already

@@ -257,7 +257,11 @@ func redactGeminiErrorMessage(value, token string) string {
 // so journals can retain them after the next read.
 func decodeGeminiStreamChunk(data []byte) (geminiStreamChunk, error) {
 	var chunk geminiStreamChunk
-	if err := json.Unmarshal(data, &chunk); err != nil {
+	// FunctionCall.Args captures the model's tool arguments as raw JSON; keep
+	// the v1 tolerance for duplicate members and invalid UTF-8 inside it (see
+	// lenientDecode) so the chunk — and with it the whole stream — survives
+	// arguments the v1 parser accepted.
+	if err := lenientDecode(data, &chunk); err != nil {
 		return chunk, fmt.Errorf("invalid Gemini stream chunk")
 	}
 	return chunk, nil

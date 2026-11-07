@@ -2,7 +2,8 @@ package llm
 
 import (
 	"bytes"
-	"encoding/json"
+
+	jsonv2 "encoding/json/v2"
 )
 
 const sseMaxTokenSize = 1024 * 1024
@@ -27,7 +28,11 @@ func sseDataLineTerminatesEvent(data []byte, eventTypeHint string, terminalEvent
 		return false
 	}
 	var raw sseEventTypeEnvelope
-	if err := json.Unmarshal(data, &raw); err != nil {
+	// Strict v2 decode of a single {"type":...} field. A failure (or a
+	// case-mismatched field name, which v2 leaves empty where v1 matched it
+	// case-insensitively) only means the early-flush hint is not taken: the
+	// blank-line delimiter and HTTP EOF still finalize the event.
+	if err := jsonv2.Unmarshal(data, &raw); err != nil {
 		return false
 	}
 	if raw.Type == "" {

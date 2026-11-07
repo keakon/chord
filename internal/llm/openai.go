@@ -1079,7 +1079,11 @@ func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector 
 		}
 
 		var chunk openAIStreamChunk
-		if err := json.Unmarshal(data, &chunk); err != nil {
+		// The chunk carries Claude-replay thinking blocks and tool calls whose
+		// function arguments are captured as raw JSON; keep the v1 tolerance
+		// for duplicate members and invalid UTF-8 inside those captures (see
+		// lenientDecode) so relay variants cannot kill the stream.
+		if err := lenientDecode(data, &chunk); err != nil {
 			return nil, fmt.Errorf("parse stream chunk: %w", err)
 		}
 		if chunk.Error != nil {

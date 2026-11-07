@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	jsonv2 "encoding/json/v2"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/httpheader"
@@ -756,7 +758,11 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		var added responseOutputItemAdded
-		if err := json.Unmarshal(eventData, &added); err != nil {
+		// The item captures arguments as raw JSON; keep the v1 tolerance for
+		// duplicate members and invalid UTF-8 inside it (see lenientDecode).
+		// A rejected event is skipped: the done payload or the terminal
+		// response still carries the authoritative data.
+		if err := lenientDecode(eventData, &added); err != nil {
 			log.Debugf("responses: skip unparseable output_item.added err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -844,7 +850,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.output_text.delta":
 		var delta responseOutputTextDelta
-		if err := json.Unmarshal(eventData, &delta); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &delta); err != nil {
 			return nil, nil, false, fmt.Errorf("parse output_text.delta: %w", err)
 		}
 		deltaIdx := delta.OutputIndex
@@ -873,7 +879,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			ItemID       string  `json:"item_id"`
 			Text         *string `json:"text"`
 		}
-		if err := json.Unmarshal(eventData, &done); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &done); err != nil {
 			return nil, nil, false, fmt.Errorf("parse output_text.done: %w", err)
 		}
 		index := done.OutputIndex
@@ -898,7 +904,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.function_call_arguments.delta":
 		var delta responseFunctionCallArgumentsDelta
-		if err := json.Unmarshal(eventData, &delta); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &delta); err != nil {
 			return nil, nil, false, fmt.Errorf("parse function_call_arguments.delta: %w", err)
 		}
 		deltaIdx := delta.OutputIndex
@@ -933,7 +939,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		// response.output_item.done, which also skips its own end emission
 		// via endEmitted.
 		var done responseFunctionCallArgumentsDone
-		if err := json.Unmarshal(eventData, &done); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &done); err != nil {
 			return nil, nil, false, fmt.Errorf("parse function_call_arguments.done: %w", err)
 		}
 		doneIdx := done.OutputIndex
@@ -947,7 +953,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.custom_tool_call_input.delta":
 		var delta responseCustomToolCallInputDelta
-		if err := json.Unmarshal(eventData, &delta); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &delta); err != nil {
 			return nil, nil, false, fmt.Errorf("parse custom_tool_call_input.delta: %w", err)
 		}
 		if delta.Delta == "" {
@@ -988,7 +994,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		// fully streamed, so emit tool_use_end early. Final arguments still come
 		// from response.output_item.done.
 		var done responseCustomToolCallInputDone
-		if err := json.Unmarshal(eventData, &done); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &done); err != nil {
 			return nil, nil, false, fmt.Errorf("parse custom_tool_call_input.done: %w", err)
 		}
 		if done.ItemID == "" {
@@ -1013,7 +1019,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_summary_text.delta":
 		var delta responseReasoningSummaryTextDelta
-		if err := json.Unmarshal(eventData, &delta); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &delta); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_summary_text.delta err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1028,7 +1034,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_summary_text.done":
 		var done responseReasoningSummaryTextDone
-		if err := json.Unmarshal(eventData, &done); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &done); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_summary_text.done err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1056,7 +1062,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_text.delta":
 		var delta responseReasoningTextDelta
-		if err := json.Unmarshal(eventData, &delta); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &delta); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_text.delta err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1079,7 +1085,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.reasoning_text.done":
 		var done responseReasoningTextDone
-		if err := json.Unmarshal(eventData, &done); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &done); err != nil {
 			log.Debugf("responses: skip unparseable reasoning_text.done err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1099,7 +1105,10 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		var done responseOutputItemDone
-		if err := json.Unmarshal(eventData, &done); err != nil {
+		// Raw-JSON arguments capture: keep the v1 tolerance (see
+		// lenientDecode). A rejected event is skipped; the terminal payload
+		// still carries the authoritative output items.
+		if err := lenientDecode(eventData, &done); err != nil {
 			log.Debugf("responses: skip unparseable output_item.done err=%v", err)
 			return nil, nil, false, nil
 		}
@@ -1243,7 +1252,12 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.completed":
 		var completed responseCompleted
-		if err := json.Unmarshal(eventData, &completed); err != nil {
+		// The completion payload has no raw captures (arguments are strings),
+		// so strict decoding only rejects genuinely malformed provider data.
+		// A rejected terminal payload fails the stream explicitly rather than
+		// hanging: the caller surfaces the parse error and the retry layer
+		// decides, same as any other mid-stream parse failure.
+		if err := jsonv2.Unmarshal(eventData, &completed); err != nil {
 			return nil, nil, false, fmt.Errorf("parse completed: %w", err)
 		}
 		respObj := completed.Response
@@ -1281,7 +1295,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.incomplete":
 		var incomplete responseIncomplete
-		if err := json.Unmarshal(eventData, &incomplete); err != nil {
+		if err := jsonv2.Unmarshal(eventData, &incomplete); err != nil {
 			return nil, nil, false, fmt.Errorf("parse incomplete: %w", err)
 		}
 		respObj := incomplete.Response
@@ -1315,7 +1329,10 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 func parseResponsesProviderErrorEvent(eventType string, eventData []byte) (*APIError, error) {
 	var payload responsesProviderErrorPayload
-	if err := json.Unmarshal(eventData, &payload); err != nil {
+	// Error payloads capture relay headers as raw JSON; a strict rejection
+	// here would downgrade a provider error (with its retry classification)
+	// into a parse error, so keep the v1 tolerance (see lenientDecode).
+	if err := lenientDecode(eventData, &payload); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", eventType, err)
 	}
 	errObj := payload.Error
@@ -1367,7 +1384,11 @@ func parseResponsesEvent(data []byte, eventTypeFromLine string, diag *responsesS
 		return eventTypeFromLine, json.RawMessage(data), nil
 	}
 	var raw responsesEventEnvelope
-	if err := json.Unmarshal(data, &raw); err != nil {
+	// The envelope captures the whole payload as raw JSON, including item
+	// arguments that relays may send as objects with duplicate members; keep
+	// the v1 tolerance so such payloads still route to their handlers (see
+	// lenientDecode).
+	if err := lenientDecode(data, &raw); err != nil {
 		return "", nil, err
 	}
 	if raw.Type == "" {
