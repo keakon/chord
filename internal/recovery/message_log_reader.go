@@ -3,9 +3,11 @@ package recovery
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
+
+	jsonv2 "encoding/json/v2"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -43,7 +45,15 @@ func (r *messageLogReader) next(msg *message.Message) error {
 			}
 			continue
 		}
-		if err := json.Unmarshal(line, msg); err != nil {
+		// The reader must accept everything the v1 writer emits: tool-call
+		// arguments are persisted verbatim and may carry duplicate object
+		// members or invalid UTF-8, exactly as the LLM sent them. The two
+		// lenient options reproduce the v1 read tolerance for those records
+		// (duplicate keys and invalid UTF-8), while raw captures still keep
+		// the bytes verbatim for replay. Field-name matching becomes case
+		// sensitive, which only matters for hand-edited logs: this reader
+		// consumes records written by the same struct tags it decodes into.
+		if err := jsonv2.Unmarshal(line, msg, jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true)); err != nil {
 			if !terminated {
 				return errTruncatedRecord
 			}

@@ -803,6 +803,85 @@ func TestLoadMessages_TruncatedLastRecord(t *testing.T) {
 	}
 }
 
+// TestLoadMessages_LenientToolArgsRoundTrip pins the message-log read/write
+// closure: the writer persists tool-call arguments verbatim, and LLM-emitted
+// arguments may contain duplicate object members, so the reader must accept
+// such a record and recover it together with every later one. A strict reader
+// would reject the record and truncate all following history.
+func TestLoadMessages_LenientToolArgsRoundTrip(t *testing.T) {
+	rm, dir := newTestManager(t)
+
+	assistant := message.Message{
+		Role:    "assistant",
+		Content: "called",
+		ToolCalls: []message.ToolCall{
+			{
+				ID:   "call-1",
+				Name: "sample",
+				Args: json.RawMessage(`{"value":"first","value":"last"}`),
+			},
+			{
+				// Invalid UTF-8 bytes survive v1 Marshal inside a RawMessage,
+				// so the reader must tolerate them the same way.
+				ID:   "call-2",
+				Name: "sample",
+				Args: json.RawMessage("{\"note\":\"x\xffy\"}"),
+			},
+		},
+		ResponsesOutput: []message.ResponsesOutputItem{{
+			Type:    "message",
+			Role:    "assistant",
+			Content: []message.ResponsesOutputContent{{Type: "output_text", Text: "called"}},
+		}},
+		GeminiParts: []message.GeminiReplayPart{{Type: "function_call", ToolCallID: "call-1"}},
+	}
+	followUp := message.Message{Role: "user", Content: "after"}
+	if err := rm.PersistMessage("main", assistant); err != nil {
+		t.Fatalf("PersistMessage assistant: %v", err)
+	}
+	if err := rm.PersistMessage("main", followUp); err != nil {
+		t.Fatalf("PersistMessage follow-up: %v", err)
+	}
+	rm.Close()
+
+	// The writer must have persisted the duplicate-key arguments verbatim.
+	raw, err := os.ReadFile(filepath.Join(dir, "main.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `{"value":"first","value":"last"}`) {
+		t.Fatalf("tool args were not persisted verbatim: %s", raw)
+	}
+
+	rm2 := NewRecoveryManager(dir)
+	defer rm2.Close()
+	loaded, err := rm2.LoadMessages("main")
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("recovered %d messages, want 2 (later history must survive a lenient-args record)", len(loaded))
+	}
+	if len(loaded[0].ToolCalls) != 2 {
+		t.Fatalf("recovered %d tool calls, want 2", len(loaded[0].ToolCalls))
+	}
+	if string(loaded[0].ToolCalls[0].Args) != `{"value":"first","value":"last"}` {
+		t.Fatalf("tool args not preserved verbatim: %s", loaded[0].ToolCalls[0].Args)
+	}
+	if loaded[0].ToolCalls[1].Args[0] != '{' || string(loaded[0].ToolCalls[1].Args) != "{\"note\":\"x\xffy\"}" {
+		t.Fatalf("invalid-UTF-8 args not preserved verbatim: %q", string(loaded[0].ToolCalls[1].Args))
+	}
+	if len(loaded[0].ResponsesOutput) != 1 || loaded[0].ResponsesOutput[0].Content[0].Text != "called" {
+		t.Fatalf("ResponsesOutput not recovered: %#v", loaded[0].ResponsesOutput)
+	}
+	if len(loaded[0].GeminiParts) != 1 || loaded[0].GeminiParts[0].ToolCallID != "call-1" {
+		t.Fatalf("GeminiParts not recovered: %#v", loaded[0].GeminiParts)
+	}
+	if loaded[1].Content != "after" {
+		t.Fatalf("follow-up message content = %q, want after", loaded[1].Content)
+	}
+}
+
 func TestLoadMessages_EmptyFile(t *testing.T) {
 	rm, dir := newTestManager(t)
 	defer rm.Close()
