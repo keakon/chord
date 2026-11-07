@@ -3,13 +3,14 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
+
+	jsonv2 "encoding/json/v2"
 
 	"github.com/keakon/golog/log"
 	"github.com/spf13/cobra"
@@ -509,7 +510,11 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 			}
 
 			var hcmd headlessCommand
-			if err := json.Unmarshal(line, &hcmd); err != nil {
+			// Strict v2 decoding tightens the input contract: duplicate object
+			// members and invalid UTF-8 are rejected instead of silently
+			// resolved. json.Unmarshal already guaranteed one value per line;
+			// v2 Unmarshal keeps that single-document guarantee.
+			if err := jsonv2.Unmarshal(line, &hcmd); err != nil {
 				out.emit(headlessEnvelope{
 					Type: "error",
 					Payload: map[string]string{
@@ -520,7 +525,7 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 			}
 			if hcmd.Type == headlessTransferPrepared {
 				var ack transferPreparedAck
-				err := json.Unmarshal(line, &ack)
+				err := jsonv2.Unmarshal(line, &ack)
 				if err == nil && transferAdapter != nil {
 					err = transferAdapter.ack(ack)
 				} else if err == nil {

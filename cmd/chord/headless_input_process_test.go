@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -65,5 +70,80 @@ func TestHeadlessInputRejectionProcess(t *testing.T) {
 	}
 	if replies != 1 {
 		t.Fatalf("rejection receipts = %d, want 1", replies)
+	}
+}
+
+// TestHeadlessStrictInputContract drives the command loop in-process: strict
+// v2 decoding rejects duplicate object members and invalid UTF-8 with the
+// productized error envelope instead of silently resolving them.
+func TestHeadlessStrictInputContract(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ac := &AppContext{Ctx: ctx, Cancel: cancel, SessionDir: "session-sample"}
+	events := make(chan agent.AgentEvent)
+	close(events)
+	rt := &fakeHeadlessRuntime{events: events, backend: &mockBackend{}}
+
+	pr, pw := io.Pipe()
+	var mu sync.Mutex
+	var envelopes []headlessEnvelope
+	collectorDone := make(chan struct{})
+	go func() {
+		defer close(collectorDone)
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := bytes.TrimSpace(scanner.Bytes())
+			if len(line) == 0 {
+				continue
+			}
+			var env headlessEnvelope
+			if json.Unmarshal(line, &env) != nil {
+				continue
+			}
+			mu.Lock()
+			envelopes = append(envelopes, env)
+			mu.Unlock()
+		}
+	}()
+
+	input := "{\"type\":\"status\",\"type\":\"subscribe\"}\n" + "{\"type\":\"stat\xffus\"}\n"
+	done := make(chan error, 1)
+	go func() {
+		done <- runHeadlessWithDeps(headlessRunDeps{
+			initApp:       func(bool, string, sessionStartupOptions) (*AppContext, error) { return ac, nil },
+			createRuntime: func(*AppContext) (headlessRuntime, error) { return rt, nil },
+			stdin:         strings.NewReader(input),
+			stdout:        pw,
+		})
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("headless loop failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("headless loop did not drain stdin within budget")
+	}
+	pw.Close()
+	select {
+	case <-collectorDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("output collector did not stop")
+	}
+
+	invalid := 0
+	mu.Lock()
+	defer mu.Unlock()
+	for _, env := range envelopes {
+		if env.Type != "error" {
+			continue
+		}
+		if payload, ok := env.Payload.(map[string]any); ok && payload["message"] == "invalid JSON command" {
+			invalid++
+		}
+	}
+	if invalid != 2 {
+		t.Fatalf("invalid JSON command envelopes = %d, want 2 (got %#v)", invalid, envelopes)
 	}
 }
