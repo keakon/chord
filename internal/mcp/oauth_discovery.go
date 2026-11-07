@@ -379,7 +379,7 @@ func cloneDiscovery(d OAuthDiscovery) OAuthDiscovery {
 // decodeOAuthMetadata preserves defaults only for absent fields, not explicit
 // nulls, and rejects duplicate keys before the standard decoder can overwrite.
 func decodeOAuthMetadata(raw []byte, known []string, out any) error {
-	if rejectDuplicateJSON(raw) != nil {
+	if !strictJSON(raw) {
 		return discoveryError(ErrorProtocol, "invalid OAuth metadata JSON")
 	}
 	var fields map[string]json.RawMessage

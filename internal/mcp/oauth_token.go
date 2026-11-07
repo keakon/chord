@@ -1,10 +1,9 @@
 package mcp
 
 import (
-	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
-	"io"
 	"math"
 	"slices"
 	"strconv"
@@ -12,63 +11,13 @@ import (
 	"time"
 )
 
-// rejectDuplicateJSON validates every object, including nested registration and
-// credential records, before ordinary decoding can silently accept duplicate keys.
-func rejectDuplicateJSON(raw []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var value func(int) error
-	value = func(depth int) error {
-		if depth > 64 {
-			return fmt.Errorf("JSON nesting limit exceeded")
-		}
-		tok, err := dec.Token()
-		if err != nil {
-			return fmt.Errorf("invalid JSON")
-		}
-		delim, ok := tok.(json.Delim)
-		if !ok {
-			return nil
-		}
-		switch delim {
-		case '{':
-			seen := map[string]bool{}
-			for dec.More() {
-				key, err := dec.Token()
-				if err != nil {
-					return fmt.Errorf("invalid JSON")
-				}
-				s, ok := key.(string)
-				if !ok || seen[s] {
-					return fmt.Errorf("duplicate JSON field")
-				}
-				seen[s] = true
-				if err := value(depth + 1); err != nil {
-					return err
-				}
-			}
-		case '[':
-			for dec.More() {
-				if err := value(depth + 1); err != nil {
-					return err
-				}
-			}
-		default:
-			return fmt.Errorf("invalid JSON")
-		}
-		_, err = dec.Token()
-		if err != nil {
-			return fmt.Errorf("invalid JSON")
-		}
-		return nil
-	}
-	if err := value(0); err != nil {
-		return err
-	}
-	if _, err := dec.Token(); err != io.EOF {
-		return fmt.Errorf("trailing JSON content")
-	}
-	return nil
+// strictJSON reports whether raw is a single, strictly valid JSON document:
+// jsontext validation rejects duplicate object members, invalid UTF-8, and
+// trailing values before ordinary decoding could silently accept them. Nesting
+// depth is bounded by the v2 decoder default (10000), far above anything OAuth
+// payloads use.
+func strictJSON(raw []byte) bool {
+	return jsontext.Value(raw).IsValid()
 }
 
 type tokenResponse struct {
@@ -80,7 +29,7 @@ type tokenResponse struct {
 
 func parseTokenResponse(raw []byte, requested []string) (tokenResponse, error) {
 	invalid := func() (tokenResponse, error) { return tokenResponse{}, fmt.Errorf("invalid OAuth token response") }
-	if len(raw) > 1<<20 || rejectDuplicateJSON(raw) != nil {
+	if len(raw) > 1<<20 || !strictJSON(raw) {
 		return invalid()
 	}
 	var fields map[string]json.RawMessage

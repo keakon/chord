@@ -163,7 +163,7 @@ func TestCredentialStoreFailedConfirmationDoesNotExposeSecrets(t *testing.T) {
 }
 
 func TestCredentialStoreRejectsCorruptionWithoutWrite(t *testing.T) {
-	for _, kind := range []string{"duplicate", "unknown", "schema", "binding", "oversized"} {
+	for _, kind := range []string{"duplicate", "unknown", "schema", "binding", "oversized", "utf8"} {
 		t.Run(kind, func(t *testing.T) {
 			s := NewCredentialStore(t.TempDir())
 			target := storeTestTarget()
@@ -193,6 +193,8 @@ func TestCredentialStoreRejectsCorruptionWithoutWrite(t *testing.T) {
 				raw, _ = json.Marshal(file)
 			case "oversized":
 				raw = make([]byte, credentialFileLimit+1)
+			case "utf8":
+				raw = []byte(`{"schema_version":1,"note":"` + "\xff" + `"}`)
 			}
 			if err := os.WriteFile(path, raw, 0o600); err != nil {
 				t.Fatal(err)

@@ -125,7 +125,7 @@ func (s *CredentialStore) read(t Target) (*CredentialFile, []byte, error) {
 	if err != nil {
 		return nil, nil, storeFailure(ErrorCredentialStoreFailed, atomicfile.NotReplaced)
 	}
-	if len(data) > credentialFileLimit || rejectDuplicateJSON(data) != nil {
+	if len(data) > credentialFileLimit || !strictJSON(data) {
 		return nil, nil, storeFailure(ErrorCredentialStoreCorrupt, atomicfile.NotReplaced)
 	}
 	var file CredentialFile
