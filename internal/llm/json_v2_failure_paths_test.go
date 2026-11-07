@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -291,6 +292,22 @@ func TestGeminiChunkLenientDecodePreservesRawArgs(t *testing.T) {
 	args := string(parts[0].FunctionCall.Args)
 	if !strings.Contains(args, `"path":"first"`) || !strings.Contains(args, `"path":"last"`) || !strings.Contains(args, "x\xffy") {
 		t.Fatalf("args = %s, want raw args preserved verbatim", args)
+	}
+}
+
+// A chunk that fails even the lenient decode must keep its underlying cause:
+// callers classify it as a protocol error and the surfaced error must say
+// what actually failed to decode.
+func TestGeminiChunkDecodeErrorPreservesCause(t *testing.T) {
+	_, err := decodeGeminiStreamChunk([]byte(`{"candidates":[{"content":`))
+	if err == nil {
+		t.Fatal("decodeGeminiStreamChunk: want error for truncated chunk")
+	}
+	if errors.Unwrap(err) == nil {
+		t.Fatalf("err = %v, want wrapped underlying cause", err)
+	}
+	if !strings.Contains(err.Error(), "decode Gemini stream chunk") {
+		t.Fatalf("err = %v, want decode context prefix", err)
 	}
 }
 

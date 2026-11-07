@@ -208,7 +208,10 @@ func (g *GeminiProvider) streamGeminiHop(ctx context.Context, frozen geminiFroze
 		}
 		chunk, err := decodeGeminiStreamChunk(data)
 		if err != nil {
-			result.Err = &GeminiContinuationError{Reason: "protocol_error"}
+			// Keep the cause in the classification so the continuation driver's
+			// abandon path (and the final surfaced error) preserves what failed
+			// to decode instead of reducing it to a bare protocol_error.
+			result.Err = &GeminiContinuationError{Reason: "protocol_error", Cause: err}
 			break
 		}
 		if collector != nil {
@@ -262,7 +265,7 @@ func decodeGeminiStreamChunk(data []byte) (geminiStreamChunk, error) {
 	// lenientDecode) so the chunk — and with it the whole stream — survives
 	// arguments the v1 parser accepted.
 	if err := lenientDecode(data, &chunk); err != nil {
-		return chunk, fmt.Errorf("invalid Gemini stream chunk")
+		return chunk, fmt.Errorf("decode Gemini stream chunk: %w", err)
 	}
 	return chunk, nil
 }

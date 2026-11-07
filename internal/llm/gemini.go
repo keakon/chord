@@ -849,7 +849,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 
 		chunk, err := decodeGeminiStreamChunk(data)
 		if err != nil {
-			return nil, fmt.Errorf("parse Gemini stream chunk: %w", err)
+			return nil, err
 		}
 		if chunk.Error != nil {
 			return nil, &APIError{

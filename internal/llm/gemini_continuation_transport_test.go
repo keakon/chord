@@ -82,6 +82,27 @@ func TestGeminiContinuationInitialRejectionKeepsClassification(t *testing.T) {
 	}
 }
 
+// An undecodable chunk must keep its decode cause through the transport's
+// protocol-error classification: the surfaced GeminiContinuationError chains
+// down to the actual decode failure instead of a bare reason string.
+func TestGeminiContinuationUndecodableChunkKeepsDecodeCause(t *testing.T) {
+	p, _ := continuationProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "data: {\"candidates\":[{\"content\":\n\n")
+	})
+	frozen := freezeGeminiRequest(p, "model-alias", "test-key", []byte(`{"contents":[]}`))
+	_, err := p.runGeminiContinuation(t.Context(), frozen, nil, geminiRecoveryPolicy{jitter: func(time.Duration) time.Duration { return 0 }, wait: func(context.Context, time.Duration) error { return nil }})
+	if err == nil {
+		t.Fatal("runGeminiContinuation: want error for undecodable chunk")
+	}
+	failure, ok := errors.AsType[*GeminiContinuationError](err)
+	if !ok || failure.Reason != "protocol_error" {
+		t.Fatalf("err = %v, want protocol_error classification", err)
+	}
+	if failure.Cause == nil || !strings.Contains(failure.Cause.Error(), "decode Gemini stream chunk") {
+		t.Fatalf("cause = %v, want chained decode error", failure.Cause)
+	}
+}
+
 func TestGeminiContinuationAcceptedStreamRetainsRecoveryTarget(t *testing.T) {
 	for _, checkpoint := range []bool{false, true} {
 		t.Run(fmt.Sprint(checkpoint), func(t *testing.T) {
