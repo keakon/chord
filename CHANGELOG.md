@@ -9,6 +9,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Streaming gateways must separate SSE events with a blank line. Consecutive `data:` lines are one payload; gateways sending separate JSON messages on consecutive lines must add event delimiters. Incomplete MCP SSE frames are reported as outcome unknown.
 - Session imports and streaming provider responses now reject unescaped control characters inside JSON strings. Exporters and providers must encode tabs and line breaks as `\t` and `\n`.
 - `chord import --json` now emits snake_case top-level keys (`project_root`, `session_id`, `session_dir`, `messages`, `report`) instead of the Go field names (`ProjectRoot`, `SessionID`, `SessionDir`, `Messages`, `Report`), matching the snake_case keys inside the nested `report` object and the rest of Chord's machine-readable outputs. Scripts that consume the JSON summary must read the new key names.
+- Third-party JSON inputs are decoded with strict v2 semantics: duplicate object members and invalid UTF-8 in MCP server responses, headless input commands, and most LLM streaming events are rejected (or skip the event) instead of being silently resolved by last-key-wins. Raw provider captures such as tool arguments and relay headers keep accepting those bytes verbatim.
 
 ### Features
 
@@ -20,10 +21,12 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Reduced context usage after compaction by omitting file-operation lists, folding successful shell-call logs, and removing empty summary sections from model requests. Saved summaries and archives retain the full records.
 - Reduced binary size and temporary memory allocations while decoding streaming responses.
+- Hot-path JSON decoding moved to the standard library's v2 engine: MCP response decoding, session log reading, and LLM SSE event parsing run measurably faster with unchanged allocation counts.
 - Claude and OpenCode imports retain source session titles in `/resume` and the terminal title, making imported conversations easier to identify. Titles are also included in `--dry-run --json` output.
 - Completion reports add `reported_only_in_records` and `observed_only_in_records` summaries when a worker's declared file list and Chord's observed paths can be compared, so the owner can see one-sided records without comparing both lists by hand. The summaries compare retained path spellings only and do not establish missing changes or false reports.
 - Multiple `apply_patch` and `delete` calls in one response run concurrently when their files do not overlap. Conflicting calls within that response keep their order, including calls that touch the same file, a rename endpoint, or an ancestor path. Across agents sharing a checkout, conflicting declared resources are mutually exclusive; execution order follows lease admission.
 - MCP tool failures now separate a request that was never sent, a server-reported error, and a call whose result is unknown. A disconnect, timeout, gateway error, truncated or mismatched response, or stdio EOF that leaves no trustworthy receipt marks the result as unknown and tells the model to verify the external state before retrying instead of presenting an ordinary failure. Cancelling or replacing a turn keeps a completed result and settles an admitted call without one as outcome unknown, never as a call that did not start.
+- MCP responses whose JSON envelope cannot be parsed now settle the matching call immediately with the parse error instead of leaving it to wait for the context deadline.
 
 ### Fixes
 
