@@ -27,6 +27,7 @@
 
 ### 修复
 
+- 终端界面的 Markdown 支持中日韩文字及标点旁的强调写法，例如 `**说明：**正文`。纯 ASCII 上下文和代码中的字面定界符保持原有行为。
 - 流式响应和 HTTP MCP 支持多行 SSE 数据、UTF-8 BOM 及单独 CR 换行。Anthropic 事件允许 `event:` 出现在 `data:` 之后；Responses 数据中的 JSON 前导空白不再导致事件丢失或工具参数混入回复正文。
 - HTTP MCP 收到完整 SSE 事件后才接受响应，同一事件后续数据无效时不再误报成功。
 - Anthropic SSE 流的 `event:` / `data:` 字段省略冒号后的可选空格时也能正确解析；此前这类流会报 `SSE stream ended without message_stop event` 失败。

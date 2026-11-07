@@ -5,6 +5,8 @@ package markdownrender
 import (
 	"strings"
 
+	cjkfriendly "github.com/tats-u/goldmark-cjk-friendly/v2"
+
 	"github.com/keakon/glamour/v2"
 	"github.com/keakon/glamour/v2/ansi"
 
@@ -57,6 +59,8 @@ func (r *Renderer) Render(content string, width int) (lines []string) {
 			glamour.WithStyles(r.style),
 			glamour.WithWordWrap(width),
 			glamour.WithInlineTableLinks(true),
+			// Relax CJK emphasis boundaries without rewriting source text.
+			glamour.WithGoldmarkExtensions(cjkfriendly.CJKFriendlyEmphasis),
 		)
 		if err != nil {
 			return terminaltext.Wrap(fallback, width)

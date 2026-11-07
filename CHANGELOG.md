@@ -27,6 +27,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- TUI Markdown now recognizes emphasis next to Chinese, Japanese and Korean text and punctuation, including `**说明：**正文`. Pure-ASCII contexts and literal delimiters in code keep their existing behavior.
 - Streaming responses and HTTP MCP now handle multiline SSE data, UTF-8 BOMs, and CR-only line endings. Anthropic events also accept `event:` after `data:`. Responses payloads with leading JSON whitespace retain their event type, preventing dropped events or tool arguments appearing as reply text.
 - HTTP MCP waits for a complete SSE event before accepting a response, so invalid trailing data within that event cannot be reported as success.
 - Anthropic SSE streams whose `event:` / `data:` field names omit the optional space after the colon are parsed correctly. Such streams previously failed with `SSE stream ended without message_stop event`.

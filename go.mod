@@ -20,7 +20,7 @@ require (
 	github.com/keakon/bubbles/v2 v2.2.1-fork.3
 	github.com/keakon/bubbletea/v2 v2.0.9-fork.1
 	github.com/keakon/dbus/v5 v5.2.3-fork.2
-	github.com/keakon/glamour/v2 v2.0.1-fork.1
+	github.com/keakon/glamour/v2 v2.0.1-fork.2
 	github.com/keakon/golog v0.4.1
 	github.com/keakon/lipgloss/v2 v2.0.6-fork.1
 	github.com/keakon/ultraviolet v0.0.1-fork.10
@@ -36,6 +36,7 @@ require (
 	github.com/sourcegraph/jsonrpc2 v0.2.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
+	github.com/tats-u/goldmark-cjk-friendly/v2 v2.0.3
 	github.com/yuin/goldmark v1.8.6
 	golang.design/x/clipboard v0.9.0
 	golang.org/x/image v0.46.0
