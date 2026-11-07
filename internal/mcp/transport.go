@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"maps"
@@ -167,9 +168,13 @@ func (t *StdioTransport) readLoop() {
 
 		resp, decodeErr := decodeJSONRPCResponse(line)
 
-		// Notifications from server (ID == 0 with no result) are logged and dropped.
+		// Lines without an extractable ID, result, or error cannot be correlated
+		// with a pending caller: server notifications and envelopes too malformed
+		// to yield an ID both land here and are dropped. Anything with an ID is
+		// routed even when decoding failed, so the caller settles with the parse
+		// error instead of waiting out its context.
 		if resp.ID == 0 && resp.Result == nil && resp.Error == nil {
-			log.Debugf("mcp stdio: received server notification line=%v", string(line))
+			log.Debugf("mcp stdio: dropped unrouteable line err=%v line=%v", decodeErr, string(line))
 			continue
 		}
 
@@ -527,13 +532,16 @@ func readJSONRPCResponse(body io.Reader, contentType string, wantID int) (JSONRP
 	if len(peek) >= 5 && bytes.Equal(peek[:5], []byte("data:")) {
 		return readSSERPCResponse(br, wantID)
 	}
-	var raw json.RawMessage
-	decoder := json.NewDecoder(br)
-	if err := decoder.Decode(&raw); err != nil {
+	decoder := jsontext.NewDecoder(br)
+	raw, err := decoder.ReadValue()
+	if err != nil {
 		return JSONRPCResponse{}, fmt.Errorf("mcp http: decode response: %w", err)
 	}
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); err != io.EOF {
+	// ReadValue returns a view into the decoder's reusable buffer, which the
+	// next ReadValue (even one that ends in io.EOF) overwrites. Detach before
+	// the single-document check below.
+	raw = bytes.Clone(raw)
+	if _, err := decoder.ReadValue(); err != io.EOF {
 		if err != nil {
 			return JSONRPCResponse{}, fmt.Errorf("mcp http: read response end: %w", err)
 		}

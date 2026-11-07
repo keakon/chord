@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	jsonv2 "encoding/json/v2"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
@@ -127,7 +129,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		return fmt.Errorf("mcp initialize %s: %w", c.name, resp.Error)
 	}
 
-	if err := json.Unmarshal(resp.Result, &c.serverInfo); err != nil {
+	if err := jsonv2.Unmarshal(resp.Result, &c.serverInfo); err != nil {
 		return fmt.Errorf("mcp initialize %s: decode result: %w", c.name, err)
 	}
 
@@ -158,10 +160,13 @@ func (c *Client) Initialize(ctx context.Context) error {
 func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMessage) (string, []message.ContentPart, error) {
 	// Bind validation to the directory visible when the call starts.
 	validators := c.outputValidators.Load()
-	// Parse args into a map so the MCP server receives a proper object.
+	// Parse args into a map so the MCP server receives a proper object. Strict
+	// decoding is safe for LLM-originated arguments: the execution pipeline's
+	// schema validation already shadows duplicate keys (recording the ignored
+	// values) and re-encodes the effective arguments before they get here.
 	var argsMap map[string]any
 	if len(args) > 0 {
-		if err := json.Unmarshal(args, &argsMap); err != nil {
+		if err := jsonv2.Unmarshal(args, &argsMap); err != nil {
 			return "", nil, newCallFailure(callNotSent, fmt.Errorf("mcp tools/call: invalid args JSON: %w", err))
 		}
 	}
@@ -189,7 +194,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 	}
 
 	var result toolCallResult
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
+	if err := jsonv2.Unmarshal(resp.Result, &result); err != nil {
 		return "", nil, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err))
 	}
 	if result.Content == nil && (len(result.StructuredContent) == 0 || bytes.Equal(bytes.TrimSpace(result.StructuredContent), []byte("null"))) {

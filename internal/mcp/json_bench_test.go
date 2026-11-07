@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	jsonv2 "encoding/json/v2"
 )
 
 var mcpJSONRPCBenchRequest = JSONRPCRequest{
@@ -55,7 +57,7 @@ func BenchmarkJSONRPCToolCallResultDecode(b *testing.B) {
 					b.Fatal(err)
 				}
 				var result toolCallResult
-				if err := json.Unmarshal(resp.Result, &result); err != nil {
+				if err := jsonv2.Unmarshal(resp.Result, &result); err != nil {
 					b.Fatal(err)
 				}
 			}
