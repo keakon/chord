@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/keakon/chord/internal/permission"
+)
 
 func benchmarkModelForConfirmDialog(tb testing.TB) Model {
 	tb.Helper()
@@ -9,10 +13,12 @@ func benchmarkModelForConfirmDialog(tb testing.TB) Model {
 	m.mode = ModeConfirm
 	m.confirm = confirmState{
 		request: &ConfirmRequest{
-			ToolName:       "Write",
-			ArgsJSON:       `{"path":"docs/guides/performance.md","content":"updated"}`,
-			NeedsApproval:  []string{"docs/guides/performance.md"},
-			AlreadyAllowed: []string{"README.md"},
+			ToolName:            "Write",
+			ArgsJSON:            `{"path":"docs/guides/performance.md","content":"updated"}`,
+			NeedsApproval:       []string{"docs/guides/performance.md"},
+			AlreadyAllowed:      []string{"README.md"},
+			NeedsApprovalRules:  []permission.Rule{{Permission: "write", Pattern: "docs/*", Action: permission.ActionAsk}},
+			AlreadyAllowedRules: []permission.Rule{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}},
 		},
 		prevMode: ModeInsert,
 	}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/keakon/chord/internal/permission"
@@ -50,6 +51,15 @@ func (m *Model) renderConfirmDialog() string {
 
 	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed, req.DoneReport)
 	lines := m.renderConfirmSummary("", summary, innerWidth)[2:]
+	// The rules are facts attached by the permission layer, not a full
+	// attribution of the decision. Requests without rule facts (and Done,
+	// which is never a permission confirmation) keep the original body.
+	if toolNameKey(req.ToolName) != tools.NameDone {
+		if ruleLines := renderConfirmMatchedRules(req.NeedsApprovalRules, innerWidth); len(ruleLines) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, ruleLines...)
+		}
+	}
 	actions := m.renderConfirmOptions()
 	out := renderScrollableDialog(OverlayConfig{
 		Title: "⚠ Confirmation Required", MaxWidth: maxWidth,
@@ -126,6 +136,39 @@ func renderConfirmPathSection(title string, paths []string, innerWidth int) []st
 		}
 	}
 	return lines
+}
+
+// renderConfirmMatchedRules lists the ask rules the permission layer attached
+// to this request. It preserves upstream order and does not deduplicate:
+// aggregatePermissionItems already deduplicates by the full permission.Rule,
+// so the count here is the number of distinct facts the request carries.
+func renderConfirmMatchedRules(rules []permission.Rule, innerWidth int) []string {
+	if len(rules) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(rules)+1)
+	lines = append(lines, currentStyles.ConfirmToolStyle.Render(fmt.Sprintf("Rules requiring approval (%d)", len(rules))))
+	for _, rule := range rules {
+		// Quote the pattern and escape the other fields before styling and
+		// wrapping: raw control bytes (including terminal escapes) stay visible
+		// text, and a real newline in a rule cannot create another row.
+		entry := fmt.Sprintf("- %s: %s → %s",
+			escapedRuleField(rule.Permission),
+			strconv.Quote(rule.Pattern),
+			escapedRuleField(string(rule.Action)))
+		// Word wrapping discards spaces at breaks, changing the rule pattern.
+		for _, row := range terminaltext.Hardwrap(entry, innerWidth) {
+			lines = append(lines, currentStyles.ConfirmToolStyle.Render(row))
+		}
+	}
+	return lines
+}
+
+// escapedRuleField reuses strconv.Quote without its surrounding quotes for
+// fields that are shown unquoted.
+func escapedRuleField(s string) string {
+	quoted := strconv.Quote(s)
+	return quoted[1 : len(quoted)-1]
 }
 
 func (m *Model) renderConfirmOptions() string {
