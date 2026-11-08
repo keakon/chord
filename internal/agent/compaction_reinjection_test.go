@@ -196,7 +196,7 @@ func TestInjectCompactionFileContextBoundsOverlayOnSmallWindow(t *testing.T) {
 
 	window := a.ctxMgr.GetMaxTokens()
 	plan := a.compactionInjectedFileBudgets(msgs)
-	if bound := estimateBytesForTokens(a.ctxMgr, window/compactionReinjectionShareDivisor); plan.maxTotalBytes > bound {
+	if bound := a.ctxMgr.EstimateBytesForTokensCalibrated(window / compactionReinjectionShareDivisor); plan.maxTotalBytes > bound {
 		t.Fatalf("overlay budget %d exceeds the small-window bound %d", plan.maxTotalBytes, bound)
 	}
 	if plan.maxTotalBytes >= compactionInjectedFilesMaxBytes {

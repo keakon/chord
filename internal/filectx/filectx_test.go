@@ -21,7 +21,7 @@ func TestBuildFilePartsWrapsResolvedFiles(t *testing.T) {
 	if len(parts) != 1 {
 		t.Fatalf("len(parts) = %d, want 1", len(parts))
 	}
-	if got := parts[0].Text; !strings.Contains(got, `<file path="a.txt">`) || !strings.Contains(got, "alpha\nbeta") {
+	if got := parts[0].Text; !strings.Contains(got, `<file path="a.txt" covered_lines=`) || !strings.Contains(got, "alpha\nbeta") {
 		t.Fatalf("wrapped part = %q", got)
 	}
 }
@@ -40,7 +40,7 @@ func TestBuildFileRefPartsIncludesRequestedLineRange(t *testing.T) {
 		t.Fatalf("len(parts) = %d, want 1", len(parts))
 	}
 	got := parts[0].Text
-	if !strings.Contains(got, `<file path="a.txt" lines="2-3">`) {
+	if !strings.Contains(got, `<file path="a.txt" lines="2-3" covered_lines="2-3"`) {
 		t.Fatalf("wrapped part missing lines attribute: %q", got)
 	}
 	if strings.Contains(got, "one") || strings.Contains(got, "four") || !strings.Contains(got, "two\nthree") {
@@ -86,7 +86,7 @@ func TestBuildFilePartsTruncatesLargeFiles(t *testing.T) {
 	if len(parts) != 1 {
 		t.Fatalf("len(parts) = %d, want 1", len(parts))
 	}
-	if !strings.Contains(parts[0].Text, "[...truncated, showing first 40 KB only]") {
+	if !strings.Contains(parts[0].Text, "[...truncated to fit the 40 KB file-context byte budget; the file body is incomplete]") {
 		t.Fatalf("expected truncation marker, got %q", parts[0].Text)
 	}
 }
@@ -120,7 +120,7 @@ func TestBuildFilePartsWithOptionsHonorsTotalBudget(t *testing.T) {
 	if len(result.Parts) != 5 {
 		t.Fatalf("len(Parts) = %d, want 5 (4 files + 1 omission note)", len(result.Parts))
 	}
-	if !strings.Contains(result.Parts[len(result.Parts)-1].Text, "additional files omitted") {
+	if !strings.Contains(result.Parts[len(result.Parts)-1].Text, "additional file omitted") {
 		t.Fatalf("expected omission note, got %q", result.Parts[len(result.Parts)-1].Text)
 	}
 }

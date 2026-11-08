@@ -12,6 +12,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/filectx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -286,13 +287,22 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message, mode
 	}
 
 	readRevisions := make(map[string]string, len(keyFiles))
-	result := filectx.BuildFilePartsWithOptions(keyFiles, a.resolveCheckpointFileReadPath, filectx.BuildFilePartsOptions{
+	var readDisplayPath string
+	var firstReadPath string
+	var firstReadData []byte
+	result := filectx.BuildFilePartsWithOptions(keyFiles, func(path string) string {
+		readDisplayPath = path
+		return a.resolveCheckpointFileReadPath(path)
+	}, filectx.BuildFilePartsOptions{
 		MaxFileBytes:  plan.maxFileBytes,
 		MaxTotalBytes: plan.maxTotalBytes,
 		ReadFile: func(path string) ([]byte, error) {
 			data, err := a.readCheckpointFile(path)
 			if err == nil {
-				readRevisions[path] = fmt.Sprintf("%x", sha256.Sum256(data))
+				readRevisions[readDisplayPath] = fmt.Sprintf("%x", sha256.Sum256(data))
+				if firstReadPath == "" {
+					firstReadPath, firstReadData = path, data
+				}
 			}
 			return data, err
 		},
@@ -301,32 +311,40 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message, mode
 		a.compactionFiles.clear()
 		return messages
 	}
-	a.annotateCompactionFileParts(signature, revisions, readRevisions, result.Parts)
-	if result.TruncatedFiles > 0 || result.OmittedFiles > 0 {
-		log.Debugf("compaction key-file context bounded loaded_files=%v truncated_files=%v omitted_files=%v total_bytes=%v max_file_bytes=%v max_total_bytes=%v usable_input_budget=%v remaining_tokens=%v quota_tokens=%v", result.LoadedFiles, result.TruncatedFiles, result.OmittedFiles, result.TotalBytes, plan.maxFileBytes, plan.maxTotalBytes, plan.usableTokens, plan.remainingTokens, plan.quotaTokens)
+	files := result.Parts[:result.LoadedFiles]
+	declared := extractCompactionStateFiles(signature, a.effectiveToolBaseDir())
+	annotateCompactionFileParts(revisions, readRevisions, declared, files)
+	fitted := fitCompactionFileInjection(message.ContentPart{
+		Type: message.ContentPartText,
+		Text: compactionFileCtxPrefix + " for continuation.\n" + compactionFileCtxReloadNote,
+	}, files, result.OmittedFiles, plan, func(maxBytes int) (message.ContentPart, int) {
+		displayPath, _ := message.FirstFileRefPath(files[0].Text)
+		shorter := filectx.BuildFilePartsWithOptions([]string{displayPath}, func(string) string { return firstReadPath }, filectx.BuildFilePartsOptions{
+			MaxFileBytes: maxBytes,
+			ReadFile:     func(string) ([]byte, error) { return firstReadData, nil },
+		})
+		previous, seen := revisions[displayPath]
+		hash := readRevisions[displayPath]
+		shorter.Parts[0].Text = annotateFileRefRevision(shorter.Parts[0].Text, hash, !seen || previous != hash,
+			compactionFileSource(declared, displayPath))
+		return shorter.Parts[0], shorter.TotalBytes
+	})
+	if !fitted.ok {
+		a.compactionFiles.clear()
+		return messages
 	}
-
-	injected := message.Message{
-		Role: message.RoleUser,
-		Kind: message.KindTurnOverlay,
-		Parts: append([]message.ContentPart{{
-			Type: message.ContentPartText,
-			Text: compactionFileCtxPrefix + " for continuation.\n" + compactionFileCtxReloadNote,
-		}}, result.Parts...),
-	}
-	a.trackObservedFileParts(injected.Parts)
+	log.Debugf("compaction key-file context bounded loaded_files=%v omitted_files=%v complete_bytes=%v complete_tokens=%v max_file_bytes=%v max_total_bytes=%v usable_input_budget=%v remaining_tokens=%v quota_tokens=%v", fitted.loaded, fitted.omitted, fitted.cost.bytes, fitted.cost.tokens, plan.maxFileBytes, plan.maxTotalBytes, plan.usableTokens, plan.remainingTokens, plan.quotaTokens)
+	a.trackObservedFileParts(fitted.message.Parts)
 
 	if !a.checkpointFileReplayAllowed(modelRef) {
 		a.compactionFiles.clear()
 	}
-	return a.compactionFiles.replay(messages, checkpointIdx, signature, a.effectiveToolBaseDir(), injected, result.TotalBytes, plan.maxTotalBytes)
+	return a.compactionFiles.replay(
+		messages, checkpointIdx, signature, a.effectiveToolBaseDir(), fitted.message, plan,
+	)
 }
 
-func (a *MainAgent) annotateCompactionFileParts(checkpoint string, revisions, readRevisions map[string]string, parts []message.ContentPart) {
-	if a == nil || checkpoint == "" || len(parts) == 0 {
-		return
-	}
-	declared := extractCompactionStateFiles(checkpoint, a.effectiveToolBaseDir())
+func annotateCompactionFileParts(revisions, readRevisions map[string]string, declared []string, parts []message.ContentPart) {
 	for i := range parts {
 		part := &parts[i]
 		if part.Type != message.ContentPartText || !message.IsFileRefContent(part.Text) {
@@ -336,7 +354,7 @@ func (a *MainAgent) annotateCompactionFileParts(checkpoint string, revisions, re
 		if !ok || displayPath == "" {
 			continue
 		}
-		hash := readRevisions[a.resolveCheckpointFileReadPath(displayPath)]
+		hash := readRevisions[displayPath]
 		if hash == "" {
 			continue
 		}
@@ -379,6 +397,7 @@ type compactionReinjectionPlan struct {
 	usableTokens    int
 	remainingTokens int
 	quotaTokens     int
+	ratio           float64
 }
 
 func (a *MainAgent) compactionInjectedFileBudgets(messages []message.Message) compactionReinjectionPlan {
@@ -389,6 +408,7 @@ func (a *MainAgent) compactionInjectedFileBudgets(messages []message.Message) co
 	if a == nil || a.ctxMgr == nil {
 		return plan
 	}
+	plan.ratio = a.ctxMgr.CalibratedRatio()
 	decision := a.ctxMgr.AutoCompactDecision()
 	usable := decision.UsableInputBudget
 	if usable <= 0 {
@@ -396,13 +416,13 @@ func (a *MainAgent) compactionInjectedFileBudgets(messages []message.Message) co
 		return plan
 	}
 	plan.usableTokens = usable
-	plan.remainingTokens = usable - estimateMessagesTokens(a.ctxMgr, messages)
+	plan.remainingTokens = usable - ctxmgr.EstimateMessagesTokensWithRatio(messages, plan.ratio)
 	plan.quotaTokens = compactionReinjectionQuotaTokens(plan.remainingTokens, usable)
 	if plan.quotaTokens <= 0 {
 		plan.maxTotalBytes = 0
 		return plan
 	}
-	allowed := min(estimateBytesForTokens(a.ctxMgr, plan.quotaTokens), plan.maxTotalBytes)
+	allowed := plan.byteLimit()
 	if allowed < compactionInjectedFilesMinBytes {
 		plan.maxTotalBytes = 0
 		return plan

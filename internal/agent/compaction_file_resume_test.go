@@ -14,7 +14,7 @@ func TestActivateLoadedSessionResetsCompactionFileReplay(t *testing.T) {
 	a.compactionFiles.checkpoint = "previous checkpoint"
 	a.compactionFiles.root = "/previous-root"
 	a.compactionFiles.paths = []string{"notes.md"}
-	a.compactionFiles.versions = []compactionFileVersion{{before: 1, anchor: "a", message: message.Message{Role: message.RoleUser}, bytes: 1}}
+	a.compactionFiles.versions = []compactionFileVersion{{before: 1, anchor: "a", message: message.Message{Role: message.RoleUser}}}
 
 	a.activateLoadedSession(&loadedSessionState{SessionPath: a.sessionDir})
 

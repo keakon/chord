@@ -136,7 +136,7 @@ func TestHandleInsertKeySubmitsFileRefsParsedFromLargePaste(t *testing.T) {
 	if len(parts) != 2 {
 		t.Fatalf("sent parts len = %d, want 2 (hidden paste + file)", len(parts))
 	}
-	if !strings.Contains(parts[1].Text, `<file path="docs/RATE_LIMIT_PLAN.md">`) {
+	if !strings.Contains(parts[1].Text, `<file path="docs/RATE_LIMIT_PLAN.md" covered_lines=`) {
 		t.Fatalf("second part = %q, want embedded file ref", parts[1].Text)
 	}
 	if got := m.viewport.visibleBlocks()[0].FileRefs; len(got) != 1 || got[0] != "docs/RATE_LIMIT_PLAN.md" {
@@ -210,7 +210,7 @@ func TestHandleInsertKeySubmitsImagePlaceholderBeforeLargePasteAndFileRef(t *tes
 	if parts[1].Type != "text" || parts[1].Text != longText || parts[1].DisplayText == "" {
 		t.Fatalf("parts[1] = %#v, want hidden large-paste text part", parts[1])
 	}
-	if !strings.Contains(parts[2].Text, `<file path="docs/RATE_LIMIT_PLAN.md">`) {
+	if !strings.Contains(parts[2].Text, `<file path="docs/RATE_LIMIT_PLAN.md" covered_lines=`) {
 		t.Fatalf("parts[2] = %q, want embedded file ref", parts[2].Text)
 	}
 	if got := m.viewport.visibleBlocks()[0].Content; got != longText {

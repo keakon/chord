@@ -136,17 +136,20 @@ func TestCompactionFileReplayRevocationAndDeletion(t *testing.T) {
 
 func TestCompactionFileReplayBoundsAndCheckpointReset(t *testing.T) {
 	var r compactionFileReplay
+	plan := compactionReinjectionPlan{}
+	largePlan := compactionReinjectionPlan{maxTotalBytes: 10000}
 	raw := []message.Message{{Role: message.RoleUser, Content: "checkpoint", IsCompactionSummary: true}}
 	snapshot := func(text string) message.Message {
 		return message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Parts: []message.ContentPart{{Type: message.ContentPartText, Text: compactionFileCtxPrefix}, {Type: message.ContentPartText, Text: `<file path="notes.md">` + text + `</file>`}}}
 	}
-	r.replay(raw, 0, "checkpoint", "/root", snapshot("old"), 10, 25)
+	plan.maxTotalBytes = 2 * plan.injectionCost(snapshot("refresh-0")).bytes
+	r.replay(raw, 0, "checkpoint", "/root", snapshot("old"), plan)
 	raw = append(raw, message.Message{Role: message.RoleUser, Content: "next"})
-	r.replay(raw, 0, "checkpoint", "/root", snapshot("new"), 10, 25)
+	r.replay(raw, 0, "checkpoint", "/root", snapshot("new"), plan)
 	if len(r.versions) != 2 {
 		t.Fatal("expected two versions")
 	}
-	out := r.replay(raw, 0, "checkpoint", "/root", snapshot("latest"), 10, 25)
+	out := r.replay(raw, 0, "checkpoint", "/root", snapshot("latest"), plan)
 	if len(r.versions) != 2 || !strings.Contains(out[1].Parts[1].Text, "old") {
 		t.Fatal("budget pressure rewrote a version the provider may already cache")
 	}
@@ -154,7 +157,7 @@ func TestCompactionFileReplayBoundsAndCheckpointReset(t *testing.T) {
 		t.Fatal("budget pressure lost the refreshed snapshot")
 	}
 	for i := range 5 {
-		out = r.replay(raw, 0, "checkpoint", "/root", snapshot(fmt.Sprintf("refresh-%d", i)), 10, 25)
+		out = r.replay(raw, 0, "checkpoint", "/root", snapshot(fmt.Sprintf("refresh-%d", i)), plan)
 		if len(r.versions) != 2 {
 			t.Fatalf("over-budget refresh grew the version list to %d", len(r.versions))
 		}
@@ -162,16 +165,16 @@ func TestCompactionFileReplayBoundsAndCheckpointReset(t *testing.T) {
 	if !strings.Contains(out[len(out)-1].Parts[1].Text, "refresh-4") {
 		t.Fatal("repeated budget refresh kept a stale snapshot")
 	}
-	r.replay(raw, 0, "next checkpoint", "/root", snapshot("latest"), 10, 25)
+	r.replay(raw, 0, "next checkpoint", "/root", snapshot("latest"), plan)
 	if len(r.versions) != 1 || r.checkpoint != "next checkpoint" {
 		t.Fatal("checkpoint retained prior replay state")
 	}
-	r.replay(raw, 0, "next checkpoint", "/other-root", snapshot("other workspace"), 10, 25)
+	r.replay(raw, 0, "next checkpoint", "/other-root", snapshot("other workspace"), plan)
 	if len(r.versions) != 1 || r.root != "/other-root" {
 		t.Fatal("workspace change retained prior replay state")
 	}
 	for i := range 20 {
-		out = r.replay(raw, 0, "next checkpoint", "/other-root", snapshot(strings.Repeat("x", i+1)), 1, 10000)
+		out = r.replay(raw, 0, "next checkpoint", "/other-root", snapshot(strings.Repeat("x", i+1)), largePlan)
 		if len(r.versions) > compactionInjectedFilesMaxVersions {
 			t.Fatal("unbounded snapshot versions")
 		}
@@ -181,6 +184,27 @@ func TestCompactionFileReplayBoundsAndCheckpointReset(t *testing.T) {
 	}
 	if !strings.Contains(out[1].Parts[1].Text, "other workspace") {
 		t.Fatal("version-count bound moved the first published bundle")
+	}
+}
+
+func TestCompactionFileReplayHonorsTokenQuota(t *testing.T) {
+	var r compactionFileReplay
+	// Bytes would allow three versions; the token quota allows only two.
+	plan := compactionReinjectionPlan{maxTotalBytes: 1000, ratio: 1}
+	snapshot := func(text string) message.Message {
+		return message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Parts: []message.ContentPart{{Type: message.ContentPartText, Text: compactionFileCtxPrefix}, {Type: message.ContentPartText, Text: `<file path="notes.md">` + fmt.Sprintf("%-8s", text) + `</file>`}}}
+	}
+	plan.quotaTokens = 2 * plan.injectionCost(snapshot("first")).tokens
+	raw := []message.Message{{Role: message.RoleUser, Content: "checkpoint", IsCompactionSummary: true}}
+	r.replay(raw, 0, "checkpoint", "/root", snapshot("first"), plan)
+	raw = append(raw, message.Message{Role: message.RoleUser, Content: "next"})
+	r.replay(raw, 0, "checkpoint", "/root", snapshot("second"), plan)
+	out := r.replay(raw, 0, "checkpoint", "/root", snapshot("latest"), plan)
+	if len(r.versions) != 2 {
+		t.Fatalf("versions = %d, want 2 under the token quota", len(r.versions))
+	}
+	if !strings.Contains(out[1].Parts[1].Text, "first") || !strings.Contains(out[len(out)-1].Parts[1].Text, "latest") {
+		t.Fatal("token-quota eviction dropped the current snapshot or rewrote the cached prefix")
 	}
 }
 

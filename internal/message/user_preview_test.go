@@ -111,6 +111,31 @@ func TestFirstFileRefPathAllowsAdditionalAttributes(t *testing.T) {
 	}
 }
 
+func TestFileRefParsersKeepPathAndLinesWithCoverageAttributes(t *testing.T) {
+	const text = `<file path="notes.md" lines="2-4" covered_lines="2-4" total_lines="9" truncated="true" partial_last_line="true" revision="sha256:abc" changed_since_checkpoint="false" source="key_file">` + "\nbeta\r\ngamma\n</file>"
+	if !IsFileRefContent(text) {
+		t.Fatal("coverage attributes hid the file reference")
+	}
+	path, ok := FirstFileRefPath(text)
+	if !ok || path != "notes.md" {
+		t.Fatalf("FirstFileRefPath = (%q, %v)", path, ok)
+	}
+	ref, body, ok := ParseSingleFileRefContent(text)
+	if !ok || ref.Path != "notes.md" || ref.Lines != "2-4" || body != "beta\r\ngamma" {
+		t.Fatalf("ParseSingleFileRefContent = (%#v, %q, %v)", ref, body, ok)
+	}
+	if got := FileRefs(text); len(got) != 1 || got[0] != (FileRef{Path: "notes.md", Lines: "2-4"}) {
+		t.Fatalf("FileRefs = %#v", got)
+	}
+	if got := FileRefPaths(text); len(got) != 1 || got[0] != "notes.md" {
+		t.Fatalf("FileRefPaths = %#v", got)
+	}
+	msg := Message{Role: RoleUser, Parts: []ContentPart{{Type: ContentPartText, Text: text}, {Type: ContentPartText, Text: "please continue"}}}
+	if got := UserPromptInstructionText(msg); got != "please continue" {
+		t.Fatalf("UserPromptInstructionText = %q", got)
+	}
+}
+
 func TestParseSingleFileRefContentPreservesExactBody(t *testing.T) {
 	ref, body, ok := ParseSingleFileRefContent(`<file path="a.txt">` + "\nfirst\nsecond\n\n</file>\n")
 	if !ok {

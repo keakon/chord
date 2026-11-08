@@ -27,10 +27,4 @@ func TestEstimateMessagesTokensRouting(t *testing.T) {
 	if got := estimateMessageTokens(m, msg); got != 600 {
 		t.Fatalf("estimateMessageTokens(calibrated) = %d, want 600", got)
 	}
-	if got := estimateBytesForTokens(m, 600); got != 3000 {
-		t.Fatalf("estimateBytesForTokens(calibrated) = %d, want 3000", got)
-	}
-	if got := estimateBytesForTokens(nil, 600); got != 1800 {
-		t.Fatalf("estimateBytesForTokens(nil) = %d, want 1800", got)
-	}
 }

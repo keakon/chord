@@ -89,6 +89,9 @@ func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 	if len(first[1].Parts) < 2 || !strings.Contains(first[1].Parts[1].Text, `revision="sha256:`) || !strings.Contains(first[1].Parts[1].Text, `changed_since_checkpoint="false"`) {
 		t.Fatalf("injected file revision metadata = %q", first[1].Parts[1].Text)
 	}
+	if !strings.Contains(first[1].Parts[1].Text, `covered_lines="1-1" total_lines="1"`) || strings.Contains(first[1].Parts[1].Text, `truncated=`) {
+		t.Fatalf("injected line facts = %q", first[1].Parts[1].Text)
+	}
 	if paths := message.FileRefPaths(first[1].Parts[1].Text); !reflect.DeepEqual(paths, []string{"internal/agent/compaction.go"}) {
 		t.Fatalf("annotated file-ref paths = %#v", paths)
 	}
@@ -204,20 +207,92 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 		t.Fatalf("len(got) = %d, want 3", len(got))
 	}
 	parts := got[1].Parts
-	if len(parts) != 6 {
-		t.Fatalf("len(parts) = %d, want 6 (system + 4 files + omission note)", len(parts))
-	}
-	if !strings.Contains(parts[len(parts)-1].Text, "additional files omitted") {
-		t.Fatalf("expected omission note, got %q", parts[len(parts)-1].Text)
-	}
-	for i := 1; i < len(parts)-1; i++ {
-		if !strings.Contains(parts[i].Text, "showing first 12 KB only") {
-			t.Fatalf("expected per-file truncation note in part %d, got %q", i, parts[i].Text)
+	plan := a.compactionInjectedFileBudgets(msgs)
+	completeBytes := 0
+	fileParts := 0
+	for i, part := range parts {
+		completeBytes += len(part.Text)
+		if i == 0 || !message.IsFileRefContent(part.Text) {
+			continue
 		}
+		fileParts++
+		for _, want := range []string{
+			"truncated to fit the 12 KB file-context byte budget",
+			`truncated="true"`,
+			`total_lines="2048"`,
+			`covered_lines="1-`,
+			`revision="sha256:`,
+			`source="key_file"`,
+		} {
+			if !strings.Contains(part.Text, want) {
+				t.Fatalf("injected part %d missing %q: %q", i, want, part.Text)
+			}
+		}
+	}
+	if fileParts == 0 || len(parts) != fileParts+2 {
+		t.Fatalf("parts = %d, file parts = %d, want system + files + omission note", len(parts), fileParts)
+	}
+	// Four truncated bodies fit the raw-body budget, but their tags, hints and
+	// annotations do not fit the complete injection cap, so one file is dropped.
+	if fileParts >= 4 {
+		t.Fatalf("complete-overhead accounting kept %d files", fileParts)
+	}
+	if !strings.Contains(parts[len(parts)-1].Text, "2 additional files omitted") {
+		t.Fatalf("omission note was not regenerated for the dropped file: %q", parts[len(parts)-1].Text)
+	}
+	if completeBytes > plan.maxTotalBytes {
+		t.Fatalf("complete injection = %d bytes, want <= %d (tags, notes and annotations included)", completeBytes, plan.maxTotalBytes)
 	}
 	firstPath := filepath.Join(projectRoot, filepath.FromSlash(keyFiles[0]))
 	if observation := a.fileTrack.Observation(firstPath, a.instanceID, computeFileHash(firstPath)); observation.Observed {
 		t.Fatalf("truncated key file was incorrectly recorded as a complete observation: %+v", observation)
+	}
+}
+
+func TestInjectCompactionFileContextRefreshesCoverageFacts(t *testing.T) {
+	t.Parallel()
+	projectRoot := t.TempDir()
+	path := filepath.Join(projectRoot, "notes.md")
+	write := func(text string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(strings.Repeat("short line\n", 20))
+	a := newTestMainAgent(t, projectRoot)
+	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
+	summary := buildCompactionCheckpointMessage(
+		"## Goal\n- continue\n\n## Files and Evidence\n- notes.md\n\n## Next Step\n- continue",
+		nil, "model_summary", nil,
+	)
+	msgs := []message.Message{
+		{Role: message.RoleUser, IsCompactionSummary: true, Content: summary},
+		{Role: message.RoleUser, Content: "continue"},
+	}
+	first, _ := injectCompactionFileContextForTest(a, msgs)
+	if len(first) != 3 || !strings.Contains(first[1].Parts[1].Text, `covered_lines="1-20" total_lines="20"`) || strings.Contains(first[1].Parts[1].Text, `truncated=`) {
+		t.Fatalf("initial coverage facts = %#v", first)
+	}
+
+	write(strings.Repeat("abcdefghij\n", 2000))
+	updated, _ := injectCompactionFileContextForTest(a, msgs)
+	if len(updated) != 3 {
+		t.Fatalf("len(updated) = %d, want 3", len(updated))
+	}
+	part := updated[1].Parts[1].Text
+	if !strings.Contains(part, `total_lines="2000"`) || !strings.Contains(part, `truncated="true"`) || !strings.Contains(part, `changed_since_checkpoint="true"`) {
+		t.Fatalf("refresh kept stale coverage or revision facts: %q", part)
+	}
+	if strings.Contains(part, `covered_lines="1-20"`) {
+		t.Fatalf("refresh kept the old covered range: %q", part)
+	}
+
+	a.compactionFiles.reset()
+	resumed, _ := injectCompactionFileContextForTest(a, msgs)
+	if len(resumed) != 3 || !strings.Contains(resumed[1].Parts[1].Text, `total_lines="2000"`) || !strings.Contains(resumed[1].Parts[1].Text, `truncated="true"`) {
+		t.Fatalf("fresh runtime did not rebuild the current coverage facts: %#v", resumed)
 	}
 }
 

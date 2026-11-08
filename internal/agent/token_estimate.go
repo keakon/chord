@@ -22,15 +22,6 @@ func estimateMessageTokens(mgr *ctxmgr.Manager, msg message.Message) int {
 	return estimateMessagesTokens(mgr, []message.Message{msg})
 }
 
-// estimateBytesForTokens inverts the token estimate so byte budgets derived
-// from remaining-token budgets follow the same accounting convention.
-func estimateBytesForTokens(mgr *ctxmgr.Manager, tokens int) int {
-	if mgr == nil {
-		return tokens * 3
-	}
-	return mgr.EstimateBytesForTokensCalibrated(tokens)
-}
-
 // EstimateTokensForText exposes the usage-calibrated estimator for plain text
 // (compact_context continuation-state budgeting). The text is wrapped in a
 // single user message so the byte accounting and calibration ratio match every

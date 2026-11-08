@@ -190,7 +190,7 @@ func TestSubmitPlainAtMentionSendsFileParts(t *testing.T) {
 	if got := parts[0].Text; got != "update @AGENTS.md" {
 		t.Fatalf("prompt part text = %q, want original prompt", got)
 	}
-	if !message.IsFileRefContent(parts[1].Text) || !strings.Contains(parts[1].Text, `<file path="AGENTS.md">`) || !strings.Contains(parts[1].Text, "agent rules") {
+	if !message.IsFileRefContent(parts[1].Text) || !strings.Contains(parts[1].Text, `<file path="AGENTS.md" covered_lines=`) || !strings.Contains(parts[1].Text, "agent rules") {
 		t.Fatalf("file part = %q, want injected AGENTS.md content", parts[1].Text)
 	}
 }
@@ -526,11 +526,20 @@ func TestBuildFileRefPartsInjectsLineRange(t *testing.T) {
 		t.Fatalf("parts len = %d, want user text + file ref", len(parts))
 	}
 	got := parts[1].Text
-	if !strings.Contains(got, `<file path="main.go" lines="2-3">`) {
+	if !strings.Contains(got, `<file path="main.go" lines="2-3" covered_lines="2-3" total_lines="4"`) {
 		t.Fatalf("file ref missing lines attribute: %q", got)
 	}
 	if strings.Contains(got, "one") || strings.Contains(got, "four") || !strings.Contains(got, "two\nthree") {
 		t.Fatalf("file ref has wrong body: %q", got)
+	}
+}
+
+func TestFileRefsFromPartsIgnoresCoverageAttributes(t *testing.T) {
+	parts := []message.ContentPart{{Type: "text", Text: `<file path="main.go" lines="2-3" covered_lines="2-3" total_lines="4" truncated="true" partial_last_line="true">` + "\nbody\n</file>"}}
+	got := fileRefsFromParts(parts)
+	want := []string{"main.go:2-3"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("fileRefsFromParts() = %#v, want %#v", got, want)
 	}
 }
 

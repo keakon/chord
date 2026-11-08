@@ -19,6 +19,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Injected `@path` and post-compaction file blocks now state the file's total line count and the returned line range, and flag budget truncation and an incomplete last line. A cut body ends with an explicit incompleteness note instead of resembling a full file.
 - Reduced context usage after compaction by omitting file-operation lists, folding successful shell-call logs, and removing empty summary sections from model requests. Saved summaries and archives retain the full records.
 - Reduced binary size and temporary memory allocations while decoding streaming responses.
 - Hot-path JSON decoding moved to the standard library's v2 engine: MCP response decoding, session log reading, and LLM SSE event parsing run measurably faster with unchanged allocation counts.

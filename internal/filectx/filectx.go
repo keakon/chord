@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -53,7 +54,9 @@ type BuildFilePartsResult struct {
 	LoadedFiles    int
 	TruncatedFiles int
 	OmittedFiles   int
-	TotalBytes     int
+	// TotalBytes counts retained raw file bodies only. Wrappers, attributes,
+	// truncation and omission notes are not part of this budget.
+	TotalBytes int
 }
 
 func (o BuildFilePartsOptions) defaults() BuildFilePartsOptions {
@@ -100,6 +103,9 @@ func BuildFilePartsWithOptions(paths []string, resolvePath func(string) string, 
 // encodes each successfully loaded file as a <file path="...">...</file> text
 // part. References with Lines set include only that 1-based inclusive line range
 // and add a lines="..." attribute while keeping path as the actual file path.
+// For plain UTF-8 text the wrapper also carries covered_lines, total_lines and,
+// when applicable, truncated and partial_last_line, all computed from the same
+// complete read as the retained raw body.
 func BuildFileRefParts(refs []FileRef, resolvePath func(string) string) []message.ContentPart {
 	return BuildFileRefPartsWithOptions(refs, resolvePath, BuildFilePartsOptions{}).Parts
 }
@@ -137,17 +143,6 @@ func BuildFileRefPartsWithOptions(refs []FileRef, resolvePath func(string) strin
 		if err != nil {
 			continue
 		}
-		if ref.Lines.IsSet() {
-			if !ref.Lines.IsValid() {
-				continue
-			}
-			selected, ok := selectLineRange(data, ref.Lines)
-			if !ok {
-				continue
-			}
-			data = selected
-		}
-
 		effectiveMaxBytes := opts.MaxFileBytes
 		if opts.MaxTotalBytes > 0 && remainingTotal < effectiveMaxBytes {
 			effectiveMaxBytes = remainingTotal
@@ -157,40 +152,68 @@ func BuildFileRefPartsWithOptions(refs []FileRef, resolvePath func(string) strin
 			break
 		}
 
-		truncated := false
-		if len(data) > effectiveMaxBytes {
-			data = data[:effectiveMaxBytes]
-			if idx := bytes.LastIndexByte(data, '\n'); idx > 0 {
-				data = data[:idx]
-			}
-			truncated = true
+		content := prepareFilePart(data, ref.Lines, effectiveMaxBytes)
+		if !content.ok {
+			continue
 		}
-		body := string(data)
-		if truncated {
-			body += fmt.Sprintf("\n[...truncated, showing first %s only]", formatByteBudget(effectiveMaxBytes))
+		body := string(content.body)
+		if content.truncated {
+			body += fmt.Sprintf("\n[...truncated to fit the %s file-context byte budget; the file body is incomplete]", formatByteBudget(effectiveMaxBytes))
 			result.TruncatedFiles++
 		}
 		openTag := fmt.Sprintf("%s%q", message.FileRefOpenTag, path)
 		if ref.Lines.IsSet() {
 			openTag += fmt.Sprintf(" lines=%q", ref.Lines.String())
 		}
+		openTag += fileLineAttributes(content)
 		result.Parts = append(result.Parts, message.ContentPart{
 			Type: message.ContentPartText,
 			Text: fmt.Sprintf("%s>\n%s\n</file>", openTag, body),
 		})
 		result.LoadedFiles++
-		result.TotalBytes += len(data)
+		result.TotalBytes += len(content.body)
 		if opts.MaxTotalBytes > 0 {
-			remainingTotal -= len(data)
+			remainingTotal -= len(content.body)
 		}
 	}
 	if opts.MaxTotalBytes > 0 && result.OmittedFiles > 0 {
 		result.Parts = append(result.Parts, message.ContentPart{
 			Type: message.ContentPartText,
-			Text: fmt.Sprintf("[... additional files omitted after reaching the total file-context budget (%s)]", formatByteBudget(opts.MaxTotalBytes)),
+			Text: OmittedFilesNote(result.OmittedFiles, opts.MaxTotalBytes),
 		})
 	}
 	return result
+}
+
+// OmittedFilesNote builds the shared tail-omission note. Callers that drop
+// additional whole file parts from an assembled bundle must regenerate it with
+// the new omitted count instead of truncating an annotated part.
+func OmittedFilesNote(omitted, totalBudget int) string {
+	noun := "files"
+	if omitted == 1 {
+		noun = "file"
+	}
+	return fmt.Sprintf("[... %d additional %s omitted after reaching the total file-context budget (%s)]", omitted, noun, formatByteBudget(totalBudget))
+}
+
+// fileLineAttributes reports the coverage facts of the retained raw body.
+// lines keeps its original meaning: the range the caller requested.
+func fileLineAttributes(content filePartContent) string {
+	if !content.hasFacts {
+		return ""
+	}
+	covered := "none"
+	if content.coveredStart > 0 && content.coveredEnd >= content.coveredStart {
+		covered = fmt.Sprintf("%d-%d", content.coveredStart, content.coveredEnd)
+	}
+	attrs := fmt.Sprintf(" covered_lines=%q total_lines=%q", covered, strconv.Itoa(content.totalLines))
+	if content.truncated {
+		attrs += ` truncated="true"`
+	}
+	if content.partialLastLine {
+		attrs += ` partial_last_line="true"`
+	}
+	return attrs
 }
 
 func selectLineRange(data []byte, lineRange LineRange) ([]byte, bool) {

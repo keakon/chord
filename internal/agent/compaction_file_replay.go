@@ -14,8 +14,9 @@ import (
 
 // Earlier snapshot versions are retained only for a provider/model that has
 // already observed cache hits: those hits establish that prefix reuse is
-// available. Model pricing is not consulted; byte and version limits bound the
-// extra history, without predicting future request counts.
+// available. Model pricing is not consulted; complete injection byte/token
+// costs and a version limit bound the extra history, without predicting future
+// request counts.
 func (a *MainAgent) checkpointFileReplayAllowed(modelRef string) bool {
 	if a == nil || a.cacheHitTracker == nil {
 		return false
@@ -65,7 +66,6 @@ type compactionFileVersion struct {
 	before  int
 	anchor  string
 	message message.Message
-	bytes   int
 }
 
 func (r *compactionFileReplay) clear() {
@@ -114,7 +114,7 @@ func compactionFileAnchor(m message.Message) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (r *compactionFileReplay) replay(messages []message.Message, checkpoint int, signature, root string, current message.Message, bytes, budget int) []message.Message {
+func (r *compactionFileReplay) replay(messages []message.Message, checkpoint int, signature, root string, current message.Message, plan compactionReinjectionPlan) []message.Message {
 	var paths []string
 	for _, p := range current.Parts {
 		paths = append(paths, message.FileRefPaths(p.Text)...)
@@ -122,48 +122,55 @@ func (r *compactionFileReplay) replay(messages []message.Message, checkpoint int
 	// Dropped paths may reflect permissions, deletion, a symlink escape or a
 	// tighter budget. Never replay their previously cached contents.
 	reset := r.checkpoint != signature || r.root != root || !slices.Equal(r.paths, paths)
-	total := 0
+	snapshots := make([]message.Message, 0, len(r.versions)+1)
 	for _, v := range r.versions {
 		if v.before > len(messages) || v.before <= checkpoint || compactionFileAnchor(messages[v.before-1]) != v.anchor {
 			reset = true
 			break
 		}
-		total += v.bytes
+		snapshots = append(snapshots, v.message)
 	}
 	if reset {
 		r.clear()
 		r.checkpoint, r.root, r.paths = signature, root, paths
+		snapshots = snapshots[:0]
 	}
+	limit := compactionFileInjectionCost{bytes: plan.maxTotalBytes, tokens: plan.quotaTokens}
 	changed := len(r.versions) == 0 || !reflect.DeepEqual(r.versions[len(r.versions)-1].message.Parts, current.Parts)
-	if changed {
+	if changed || !plan.injectionCost(snapshots...).fits(limit) {
 		switch {
 		case len(r.versions) == 0:
 			// Nothing after a fresh checkpoint is cached yet, so the bundle can
-			// sit directly behind it without replacing a published item.
+			// sit directly behind it without replacing a published item. The
+			// caller already measured this snapshot against the same limit.
 			r.versions = append(r.versions, compactionFileVersion{
-				before: checkpoint + 1, anchor: compactionFileAnchor(messages[checkpoint]), message: current, bytes: bytes,
+				before: checkpoint + 1, anchor: compactionFileAnchor(messages[checkpoint]), message: current,
 			})
-		case total+bytes <= budget && len(r.versions) < compactionInjectedFilesMaxVersions:
+		case len(r.versions) < compactionInjectedFilesMaxVersions && plan.injectionCost(append(snapshots, current)...).fits(limit):
 			// Appending at the tail leaves every earlier byte in place, so the
 			// prefix the provider already cached keeps matching.
 			r.versions = append(r.versions, compactionFileVersion{
-				before: len(messages), anchor: compactionFileAnchor(messages[len(messages)-1]), message: current, bytes: bytes,
+				before: len(messages), anchor: compactionFileAnchor(messages[len(messages)-1]), message: current,
 			})
 		default:
-			// The bundle is at its byte or version bound. Refresh the newest
-			// published position in place instead of restarting the bundle
-			// behind the checkpoint: rewriting that early item invalidates
+			// The bundle is at its byte, token or version bound. Refresh the
+			// newest published position in place instead of restarting the
+			// bundle behind the checkpoint: rewriting that early item invalidates
 			// every message after it, while the newest position only costs the
 			// messages appended since it was published. Older versions stay
 			// byte-identical, so they keep hitting the provider cache, and only
 			// trailing versions are dropped as far as the refreshed bundle
 			// needs room.
-			for len(r.versions) > 1 && total-r.versions[len(r.versions)-1].bytes+bytes > budget {
-				total -= r.versions[len(r.versions)-1].bytes
+			for {
+				snapshots[len(snapshots)-1] = current
+				if len(r.versions) == 1 || plan.injectionCost(snapshots...).fits(limit) {
+					break
+				}
+				snapshots = snapshots[:len(snapshots)-1]
 				r.versions = r.versions[:len(r.versions)-1]
 			}
 			last := &r.versions[len(r.versions)-1]
-			last.message, last.bytes = current, bytes
+			last.message = current
 		}
 	}
 	out := make([]message.Message, 0, len(messages)+len(r.versions))

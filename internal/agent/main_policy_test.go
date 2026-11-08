@@ -308,7 +308,7 @@ func TestStartPlanExecutionPromptUsesGenericPlanExecutionModeWhenDelegateUnavail
 	if !strings.Contains(last, "Execute the plan at @") || !strings.Contains(last, planPath) {
 		t.Fatalf("bootstrap execution message should @-reference plan path %q: %q", planPath, last)
 	}
-	if len(msgs[len(msgs)-1].Parts) < 2 || !strings.Contains(msgs[len(msgs)-1].Parts[1].Text, `<file path="`+planPath+`">`) {
+	if len(msgs[len(msgs)-1].Parts) < 2 || !strings.Contains(msgs[len(msgs)-1].Parts[1].Text, `<file path="`+planPath+`" covered_lines=`) {
 		t.Fatalf("bootstrap execution message should include referenced plan file part, got %#v", msgs[len(msgs)-1].Parts)
 	}
 	if !strings.Contains(last, "execute the plan using the visible tools and coordination mechanisms available in this role") {
