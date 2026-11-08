@@ -273,8 +273,6 @@ type dumpJSONWriter struct {
 	w          io.Writer
 	err        error
 	wroteField bool
-	chunkBuf   bytes.Buffer
-	chunkEnc   *json.Encoder
 }
 
 func (w *dumpJSONWriter) writeString(s string) {
@@ -362,19 +360,11 @@ func (w *dumpJSONWriter) stringArrayField(name string, values []string) {
 			w.writeString(",")
 		}
 		w.writeString("\n    ")
-		// Reuse one encoder and buffer so each chunk is not copied into a fresh
-		// []byte. Encoder appends a newline; drop it to keep the array layout.
-		if w.chunkEnc == nil {
-			w.chunkEnc = json.NewEncoder(&w.chunkBuf)
-		}
-		w.chunkBuf.Reset()
-		if err := w.chunkEnc.Encode(value); err != nil {
+		// jsonx.Marshal emits no trailing newline, so the array layout stays intact.
+		data, err := jsonx.Marshal(value)
+		if err != nil {
 			w.err = err
 			return
-		}
-		data := w.chunkBuf.Bytes()
-		if n := len(data); n > 0 && data[n-1] == '\n' {
-			data = data[:n-1]
 		}
 		w.writeBytes(data)
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/sessionimport"
 )
 
@@ -70,9 +70,7 @@ func newImportCmd() *cobra.Command {
 			}
 
 			if jsonOut {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(res)
+				return jsonx.EncodeIndent(cmd.OutOrStdout(), res, "", "  ")
 			}
 
 			if dryRun {

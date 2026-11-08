@@ -70,6 +70,14 @@ func Encode(w io.Writer, v any) error {
 	return jsonv2.MarshalEncode(jsontext.NewEncoder(w), v, canonical()...)
 }
 
+// EncodeIndent writes v as one indented JSON value followed by a newline — the
+// same shape as json.NewEncoder(w) with SetIndent, sharing the canonical
+// option set.
+func EncodeIndent(w io.Writer, v any, prefix, indent string) error {
+	enc := jsontext.NewEncoder(w, jsontext.WithIndentPrefix(prefix), jsontext.WithIndent(indent))
+	return jsonv2.MarshalEncode(enc, v, canonical()...)
+}
+
 // EscapeForPrompt escapes the three characters the v1 API escaped on top of
 // the JSON requirements. Some sites embed canonically encoded text verbatim
 // into prompt content (skill listings, memory reminders); there "<" in

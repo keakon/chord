@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/mcp"
 )
 
@@ -128,7 +128,7 @@ func newDoctorMCPCmd() *cobra.Command {
 		}
 		report.DurationMS = time.Since(started).Milliseconds()
 		if jsonOutput {
-			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(report); err != nil {
+			if err := jsonx.Encode(cmd.OutOrStdout(), report); err != nil {
 				return mcpCommandError(err, 1)
 			}
 		} else {

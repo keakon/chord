@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 )
 
@@ -196,10 +197,9 @@ func appendTaskArchive(sessionDir string, records []*DurableTaskRecord) error {
 	if err != nil {
 		return fmt.Errorf("open task archive: %w", err)
 	}
-	enc := json.NewEncoder(f)
 	now := time.Now()
 	for _, rec := range records {
-		if err := enc.Encode(archivedTaskRecord{ArchivedAt: now, Task: rec}); err != nil {
+		if err := jsonx.Encode(f, archivedTaskRecord{ArchivedAt: now, Task: rec}); err != nil {
 			_ = f.Close()
 			return fmt.Errorf("append task archive: %w", err)
 		}
@@ -286,10 +286,9 @@ func rewriteMailboxLog(sessionDir string, msgs []SubAgentMailboxMessage) error {
 		return fmt.Errorf("open compacted mailbox log: %w", err)
 	}
 	w := bufio.NewWriter(f)
-	enc := json.NewEncoder(w)
 	for _, msg := range msgs {
 		msg.Consumed = false
-		if err := enc.Encode(msg); err != nil {
+		if err := jsonx.Encode(w, msg); err != nil {
 			_ = f.Close()
 			return fmt.Errorf("write compacted mailbox log: %w", err)
 		}
@@ -326,7 +325,6 @@ func compactMailboxAckLog(sessionDir string, kept []SubAgentMailboxMessage) erro
 		return fmt.Errorf("open compacted mailbox ack log: %w", err)
 	}
 	w := bufio.NewWriter(f)
-	enc := json.NewEncoder(w)
 	ids := make([]string, 0, len(keepIDs))
 	for id := range keepIDs {
 		ids = append(ids, id)
@@ -334,7 +332,7 @@ func compactMailboxAckLog(sessionDir string, kept []SubAgentMailboxMessage) erro
 	sort.Strings(ids)
 	for _, id := range ids {
 		if ack, ok := acks[id]; ok {
-			if err := enc.Encode(ack); err != nil {
+			if err := jsonx.Encode(w, ack); err != nil {
 				_ = f.Close()
 				return fmt.Errorf("write compacted mailbox ack log: %w", err)
 			}

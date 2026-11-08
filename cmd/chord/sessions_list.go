@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -68,7 +68,7 @@ func newSessionsListCmd() *cobra.Command {
 				report.Sessions = append(report.Sessions, sessionListEntry{ID: s.ID, LastActive: s.LastModTime, Locked: s.Locked})
 			}
 			if asJSON {
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+				return jsonx.Encode(cmd.OutOrStdout(), report)
 			}
 			for _, s := range report.Sessions {
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\tlocked=%t\n", s.ID, s.LastActive.Format(time.RFC3339), s.Locked); err != nil {

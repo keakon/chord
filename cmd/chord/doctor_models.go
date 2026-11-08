@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -227,9 +227,7 @@ func runDoctorModels(parentCtx context.Context, opts doctorModelsOptions) error 
 	report := executeDoctorModelsPlan(parentCtx, runtimeCfg, plan, opts, renderEach)
 	report.ExecutionTime = time.Since(started).Seconds()
 	if opts.JSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
+		if err := jsonx.EncodeIndent(out, report, "", "  "); err != nil {
 			return cliExitError{code: 2, err: fmt.Errorf("write JSON report: %w", err)}
 		}
 	} else {

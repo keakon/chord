@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/mcp"
 )
 
@@ -49,7 +49,7 @@ func newMCPListCmd() *cobra.Command {
 			entries = append(entries, mcpListEntry{Ref: target.Ref, Auth: view.Auth, Credential: view, Aliases: mcpTargetAliases(target, targets)})
 		}
 		if jsonOutput {
-			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+			if err := jsonx.Encode(cmd.OutOrStdout(), struct {
 				SchemaVersion int            `json:"schema_version"`
 				Mode          string         `json:"mode"`
 				Targets       []mcpListEntry `json:"targets"`

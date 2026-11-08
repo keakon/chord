@@ -1,12 +1,12 @@
 package recovery
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
 )
@@ -32,7 +32,6 @@ func SeedForkTranscript(sessionDir string, count int, prepare func(int) (message
 	defer f.Close()
 	manager := NewRecoveryManager(sessionDir)
 	defer manager.Close()
-	encoder := json.NewEncoder(f)
 	messages := make([]message.Message, count)
 	for i := range count {
 		msg, err := prepare(i)
@@ -43,7 +42,7 @@ func SeedForkTranscript(sessionDir string, count int, prepare func(int) (message
 		if err != nil {
 			return nil, fmt.Errorf("persist fork attachment %d: %w", i, err)
 		}
-		if err := encoder.Encode(msg); err != nil {
+		if err := jsonx.Encode(f, msg); err != nil {
 			return nil, fmt.Errorf("encode fork message %d: %w", i, err)
 		}
 		messages[i] = msg

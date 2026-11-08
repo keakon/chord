@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -142,13 +143,12 @@ func dropIgnoredArgsUnder(ignored *[]message.IgnoredToolArg, parent string) {
 // escaping `<`, `>` and `&` would both inflate every JSX, HTML or shell payload
 // sixfold per character and hide from the reader what actually ran.
 func Encode(value any) (json.RawMessage, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(value); err != nil {
+	// The canonical encoder does not escape HTML, so `<`, `>` and `&` stay
+	// readable instead of inflating every JSX, HTML or shell payload sixfold
+	// per character.
+	encoded, err := jsonx.Marshal(value)
+	if err != nil {
 		return nil, fmt.Errorf("re-encode arguments: %w", err)
 	}
-	// Encode terminates the value with a newline; tool arguments are compared
-	// and displayed as bare JSON.
-	return json.RawMessage(bytes.TrimRight(buf.Bytes(), "\n")), nil
+	return json.RawMessage(encoded), nil
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 )
 
@@ -247,7 +248,7 @@ func (a *MainAgent) appendSubAgentMailboxLog(sessionDir, path string, msg SubAge
 	if info, statErr := f.Stat(); statErr == nil {
 		startOffset = info.Size()
 	}
-	if err := json.NewEncoder(f).Encode(msg); err != nil {
+	if err := jsonx.Encode(f, msg); err != nil {
 		_ = f.Close()
 		return startOffset, -1, fmt.Errorf("append mailbox message: %w", err)
 	}

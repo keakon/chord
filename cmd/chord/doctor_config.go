@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/modelcatalog"
 )
 
@@ -235,9 +235,7 @@ func describeDoctorCatalog(catalog doctorConfigCatalogReport) string {
 func writeDoctorConfigReport(out io.Writer, asJSON bool, report doctorConfigReport) error {
 
 	if asJSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
+		if err := jsonx.EncodeIndent(out, report, "", "  "); err != nil {
 			return cliExitError{code: 2, err: fmt.Errorf("write JSON report: %w", err)}
 		}
 	} else {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -203,9 +202,7 @@ func recordCatalogAdvisoryKeeps(out io.Writer, groups [][]config.CatalogConfigAd
 
 func renderConfigAdvisories(out io.Writer, advisories []config.CatalogConfigAdvisory, asJSON bool) error {
 	if asJSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(advisories)
+		return jsonx.EncodeIndent(out, advisories, "", "  ")
 	}
 	if len(advisories) == 0 {
 		_, err := fmt.Fprintln(out, "No active catalog configuration recommendations.")

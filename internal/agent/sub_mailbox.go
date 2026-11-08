@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -493,8 +494,7 @@ func (a *MainAgent) appendSubAgentMailboxAck(record SubAgentMailboxAckRecord) er
 	if err != nil {
 		return fmt.Errorf("open mailbox ack log: %w", err)
 	}
-	enc := json.NewEncoder(f)
-	if err := enc.Encode(record); err != nil {
+	if err := jsonx.Encode(f, record); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("append mailbox ack: %w", err)
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/toolname"
@@ -568,9 +568,7 @@ func runDoctorSkills(opts doctorSkillsOptions) error {
 	report.Actions, report.ActionTotal = doctorSkillActions(entries)
 
 	if opts.JSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
+		if err := jsonx.EncodeIndent(out, report, "", "  "); err != nil {
 			return cliExitError{code: 2, err: fmt.Errorf("write JSON report: %w", err)}
 		}
 	} else {

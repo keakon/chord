@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -126,9 +126,7 @@ func runDoctorAgents(opts doctorAgentsOptions) error {
 	}
 
 	if opts.JSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
+		if err := jsonx.EncodeIndent(out, report, "", "  "); err != nil {
 			return cliExitError{code: 2, err: fmt.Errorf("write JSON report: %w", err)}
 		}
 	} else {
