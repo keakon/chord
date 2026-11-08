@@ -263,8 +263,10 @@ func restoreRuntimeMCP(ac *AppContext, ctrl *runtimeResourceController) func(con
 		return nil
 	}
 	return func(ctx context.Context) error {
-		ac.mcpRestoreRunMu.Lock()
-		defer ac.mcpRestoreRunMu.Unlock()
+		if err := ac.acquireMCPRuntime(ctx); err != nil {
+			return err
+		}
+		defer ac.releaseMCPRuntime()
 		readyGeneration := ac.MainAgent.ResetMCPReady()
 		ac.MainAgent.NotifyEnvStatusUpdated()
 		ac.MCPMgr.ConnectAll(ctx, runtimeMCPReconnectConfigs(ac.MCPTargets, ctrl.MCPLoadedNames()))

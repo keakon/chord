@@ -87,7 +87,9 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		done := make(chan struct{})
 		go func() {
 			a.mcpAuthWg.Wait()
+			a.mcpControlWg.Wait()
 			a.compactionWg.Wait()
+			a.hooksWg.Wait()
 			close(done)
 		}()
 		select {

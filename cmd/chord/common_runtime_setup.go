@@ -251,15 +251,17 @@ func controlRuntimeMCP(ctx context.Context, ac *AppContext, req agent.MCPControl
 	if ctx == nil {
 		ctx = ac.Ctx
 	}
-	if ac.MCPCatalog == nil {
-		ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
-	}
 	// MCP connections and the catalog are process-wide, while desired
 	// enablement is session-scoped. Serialize controls with startup, restore,
 	// and idle reload so a stale control cannot leave the active session with
 	// the previous session's connections.
-	ac.mcpRestoreRunMu.Lock()
-	defer ac.mcpRestoreRunMu.Unlock()
+	if err := ac.acquireMCPRuntime(ctx); err != nil {
+		return agent.MCPControlResult{}, err
+	}
+	defer ac.releaseMCPRuntime()
+	if ac.MCPCatalog == nil {
+		ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
+	}
 
 	activeSessionDir := ""
 	if ac.MainAgent != nil {
@@ -367,7 +369,7 @@ func controlRuntimeMCP(ctx context.Context, ac *AppContext, req agent.MCPControl
 		errs = append(errs, fmt.Errorf("MCP enable intent applied but not persisted: %w", err))
 	}
 	// A session switch may happen while ConnectOne/Disconnect is in flight.
-	// The switch's restore waits on this mutex, so reconcile here before
+	// The switch's restore waits on this gate, so reconcile here before
 	// releasing it; the later restore remains harmless.
 	if ac.MainAgent != nil {
 		if currentSessionDir := ac.MainAgent.SessionDir(); currentSessionDir != intentSessionDir {
@@ -535,8 +537,11 @@ func restoreMCPSessionIntentAsync(ac *AppContext) {
 // hand the current barrier an empty surface instead of leaving it blocked.
 func runMCPRestoreFlow(ac *AppContext, sessionDir string, readyGeneration agent.MCPReadyGeneration, restoreGeneration uint64, restoreCtx context.Context, connectAll bool) {
 	defer finishMCPRestore(ac, restoreGeneration)
-	ac.mcpRestoreRunMu.Lock()
-	defer ac.mcpRestoreRunMu.Unlock()
+	if err := ac.acquireMCPRuntime(restoreCtx); err != nil {
+		ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, nil, "")
+		return
+	}
+	defer ac.releaseMCPRuntime()
 	if ac.mcpRestoreGen.Load() != restoreGeneration {
 		ac.MainAgent.SetRuntimeMCPDiscoveryForGeneration(readyGeneration, nil, "")
 		return

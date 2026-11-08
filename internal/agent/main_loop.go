@@ -85,6 +85,8 @@ func (a *MainAgent) Run(ctx context.Context) error {
 		// finish any cancellation/flush work before closing outputCh.
 		a.outputWg.Wait()
 		a.mcpAuthWg.Wait()
+		a.mcpControlWg.Wait()
+		a.hooksWg.Wait()
 		// 4. Now safe to close outputCh (all producers stopped).
 		a.outputMu.Lock()
 		a.outputClosed.Store(true)

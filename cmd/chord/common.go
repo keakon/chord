@@ -96,7 +96,7 @@ type AppContext struct {
 	logLevel               golog.Level
 	mcpStartOnce           sync.Once
 	mcpRuntimeStarted      atomic.Bool
-	mcpRestoreRunMu        sync.Mutex
+	mcpRuntimeGate         chan struct{}
 	mcpPublishedBinding    string
 	mcpPublishedVersion    uint64
 	mcpPublishedGeneration agent.MCPReadyGeneration

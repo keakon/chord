@@ -9,11 +9,10 @@ func reconcileRuntimeMCPCredentials(ctx context.Context, ac *AppContext) error {
 		return nil
 	}
 	startRuntimeMCP(ac)
-	ac.mcpRestoreRunMu.Lock()
-	defer ac.mcpRestoreRunMu.Unlock()
-	if err := ctx.Err(); err != nil {
+	if err := ac.acquireMCPRuntime(ctx); err != nil {
 		return err
 	}
+	defer ac.releaseMCPRuntime()
 	generation := ac.MainAgent.CurrentMCPReadyGeneration()
 	_, err := ac.MCPMgr.ReconcileCredentials(ctx)
 	if err != nil {

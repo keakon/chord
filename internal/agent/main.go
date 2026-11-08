@@ -370,6 +370,11 @@ type MainAgent struct {
 	// Run waits on outputWg before closing outputCh.
 	outputWg sync.WaitGroup
 
+	// hooksWg tracks fire-and-forget hook goroutines (on_after_llm_call). They
+	// do not emit to the TUI, but Run and Shutdown wait for them so no hook
+	// process outlives the agent's reported lifetime.
+	hooksWg sync.WaitGroup
+
 	// Confirm/Question interaction: owns the requestID→response-channel
 	// plumbing for the single-modal confirm and question flows. Wired in
 	// NewMainAgent once stoppingCh exists.
@@ -749,6 +754,7 @@ type MainAgent struct {
 	mcpReadyGeneration  uint64
 	mcpTransitionActive atomic.Bool
 	mcpControlFn        func(context.Context, MCPControlRequest) (MCPControlResult, error)
+	mcpControlWg        sync.WaitGroup
 	mcpMountState       mcpToolMountState
 	loopDoneLateMount   atomic.Bool
 	sessionBuilt        atomic.Bool

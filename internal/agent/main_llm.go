@@ -1065,7 +1065,9 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 				callIDs = append(callIDs, tc.ID)
 			}
 		}
+		a.hooksWg.Add(1)
 		go func(callIDs []string) {
+			defer a.hooksWg.Done()
 			hookResult, hookErr := a.fireHook(a.parentCtx, hook.OnAfterLLMCall, turnID, hookCtxData)
 			finishedAt := time.Now()
 			for _, callID := range callIDs {
@@ -1086,7 +1088,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 			}
 		}(callIDs)
 	} else {
-		go func() {
+		a.hooksWg.Go(func() {
 			if hookResult, hookErr := a.fireHook(a.parentCtx, hook.OnAfterLLMCall, turnID, hookCtxData); hookErr != nil {
 				log.Warnf("on_after_llm_call hook error error=%v", hookErr)
 			} else if hookResult != nil {
@@ -1097,7 +1099,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 					log.Warn("on_after_llm_call hook returned modify action; modifying LLM responses is not supported, continuing")
 				}
 			}
-		}()
+		})
 	}
 
 	// Notify TUI consumers so usage displays update after each LLM round

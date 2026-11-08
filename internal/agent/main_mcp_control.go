@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -17,6 +18,12 @@ const (
 	MCPControlEnable  MCPControlAction = "enable"
 	MCPControlDisable MCPControlAction = "disable"
 )
+
+// mcpControlTimeout bounds one runtime MCP control operation. It aligns with
+// the per-operation timeouts used by MCP probe and OAuth paths; without it a
+// control against an unresponsive server would keep the tracked goroutine
+// alive past Shutdown.
+const mcpControlTimeout = 60 * time.Second
 
 // MCPControlRequest describes a runtime MCP enable/disable operation.
 // Servers may contain one or more server names. If Servers is empty, the
@@ -123,6 +130,16 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 		return
 	}
 
+	// Do not start a tracked control goroutine once the agent is stopping;
+	// Shutdown's background drain may already be past its Wait.
+	select {
+	case <-a.parentCtx.Done():
+		return
+	case <-a.stoppingCh:
+		return
+	default:
+	}
+
 	// Sample before the transition begins: markRuntimeSurfaceDirty below clears
 	// sessionBuilt, so the cache warning can no longer tell "a request already
 	// installed the surface this toggle replaces" from "the surface was already
@@ -137,10 +154,12 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 	a.NotifyEnvStatusUpdated()
 
 	req.SessionDir = a.SessionDir()
-	go func() {
-		res, err := a.mcpControlFn(a.parentCtx, req)
+	a.mcpControlWg.Go(func() {
+		ctx, cancel := context.WithTimeout(a.parentCtx, mcpControlTimeout)
+		defer cancel()
+		res, err := a.mcpControlFn(ctx, req)
 		a.sendEvent(Event{Type: EventMCPControlDone, Payload: mcpControlDonePayload{req: req, result: res, err: err, readyGen: gen, surfaceBuiltAtDispatch: surfaceBuiltAtDispatch}})
-	}()
+	})
 }
 
 func (a *MainAgent) mcpControlTargetsVisible(servers []string) bool {
