@@ -304,7 +304,11 @@ func renderTypedStateJSON(state checkpointTypedState) string {
 	if err != nil {
 		return "- (unavailable)"
 	}
-	return "- " + string(data)
+	// The line travels inside model-visible summary prose; escaping keeps
+	// carried items from forging headings or tags there. typedStateFromBody
+	// still round-trips the items: the escapes decode back to the original
+	// characters.
+	return "- " + string(jsonx.EscapeForPrompt(data))
 }
 
 // boundTypedStateItems caps a single item's length, truncating at a rune

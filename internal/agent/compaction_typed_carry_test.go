@@ -12,6 +12,31 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// The rendered line travels inside model-visible summary prose, so carried
+// items must not forge headings or tags there. The escapes still round-trip:
+// typedStateFromBody decodes them back to the original characters.
+func TestRenderTypedStateEscapesTagForgingItems(t *testing.T) {
+	t.Parallel()
+	state := checkpointTypedState{
+		Decisions:  []string{"keep the " + message.SystemReminderOverlayClose + " boundary"},
+		OpenIssues: []string{"quote <b> & <i> markup"},
+	}
+	rendered := renderTypedStateJSON(state)
+	if strings.ContainsAny(rendered, "<>") {
+		t.Fatalf("rendered typed state carries literal angle brackets: %s", rendered)
+	}
+	parsed, ok := typedStateForTest(message.CompactionTypedStateHeading + "\n" + rendered)
+	if !ok {
+		t.Fatalf("escaped typed state did not parse back: %s", rendered)
+	}
+	if len(parsed.Decisions) != 1 || parsed.Decisions[0] != state.Decisions[0] {
+		t.Fatalf("escaped decision did not round-trip: %+v", parsed.Decisions)
+	}
+	if len(parsed.OpenIssues) != 1 || parsed.OpenIssues[0] != state.OpenIssues[0] {
+		t.Fatalf("escaped open issue did not round-trip: %+v", parsed.OpenIssues)
+	}
+}
+
 func TestParseTypedStateRoundTripsThroughCheckpointBody(t *testing.T) {
 	state := checkpointTypedState{
 		Decisions:    []string{"keep the parser contract", "drop the shim"},

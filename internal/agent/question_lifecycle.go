@@ -431,7 +431,9 @@ func questionRequestContext(r questionRequestProjection, msgs []message.Message)
 	}
 	slices.SortFunc(questions, func(x, y pending) int { return strings.Compare(x.ID, y.ID) })
 	data, _ := jsonx.Marshal(questions)
-	return append(visible, questionProjectionMessage(message.SystemReminderOverlayText("Current questions: "+string(data)+". Continue independent work; use Question(wait_for) only when these decisions are needed. An unanswered question still requires a user decision or an explicit cancellation. Never recreate pending questions."), nil))
+	// The payload is embedded inside a <system-reminder> framing, so question
+	// text carrying literal tags must not close or reopen that boundary.
+	return append(visible, questionProjectionMessage(message.SystemReminderOverlayText("Current questions: "+string(jsonx.EscapeForPrompt(data))+". Continue independent work; use Question(wait_for) only when these decisions are needed. An unanswered question still requires a user decision or an explicit cancellation. Never recreate pending questions."), nil))
 }
 
 // questionProjectionMessage builds one request-scoped question projection row.
