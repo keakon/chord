@@ -676,10 +676,14 @@ func resolveModelRef(
 					effectiveProxy,
 				)
 				startOAuthMetadataBackfill(parentCtx, provCfg, authConfigPath, &authCopy, &authMu, provName, creds)
-				provCfg.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
-					ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
+				provCfg.StartCodexRateLimitPolling(func(ctx context.Context, key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+					fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 					defer cancel()
-					return llm.FetchCodexUsageSnapshot(ctx, provCfg, key, accountID)
+					// Keep the app ctx coupled so the poll dies with the process
+					// scope that owned this provider, not only with Close().
+					stopParent := context.AfterFunc(parentCtx, cancel)
+					defer stopParent()
+					return llm.FetchCodexUsageSnapshot(fetchCtx, provCfg, key, accountID)
 				})
 			}
 		}

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -564,7 +565,7 @@ func TestWakeCodexRateLimitPollingSkipsFetchAfterAuthStateReload(t *testing.T) {
 	}
 
 	fetchCalled := make(chan struct{}, 1)
-	p.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+	p.StartCodexRateLimitPolling(func(ctx context.Context, key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		select {
 		case fetchCalled <- struct{}{}:
 		default:
@@ -599,7 +600,7 @@ func TestProviderCloseWaitsForInFlightCodexPoll(t *testing.T) {
 	p.mu.Unlock()
 	started := make(chan struct{})
 	release := make(chan struct{})
-	p.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+	p.StartCodexRateLimitPolling(func(context.Context, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		close(started)
 		<-release
 		return nil, nil
@@ -622,6 +623,59 @@ func TestProviderCloseWaitsForInFlightCodexPoll(t *testing.T) {
 	case <-closed:
 	case <-time.After(time.Second):
 		t.Fatal("Close did not return after in-flight poll exited")
+	}
+}
+
+func TestProviderCloseCancelsInFlightCodexPoll(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, []string{"sample-key"})
+	p.mu.Lock()
+	p.oauthProfile = config.OAuthProfileOpenAICodex
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{AccountID: "sample-account"}
+	p.lastSelectedSlot = 0
+	p.mu.Unlock()
+	started := make(chan struct{})
+	finished := make(chan error, 1)
+	release := make(chan struct{})
+	closed := make(chan struct{})
+	defer func() {
+		close(release)
+		select {
+		case <-closed:
+		case <-time.After(time.Second):
+			t.Error("provider cleanup did not finish")
+		}
+	}()
+	p.StartCodexRateLimitPolling(func(ctx context.Context, _, _ string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+		close(started)
+		select {
+		case <-ctx.Done():
+			finished <- ctx.Err()
+			return nil, ctx.Err()
+		case <-release:
+			return nil, nil
+		}
+	})
+	p.WakeCodexRateLimitPolling()
+	go func() {
+		select {
+		case <-started:
+		case <-release:
+		}
+		p.Close()
+		close(closed)
+	}()
+	select {
+	case err := <-finished:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("poll context error = %v, want cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel the in-flight poll")
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not return after the poll stopped")
 	}
 }
 

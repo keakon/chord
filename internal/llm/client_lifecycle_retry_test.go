@@ -53,7 +53,7 @@ func TestNewClientCodexWarmupProbesMultipleAccounts(t *testing.T) {
 		creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-a", Expires: expires},
 		creds[2].OAuth.Access: {CredentialIndex: 2, AccountID: "acc-b", Expires: expires},
 	}, "")
-	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+	prov.StartCodexRateLimitPolling(func(context.Context, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil
 	})
 
@@ -129,7 +129,7 @@ func TestNewClientCodexWarmupCancelsOnInvalidateRouting(t *testing.T) {
 		creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-a", Expires: expires},
 		creds[1].OAuth.Access: {CredentialIndex: 1, AccountID: "acc-b", Expires: expires},
 	}, "")
-	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+	prov.StartCodexRateLimitPolling(func(context.Context, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil
 	})
 
@@ -184,7 +184,7 @@ func TestClientCloseCancelsWarmupAndRejectsNewRequests(t *testing.T) {
 		creds[0].OAuth.Access: {CredentialIndex: 0, AccountID: "acc-a", Expires: expires},
 		creds[1].OAuth.Access: {CredentialIndex: 1, AccountID: "acc-b", Expires: expires},
 	}, "")
-	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) { return nil, nil })
+	prov.StartCodexRateLimitPolling(func(context.Context, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) { return nil, nil })
 	c := NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
 	c.SetExecutionGate(&executiongate.Gate{}, "test")
 	c.startCodexWarmup()

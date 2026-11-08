@@ -320,7 +320,7 @@ type ProviderConfig struct {
 	polledRateLimitSucceededAt map[int]time.Time
 	polledRateLimitInFlight    map[int]bool
 	inlineDisplaySnap          *ratelimit.KeyRateLimitSnapshot
-	codexPollFetchFn           func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)
+	codexPollFetchFn           func(context.Context, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)
 	codexPollWG                sync.WaitGroup
 	codexPollClosed            bool
 	backgroundTaskWG           sync.WaitGroup

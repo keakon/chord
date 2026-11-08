@@ -130,7 +130,7 @@ func TestCodexWarmupMarksDeactivatedOAuthCredential(t *testing.T) {
 		accessA: {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
 		accessB: {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
 	}, "")
-	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+	prov.StartCodexRateLimitPolling(func(context.Context, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil
 	})
 	defer prov.Close()
@@ -176,7 +176,7 @@ func TestProviderCloseWaitsForInFlightCodexWarmup(t *testing.T) {
 	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{CredentialIndex: 0, AccountID: "acc-a"}
 	p.keyStates[1].OAuthInfo = &OAuthKeyInfo{CredentialIndex: 1, AccountID: "acc-b"}
 	p.mu.Unlock()
-	p.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+	p.StartCodexRateLimitPolling(func(context.Context, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil
 	})
 
@@ -282,7 +282,7 @@ func TestCodexWarmupMarksExpiredOAuthCredentialWhenRefreshTokenInvalid(t *testin
 		accessA: {CredentialIndex: 0, AccountID: "acc-a", Expires: 32503680000000},
 		accessB: {CredentialIndex: 1, AccountID: "acc-b", Expires: 32503680000000},
 	}, "")
-	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+	prov.StartCodexRateLimitPolling(func(context.Context, string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		return nil, nil
 	})
 	defer prov.Close()
@@ -447,7 +447,7 @@ func TestCodexRateLimitPollingStartsOnlyAfterOAuthProviderSelection(t *testing.T
 
 	var pollHits atomic.Int32
 	pollStarted := make(chan struct{}, 1)
-	prov.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+	prov.StartCodexRateLimitPolling(func(ctx context.Context, key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		pollHits.Add(1)
 		select {
 		case pollStarted <- struct{}{}:
@@ -509,7 +509,7 @@ func TestCodexRateLimitPollingAuthFailureDoesNotChangeKeyHealth(t *testing.T) {
 		"",
 	)
 	pollHit := make(chan struct{}, 1)
-	prov.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+	prov.StartCodexRateLimitPolling(func(ctx context.Context, key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
 		select {
 		case pollHit <- struct{}{}:
 		default:

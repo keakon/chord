@@ -110,13 +110,17 @@ func (c *providerCache) getOrCreate(provName string, cfg config.ProviderConfig, 
 			backfillCtx = context.Background()
 		}
 		startOAuthMetadataBackfill(backfillCtx, p, c.authPath, &c.auth, &c.authMu, provName, creds)
-		p.StartCodexRateLimitPolling(func(key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
-			pollParentCtx := c.ctx
-			if pollParentCtx == nil {
-				pollParentCtx = context.Background()
-			}
-			pollCtx, cancel := context.WithTimeout(pollParentCtx, 30*time.Second)
+		p.StartCodexRateLimitPolling(func(ctx context.Context, key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error) {
+			pollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
+			// The poll goroutine derives its ctx from the provider lifecycle so
+			// Close() unblocks an in-flight fetch; keep the cache ctx coupled too
+			// so the poll also dies with the cache that owns this provider.
+			pollParentCtx := c.ctx
+			if pollParentCtx != nil {
+				stopCache := context.AfterFunc(pollParentCtx, cancel)
+				defer stopCache()
+			}
 			fetchFn := c.fetchCodexUsage
 			if fetchFn == nil {
 				fetchFn = llm.FetchCodexUsageSnapshot

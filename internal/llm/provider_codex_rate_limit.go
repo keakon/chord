@@ -363,7 +363,7 @@ func (p *ProviderConfig) usesPresetCodexRateLimitCooldown() bool {
 	return p.oauthProfile == config.OAuthProfileOpenAICodex
 }
 
-func (p *ProviderConfig) StartCodexRateLimitPolling(fetchFn func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)) {
+func (p *ProviderConfig) StartCodexRateLimitPolling(fetchFn func(ctx context.Context, key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error)) {
 	if fetchFn == nil {
 		return
 	}
@@ -637,12 +637,16 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 		return
 	}
 	fetchFn := p.codexPollFetchFn
+	lifecycleCtx := p.codexLifecycleCtx
+	if lifecycleCtx == nil {
+		lifecycleCtx = context.Background()
+	}
 	p.polledRateLimitInFlight[credIdx] = true
 	p.polledRateLimitAttemptedAt[credIdx] = now
 	p.codexPollWG.Add(1)
 	p.mu.Unlock()
 
-	go func(providerName string, key string, accountID string, credIdx int, fetchFn func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error)) {
+	go func(providerName string, key string, accountID string, credIdx int, lifecycleCtx context.Context, fetchFn func(ctx context.Context, key, accountID string) ([]*ratelimit.KeyRateLimitSnapshot, error)) {
 		defer p.codexPollWG.Done()
 		defer func() {
 			p.mu.Lock()
@@ -651,7 +655,11 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 			}
 			p.mu.Unlock()
 		}()
-		snaps, err := fetchFn(key, accountID)
+		// Derive from the lifecycle so Close() unblocks an in-flight fetch and
+		// codexPollWG.Wait() stays bounded regardless of the fetch implementation.
+		ctx, cancel := context.WithCancel(lifecycleCtx)
+		defer cancel()
+		snaps, err := fetchFn(ctx, key, accountID)
 		if err != nil {
 			if p.handleCodexWarmupAuthFailure(key, err) {
 				log.Debugf("codex usage poll auth failure ignored for key health provider=%v error=%v", providerName, err)
@@ -671,7 +679,7 @@ func (p *ProviderConfig) WakeCodexRateLimitPolling() {
 				break
 			}
 		}
-	}(p.name, key, accountID, credIdx, fetchFn)
+	}(p.name, key, accountID, credIdx, lifecycleCtx, fetchFn)
 }
 
 // codexUsagePollAuthLocked returns the currently selected Codex OAuth key and account id.
