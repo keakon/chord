@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/agent/checkpointfmt"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -299,7 +300,7 @@ func renderTypedStateJSON(state checkpointTypedState) string {
 		Kind:              state.Kind,
 		Claims:            state.Claims,
 	}
-	data, err := json.Marshal(payload)
+	data, err := jsonx.Marshal(payload)
 	if err != nil {
 		return "- (unavailable)"
 	}

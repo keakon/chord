@@ -3,9 +3,9 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -24,7 +24,7 @@ type checkpointSourceRef struct {
 }
 
 func canonicalMessageHash(msg message.Message) (string, error) {
-	payload, err := json.Marshal(msg)
+	payload, err := jsonx.Marshal(msg)
 	if err != nil {
 		return "", fmt.Errorf("marshal message for provenance: %w", err)
 	}
@@ -54,7 +54,7 @@ func buildCheckpointSourceRefs(sessionID, generation, segmentID string, messages
 }
 
 func checkpointSourceFingerprint(refs []checkpointSourceRef) string {
-	payload, err := json.Marshal(refs)
+	payload, err := jsonx.Marshal(refs)
 	if err != nil {
 		return ""
 	}

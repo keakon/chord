@@ -2,11 +2,11 @@ package agent
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"sort"
 	"sync"
 
 	"github.com/keakon/chord/internal/agent/requestshape"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	toolpkg "github.com/keakon/chord/internal/tools"
@@ -430,7 +430,7 @@ func (s *mcpToolMountState) incrementalMessageShapes(messages []message.Message)
 }
 
 func toolDefinitionSignature(def message.ToolDefinition) [sha256.Size]byte {
-	data, _ := json.Marshal(def)
+	data, _ := jsonx.Marshal(def)
 	return sha256.Sum256(data)
 }
 

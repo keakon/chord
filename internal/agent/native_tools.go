@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/hook"
@@ -165,7 +166,7 @@ func (a *MainAgent) nativeUsageRecorder(attr usageAttribution) func(llm.NativeRe
 		}
 		if resp != nil {
 			usage = resp.Usage
-			attempt.elapsed = resp.NativeRequestDuration
+			attempt.elapsed = time.Duration(resp.NativeRequestDuration)
 		}
 		diagnostic := hostedAttemptDiagnostics(attempt)
 		diagnostic["native_contract"] = record.Authorization.Contract

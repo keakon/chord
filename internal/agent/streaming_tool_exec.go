@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
 	"github.com/keakon/chord/internal/executiongate"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -605,7 +606,7 @@ func speculativeConflictKeys(call message.ToolCall, workDir string) []string {
 func canonicalArgsHash(args json.RawMessage) string {
 	var v any
 	if len(args) > 0 && json.Unmarshal(args, &v) == nil {
-		if canonical, err := json.Marshal(v); err == nil {
+		if canonical, err := jsonx.Marshal(v); err == nil {
 			sum := sha256.Sum256(canonical)
 			return hex.EncodeToString(sum[:])
 		}

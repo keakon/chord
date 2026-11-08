@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -38,7 +39,7 @@ type compactionTransactionManifest struct {
 func compactionTranscriptFingerprint(messages []message.Message) string {
 	h := sha256.New()
 	for _, msg := range messages {
-		data, _ := json.Marshal(msg)
+		data, _ := jsonx.Marshal(msg)
 		_, _ = h.Write(data)
 		_, _ = h.Write([]byte{'\n'})
 	}

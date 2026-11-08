@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/thinkingtranslate"
 )
@@ -166,7 +167,7 @@ func loadThinkingTranslationsFileLocked(sessionDir string) (thinkingTranslations
 }
 
 func writeThinkingTranslationsFileLocked(sessionDir string, file thinkingTranslationsFile) error {
-	data, err := json.MarshalIndent(file, "", "  ")
+	data, err := jsonx.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal thinking translations: %w", err)
 	}

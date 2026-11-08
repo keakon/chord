@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strconv"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/imagegen"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -49,8 +49,8 @@ func logImageRequestFailure(ctx context.Context, target imagegen.Target, elapsed
 	if failure.Details.RetryAfterSeconds != nil {
 		retryAfter = strconv.FormatFloat(*failure.Details.RetryAfterSeconds, 'f', 3, 64)
 	}
-	request, _ := json.Marshal(failure.Details.Request)
-	response, _ := json.Marshal(failure.Details.Response)
+	request, _ := jsonx.Marshal(failure.Details.Request)
+	response, _ := jsonx.Marshal(failure.Details.Response)
 	log.Warnf("image request failed agent_id=%v call_id=%v provider=%v model=%v duration_ms=%v state=%v request_id=%v http_status=%v category=%v code=%v type=%v status=%v reason=%v param=%v message=%q request=%s response=%s retry_after_seconds=%v",
 		tools.AgentIDFromContext(ctx), tools.ToolCallIDFromContext(ctx), target.Provider, target.Model, elapsed.Milliseconds(), failure.State, failure.RequestID, failure.Details.HTTPStatus, failure.Details.Category, failure.Details.Code, failure.Details.Type, failure.Details.Status, failure.Details.Reason, failure.Details.Param, failure.Details.Message, request, response, retryAfter)
 }

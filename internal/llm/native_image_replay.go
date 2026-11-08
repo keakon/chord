@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -50,9 +51,9 @@ func projectNativeImageReplay(ctx context.Context, messages []message.Message) (
 				if len(data) == 0 {
 					return nil, fmt.Errorf("native image %q original is empty", image.Call.ID)
 				}
-				item["result"], _ = json.Marshal(base64.StdEncoding.EncodeToString(data))
+				item["result"], _ = jsonx.Marshal(base64.StdEncoding.EncodeToString(data))
 			}
-			encoded, err := json.Marshal(item)
+			encoded, err := jsonx.Marshal(item)
 			if err != nil {
 				return nil, fmt.Errorf("encode native image replay: %w", err)
 			}

@@ -2,9 +2,10 @@ package llm
 
 import (
 	"bytes"
-	"encoding/json"
 	"maps"
 	"slices"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // toolSchema is a tool's JSON Schema as it goes on the wire.
@@ -56,7 +57,7 @@ func writeSchemaValue(buf *bytes.Buffer, v any) error {
 		buf.WriteByte(']')
 		return nil
 	default:
-		data, err := json.Marshal(v)
+		data, err := jsonx.Marshal(v)
 		if err != nil {
 			return err
 		}
@@ -104,7 +105,7 @@ func writeSchemaObject(buf *bytes.Buffer, obj map[string]any) error {
 }
 
 func writeSchemaKey(buf *bytes.Buffer, key string) error {
-	data, err := json.Marshal(key)
+	data, err := jsonx.Marshal(key)
 	if err != nil {
 		return err
 	}

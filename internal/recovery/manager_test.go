@@ -804,10 +804,10 @@ func TestLoadMessages_TruncatedLastRecord(t *testing.T) {
 }
 
 // TestLoadMessages_LenientToolArgsRoundTrip pins the message-log read/write
-// closure: the writer persists tool-call arguments verbatim, and LLM-emitted
-// arguments may contain duplicate object members, so the reader must accept
-// such a record and recover it together with every later one. A strict reader
-// would reject the record and truncate all following history.
+// closure: the writer persists duplicate object members verbatim, and
+// LLM-emitted arguments may contain them, so the reader must accept such a
+// record and recover it together with every later one. A strict reader would
+// reject the record and truncate all following history.
 func TestLoadMessages_LenientToolArgsRoundTrip(t *testing.T) {
 	rm, dir := newTestManager(t)
 
@@ -821,8 +821,10 @@ func TestLoadMessages_LenientToolArgsRoundTrip(t *testing.T) {
 				Args: json.RawMessage(`{"value":"first","value":"last"}`),
 			},
 			{
-				// Invalid UTF-8 bytes survive v1 Marshal inside a RawMessage,
-				// so the reader must tolerate them the same way.
+				// The canonical encoder rewrites invalid UTF-8 bytes inside a
+				// RawMessage payload as U+FFFD (the one documented deviation
+				// from the v1 API), so the reader must tolerate the normalized
+				// record the same way.
 				ID:   "call-2",
 				Name: "sample",
 				Args: json.RawMessage("{\"note\":\"x\xffy\"}"),
@@ -868,8 +870,8 @@ func TestLoadMessages_LenientToolArgsRoundTrip(t *testing.T) {
 	if string(loaded[0].ToolCalls[0].Args) != `{"value":"first","value":"last"}` {
 		t.Fatalf("tool args not preserved verbatim: %s", loaded[0].ToolCalls[0].Args)
 	}
-	if loaded[0].ToolCalls[1].Args[0] != '{' || string(loaded[0].ToolCalls[1].Args) != "{\"note\":\"x\xffy\"}" {
-		t.Fatalf("invalid-UTF-8 args not preserved verbatim: %q", string(loaded[0].ToolCalls[1].Args))
+	if loaded[0].ToolCalls[1].Args[0] != '{' || string(loaded[0].ToolCalls[1].Args) != "{\"note\":\"x\uFFFDy\"}" {
+		t.Fatalf("invalid-UTF-8 args not normalized to U+FFFD: %q", string(loaded[0].ToolCalls[1].Args))
 	}
 	if len(loaded[0].ResponsesOutput) != 1 || loaded[0].ResponsesOutput[0].Content[0].Text != "called" {
 		t.Fatalf("ResponsesOutput not recovered: %#v", loaded[0].ResponsesOutput)

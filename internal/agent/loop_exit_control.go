@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -101,7 +102,7 @@ func (a *MainAgent) maybeInterceptRepeatedToolCall(ctx context.Context, tc messa
 		Reason: a.repeatedToolCallConfirmResult(tc, streak),
 		Report: strings.TrimSpace(a.repeatedToolCallRejectResult(tc, streak)),
 	}
-	encoded, err := json.Marshal(payload)
+	encoded, err := jsonx.Marshal(payload)
 	if err != nil {
 		return &repeatedToolCallInterceptResult{confirmErr: err}, true
 	}
@@ -206,7 +207,7 @@ func (a *MainAgent) awaitDoneConfirmation(ctx context.Context, reason, argsJSON,
 		Reason string `json:"reason,omitempty"`
 		Report string `json:"report"`
 	}{Reason: strings.TrimSpace(reason), Report: report}
-	encoded, err := json.Marshal(payload)
+	encoded, err := jsonx.Marshal(payload)
 	if err != nil {
 		return ConfirmResponse{}, err
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -42,8 +43,8 @@ func geminiBodyWithContinuation(base []byte, token string) ([]byte, error) {
 	if err := json.Unmarshal(base, &body); err != nil {
 		return nil, fmt.Errorf("decode Gemini request: %w", err)
 	}
-	body["continuationToken"], _ = json.Marshal(token)
-	return json.Marshal(body)
+	body["continuationToken"], _ = jsonx.Marshal(token)
+	return jsonx.Marshal(body)
 }
 
 func validateGeminiContinuationBody(body []byte, maxTokens int, enabled bool) error {
@@ -89,9 +90,9 @@ func redactGeminiChunk(data []byte) string {
 			delete(candidate, "continuationToken")
 			delete(candidate, "continuation_token")
 		}
-		value["candidates"], _ = json.Marshal(candidates)
+		value["candidates"], _ = jsonx.Marshal(candidates)
 	}
-	encoded, err := json.Marshal(value)
+	encoded, err := jsonx.Marshal(value)
 	if err != nil {
 		return "[invalid Gemini chunk]"
 	}

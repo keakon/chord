@@ -2,12 +2,12 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -157,7 +157,7 @@ func searchDeferredTools(ctx context.Context, registry *tools.Registry, visible 
 		default:
 			cost := toolSurfaceTokens([]tools.Tool{tool})
 			def := llmToolDefinitionsFromVisibleTools([]tools.Tool{tool})[0]
-			raw, err := json.Marshal(def)
+			raw, err := jsonx.Marshal(def)
 			if err != nil {
 				entry.Status = tools.DiscoveryUnavailable
 				break

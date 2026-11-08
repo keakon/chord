@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 func applyRequestBodyOverrides(body []byte, overrides config.RequestOverridesConfig) ([]byte, error) {
@@ -30,7 +31,7 @@ func applyRequestBodyOverrides(body []byte, overrides config.RequestOverridesCon
 	if err := mergeRawRequestBody(patched, overrides.Body); err != nil {
 		return nil, err
 	}
-	patchedBody, err := json.Marshal(patched)
+	patchedBody, err := jsonx.Marshal(patched)
 	if err != nil {
 		return nil, fmt.Errorf("encode request body overrides: %w", err)
 	}
@@ -60,7 +61,7 @@ func mergeRawRequestBody(target map[string]json.RawMessage, patch map[string]any
 			}
 			value = object
 		}
-		encoded, err := json.Marshal(value)
+		encoded, err := jsonx.Marshal(value)
 		if err != nil {
 			return fmt.Errorf("encode request override field %q: %w", key, err)
 		}

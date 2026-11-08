@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -55,7 +56,7 @@ func (m *claudeMessage) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	if len(content) > 0 && content[0] == '"' {
-		block, err := json.Marshal(map[string]string{
+		block, err := jsonx.Marshal(map[string]string{
 			"type": "text",
 			"text": rawContentString(content),
 		})
@@ -831,7 +832,7 @@ func convertClaudeToolCall(block claudeContentBlock) (message.ToolCall, bool) {
 	// shared argument normalizer expects before the mapping.
 	if importedToolClosestIs(name, tools.NameShell) {
 		if parsed, ok := parseImportedToolArgs(args); ok {
-			if out, err := json.Marshal(importedShellTimeoutToSeconds(parsed)); err == nil {
+			if out, err := jsonx.Marshal(importedShellTimeoutToSeconds(parsed)); err == nil {
 				args = out
 			}
 		}

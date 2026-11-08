@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // canonicalToolCallArgs preserves number literals while normalizing object
@@ -23,5 +25,5 @@ func canonicalToolCallArgs(input json.RawMessage) (json.RawMessage, error) {
 		}
 		return nil, fmt.Errorf("decode trailing tool arguments: %w", err)
 	}
-	return json.Marshal(value)
+	return jsonx.Marshal(value)
 }

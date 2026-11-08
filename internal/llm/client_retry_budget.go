@@ -1,11 +1,11 @@
 package llm
 
 import (
-	"encoding/json"
 	"sync"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -51,7 +51,7 @@ func estimateToolDefinitionTokens(tools []message.ToolDefinition) int {
 	total := 0
 	for _, tool := range tools {
 		n := len(tool.Name) + len(tool.Description)
-		if schemaBytes, err := json.Marshal(tool.InputSchema); err == nil {
+		if schemaBytes, err := jsonx.Marshal(tool.InputSchema); err == nil {
 			n += len(schemaBytes)
 		}
 		total += n

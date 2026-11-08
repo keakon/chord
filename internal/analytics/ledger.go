@@ -17,6 +17,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
 )
@@ -665,7 +666,7 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 }
 
 func (l *UsageLedger) appendEventLocked(event UsageEvent) error {
-	data, err := json.Marshal(event)
+	data, err := jsonx.Marshal(event)
 	if err != nil {
 		return &ledgerWriteError{cause: fmt.Errorf("marshal usage event: %w", err), retrySafe: true}
 	}
@@ -1039,7 +1040,7 @@ func (l *UsageLedger) writeSummaryLocked(summary *SessionUsageSummary) error {
 	if summary == nil {
 		return nil
 	}
-	data, err := json.Marshal(summary)
+	data, err := jsonx.Marshal(summary)
 	if err != nil {
 		return fmt.Errorf("marshal usage summary: %w", err)
 	}

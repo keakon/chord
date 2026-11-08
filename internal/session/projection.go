@@ -12,11 +12,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -205,7 +205,7 @@ func enforceProjectionBudget(turns []ProjectedTurn, limits ProjectionLimits) ([]
 func MarshalProjectedTurnsJSONL(turns []ProjectedTurn) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, turn := range turns {
-		data, err := json.Marshal(turn)
+		data, err := jsonx.Marshal(turn)
 		if err != nil {
 			return nil, fmt.Errorf("marshal projected turn %d: %w", turn.TurnIndex, err)
 		}

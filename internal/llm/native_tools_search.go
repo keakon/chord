@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
 )
@@ -22,7 +23,7 @@ func nativeWebSearchRequest(cfg *config.NativeWebSearchConfig, provider *Provide
 	if snapshot.MaxUses == 0 {
 		snapshot.MaxUses = 8
 	}
-	constraints, err := json.Marshal(struct {
+	constraints, err := jsonx.Marshal(struct {
 		AllowedDomains []string `json:"allowed_domains,omitempty"`
 		BlockedDomains []string `json:"blocked_domains,omitempty"`
 		MaxUses        int      `json:"max_uses"`
@@ -54,22 +55,22 @@ func addNativeWebSearchDeclaration(raw []byte, cfg *config.NativeWebSearchConfig
 	}
 	decl := nativeSearchDeclaration(cfg)
 	if cfg.Contract != config.NativeWebSearchMessages {
-		body["max_tool_calls"], _ = json.Marshal(cfg.MaxUses)
+		body["max_tool_calls"], _ = jsonx.Marshal(cfg.MaxUses)
 		var include []string
 		_ = json.Unmarshal(body["include"], &include)
 		include = append(include, "web_search_call.action.sources")
-		body["include"], _ = json.Marshal(include)
+		body["include"], _ = jsonx.Marshal(include)
 	}
-	encoded, err := json.Marshal(decl)
+	encoded, err := jsonx.Marshal(decl)
 	if err != nil {
 		return nil, err
 	}
 	defs = append(defs, encoded)
-	body["tools"], err = json.Marshal(defs)
+	body["tools"], err = jsonx.Marshal(defs)
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(body)
+	return jsonx.Marshal(body)
 }
 
 func nativeSearchDeclaration(cfg *config.NativeWebSearchConfig) map[string]any {

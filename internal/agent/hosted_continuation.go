@@ -2,10 +2,10 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -66,7 +66,7 @@ func (b *hostedBackend) checkContinuation(ctx context.Context, target llm.Fallba
 	} else {
 		ruleset, scope = b.agent.effectiveRuleset(), b.agent.effectivePathScope()
 	}
-	raw, err := json.Marshal(args)
+	raw, err := jsonx.Marshal(args)
 	if err != nil {
 		return fmt.Errorf("marshal continuation permission arguments: %w", err)
 	}

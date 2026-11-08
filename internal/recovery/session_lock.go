@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 )
 
@@ -106,7 +107,7 @@ func AcquireSessionLock(sessionDir string) (*SessionLock, error) {
 		Hostname:   hostname,
 		AcquiredAt: time.Now(),
 	}
-	data, err := json.Marshal(info)
+	data, err := jsonx.Marshal(info)
 	if err != nil {
 		return nil, fmt.Errorf("marshal session lock: %w", err)
 	}

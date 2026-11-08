@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -227,7 +227,7 @@ func (s *SubAgent) archiveContextRecoveryHistory(messages []message.Message) (st
 	if s == nil || strings.TrimSpace(s.sessionDir) == "" || strings.TrimSpace(s.instanceID) == "" {
 		return "unavailable", nil
 	}
-	data, err := json.MarshalIndent(messages, "", "  ")
+	data, err := jsonx.MarshalIndent(messages, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal context archive: %w", err)
 	}

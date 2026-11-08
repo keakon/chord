@@ -3,10 +3,10 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -15,7 +15,7 @@ func skillDiscoveryID(record *message.SkillDiscoveryRecord) string {
 	slices.SortFunc(refs, func(a, b message.SkillActivationRef) int {
 		return strings.Compare(skillRefKey(a)+a.Name, skillRefKey(b)+b.Name)
 	})
-	data, _ := json.Marshal(struct {
+	data, _ := jsonx.Marshal(struct {
 		Task, Root string
 		Epoch      uint64
 		Mode       string

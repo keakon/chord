@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -111,13 +112,13 @@ func (c *anthropicHostedCapture) capture(resp *message.Response, eventType strin
 		}
 		for field, src := range map[string]*strings.Builder{"text": &b.text, "thinking": &b.thinking, "signature": &b.signature} {
 			if _, present := b.fields[field]; present || src.Len() > 0 {
-				b.fields[field], _ = json.Marshal(src.String())
+				b.fields[field], _ = jsonx.Marshal(src.String())
 			}
 		}
 		if b.citations != nil {
-			b.fields["citations"], _ = json.Marshal(b.citations)
+			b.fields["citations"], _ = jsonx.Marshal(b.citations)
 		}
-		raw, err := json.Marshal(b.fields)
+		raw, err := jsonx.Marshal(b.fields)
 		if err != nil {
 			return fmt.Errorf("marshal hosted native block: %w", err)
 		}

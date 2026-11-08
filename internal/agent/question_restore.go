@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -86,7 +87,7 @@ func restoreQuestionMessages(msgs []message.Message) []message.Message {
 		if len(result.PendingIDs) > 0 {
 			result.Status = tools.QuestionStatusWaitInterrupted
 		}
-		data, err := json.Marshal(result)
+		data, err := jsonx.Marshal(result)
 		if err != nil {
 			continue
 		}

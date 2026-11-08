@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcatalog"
 	"github.com/keakon/chord/internal/toolname"
@@ -63,13 +64,13 @@ func resolveNativeToolRequest(provider *ProviderConfig, model string, tuning Req
 				if searchMax == 0 {
 					searchMax = 8
 				}
-				body["max_tool_calls"], _ = json.Marshal(min(imageMax, searchMax))
-				return json.Marshal(body)
+				body["max_tool_calls"], _ = jsonx.Marshal(min(imageMax, searchMax))
+				return jsonx.Marshal(body)
 			}
 			image.additionalTools = []string{toolname.WebSearch}
 			imageDefinitions := image.diagnosticDefinitions
 			image.diagnosticDefinitions = func() []map[string]any { return append(imageDefinitions(), search.diagnosticDefinitions()...) }
-			image.authorization.Constraints, err = json.Marshal(struct{ Image, Search json.RawMessage }{image.authorization.Constraints, search.authorization.Constraints})
+			image.authorization.Constraints, err = jsonx.Marshal(struct{ Image, Search json.RawMessage }{image.authorization.Constraints, search.authorization.Constraints})
 			if err != nil {
 				return nil, err
 			}

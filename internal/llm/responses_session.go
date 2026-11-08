@@ -3,9 +3,9 @@ package llm
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -24,7 +24,7 @@ func (r *ResponsesProvider) InvalidateRouting(reason string) {
 
 // responsesInputSignature returns a SHA-256 hash of the serialized input items.
 func responsesInputSignature(items []responsesInputItem) string {
-	b, err := json.Marshal(items)
+	b, err := jsonx.Marshal(items)
 	if err != nil {
 		return ""
 	}
@@ -52,7 +52,7 @@ func responsesRequestSignature(req *responsesRequest) string {
 	cpy.Input = nil
 	cpy.PreviousResponseID = ""
 	cpy.ClientMetadata = nil
-	b, err := json.Marshal(cpy)
+	b, err := jsonx.Marshal(cpy)
 	if err != nil {
 		return ""
 	}
@@ -80,7 +80,7 @@ func responsesItemKey(item responsesInputItem) string {
 		}
 		return b.String()
 	default:
-		raw, _ := json.Marshal(item)
+		raw, _ := jsonx.Marshal(item)
 		return item.Type + "|" + string(raw)
 	}
 }

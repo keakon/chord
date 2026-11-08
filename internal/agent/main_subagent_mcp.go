@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"reflect"
@@ -15,6 +14,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -276,7 +276,7 @@ func (a *MainAgent) prepareSubAgentMCP(ctx context.Context, owner string, cfg co
 		}
 	}
 	snapshot.Tools = filtered
-	raw, err := json.Marshal(struct {
+	raw, err := jsonx.Marshal(struct {
 		Versions []any
 		Rules    permission.Ruleset
 	}{versions, rules})

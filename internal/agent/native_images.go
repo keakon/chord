@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/imagegen"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
@@ -55,7 +56,7 @@ func (a *MainAgent) configureNativeImagePolicy(policy *llm.NativeToolPolicy, tur
 				return false
 			}
 			marker := filepath.Join(sessionDir, "native-image-fallback", fmt.Sprintf("%x.json", sha256.Sum256([]byte(requestID))))
-			data, _ := json.Marshal(struct {
+			data, _ := jsonx.Marshal(struct {
 				RequestID string `json:"request_id"`
 				AgentID   string `json:"agent_id"`
 				Deadline  int64  `json:"deadline_unix_nano"`
@@ -95,7 +96,7 @@ func saveNativeImages(ctx context.Context, sessionDir string, resp *message.Resp
 		var kind string
 		if json.Unmarshal(raw, &item) == nil && json.Unmarshal(item["type"], &kind) == nil && kind == message.HostedCallKindImageGeneration {
 			delete(item, "result")
-			resp.Hosted.Items[i], _ = json.Marshal(item)
+			resp.Hosted.Items[i], _ = jsonx.Marshal(item)
 		}
 	}
 	defer func() {
@@ -141,7 +142,7 @@ func saveNativeImages(ctx context.Context, sessionDir string, resp *message.Resp
 		}
 		generated := tools.GeneratedImage{ArtifactRef: ref, Reference: tools.ImageArtifactPrefix + ref.RelPath, Width: img.Width, Height: img.Height, RevisedPrompt: item.RevisedPrompt}
 		summary := tools.ImageGenerationSummary{OperationID: item.ID, State: imagegen.StateSaved, Images: []tools.GeneratedImage{generated}, RequestID: resp.ProviderResponseID, BillingState: "unknown"}
-		encoded, err := json.Marshal(summary)
+		encoded, err := jsonx.Marshal(summary)
 		if err != nil {
 			return err
 		}

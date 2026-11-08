@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -170,7 +171,7 @@ func (a *MainAgent) prepareQuestionLifecycle(c *questionCommand) (QuestionFact, 
 		return fact, msg, receipt, fmt.Errorf("unknown question lifecycle operation")
 	}
 	fact.Receipt = receipt
-	data, err := json.Marshal(fact)
+	data, err := jsonx.Marshal(fact)
 	if err != nil {
 		return fact, msg, receipt, fmt.Errorf("encode question lifecycle: %w", err)
 	}
@@ -221,7 +222,7 @@ func (a *MainAgent) attachQuestionConsumption(msg *message.Message, ids []string
 		return
 	}
 	fact := QuestionFact{TransactionID: fmt.Sprintf("consume:%s:%d", a.questions.scope, msg.RequestBatch), Operation: questionOpConsume, Consumed: ids}
-	data, err := json.Marshal(fact)
+	data, err := jsonx.Marshal(fact)
 	if err == nil {
 		msg.Question = data
 	}
@@ -405,7 +406,7 @@ func questionRequestContext(r questionRequestProjection, msgs []message.Message)
 		if !ok || q.ScopeID != r.scope || q.TaskID != identity.MainAgentID {
 			continue
 		}
-		meta, _ := json.Marshal(QuestionFact{Result: fact.Result})
+		meta, _ := jsonx.Marshal(QuestionFact{Result: fact.Result})
 		// Re-state the whole decision, not just its identifier: the call that
 		// asked the question may already be gone from the request, so this row
 		// is the only place the model can still see what was asked and chosen.
@@ -429,7 +430,7 @@ func questionRequestContext(r questionRequestProjection, msgs []message.Message)
 		return visible
 	}
 	slices.SortFunc(questions, func(x, y pending) int { return strings.Compare(x.ID, y.ID) })
-	data, _ := json.Marshal(questions)
+	data, _ := jsonx.Marshal(questions)
 	return append(visible, questionProjectionMessage(message.SystemReminderOverlayText("Current questions: "+string(data)+". Continue independent work; use Question(wait_for) only when these decisions are needed. An unanswered question still requires a user decision or an explicit cancellation. Never recreate pending questions."), nil))
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -457,7 +458,7 @@ func codexProcessResponseItem(
 		} else {
 			// Legacy freeform custom tools (apply_patch) carry their input as
 			// the tool's own string parameter.
-			argsJSON, _ := json.Marshal(map[string]string{"input": inputStr})
+			argsJSON, _ := jsonx.Marshal(map[string]string{"input": inputStr})
 			call.Arguments = argsJSON
 		}
 		turn.ToolCalls[callID] = call
@@ -687,7 +688,7 @@ func codexWebSearchArgs(query string, action json.RawMessage) json.RawMessage {
 			args["action"] = string(action)
 		}
 	}
-	b, _ := json.Marshal(args)
+	b, _ := jsonx.Marshal(args)
 	return b
 }
 
@@ -1209,7 +1210,7 @@ func codexNormalizeExecCommandArgs(args map[string]any) json.RawMessage {
 	if ms := codexPickFloat(args, "timeout_ms"); ms > 0 {
 		result["timeout_ms"] = int(ms)
 	}
-	b, _ := json.Marshal(result)
+	b, _ := jsonx.Marshal(result)
 	return b
 }
 
@@ -1237,7 +1238,7 @@ func normalizeImportedShellArgs(args map[string]any) json.RawMessage {
 		// timeout_ms, so convert to keep the imported deadline intact.
 		result["timeout_ms"] = int(timeout * 1000)
 	}
-	b, _ := json.Marshal(result)
+	b, _ := jsonx.Marshal(result)
 	return b
 }
 
@@ -1253,7 +1254,7 @@ func normalizeImportedReadArgs(args map[string]any) json.RawMessage {
 	if limit := codexPickFloat(args, "limit", "max_lines", "max_output_tokens"); limit > 0 {
 		result["limit"] = int(limit)
 	}
-	b, _ := json.Marshal(result)
+	b, _ := jsonx.Marshal(result)
 	return b
 }
 
@@ -1267,7 +1268,7 @@ func normalizeImportedWriteArgs(args map[string]any) json.RawMessage {
 		return nil
 	}
 	result := map[string]any{"path": path, "content": content}
-	b, _ := json.Marshal(result)
+	b, _ := jsonx.Marshal(result)
 	return b
 }
 
@@ -1281,7 +1282,7 @@ func normalizeImportedDeleteArgs(args map[string]any) json.RawMessage {
 		reason = deleteReasonFallback
 	}
 	result := map[string]any{"paths": paths, "reason": reason}
-	b, _ := json.Marshal(result)
+	b, _ := jsonx.Marshal(result)
 	return b
 }
 
@@ -1297,7 +1298,7 @@ func normalizeImportedGrepArgs(args map[string]any) json.RawMessage {
 	if includes := codexPickStringList(args, "includes", "glob", "file_pattern", "include"); len(includes) > 0 {
 		result["includes"] = includes
 	}
-	b, _ := json.Marshal(result)
+	b, _ := jsonx.Marshal(result)
 	return b
 }
 
@@ -1310,7 +1311,7 @@ func normalizeImportedGlobArgs(args map[string]any) json.RawMessage {
 	if path := codexPickString(args, "path", "directory"); path != "" {
 		result["path"] = path
 	}
-	b, _ := json.Marshal(result)
+	b, _ := jsonx.Marshal(result)
 	return b
 }
 
@@ -1397,7 +1398,7 @@ func codexImportedToolCall(tc *codexToolCall) (string, json.RawMessage) {
 		if json.Valid(tc.Arguments) {
 			return name, tc.Arguments
 		}
-		wrapped, err := json.Marshal(map[string]string{"input": string(tc.Arguments)})
+		wrapped, err := jsonx.Marshal(map[string]string{"input": string(tc.Arguments)})
 		if err == nil {
 			return name, wrapped
 		}
@@ -1423,7 +1424,7 @@ func codexImportedToolCall(tc *codexToolCall) (string, json.RawMessage) {
 			// declaration the script opens with.
 			payload["commands"] = strings.Join(commands, "\n")
 		}
-		args, err := json.Marshal(payload)
+		args, err := jsonx.Marshal(payload)
 		if err == nil {
 			return name, args
 		}

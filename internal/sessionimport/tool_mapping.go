@@ -5,6 +5,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -197,7 +198,7 @@ func normalizeImportedQuestionArgs(args map[string]any) json.RawMessage {
 		}
 		normalized = append(normalized, entry)
 	}
-	raw, err := json.Marshal(map[string]any{"questions": normalized})
+	raw, err := jsonx.Marshal(map[string]any{"questions": normalized})
 	if err != nil {
 		return nil
 	}
@@ -282,7 +283,7 @@ func normalizeReplaceEditArgs(args map[string]any) json.RawMessage {
 	}
 	if batch := normalizeReplaceEditBatch(args); batch != nil {
 		result := map[string]any{"path": path, "edits": batch}
-		b, _ := json.Marshal(result)
+		b, _ := jsonx.Marshal(result)
 		return b
 	}
 	oldText := codexPickString(args, "old_string", "oldString", "old", "old_text")
@@ -294,7 +295,7 @@ func normalizeReplaceEditArgs(args map[string]any) json.RawMessage {
 	if replaceAll := pickImportedBool(args, "replace_all", "replaceAll"); replaceAll != nil {
 		result["replace_all"] = *replaceAll
 	}
-	b, _ := json.Marshal(result)
+	b, _ := jsonx.Marshal(result)
 	return b
 }
 
@@ -335,7 +336,7 @@ func normalizeApplyPatchArgs(args map[string]any) json.RawMessage {
 	}
 	if strings.HasPrefix(strings.TrimSpace(patch), "*** Begin Patch") {
 		result := map[string]any{"patch": patch}
-		b, _ := json.Marshal(result)
+		b, _ := jsonx.Marshal(result)
 		return b
 	}
 	path := codexPickString(args, "path", "file_path", "filePath", "file")
@@ -343,7 +344,7 @@ func normalizeApplyPatchArgs(args map[string]any) json.RawMessage {
 		return nil
 	}
 	result := map[string]any{"patch": buildImportedApplyPatchEnvelope(path, patch)}
-	b, _ := json.Marshal(result)
+	b, _ := jsonx.Marshal(result)
 	return b
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/imageutil"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -511,7 +512,7 @@ func extractOpenCodeContent(obj map[string]json.RawMessage) (text string, conten
 						continue
 					}
 					// Non-text block: keep a short marker so ordering isn't lost.
-					pretty, _ := json.Marshal(v)
+					pretty, _ := jsonx.Marshal(v)
 					b.WriteString("[non-text content block]\n")
 					b.Write(pretty)
 					b.WriteString("\n")
@@ -529,7 +530,7 @@ func extractOpenCodeContent(obj map[string]json.RawMessage) (text string, conten
 			if t, _, ok := extractTextFromBlock(m); ok {
 				return strings.TrimSpace(t), contentTypes, warns, nil
 			}
-			pretty, _ := json.MarshalIndent(m, "", "  ")
+			pretty, _ := jsonx.MarshalIndent(m, "", "  ")
 			warns = append(warns, "content object not recognized; rendered as JSON")
 			return string(pretty), contentTypes, warns, nil
 		}
@@ -651,7 +652,7 @@ func convertOpenCodePartsOrdered(raw json.RawMessage, role message.Role, reasoni
 		case "":
 			warns = append(warns, "part missing type; skipped")
 		default:
-			payload, _ := json.MarshalIndent(part, "", "  ")
+			payload, _ := jsonx.MarshalIndent(part, "", "  ")
 			rendered = append(rendered, "["+typ+" part]\n"+string(payload))
 			warns = append(warns, "unsupported part type "+typ+"; imported as text")
 		}
@@ -700,7 +701,7 @@ func openCodeStructuredToolMessages(part map[string]any) (call message.Message, 
 	if importedToolClosestIs(name, tools.NameShell) {
 		args = importedShellTimeoutToSeconds(args)
 	}
-	rawArgs, err := json.Marshal(args)
+	rawArgs, err := jsonx.Marshal(args)
 	if err != nil {
 		return message.Message{}, nil, false, false
 	}
@@ -744,7 +745,7 @@ func openCodeToolMessages(name, callID string, args json.RawMessage, part map[st
 
 func renderOpenCodeUnsupportedToolPart(part map[string]any) string {
 	name := openCodeToolName(part)
-	payload, _ := json.MarshalIndent(part, "", "  ")
+	payload, _ := jsonx.MarshalIndent(part, "", "  ")
 	var b strings.Builder
 	b.WriteString(openCodeUnsupportedToolHeaderPrefix)
 	if name != "" {
@@ -1058,7 +1059,7 @@ func extractToolishText(obj map[string]json.RawMessage, contentTypes []string) (
 				if strings.ToLower(strings.TrimSpace(t)) != openCodePartTypeTool {
 					continue
 				}
-				payload, _ := json.MarshalIndent(block, "", "  ")
+				payload, _ := jsonx.MarshalIndent(block, "", "  ")
 				if b.Len() > 0 {
 					b.WriteString("\n\n")
 				}
@@ -1121,7 +1122,7 @@ func indentJSON(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return string(bytes.TrimSpace(raw))
 	}
-	b, err := json.MarshalIndent(v, "", "  ")
+	b, err := jsonx.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return string(bytes.TrimSpace(raw))
 	}

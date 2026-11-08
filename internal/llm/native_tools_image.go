@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
 )
@@ -18,7 +19,7 @@ func nativeImageRequest(cfg *config.NativeImageGenerationConfig, provider *Provi
 	if snapshot.MaxUses == 0 {
 		snapshot.MaxUses = 1
 	}
-	constraints, err := json.Marshal(snapshot)
+	constraints, err := jsonx.Marshal(snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -34,17 +35,17 @@ func nativeImageRequest(cfg *config.NativeImageGenerationConfig, provider *Provi
 			}
 		}
 		decl := nativeImageDeclaration(&snapshot)
-		encoded, err := json.Marshal(decl)
+		encoded, err := jsonx.Marshal(decl)
 		if err != nil {
 			return nil, err
 		}
 		defs = append(defs, encoded)
-		body["tools"], err = json.Marshal(defs)
+		body["tools"], err = jsonx.Marshal(defs)
 		if err != nil {
 			return nil, err
 		}
-		body["max_tool_calls"], _ = json.Marshal(snapshot.MaxUses)
-		return json.Marshal(body)
+		body["max_tool_calls"], _ = jsonx.Marshal(snapshot.MaxUses)
+		return jsonx.Marshal(body)
 	}}, nil
 }
 
@@ -69,7 +70,7 @@ func nativeImageFallbackDefinitions(defs []message.ToolDefinition, provider *Pro
 			}
 		}
 		if len(options) > 0 {
-			encoded, _ := json.Marshal(options)
+			encoded, _ := jsonx.Marshal(options)
 			requirements = " Preserve the configured output requirements: " + string(encoded) + "."
 		}
 	}

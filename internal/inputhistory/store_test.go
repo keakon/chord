@@ -116,7 +116,7 @@ func TestInputHistoryRetentionAndExternalClear(t *testing.T) {
 		t.Fatal("synced entry resurrected", snap, err)
 	}
 }
-func TestInputHistoryDisabledAndEscapedLimit(t *testing.T) {
+func TestInputHistoryDisabledAndSizeLimit(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Enabled = false
 	s := historyStore(t, t.TempDir(), opts)
@@ -124,14 +124,15 @@ func TestInputHistoryDisabledAndEscapedLimit(t *testing.T) {
 		t.Fatal(a)
 	}
 	opts.Enabled = true
-	opts.MaxBytes = 512
+	opts.MaxBytes = 300
 	s = historyStore(t, t.TempDir(), opts)
-	s.TryRecord(historyRecord("two", strings.Repeat("<", 100)))
+	// The pre-queue TextParts check rejects a record whose raw text exceeds
+	// the per-record share of MaxBytes, independent of JSON escaping.
+	if a := s.TryRecord(historyRecord("two", strings.Repeat("a", 500))); a.Outcome != TooLarge {
+		t.Fatal(a)
+	}
 	if err := s.Close(context.Background()); err != nil {
 		t.Fatal(err)
-	}
-	if status := s.Status(); status.Reason != TooLarge {
-		t.Fatal(status)
 	}
 	snap, _ := s.Snapshot(context.Background(), false)
 	if len(snap.Entries) != 0 {

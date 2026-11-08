@@ -5,11 +5,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/json"
 	"io"
 	"maps"
 	"slices"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -362,7 +362,7 @@ func ToolDefinitionsHash(defs []message.ToolDefinition) [sha256.Size]byte {
 	for _, def := range defs {
 		writeString(h, def.Name)
 		writeString(h, def.Description)
-		schema, err := json.Marshal(def.InputSchema)
+		schema, err := jsonx.Marshal(def.InputSchema)
 		if err != nil {
 			schema = nil
 		}
@@ -375,7 +375,7 @@ func deliveryMetadataHash(m message.Message) [32]byte {
 	if len(m.DeliveredFiles) == 0 && len(m.CompactionDeliveredFiles) == 0 && m.FileLinkBaseDir == "" {
 		return [32]byte{}
 	}
-	raw, _ := json.Marshal(struct {
+	raw, _ := jsonx.Marshal(struct {
 		Files, Checkpoint []message.DeliveredFile
 		Base              string
 	}{m.DeliveredFiles, m.CompactionDeliveredFiles, m.FileLinkBaseDir})

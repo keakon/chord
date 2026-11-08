@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/keakon/chord/internal/convformat"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 func renderImportedToolMarker(kind string, payload json.RawMessage) string {
@@ -15,6 +16,6 @@ func renderImportedToolMarker(kind string, payload json.RawMessage) string {
 	if err := json.Unmarshal(payload, &v); err != nil {
 		return convformat.BlockString("["+kind+"]", string(payload))
 	}
-	b, _ := json.MarshalIndent(v, "", "  ")
+	b, _ := jsonx.MarshalIndent(v, "", "  ")
 	return convformat.BlockString("["+kind+"]", string(b))
 }

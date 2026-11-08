@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -97,7 +98,7 @@ func (w *TraceWriter) Write(rec *LLMTraceRecord) error {
 	if path == "" {
 		return nil
 	}
-	data, err := json.Marshal(rec)
+	data, err := jsonx.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("marshal llm trace: %w", err)
 	}

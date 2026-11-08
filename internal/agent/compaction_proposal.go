@@ -1,12 +1,12 @@
 package agent
 
 import (
-	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -86,7 +86,7 @@ func (p *modelDrivenProposalState) isEmpty() bool {
 // canonical form is what a restore would ever compare against, so it is what
 // gets persisted.
 func marshalCompactContextArgsForAudit(args tools.CompactContextArgs) string {
-	data, err := json.Marshal(args)
+	data, err := jsonx.Marshal(args)
 	if err != nil {
 		return ""
 	}

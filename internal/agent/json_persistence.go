@@ -1,17 +1,17 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 )
 
 func persistJSONAtomically(sessionDir, path, tempPrefix string, value any) error {
-	data, err := json.MarshalIndent(value, "", "  ")
+	data, err := jsonx.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}

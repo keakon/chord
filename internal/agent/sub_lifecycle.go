@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -279,7 +279,7 @@ func (s *SubAgent) effectiveQueueLimits() (int, int) {
 }
 
 func pendingUserMessageBytes(input pendingUserMessage) int {
-	data, err := json.Marshal(input)
+	data, err := jsonx.Marshal(input)
 	if err == nil {
 		return len(data)
 	}
@@ -319,7 +319,7 @@ func (s *SubAgent) hasAcceptedMailbox(messageID string) bool {
 }
 
 func messageQueueBytes(msg message.Message) int {
-	data, err := json.Marshal(msg)
+	data, err := jsonx.Marshal(msg)
 	if err == nil {
 		return len(data)
 	}

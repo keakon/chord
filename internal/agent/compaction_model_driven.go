@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -229,7 +230,7 @@ func (a *MainAgent) tryArmModelDrivenCheckpoint(callID string, rawArgs string) (
 }
 
 func modelDrivenArgsFingerprint(args tools.CompactContextArgs) string {
-	data, err := json.Marshal(args)
+	data, err := jsonx.Marshal(args)
 	if err != nil {
 		return ""
 	}

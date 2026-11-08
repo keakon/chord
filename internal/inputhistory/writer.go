@@ -2,12 +2,13 @@ package inputhistory
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"slices"
 	"time"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 func (s *Store) run() {
@@ -137,7 +138,7 @@ func (s *Store) encodeBatch(ops []operation) {
 			s.settle(op, Failed, s.ctx.Err(), false)
 			continue
 		}
-		line, err := json.Marshal(op.record)
+		line, err := jsonx.Marshal(op.record)
 		line = append(line, '\n')
 		if err != nil || len(line) > MaxRecordBytes || int64(len(line)) > s.opts.MaxBytes {
 			s.settle(op, Failed, ErrTooLarge, true)
@@ -204,7 +205,7 @@ func (s *Store) appendDisk(ops []operation, b []byte, sizes []int64) {
 		encoded := make([][]byte, len(d.records))
 		var total int64
 		for i, r := range d.records {
-			line, e := json.Marshal(r)
+			line, e := jsonx.Marshal(r)
 			if e != nil {
 				err = e
 				break

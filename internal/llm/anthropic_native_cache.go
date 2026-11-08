@@ -3,6 +3,8 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // Read only the cache metadata. Protocol fields and signed payloads remain in
@@ -31,10 +33,10 @@ func marshalAnthropicNativeContent(item anthropicContent) ([]byte, error) {
 	if block == nil {
 		return nil, fmt.Errorf("native cache projection must be a content block")
 	}
-	marker, err := json.Marshal(item.CacheControl)
+	marker, err := jsonx.Marshal(item.CacheControl)
 	if err != nil {
 		return nil, fmt.Errorf("encode native cache marker: %w", err)
 	}
 	block["cache_control"] = marker
-	return json.Marshal(block)
+	return jsonx.Marshal(block)
 }

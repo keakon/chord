@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -546,13 +546,13 @@ func (b *hostedBackend) runAttempt(ctx context.Context, caller *hostedCaller, ta
 				return nil, &llm.HostedOutcomeUnknownError{Cause: fmt.Errorf("%s paused without a completed turn; continuation limit or native content unavailable", spec.Name), Response: resp}
 			}
 			if len(hosted.Messages) == 0 {
-				user, marshalErr := json.Marshal(map[string]any{"role": "user", "content": prompt})
+				user, marshalErr := jsonx.Marshal(map[string]any{"role": "user", "content": prompt})
 				if marshalErr != nil {
 					return nil, fmt.Errorf("marshal hosted user message: %w", marshalErr)
 				}
 				hosted.Messages = append(hosted.Messages, user)
 			}
-			assistant, marshalErr := json.Marshal(map[string]any{"role": "assistant", "content": resp.Hosted.Items})
+			assistant, marshalErr := jsonx.Marshal(map[string]any{"role": "assistant", "content": resp.Hosted.Items})
 			if marshalErr != nil {
 				return nil, fmt.Errorf("marshal hosted continuation: %w", marshalErr)
 			}

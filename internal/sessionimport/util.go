@@ -3,12 +3,12 @@ package sessionimport
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/recovery"
 )
@@ -52,7 +52,7 @@ func allocateSessionID(last string) (id string, nextLast string) {
 }
 
 func writeJSONAtomic(root, path string, v any) error {
-	data, err := json.MarshalIndent(v, "", "  ")
+	data, err := jsonx.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}

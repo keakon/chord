@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/externalclaude"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -80,7 +81,7 @@ func externalToolFingerprint(name string, input json.RawMessage) ([32]byte, erro
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("%w: %w", errExternalToolInputInvalid, err)
 	}
-	data, err := json.Marshal(struct {
+	data, err := jsonx.Marshal(struct {
 		Name  string
 		Input json.RawMessage
 	}{externalclaude.NormalizeToolName(name), canonical})
@@ -397,8 +398,8 @@ func (w *externalWorker) answerExternalQuestion(ctx context.Context, raw json.Ra
 	}
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &fields)
-	fields["answers"], _ = json.Marshal(answers)
-	return json.Marshal(fields)
+	fields["answers"], _ = jsonx.Marshal(answers)
+	return jsonx.Marshal(fields)
 }
 
 func externalPermissionSummary(toolName string) string {

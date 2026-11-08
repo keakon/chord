@@ -17,6 +17,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent/compactionarchive"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/recovery"
@@ -126,7 +127,7 @@ func writeCompactionHistoryMeta(sessionDir, path string, meta compactionHistoryM
 	if meta.HistoryFile == "" {
 		meta.HistoryFile = filepath.Base(strings.TrimSuffix(path, ".status.json") + ".md")
 	}
-	data, err := json.MarshalIndent(meta, "", "  ")
+	data, err := jsonx.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return err
 	}

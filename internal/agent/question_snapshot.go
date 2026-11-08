@@ -1,10 +1,11 @@
 package agent
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -62,7 +63,7 @@ func (a *MainAgent) questionSnapshotPage(query QuestionSnapshotQuery) QuestionRe
 			continue
 		}
 		projected := projectQuestionSnapshot(q, r)
-		data, err := json.Marshal(projected)
+		data, err := jsonx.Marshal(projected)
 		if err != nil || requestedBytes+len(data) > maxQuestionRequestedBytes {
 			return QuestionReceipt{Error: "requested question snapshots exceed the byte budget; request fewer IDs"}
 		}
@@ -77,7 +78,7 @@ func (a *MainAgent) questionSnapshotPage(query QuestionSnapshotQuery) QuestionRe
 		q := r.records[r.recordOrder[i]]
 		if !q.pending() && !included[q.ID] {
 			projected := projectQuestionSnapshot(q, r)
-			data, err := json.Marshal(projected)
+			data, err := jsonx.Marshal(projected)
 			if err != nil {
 				return QuestionReceipt{Error: "encode question snapshot: " + err.Error()}
 			}

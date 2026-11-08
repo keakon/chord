@@ -1,11 +1,11 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -118,8 +118,8 @@ func buildSkillDiscoveryMessage(history []message.Message, view skillActivationV
 	reserve := len(fmt.Sprintf("%d additional matched skills are omitted by the discovery budget.\n", len(candidates)))
 	var refs []message.SkillActivationRef
 	for _, ref := range candidates {
-		name, _ := json.Marshal(ref.Name)
-		description, _ := json.Marshal(tools.TruncateSkillDescription(descriptions[ref.Name], skillDiscoveryDescriptionRunes))
+		name, _ := jsonx.Marshal(ref.Name)
+		description, _ := jsonx.Marshal(tools.TruncateSkillDescription(descriptions[ref.Name], skillDiscoveryDescriptionRunes))
 		line := fmt.Sprintf("- name: %s; description: %s\n", name, description)
 		if len(refs) >= maxEntries || content.Len()+len(line)+reserve > maxBytes {
 			continue

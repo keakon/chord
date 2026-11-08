@@ -1,12 +1,12 @@
 package agent
 
 import (
-	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/patchinput"
 	"github.com/keakon/chord/internal/textclean"
@@ -230,7 +230,7 @@ func (t *Turn) streamingArgsFlushDue(callID string, now time.Time) bool {
 // streamed args — and every consumer reading them before execution — carry the
 // real patch instead of the envelope.
 func canonicalApplyPatchArgsJSON(text string) string {
-	canonical, err := json.Marshal(map[string]string{"patch": patchinput.UnwrapEnvelope(text)})
+	canonical, err := jsonx.Marshal(map[string]string{"patch": patchinput.UnwrapEnvelope(text)})
 	if err != nil {
 		return `{"patch":""}`
 	}

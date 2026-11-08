@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/executiongate"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
 )
@@ -171,7 +172,7 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 			callErr = ctx.Err()
 		}
 		if resp != nil {
-			resp.NativeRequestDuration = time.Since(started)
+			resp.NativeRequestDuration = int64(time.Since(started))
 			normalizeResponseUsage(provider, resp)
 			if resp.Hosted != nil && resp.Hosted.RequiresApproval {
 				callErr = fmt.Errorf("provider requested approval; no approval was sent")
@@ -292,12 +293,12 @@ func (item responsesInputItem) MarshalJSON() ([]byte, error) {
 		return item.Raw, nil
 	}
 	type wire responsesInputItem
-	return json.Marshal(wire(item))
+	return jsonx.Marshal(wire(item))
 }
 func (item anthropicContent) MarshalJSON() ([]byte, error) {
 	if len(item.Raw) > 0 {
 		return marshalAnthropicNativeContent(item)
 	}
 	type wire anthropicContent
-	return json.Marshal(wire(item))
+	return jsonx.Marshal(wire(item))
 }

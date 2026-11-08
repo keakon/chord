@@ -18,6 +18,7 @@ import (
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -1347,7 +1348,7 @@ func (p toolExecutionPipeline) applyToolHook(ctx context.Context, tc *message.To
 		if !ok {
 			return false, nil
 		}
-		raw, err := json.Marshal(newArgs)
+		raw, err := jsonx.Marshal(newArgs)
 		if err != nil {
 			return false, nil
 		}

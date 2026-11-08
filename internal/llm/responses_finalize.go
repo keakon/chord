@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/patchinput"
 	"github.com/keakon/chord/internal/toolname"
@@ -65,7 +66,7 @@ func canonicalApplyPatchArgs(raw json.RawMessage) json.RawMessage {
 	if patch == "" {
 		patch = patchinput.UnwrapEnvelope(string(text))
 	}
-	out, err := json.Marshal(map[string]string{"patch": patch})
+	out, err := jsonx.Marshal(map[string]string{"patch": patch})
 	if err != nil {
 		return json.RawMessage(`{"patch":""}`)
 	}

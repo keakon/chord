@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -84,7 +85,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 			case hook.ActionModify:
 				if modified, ok := hookResult.Data.(map[string]any); ok {
 					if newArgs, ok := modified["args"]; ok {
-						if raw, err := json.Marshal(newArgs); err == nil {
+						if raw, err := jsonx.Marshal(newArgs); err == nil {
 							originalArgs := append(json.RawMessage(nil), effective.Args...)
 							effective.Args = raw
 							execResult.EffectiveArgsJSON = string(raw)

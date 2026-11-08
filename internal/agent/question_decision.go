@@ -1,10 +1,10 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -72,7 +72,7 @@ func questionDecisionText(fact QuestionFact) string {
 		fmt.Fprintf(&b, "\nResult ID: %s", result.ResultID)
 	}
 	if len(result.SelectedIDs) > 0 {
-		ids, _ := json.Marshal(result.SelectedIDs)
+		ids, _ := jsonx.Marshal(result.SelectedIDs)
 		fmt.Fprintf(&b, "\nSelected option IDs: %s", ids)
 	}
 	return b.String()

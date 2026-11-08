@@ -2,7 +2,6 @@ package agent
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -11,6 +10,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
@@ -348,7 +348,7 @@ func modelDrivenRuntimeInputFingerprint(input modelDrivenRuntimeInput) string {
 	// state the apply depends on — counting it would void every draft that a
 	// user interrupts by typing. The draft's own boundary (generation) still
 	// guards against genuinely changed runtime state.
-	payload, _ := json.Marshal(struct {
+	payload, _ := jsonx.Marshal(struct {
 		Todos      []tools.TodoItem
 		SubAgents  []SubAgentInfo
 		Background []recovery.BackgroundObjectState

@@ -1,13 +1,17 @@
 package agent
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/keakon/chord/internal/jsonx"
+)
 
 func marshalCompletionEnvelope(env *CompletionEnvelope) json.RawMessage {
 	env = normalizeCompletionEnvelope(env)
 	if env == nil {
 		return nil
 	}
-	data, err := json.Marshal(env)
+	data, err := jsonx.Marshal(env)
 	if err != nil {
 		return nil
 	}

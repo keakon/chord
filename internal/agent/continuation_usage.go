@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/contextdiag"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -42,7 +43,7 @@ func (a *MainAgent) continuationUsageObserver(client *llm.Client, target *wallti
 		// Freeze nested price tiers and service multipliers as well as the top-level value.
 		model, _ := item.ProviderConfig.GetModel(item.ModelID)
 		if source := model.Cost; source != nil {
-			data, _ := json.Marshal(source)
+			data, _ := jsonx.Marshal(source)
 			var cost config.ModelCost
 			if json.Unmarshal(data, &cost) == nil {
 				prices[ref] = &cost

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 )
 
@@ -242,7 +243,7 @@ func (r *RecoveryManager) SaveInputDelivery(expectedRevision uint64, next *Input
 	if err != nil {
 		return nil, err
 	}
-	data, err := json.Marshal(candidate)
+	data, err := jsonx.Marshal(candidate)
 	if err != nil {
 		return nil, fmt.Errorf("marshal input delivery: %w", err)
 	}

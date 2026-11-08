@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 func looksLikeStructuredJSON(content string) bool {
@@ -124,7 +126,7 @@ func summarizeJSONValue(value any) string {
 	case map[string]any:
 		return summarizeJSONNestedKeys(t)
 	default:
-		if raw, err := json.Marshal(value); err == nil {
+		if raw, err := jsonx.Marshal(value); err == nil {
 			return strings.ReplaceAll(TextSnippet(string(raw), SummaryLineSnippetChars), "\n", " ")
 		}
 		return ""
@@ -172,7 +174,7 @@ func summarizeJSONArrayItems(items []any, limit int) []string {
 		if limit > 1 {
 			idx = (len(items) - 1) * i / (limit - 1)
 		}
-		rendered, _ := json.Marshal(items[idx])
+		rendered, _ := jsonx.Marshal(items[idx])
 		out = append(out, fmt.Sprintf("- [%d] %s", idx, strings.ReplaceAll(TextSnippet(string(rendered), SummaryLineSnippetChars), "\n", " ")))
 	}
 	return out

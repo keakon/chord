@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -68,7 +69,7 @@ func subAgentCheckpointSkills(s *SubAgent, messages []message.Message) string {
 		result += "\n" + subAgentCheckpointNotLoadablePrefix + strings.Join(notLoadable, ", ") + subAgentCheckpointNotLoadableHint
 	}
 	if len(omittedNames) > 0 {
-		encoded, err := json.Marshal(omittedNames)
+		encoded, err := jsonx.Marshal(omittedNames)
 		if err == nil {
 			result += "\n" + subAgentCheckpointOmittedNamesPrefix + string(encoded)
 		}
