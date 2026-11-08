@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -72,7 +73,10 @@ func TestArtifactContainmentAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(session, "artifacts")); err != nil {
-		t.Skip(err)
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation requires privileges on windows: %v", err)
+		}
+		t.Fatalf("create artifacts symlink: %v", err)
 	}
 	loc, _ := ArtifactLocator("artifacts/secret")
 	if _, _, err := Open(loc, session); err == nil {

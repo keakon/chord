@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/keakon/chord/internal/imagegen"
@@ -152,7 +153,10 @@ func TestImageArtifactRejectsSessionSymlinkAlias(t *testing.T) {
 	}
 	alias := filepath.Join(dir, "images", "alias.png")
 	if err := os.Symlink(path, alias); err != nil {
-		t.Skip(err)
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation requires privileges on windows: %v", err)
+		}
+		t.Fatalf("create session symlink alias: %v", err)
 	}
 	raw, _ := json.Marshal(map[string]string{"path": "artifact:images/alias.png"})
 	decision := evaluateToolPermissionInDirWithContext(permissionRuleset(t, `"*": allow`), tools.NameViewImage, raw, permission.PathScope{Cwd: cwd}, toolPermissionContext{SessionDir: dir})

@@ -165,7 +165,7 @@ func FuzzStreamingToolArguments(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, raw string, chunk uint8) {
 		if len(raw) > 4096 {
-			t.Skip()
+			t.Skip("corpus sample exceeds streaming bound; covered by generated chunks")
 		}
 		s := &streamingToolArguments{readFields: true}
 		step := int(chunk)%64 + 1
