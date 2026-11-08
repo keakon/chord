@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
@@ -21,7 +20,7 @@ import (
 func estimateInputTokens(messages []message.Message) int {
 	total := 0
 	for _, msg := range messages {
-		total += ctxmgr.EstimateMessageTokens(msg)
+		total += message.EstimateMessageTokens(msg)
 	}
 	return total
 }

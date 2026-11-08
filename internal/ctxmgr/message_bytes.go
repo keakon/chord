@@ -61,7 +61,7 @@ func messageBytesBreakdown(messages []message.Message, resident bool) MessageByt
 			if resident {
 				b.Image += nativeImageResidentBytes(msg.NativeTools)
 			} else {
-				imageBytes, _ := nativeImageAccounting(msg.NativeTools)
+				imageBytes, _ := message.NativeImageAccounting(msg.NativeTools)
 				b.Image += imageBytes
 			}
 			continue
@@ -110,7 +110,7 @@ func messageBytesBreakdown(messages []message.Message, resident bool) MessageByt
 }
 
 // nativeImageResidentBytes sums the inline payloads native replay items hold.
-// Unlike nativeImageAccounting it does not expand to base64: the base64 form is
+// Unlike message.NativeImageAccounting it does not expand to base64: the base64 form is
 // what goes on the wire, not what sits in the heap.
 func nativeImageResidentBytes(native *message.NativeToolHistory) int {
 	images, err := native.ImageReplayItems()

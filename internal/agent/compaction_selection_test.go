@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -327,7 +326,7 @@ func TestSelectRecentTailDegradesInsteadOfDroppingTail(t *testing.T) {
 	if len(tail) == 0 {
 		t.Fatal("large agentic turn produced no recent tail; continuation compaction would degrade to summary-only")
 	}
-	if got := ctxmgr.EstimateMessagesTokens(tail); got > budget {
+	if got := message.EstimateMessagesTokens(tail); got > budget {
 		t.Fatalf("tail tokens = %d, want <= %d", got, budget)
 	}
 	if tail[0].Role == message.RoleTool {
@@ -367,7 +366,7 @@ func TestCompactionHeadSplitPreservesTailForLargeAgenticTurn(t *testing.T) {
 	if messages[split].Role == message.RoleTool {
 		t.Fatalf("head split %d leaves an orphan tool result at the tail head", split)
 	}
-	if got := ctxmgr.EstimateMessagesTokens(messages[split:]); got > recentTailTokenBudget(contextLimit) {
+	if got := message.EstimateMessagesTokens(messages[split:]); got > recentTailTokenBudget(contextLimit) {
 		t.Fatalf("preserved tail tokens = %d, want <= %d", got, recentTailTokenBudget(contextLimit))
 	}
 }

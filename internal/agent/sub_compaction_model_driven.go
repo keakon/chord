@@ -8,7 +8,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -148,9 +147,9 @@ func (s *SubAgent) applyModelDrivenCheckpoint(req *subModelDrivenRequest) {
 		s.settleModelDrivenSkip(subModelDrivenSkipShortHistory)
 		return
 	}
-	estimated := ctxmgr.EstimateMessagesTokens(messages)
+	estimated := message.EstimateMessagesTokens(messages)
 	checkpoint := newSubModelDrivenCheckpointContent(s, messages, req.Args, subModelDrivenApplyReason)
-	checkpointTokens := ctxmgr.EstimateMessageTokens(message.Message{
+	checkpointTokens := message.EstimateMessageTokens(message.Message{
 		Role:    message.RoleUser,
 		Content: checkpoint.build(0, subCheckpointArchiveRefPlaceholder),
 	})
@@ -187,12 +186,12 @@ func (s *SubAgent) applyModelDrivenCheckpoint(req *subModelDrivenRequest) {
 func modelDrivenCheckpointTarget(messages []message.Message, callID string) int {
 	tail := 0
 	for i := len(messages) - 1; i >= 1; i-- {
-		tail += ctxmgr.EstimateMessageTokens(messages[i])
+		tail += message.EstimateMessageTokens(messages[i])
 		if slices.ContainsFunc(messages[i].ToolCalls, func(tc message.ToolCall) bool { return tc.ID == callID }) {
 			break
 		}
 	}
-	return ctxmgr.EstimateMessageTokens(messages[0]) + max(tail, subModelDrivenCheckpointTailTokens)
+	return message.EstimateMessageTokens(messages[0]) + max(tail, subModelDrivenCheckpointTailTokens)
 }
 
 // settleModelDrivenSkip queues the one-shot "not applied" transient and toasts

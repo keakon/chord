@@ -95,7 +95,7 @@ func TestEstimateMessageTokensCountsOpaqueReasoningState(t *testing.T) {
 		}},
 		GeminiParts: []message.GeminiReplayPart{{Type: "text", ThoughtSignature: strings.Repeat("g", 120)}},
 	}
-	if got := EstimateMessageTokens(msg); got < 380 {
+	if got := message.EstimateMessageTokens(msg); got < 380 {
 		t.Fatalf("EstimateMessageTokens = %d, want opaque reasoning state included", got)
 	}
 	if got := messageContextBytes([]message.Message{msg}); got < 1100 {
@@ -309,23 +309,6 @@ func TestCompressForTargetCountsMultipartPayload(t *testing.T) {
 	}
 	if len(got[1].Parts) != 0 || !strings.Contains(got[1].Content, "Context was compressed") || got[2].Content != "recent" {
 		t.Fatalf("unexpected multipart compression result: %+v", got)
-	}
-}
-
-// Image parts are charged a per-image allowance, never their base64 length: a
-// 300 KB screenshot would otherwise add ~100K phantom tokens to the estimate.
-func TestEstimateMessageTokensChargesImagesPerImage(t *testing.T) {
-	text := strings.Repeat("a", 3000)
-	textOnly := message.Message{Role: message.RoleUser, Content: text}
-	textPart := message.ContentPart{Type: message.ContentPartText, Text: text}
-	for _, size := range []int{1000, 300_000} {
-		msg := message.Message{Role: message.RoleUser, Parts: []message.ContentPart{
-			textPart,
-			{Type: message.ContentPartImage, Data: make([]byte, size)},
-		}}
-		if got, want := EstimateMessageTokens(msg), EstimateMessageTokens(textOnly)+imagePartEstimateTokens; got != want {
-			t.Fatalf("EstimateMessageTokens(image %d bytes) = %d, want %d (text estimate plus per-image allowance)", size, got, want)
-		}
 	}
 }
 
@@ -582,8 +565,8 @@ func TestPayloadByteCalibrationAddsPerImageAllowance(t *testing.T) {
 
 	// Text bytes 100 -> 150 scale the 400-token sample to 600; the image adds
 	// one per-image allowance on top.
-	if got := m.AutoCompactDecision().EstimatedInputTokens; got != 600+imagePartEstimateTokens {
-		t.Fatalf("EstimatedInputTokens = %d, want %d (scaled text share plus per-image allowance)", got, 600+imagePartEstimateTokens)
+	if got := m.AutoCompactDecision().EstimatedInputTokens; got != 600+message.ImagePartEstimateTokens {
+		t.Fatalf("EstimatedInputTokens = %d, want %d (scaled text share plus per-image allowance)", got, 600+message.ImagePartEstimateTokens)
 	}
 }
 
@@ -681,27 +664,6 @@ func TestClearLastTokenUsagePreservesCumulativeStats(t *testing.T) {
 	}
 }
 
-func TestEstimateMessagesTokensCountsToolCallsAndThinking(t *testing.T) {
-	msgs := []message.Message{
-		{
-			Role:    "assistant",
-			Content: "abcd",
-			ToolCalls: []message.ToolCall{
-				{ID: "1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)},
-			},
-			ThinkingBlocks: []message.ThinkingBlock{
-				{Thinking: "reasoning", Signature: "sig"},
-			},
-			ReasoningContent: "hidden reasoning",
-		},
-	}
-
-	got := EstimateMessagesTokens(msgs)
-	if got <= 1 {
-		t.Fatalf("expected token estimate to include tool args and thinking, got %d", got)
-	}
-}
-
 func TestMessagePayloadBytesCountsOnlyContentAndImageData(t *testing.T) {
 	msgs := []message.Message{
 		{
@@ -786,7 +748,7 @@ func TestManagerImageAccountingTracksMessageChanges(t *testing.T) {
 	m := NewManager(1000, 0)
 
 	m.Append(image)
-	if m.imagePayloadBytes != 300_000 || m.imageEstimateTokens != imagePartEstimateTokens {
+	if m.imagePayloadBytes != 300_000 || m.imageEstimateTokens != message.ImagePartEstimateTokens {
 		t.Fatalf("after Append: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
 	}
 	if got := m.ContextPayloadBytes(); got != 300_000 {
@@ -1080,7 +1042,7 @@ func TestManagerImageAccountingTracksRestoreAndRepair(t *testing.T) {
 		ImagePath: "shot.png",
 		DataBytes: 300_000,
 	}}}})
-	if m.imagePayloadBytes != 300_000 || m.imageEstimateTokens != imagePartEstimateTokens {
+	if m.imagePayloadBytes != 300_000 || m.imageEstimateTokens != message.ImagePartEstimateTokens {
 		t.Fatalf("after RestoreMessages: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
 	}
 	if got := m.ContextPayloadBytes(); got != 300_000 {
@@ -1091,14 +1053,14 @@ func TestManagerImageAccountingTracksRestoreAndRepair(t *testing.T) {
 		Type: message.ContentPartImage,
 		Data: make([]byte, 4000),
 	}}})
-	if m.imagePayloadBytes != 304_000 || m.imageEstimateTokens != 2*imagePartEstimateTokens {
+	if m.imagePayloadBytes != 304_000 || m.imageEstimateTokens != 2*message.ImagePartEstimateTokens {
 		t.Fatalf("after Append: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
 	}
 
 	if got := m.RepairOrphanToolMessagesInPlace(); got != 1 {
 		t.Fatalf("RepairOrphanToolMessagesInPlace = %d, want 1", got)
 	}
-	if m.imagePayloadBytes != 300_000 || m.imageEstimateTokens != imagePartEstimateTokens {
+	if m.imagePayloadBytes != 300_000 || m.imageEstimateTokens != message.ImagePartEstimateTokens {
 		t.Fatalf("after repair: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
 	}
 	if got := m.MessageCount(); got != 1 {
@@ -1167,7 +1129,7 @@ func TestMixedUsageKeepsTextCalibrationAndEstimatesOnlyGrowth(t *testing.T) {
 	m.Append(message.Message{Role: message.RoleUser, Content: strings.Repeat("x", 100)})
 	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{Type: message.ContentPartImage}}})
 	m.NoteMissingUsage()
-	if got, want := m.FrozenEstimateTokens(), 2020+imagePartEstimateTokens; got != want {
+	if got, want := m.FrozenEstimateTokens(), 2020+message.ImagePartEstimateTokens; got != want {
 		t.Fatalf("frozen estimate = %d, want %d", got, want)
 	}
 }

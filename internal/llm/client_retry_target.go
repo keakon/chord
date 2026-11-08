@@ -10,7 +10,6 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
@@ -479,7 +478,7 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 			if resp.Usage != nil {
 				inputTok = resp.Usage.InputTokens
 				outputTok = resp.Usage.OutputTokens
-				lastInputTokens, _ = ctxmgr.ContextPromptTokens(*resp.Usage)
+				lastInputTokens, _ = message.ContextPromptTokens(*resp.Usage)
 				c.setLastInputTokens(lastInputTokens)
 			}
 			log.Debugf("LLM request completed provider=%v model=%v input_tokens=%v output_tokens=%v stop_reason=%v", t.provider.Name(), t.modelID, inputTok, outputTok, resp.StopReason)

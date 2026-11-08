@@ -13,7 +13,7 @@ import (
 // same way everywhere.
 func estimateMessagesTokens(mgr *ctxmgr.Manager, messages []message.Message) int {
 	if mgr == nil {
-		return ctxmgr.EstimateMessagesTokens(messages)
+		return message.EstimateMessagesTokens(messages)
 	}
 	return mgr.EstimateMessagesTokensCalibrated(messages)
 }

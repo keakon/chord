@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/agent/checkpointfmt"
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/worktree"
@@ -49,7 +48,7 @@ func checkpointWorklogWriteResult(callID, path string) message.Message {
 }
 
 func checkpointWorklogEstimateTokens(text string) int {
-	return ctxmgr.EstimateMessagesTokens([]message.Message{{Role: message.RoleUser, Content: text}})
+	return message.EstimateMessagesTokens([]message.Message{{Role: message.RoleUser, Content: text}})
 }
 
 func TestBuildCheckpointWorklogExtractsMachineWork(t *testing.T) {

@@ -16,7 +16,6 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
@@ -993,7 +992,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	// fullPromptTokens (cache reads are already inside input on most wires;
 	// adding them again double-counts).
 	if resp.Usage != nil && decision.UsableInputBudget > 0 {
-		if fullPrompt, known := ctxmgr.ContextPromptTokens(*resp.Usage); known && fullPrompt > decision.UsableInputBudget {
+		if fullPrompt, known := message.ContextPromptTokens(*resp.Usage); known && fullPrompt > decision.UsableInputBudget {
 			log.Debugf("successful response exceeded local input budget full_prompt_tokens=%v usable_input_budget=%v %v", fullPrompt, decision.UsableInputBudget, decisionFields)
 		}
 	}

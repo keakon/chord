@@ -12,6 +12,7 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"github.com/keakon/chord/internal/imageutil"
+	"github.com/keakon/chord/internal/message"
 )
 
 func ReadBounded(r io.Reader, max int64) ([]byte, error) {
@@ -41,7 +42,7 @@ func ValidateImage(ctx context.Context, data []byte, declaredMIME string) (Image
 	if declaredMIME != "" && declaredMIME != mime {
 		return Image{}, fmt.Errorf("image MIME does not match content")
 	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > MaxImageDimension || cfg.Height > MaxImageDimension || int64(cfg.Width)*int64(cfg.Height) > MaxPixels {
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > message.MaxImageDimension || cfg.Height > message.MaxImageDimension || int64(cfg.Width)*int64(cfg.Height) > message.MaxImagePixels {
 		return Image{}, fmt.Errorf("generated image exceeds pixel budget")
 	}
 	if err := ctx.Err(); err != nil {

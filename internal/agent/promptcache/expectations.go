@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent/requestshape"
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -47,7 +46,7 @@ type expectationRecord struct {
 // slices for messages, reusing the previous record's entries for the leading
 // run of messages that are field-equal to the previously sent request.
 // requestshape.MessageEquivalent covers every field that
-// requestshape.ShapeOf hashes and ctxmgr.EstimateMessageTokens reads,
+// requestshape.ShapeOf hashes and message.EstimateMessageTokens reads,
 // so equivalence guarantees identical shape and token values. In the
 // append-only steady state only the new tail is hashed; when the whole request
 // is unchanged the previous slices are returned as-is.
@@ -67,7 +66,7 @@ func incrementalCacheExpectationShapes(previous *expectationRecord, messages []m
 	}
 	for i := reusable; i < len(messages); i++ {
 		shapes[i] = requestshape.ShapeOf(&messages[i])
-		tokens[i] = ctxmgr.EstimateMessageTokens(messages[i])
+		tokens[i] = message.EstimateMessageTokens(messages[i])
 	}
 	return shapes, tokens, append([]message.Message(nil), messages...)
 }

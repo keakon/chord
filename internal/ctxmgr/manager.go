@@ -268,7 +268,7 @@ func (m *Manager) Append(msg message.Message) {
 	} else {
 		m.contextBytes += messageContextBytes([]message.Message{msg})
 	}
-	imagePayloadBytes, imageTokens := imagePartAccounting([]message.Message{msg})
+	imagePayloadBytes, imageTokens := message.ImagePartAccounting([]message.Message{msg})
 	m.imagePayloadBytes += imagePayloadBytes
 	m.imageEstimateTokens += imageTokens
 }
@@ -321,7 +321,7 @@ func (m *Manager) DropLastMessages(n int) {
 		removedDirectoryFacts = removedDirectoryFacts || msg.Kind == message.KindDirectoryInstructions
 	}
 	m.contextBytes -= messageContextBytes(m.messages[len(m.messages)-n:])
-	imagePayloadBytes, imageTokens := imagePartAccounting(m.messages[len(m.messages)-n:])
+	imagePayloadBytes, imageTokens := message.ImagePartAccounting(m.messages[len(m.messages)-n:])
 	m.imagePayloadBytes -= imagePayloadBytes
 	m.imageEstimateTokens -= imageTokens
 	m.messages = m.messages[:len(m.messages)-n]
@@ -391,7 +391,7 @@ func (m *Manager) RestoreMessages(msgs []message.Message) {
 	m.messages = replaced
 	m.payloadBytes = MessagePayloadBytes(replaced)
 	m.contextBytes = messageContextBytes(replaced)
-	m.imagePayloadBytes, m.imageEstimateTokens = imagePartAccounting(replaced)
+	m.imagePayloadBytes, m.imageEstimateTokens = message.ImagePartAccounting(replaced)
 	m.rebuildToolCallIDIndexLocked()
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
@@ -418,7 +418,7 @@ func (m *Manager) RepairOrphanToolMessagesInPlace() int {
 	m.messages = repaired
 	m.payloadBytes = MessagePayloadBytes(repaired)
 	m.contextBytes = messageContextBytes(repaired)
-	m.imagePayloadBytes, m.imageEstimateTokens = imagePartAccounting(repaired)
+	m.imagePayloadBytes, m.imageEstimateTokens = message.ImagePartAccounting(repaired)
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
 	m.calibrationImageTokens = 0
@@ -520,36 +520,6 @@ type calibrationSample struct {
 	bytes  int
 }
 
-// fullPromptTokens normalizes a usage report to the full prompt size across
-// wire accounting conventions. Live responses already arrive canonicalized by
-// the LLM client (input includes cache reads and excludes cache writes — see
-// message.TokenUsage), so on that path only the cache-write add-back applies;
-// the other branches are defense in depth for raw provider shapes, so a path
-// that bypasses that normalization cannot blind the compaction threshold and
-// the byte calibration below. Anthropic-style wires report cache-read and
-// cache-write prefixes outside input_tokens (flags false — add them back), and
-// some OpenAI-compatible relays report only the uncached remainder even though
-// the wire contract says input includes the cached prefix — when input is
-// smaller than a slice it supposedly contains, trust the sum instead.
-func fullPromptTokens(usage message.TokenUsage) int {
-	full := usage.InputTokens
-	if !usage.InputIncludesCacheRead || usage.InputTokens < usage.CacheReadTokens {
-		full += usage.CacheReadTokens
-	}
-	if !usage.InputIncludesCacheWrite || usage.InputTokens < usage.CacheWriteTokens {
-		full += usage.CacheWriteTokens
-	}
-	return full
-}
-
-// FullPromptTokens normalizes a usage report to the full prompt size across
-// wire accounting conventions (see fullPromptTokens). Providers must be compared
-// through this normalization: cache reads are already inside input on most
-// wires, so adding them again double-counts.
-func FullPromptTokens(usage message.TokenUsage) int {
-	return fullPromptTokens(usage)
-}
-
 // ContextUsageState is the observation state behind the context gauge. observed
 // = latest main response carried usage; estimated = latest missed usage but a
 // frozen calibration estimate exists; stale = a previous window or restored
@@ -564,16 +534,6 @@ const (
 	ContextUsageStale     ContextUsageState = "stale"
 	ContextUsageUnknown   ContextUsageState = "unknown"
 )
-
-// hasUsageReport reports whether a TokenUsage carries any provider observation.
-// An all-zero report is treated as missing usage, never as a real zero-size
-// observation: no provider bills a real request at zero input and zero output.
-func hasUsageReport(usage message.TokenUsage) bool {
-	if fullPromptTokens(usage) > 0 {
-		return true
-	}
-	return usage.OutputTokens > 0 || usage.CacheReadTokens > 0 || usage.CacheWriteTokens > 0 || usage.ReasoningTokens > 0
-}
 
 // computeFrozenEstimateLocked computes the single frozen estimate allowed when a
 // response misses usage: one absolute size for the just-finished request, using
@@ -624,7 +584,7 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.stats.CacheReadTokens += usage.CacheReadTokens
 	m.stats.CacheWriteTokens += usage.CacheWriteTokens
 	m.stats.ReasoningTokens += usage.ReasoningTokens
-	if _, known := ContextPromptTokens(usage); !known {
+	if _, known := message.ContextPromptTokens(usage); !known {
 		frozen := m.computeFrozenEstimateLocked()
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
@@ -642,7 +602,7 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 		m.mu.Unlock()
 		return
 	}
-	fullPrompt, _ := ContextPromptTokens(usage)
+	fullPrompt, _ := message.ContextPromptTokens(usage)
 	output := usage.OutputTokens
 	if usage.Context != nil {
 		output = usage.Context.OutputTokens
@@ -810,7 +770,7 @@ func (m *Manager) InvalidateSizeObservation() {
 func (m *Manager) EstimateTotalTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return EstimateMessagesTokens(m.messages)
+	return message.EstimateMessagesTokens(m.messages)
 }
 
 // PayloadBytes returns message content bytes for the current message list. It
@@ -866,103 +826,12 @@ func EstimateMessagesBytes(messages []message.Message) int {
 	return messageContextBytes(messages)
 }
 
-// imagePartEstimateTokens is the input-token allowance one image part carries in
-// every estimate. Providers bill images per image (patch- or scale-based), not
-// per base64 byte — byte accounting charged a 400 KB screenshot ~130K phantom
-// tokens. The allowance covers the largest normalized image Chord accepts
-// under the conservative Anthropic-style ceil(w*h/750) rule (2000x2000), so an
-// unknown provider does not make capacity planning optimistic. PDF parts keep
-// the byte-based accounting: their cost scales with the document and the part
-// carries no page count to estimate.
-const imagePartEstimateTokens = (2000*2000 + 749) / 750
-
-// imagePartAccounting reports the two image-side quantities the token estimator
-// keeps apart from the byte counters: the payload bytes image parts contribute
-// and the per-image token allowance replacing them.
-func imagePartAccounting(messages []message.Message) (payloadBytes, tokens int) {
-	for _, msg := range messages {
-		if msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 {
-			imageBytes, imageTokens := nativeImageAccounting(msg.NativeTools)
-			payloadBytes += imageBytes
-			tokens += imageTokens
-			continue
-		}
-		for _, part := range msg.Parts {
-			if part.Type != message.ContentPartImage {
-				continue
-			}
-			payloadBytes += int(part.PayloadBytes())
-			tokens += imagePartEstimateTokens
-		}
-	}
-	return payloadBytes, tokens
-}
-
 // messageEstimateBytesAndImages splits a message slice into the estimator's two
 // inputs: the byte surface the calibrated ratio applies to (image payloads
 // removed) and the per-image allowance for the image parts in it.
 func messageEstimateBytesAndImages(messages []message.Message) (bytes, imageTokens int) {
-	imagePayloadBytes, imageTokens := imagePartAccounting(messages)
+	imagePayloadBytes, imageTokens := message.ImagePartAccounting(messages)
 	return messageContextBytes(messages) - imagePayloadBytes, imageTokens
-}
-
-// EstimateMessagesTokens returns the approximate input-token count for a slice
-// of messages, including multipart text and attachment payloads.
-func EstimateMessagesTokens(messages []message.Message) int {
-	messages = message.DirectoryInstructionAccountingMessages(messages)
-	total := 0
-	for _, msg := range messages {
-		total += EstimateMessageTokens(msg)
-	}
-	return total
-}
-
-// EstimateMessageTokens returns approximate token count for a single message.
-func EstimateMessageTokens(msg message.Message) int {
-	// Native adapters replay the complete raw surface instead of its display
-	// mirrors (content, thinking and client calls).
-	if msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 {
-		n := 0
-		for _, item := range msg.NativeTools.Items {
-			n += len(item)
-		}
-		_, imageTokens := nativeImageAccounting(msg.NativeTools)
-		return max(1, n/3+imageTokens)
-	}
-	payloadBytes := len(msg.Content)
-	imageTokens := 0
-	if len(msg.Parts) > 0 {
-		payloadBytes = 0
-		for _, part := range msg.Parts {
-			if part.Type == message.ContentPartImage {
-				imageTokens += imagePartEstimateTokens
-				continue
-			}
-			payloadBytes += len(part.Text) + int(part.PayloadBytes())
-		}
-	}
-	n := payloadBytes/3 + imageTokens
-	n += len(msg.ToolCallID) / 3
-	for _, tc := range msg.ToolCalls {
-		n += len(tc.Args) / 3
-	}
-	for _, tb := range msg.ThinkingBlocks {
-		n += (len(tb.Thinking) + len(tb.Signature) + len(tb.Data)) / 3
-	}
-	for _, item := range msg.ResponsesOutput {
-		n += (len(item.ID) + len(item.EncryptedContent)) / 3
-		for _, summary := range item.Summary {
-			n += len(summary.Text) / 3
-		}
-	}
-	for _, part := range msg.GeminiParts {
-		n += len(part.ThoughtSignature) / 3
-	}
-	n += len(msg.ReasoningContent) / 3
-	if n < 1 {
-		n = 1
-	}
-	return n
 }
 
 type AutoCompactDecision struct {
@@ -1147,7 +1016,7 @@ func (m *Manager) computeCalibratedRatioLocked() float64 {
 // estimate is returned.
 func (m *Manager) EstimateMessagesTokensCalibrated(messages []message.Message) int {
 	if m == nil {
-		return EstimateMessagesTokens(messages)
+		return message.EstimateMessagesTokens(messages)
 	}
 	m.mu.RLock()
 	ratio := m.calibratedRatioCache
@@ -1179,7 +1048,7 @@ func (m *Manager) EstimateMessagesTokensCalibrated(messages []message.Message) i
 // EstimateMessagesTokensCalibrated's no-sample behavior.
 func EstimateMessagesTokensWithRatio(messages []message.Message, ratio float64) int {
 	if ratio <= 0 {
-		return EstimateMessagesTokens(messages)
+		return message.EstimateMessagesTokens(messages)
 	}
 	bytes, imageTokens := messageEstimateBytesAndImages(messages)
 	return max(int(float64(bytes)*ratio), 1) + imageTokens
@@ -1190,7 +1059,7 @@ func EstimateMessagesTokensWithRatio(messages []message.Message, ratio float64) 
 // snapshot ratio instead of re-reading the live calibration per message.
 func EstimateMessageTokensWithRatio(msg message.Message, ratio float64) int {
 	if ratio <= 0 {
-		return EstimateMessageTokens(msg)
+		return message.EstimateMessageTokens(msg)
 	}
 	bytes, imageTokens := messageEstimateBytesAndImages([]message.Message{msg})
 	return max(int(float64(bytes)*ratio), 1) + imageTokens
@@ -1243,7 +1112,7 @@ func (m *Manager) CompressForTarget(messages []message.Message, targetTokens int
 	}
 
 	// Always keep the first message (context/system header or first user turn).
-	firstTokens := EstimateMessageTokens(messages[0])
+	firstTokens := message.EstimateMessageTokens(messages[0])
 	remaining := targetTokens - firstTokens
 	if remaining <= 0 {
 		// Even the first message exceeds the budget — can't compress.
@@ -1253,7 +1122,7 @@ func (m *Manager) CompressForTarget(messages []message.Message, targetTokens int
 	// Walk backwards from the end, accumulating messages that fit.
 	var kept []message.Message
 	for i := len(messages) - 1; i >= 1; i-- {
-		cost := EstimateMessageTokens(messages[i])
+		cost := message.EstimateMessageTokens(messages[i])
 		if remaining-cost < 0 {
 			break
 		}
@@ -1432,7 +1301,7 @@ func (m *Manager) ReplacePrefixAtomic(
 func (m *Manager) refreshMessageByteStateLocked() {
 	m.payloadBytes = MessagePayloadBytes(m.messages)
 	m.contextBytes = messageContextBytes(m.messages)
-	m.imagePayloadBytes, m.imageEstimateTokens = imagePartAccounting(m.messages)
+	m.imagePayloadBytes, m.imageEstimateTokens = message.ImagePartAccounting(m.messages)
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
 	m.calibrationImageTokens = 0

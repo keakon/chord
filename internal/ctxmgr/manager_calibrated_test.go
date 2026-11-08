@@ -178,7 +178,7 @@ func TestEstimateMessagesTokensCalibratedChargesImagesPerImage(t *testing.T) {
 		t.Fatalf("calibrated estimate depends on image payload size: %d vs %d", small, large)
 	}
 	// 3000 text bytes at ratio 0.2 plus one per-image allowance.
-	if want := 600 + imagePartEstimateTokens; small != want {
+	if want := 600 + message.ImagePartEstimateTokens; small != want {
 		t.Fatalf("calibrated estimate = %d, want %d", small, want)
 	}
 }

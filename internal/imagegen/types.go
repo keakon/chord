@@ -8,20 +8,18 @@ import (
 )
 
 const (
-	Generate          = "generate"
-	Edit              = "edit"
-	PresetOpenAI      = "openai"
-	PresetCompatible  = "openai-compatible"
-	PresetGemini      = "gemini"
-	PresetSeedream    = "seedream"
-	PresetXAI         = "xai"
-	PresetQwen        = "qwen"
-	MaxImageBytes     = 32 << 20
-	MaxResponseBytes  = 96 << 20
-	MaxImages         = 5
-	MaxReferences     = 5
-	MaxPixels         = 36_000_000
-	MaxImageDimension = 12000
+	Generate         = "generate"
+	Edit             = "edit"
+	PresetOpenAI     = "openai"
+	PresetCompatible = "openai-compatible"
+	PresetGemini     = "gemini"
+	PresetSeedream   = "seedream"
+	PresetXAI        = "xai"
+	PresetQwen       = "qwen"
+	MaxImageBytes    = 32 << 20
+	MaxResponseBytes = 96 << 20
+	MaxImages        = 5
+	MaxReferences    = 5
 )
 
 type Request struct {

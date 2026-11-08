@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent/requestshape"
-	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -56,7 +55,7 @@ func TestIncrementalCacheExpectationShapesMatchFullComputation(t *testing.T) {
 			if shapes[i] != want[i] {
 				t.Fatalf("shape[%d] diverges from full computation", i)
 			}
-			if est := ctxmgr.EstimateMessageTokens(msgs[i]); tokens[i] != est {
+			if est := message.EstimateMessageTokens(msgs[i]); tokens[i] != est {
 				t.Fatalf("tokens[%d] = %d, want %d", i, tokens[i], est)
 			}
 		}
@@ -187,7 +186,7 @@ func TestNoteCacheExpectationCapsByProviderPromptSize(t *testing.T) {
 		return state.Note(Request{ModelRef: "p/m", Messages: messages, ToolDefHash: hash, SentAt: sentAt, Usage: usage, PromptHash: prompt})
 	}
 	base := []message.Message{{Role: message.RoleUser, Content: strings.Repeat("payload ", 2000)}}
-	estimated := ctxmgr.EstimateMessageTokens(base[0])
+	estimated := message.EstimateMessageTokens(base[0])
 	providerTokens := estimated / 3
 	if providerTokens < minAttributableCacheTokens {
 		t.Fatalf("sample too small: estimate=%d", estimated)
