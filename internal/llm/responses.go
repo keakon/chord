@@ -20,6 +20,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/executiongate"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/ratelimit"
@@ -120,18 +121,18 @@ type responsesRequest struct {
 	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
 	Stream             bool                   `json:"stream"`
 	ServiceTier        string                 `json:"service_tier,omitempty"`
-	Instructions       *string                `json:"instructions,omitempty"`
+	Instructions       *string                `json:"instructions,omitzero"`
 	Input              []responsesInputItem   `json:"input"`
 	Tools              []responsesTool        `json:"tools"`
 	ToolChoice         string                 `json:"tool_choice,omitempty"`
-	ParallelToolCalls  *bool                  `json:"parallel_tool_calls,omitempty"`
-	Reasoning          *reasoningConfig       `json:"reasoning,omitempty"`
+	ParallelToolCalls  *bool                  `json:"parallel_tool_calls,omitzero"`
+	Reasoning          *reasoningConfig       `json:"reasoning,omitzero"`
 	Store              bool                   `json:"store"`
 	Include            []string               `json:"include"`
 	MaxOutputTokens    int                    `json:"max_output_tokens,omitzero"`
 	PromptCacheKey     string                 `json:"prompt_cache_key,omitempty"`
-	PromptCacheOptions *responsesCacheControl `json:"prompt_cache_options,omitempty"`
-	Text               *textConfig            `json:"text,omitempty"`
+	PromptCacheOptions *responsesCacheControl `json:"prompt_cache_options,omitzero"`
+	Text               *textConfig            `json:"text,omitzero"`
 	ClientMetadata     map[string]string      `json:"client_metadata,omitempty"`
 	omitStore          bool
 	omitInclude        bool
@@ -147,8 +148,8 @@ func (r responsesRequest) MarshalJSON() ([]byte, error) {
 		// fields are omitted entirely rather than serialized as empty values.
 		type withoutOptionalFields struct {
 			alias
-			Store   *bool     `json:"store,omitempty"`
-			Include *[]string `json:"include,omitempty"`
+			Store   *bool     `json:"store,omitzero"`
+			Include *[]string `json:"include,omitzero"`
 		}
 		out := withoutOptionalFields{alias: alias(r)}
 		if !r.omitStore {
@@ -159,9 +160,9 @@ func (r responsesRequest) MarshalJSON() ([]byte, error) {
 		} else {
 			out.Include = &r.Include
 		}
-		return json.Marshal(out)
+		return jsonx.Marshal(out)
 	}
-	return json.Marshal(alias(r))
+	return jsonx.Marshal(alias(r))
 }
 
 // responsesInputItem represents an item in the Responses API input array.
@@ -171,10 +172,10 @@ type responsesInputItem struct {
 	Type      string          `json:"type"` // "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "reasoning", "additional_tools"
 	ID        string          `json:"id,omitempty"`
 	Role      string          `json:"role,omitempty"`
-	Content   any             `json:"content,omitempty"`
+	Content   any             `json:"content,omitzero"`
 	Name      string          `json:"name,omitempty"`
 	CallID    string          `json:"call_id,omitempty"`
-	Output    any             `json:"output,omitempty"`    // string or []responsesContentBlock for *_call_output items
+	Output    any             `json:"output,omitzero"`
 	Arguments string          `json:"arguments,omitempty"` // JSON object as string per API spec
 	// Input carries the freeform text of a custom_tool_call input item.
 	Input  string          `json:"input,omitempty"`
@@ -183,7 +184,7 @@ type responsesInputItem struct {
 	Tools  []responsesTool `json:"tools,omitempty"`
 	// Summary is a pointer so a reasoning item can serialize an explicit empty
 	// [] (API rejects a missing summary field) while other item types omit it.
-	Summary          *[]responsesReasoningSummaryPayload `json:"summary,omitempty"`
+	Summary          *[]responsesReasoningSummaryPayload `json:"summary,omitzero"`
 	EncryptedContent string                              `json:"encrypted_content,omitempty"`
 }
 
@@ -194,7 +195,7 @@ const responsesDeveloperItemRole = "developer"
 
 // responsesContentBlock is a content block within a message item.
 type responsesContentBlock struct {
-	PromptCacheBreakpoint *responsesCacheControl `json:"prompt_cache_breakpoint,omitempty"`
+	PromptCacheBreakpoint *responsesCacheControl `json:"prompt_cache_breakpoint,omitzero"`
 	Type                  string                 `json:"type"` // "input_text", "output_text", "input_image", "input_file"
 	Text                  string                 `json:"text,omitempty"`
 	Refusal               string                 `json:"refusal,omitempty"`
@@ -213,14 +214,14 @@ type responsesTool struct {
 	Parameters  toolSchema `json:"parameters,omitempty"`
 	// Format carries the constraint-decoding block for custom (freeform)
 	// tools. Custom tools must not send "parameters".
-	Format *responsesToolFormat `json:"format,omitempty"`
+	Format *responsesToolFormat `json:"format,omitzero"`
 	// Strict explicitly opts a JSON function tool out of server-side strict
 	// schema normalization: some Responses hosts rewrite a tool whose schema
 	// omits strict into strict mode (every property required), silently making
 	// schemas that rely on omitted optional fields inexpressible. It is a
 	// pointer so only the function conversion entry points emit strict:false;
 	// custom tools keep it nil and never serialize the field.
-	Strict *bool `json:"strict,omitempty"`
+	Strict *bool `json:"strict,omitzero"`
 }
 
 // reasoningConfig configures reasoning models.
@@ -359,7 +360,7 @@ func responsesClientMetadata(wire responsesWireIdentity, state *ResponsesTurnSta
 		RequestKind:            "turn",
 		TurnStartedAtUnixMilli: startedAt.UnixMilli(),
 	}
-	if data, err := json.Marshal(turnMetadata); err == nil {
+	if data, err := jsonx.Marshal(turnMetadata); err == nil {
 		metadata[responsesClientMetadataTurnMetadata] = string(data)
 	}
 	return metadata
@@ -461,7 +462,7 @@ func (r *ResponsesProvider) CompleteStream(
 				applyResponsesHostedCodexShape(&reqBody, systemPrompt, sessionKey, ot.ParallelToolCalls, rc)
 			}
 			reqBody.ServiceTier = ot.ServiceTier
-			bodyBytes, err := json.Marshal(reqBody)
+			bodyBytes, err := jsonx.Marshal(reqBody)
 			if err != nil {
 				return nil, nil, fmt.Errorf("marshal request body: %w", err)
 			}
@@ -654,7 +655,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if !reqBody.omitInclude {
 			reqBody.Include = responsesReasoningIncludes()
 		}
-		bodyBytes, err := json.Marshal(reqBody)
+		bodyBytes, err := jsonx.Marshal(reqBody)
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal request body: %w", err)
 		}

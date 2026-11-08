@@ -147,14 +147,14 @@ type Envelope struct {
 	ProjectRoot   string    `json:"project_root,omitempty"`
 	SelectedModel string    `json:"selected_model,omitempty"`
 	RunningModel  string    `json:"running_model,omitempty"`
-	Data          any       `json:"data,omitempty"`
+	Data          any       `json:"data,omitzero"`
 }
 
 // Result is the outcome of a synchronous interceptor hook.
 type Result struct {
 	Action  string `json:"action"`
 	Message string `json:"message,omitempty"`
-	Data    any    `json:"data,omitempty"`
+	Data    any    `json:"data,omitzero"`
 }
 
 // AutomationResult is the stdout contract for automation hooks.

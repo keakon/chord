@@ -38,7 +38,7 @@ type replaceEditArgs struct {
 	Edits      []textReplacement `json:"edits,omitempty"`
 	OldString  string            `json:"old_string"`
 	NewString  *string           `json:"new_string"`
-	ReplaceAll *bool             `json:"replace_all,omitempty"`
+	ReplaceAll *bool             `json:"replace_all,omitzero"`
 }
 
 // UnmarshalJSON accepts the tolerated "filePath" alias for "path" (current
@@ -52,7 +52,7 @@ func (a *replaceEditArgs) UnmarshalJSON(data []byte) error {
 		FilePath   string            `json:"filePath"`
 		OldString  string            `json:"old_string"`
 		NewString  *string           `json:"new_string"`
-		ReplaceAll *bool             `json:"replace_all,omitempty"`
+		ReplaceAll *bool             `json:"replace_all,omitzero"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err

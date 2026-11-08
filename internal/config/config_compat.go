@@ -8,31 +8,31 @@ import (
 // All options are opt-in and default to disabled unless explicitly enabled.
 // Model-level wire fields override provider-level defaults when both exist.
 type ModelCompatConfig struct {
-	GenerateContent     *GenerateContentCompatConfig     `json:"generate_content,omitempty" yaml:"generate_content,omitempty"`
-	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
-	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
-	ForcedToolChoice    *ForcedToolChoiceCompatConfig    `json:"forced_tool_choice,omitempty" yaml:"forced_tool_choice,omitempty"`
-	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
-	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
-	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
-	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitempty" yaml:"apply_patch,omitempty"`
-	HostedTools         *[]string                        `json:"hosted_tools,omitempty" yaml:"hosted_tools,omitempty"` // hosted_tools catalog entries enabled for this target
+	GenerateContent     *GenerateContentCompatConfig     `json:"generate_content,omitzero" yaml:"generate_content,omitempty"`
+	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitzero" yaml:"thinking_toolcall,omitempty"`
+	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitzero" yaml:"reasoning_continuity,omitempty"`
+	ForcedToolChoice    *ForcedToolChoiceCompatConfig    `json:"forced_tool_choice,omitzero" yaml:"forced_tool_choice,omitempty"`
+	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitzero" yaml:"request_overrides,omitempty"`
+	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitzero" yaml:"chat_completions,omitempty"`
+	Responses           *ResponsesCompatConfig           `json:"responses,omitzero" yaml:"responses,omitempty"`
+	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitzero" yaml:"apply_patch,omitempty"`
+	HostedTools         *[]string                        `json:"hosted_tools,omitzero" yaml:"hosted_tools,omitempty"`
 }
 
 // ProviderCompatConfig contains provider-level compatibility toggles. Model
 // behavior compat belongs under ModelCompatConfig; transport-layer compat lives
 // here so the schema reflects the runtime semantics.
 type ProviderCompatConfig struct {
-	GenerateContent     *GenerateContentCompatConfig     `json:"generate_content,omitempty" yaml:"generate_content,omitempty"`
-	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
-	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
-	ForcedToolChoice    *ForcedToolChoiceCompatConfig    `json:"forced_tool_choice,omitempty" yaml:"forced_tool_choice,omitempty"`
-	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitempty" yaml:"request_overrides,omitempty"`
-	Usage               *UsageCompatConfig               `json:"usage,omitempty" yaml:"usage,omitempty"`
-	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
-	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
-	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitempty" yaml:"apply_patch,omitempty"`
-	HostedTools         *[]string                        `json:"hosted_tools,omitempty" yaml:"hosted_tools,omitempty"` // hosted_tools catalog entries enabled for this target
+	GenerateContent     *GenerateContentCompatConfig     `json:"generate_content,omitzero" yaml:"generate_content,omitempty"`
+	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitzero" yaml:"thinking_toolcall,omitempty"`
+	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitzero" yaml:"reasoning_continuity,omitempty"`
+	ForcedToolChoice    *ForcedToolChoiceCompatConfig    `json:"forced_tool_choice,omitzero" yaml:"forced_tool_choice,omitempty"`
+	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitzero" yaml:"request_overrides,omitempty"`
+	Usage               *UsageCompatConfig               `json:"usage,omitzero" yaml:"usage,omitempty"`
+	Responses           *ResponsesCompatConfig           `json:"responses,omitzero" yaml:"responses,omitempty"`
+	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitzero" yaml:"chat_completions,omitempty"`
+	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitzero" yaml:"apply_patch,omitempty"`
+	HostedTools         *[]string                        `json:"hosted_tools,omitzero" yaml:"hosted_tools,omitempty"`
 }
 
 // ApplyPatchCompatConfig controls the apply_patch tool surface and wire shape.
@@ -44,13 +44,13 @@ type ApplyPatchCompatConfig struct {
 	// Enabled controls the tool surface: true keeps apply_patch (hiding edit
 	// and the write/delete tools), false falls back to edit. Nil infers from
 	// the model name.
-	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Enabled *bool `json:"enabled,omitzero" yaml:"enabled,omitempty"`
 	// Freeform controls the Responses wire shape: true emits apply_patch as a
 	// custom tool with a grammar, false emits a JSON function tool. Nil infers
 	// from the model name and the wire type (non-Responses endpoints default to
 	// false). Hosts that accept Responses requests but reject custom tools have
 	// no built-in exception: set Freeform to false there (see docs/edit-tools.md).
-	Freeform *bool `json:"freeform,omitempty" yaml:"freeform,omitempty"`
+	Freeform *bool `json:"freeform,omitzero" yaml:"freeform,omitempty"`
 }
 
 // ForcedToolChoiceCompatConfig controls whether request-level forced tool
@@ -64,17 +64,17 @@ type ApplyPatchCompatConfig struct {
 type ForcedToolChoiceCompatConfig struct {
 	// SuppressInThinking downgrades forced tool_choice to "auto" whenever
 	// reasoning/thinking is active for the request.
-	SuppressInThinking *bool `json:"suppress_in_thinking,omitempty" yaml:"suppress_in_thinking,omitempty"`
+	SuppressInThinking *bool `json:"suppress_in_thinking,omitzero" yaml:"suppress_in_thinking,omitempty"`
 	// AutoOnly downgrades any non-auto tool_choice to the backend default for
 	// targets that only support "auto".
-	AutoOnly *bool `json:"auto_only,omitempty" yaml:"auto_only,omitempty"`
+	AutoOnly *bool `json:"auto_only,omitzero" yaml:"auto_only,omitempty"`
 }
 
 // UsageCompatConfig overrides provider usage-field semantics when a compatible
 // gateway differs from the official wire protocol. Nil uses protocol defaults.
 type UsageCompatConfig struct {
-	InputIncludesCacheRead  *bool `json:"input_includes_cache_read,omitempty" yaml:"input_includes_cache_read,omitempty"`
-	InputIncludesCacheWrite *bool `json:"input_includes_cache_write,omitempty" yaml:"input_includes_cache_write,omitempty"`
+	InputIncludesCacheRead  *bool `json:"input_includes_cache_read,omitzero" yaml:"input_includes_cache_read,omitempty"`
+	InputIncludesCacheWrite *bool `json:"input_includes_cache_write,omitzero" yaml:"input_includes_cache_write,omitempty"`
 }
 
 // ResponsesCompatConfig controls which optional Responses request fields Chord
@@ -86,19 +86,19 @@ type ResponsesCompatConfig struct {
 	// SendStore emits the top-level "store" field (default true). When false the
 	// field is omitted and the backend default applies — for official Responses
 	// backends that default is server-side retention (store=true).
-	SendStore *bool `json:"send_store,omitempty" yaml:"send_store,omitempty"`
+	SendStore *bool `json:"send_store,omitzero" yaml:"send_store,omitempty"`
 	// SendReasoningInclude requests include: ["reasoning.encrypted_content"]
 	// (default true). Set false for gateways that reject the include parameter.
-	SendReasoningInclude *bool `json:"send_reasoning_include,omitempty" yaml:"send_reasoning_include,omitempty"`
+	SendReasoningInclude *bool `json:"send_reasoning_include,omitzero" yaml:"send_reasoning_include,omitempty"`
 	// SendToolChoice emits the default tool_choice: "auto" (default true).
 	// An explicit tool choice from model/variant tuning is always sent.
-	SendToolChoice *bool `json:"send_tool_choice,omitempty" yaml:"send_tool_choice,omitempty"`
+	SendToolChoice *bool `json:"send_tool_choice,omitzero" yaml:"send_tool_choice,omitempty"`
 	// SendParallelToolCalls emits parallel_tool_calls when tools are present
 	// (default true). Set false for a binding that does not accept this field.
-	SendParallelToolCalls *bool `json:"send_parallel_tool_calls,omitempty" yaml:"send_parallel_tool_calls,omitempty"`
+	SendParallelToolCalls *bool `json:"send_parallel_tool_calls,omitzero" yaml:"send_parallel_tool_calls,omitempty"`
 	// SendPromptCacheKey emits prompt_cache_key and client_metadata session
 	// routing metadata (default true).
-	SendPromptCacheKey *bool `json:"send_prompt_cache_key,omitempty" yaml:"send_prompt_cache_key,omitempty"`
+	SendPromptCacheKey *bool `json:"send_prompt_cache_key,omitzero" yaml:"send_prompt_cache_key,omitempty"`
 	// SendPromptCacheOptions allows the top-level prompt_cache_options policy
 	// field while explicit breakpoints are enabled (default false). Chord sends
 	// it only for requests that need explicit mode; implicit requests omit it
@@ -106,20 +106,20 @@ type ResponsesCompatConfig struct {
 	// SendPromptCacheBreakpoint to enable explicit caching. Leave it false for
 	// a gateway that accepts prompt_cache_breakpoint markers but rejects the
 	// top-level field.
-	SendPromptCacheOptions *bool `json:"send_prompt_cache_options,omitempty" yaml:"send_prompt_cache_options,omitempty"`
+	SendPromptCacheOptions *bool `json:"send_prompt_cache_options,omitzero" yaml:"send_prompt_cache_options,omitempty"`
 	// SendPromptCacheBreakpoint emits prompt_cache_breakpoint markers on
 	// eligible input content blocks (default false). Enable it only for
 	// endpoints known to support explicit cache breakpoints. Disabling it also
 	// omits prompt_cache_options, which only selects the breakpoint policy.
-	SendPromptCacheBreakpoint *bool `json:"send_prompt_cache_breakpoint,omitempty" yaml:"send_prompt_cache_breakpoint,omitempty"`
+	SendPromptCacheBreakpoint *bool `json:"send_prompt_cache_breakpoint,omitzero" yaml:"send_prompt_cache_breakpoint,omitempty"`
 	// SendMaxOutputTokens emits max_output_tokens with the effective output cap
 	// (default false, preserving the stable Codex request shape). Enable for
 	// compatible gateways whose server-side default output is unbounded.
-	SendMaxOutputTokens *bool `json:"send_max_output_tokens,omitempty" yaml:"send_max_output_tokens,omitempty"`
+	SendMaxOutputTokens *bool `json:"send_max_output_tokens,omitzero" yaml:"send_max_output_tokens,omitempty"`
 	// MCPAdditionalTools mounts runtime MCP function definitions through
 	// input[type="additional_tools"] at their conversation anchor instead of
 	// the top-level tools array. Default false: compatible gateways must opt in.
-	MCPAdditionalTools *bool `json:"mcp_additional_tools,omitempty" yaml:"mcp_additional_tools,omitempty"`
+	MCPAdditionalTools *bool `json:"mcp_additional_tools,omitzero" yaml:"mcp_additional_tools,omitempty"`
 }
 
 // HostedToolConfig is one entry in the top-level hosted_tools catalog: the
@@ -141,10 +141,10 @@ type HostedToolConfig struct {
 	// ReadOnly and ConcurrencySafe override the local tool traits. Nil keeps
 	// the conservative default (false), so a catalog-only tool never silently
 	// gains read-only or parallel-execution semantics.
-	ReadOnly        *bool `json:"read_only,omitempty" yaml:"read_only,omitempty"`
-	ConcurrencySafe *bool `json:"concurrency_safe,omitempty" yaml:"concurrency_safe,omitempty"`
+	ReadOnly        *bool `json:"read_only,omitzero" yaml:"read_only,omitempty"`
+	ConcurrencySafe *bool `json:"concurrency_safe,omitzero" yaml:"concurrency_safe,omitempty"`
 	// RetrySafe permits replay after an attempt whose execution outcome is unknown.
-	RetrySafe *bool `json:"retry_safe,omitempty" yaml:"retry_safe,omitempty"`
+	RetrySafe *bool `json:"retry_safe,omitzero" yaml:"retry_safe,omitempty"`
 	// ImagePaths selects base64 images from completed raw result objects.
 	ImagePaths []string `json:"image_paths,omitempty" yaml:"image_paths,omitempty"`
 	// TimeoutSeconds caps one local execution; 0 uses the shared default.
@@ -171,7 +171,7 @@ type HostedToolConfig struct {
 // empty argument drops the enclosing key.
 type HostedToolDeclarationConfig struct {
 	Tool    map[string]any    `json:"tool,omitempty" yaml:"tool,omitempty"`
-	Force   any               `json:"force,omitempty" yaml:"force,omitempty"`
+	Force   any               `json:"force,omitzero" yaml:"force,omitempty"`
 	Include []string          `json:"include,omitempty" yaml:"include,omitempty"`
 	Headers map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
 }
@@ -182,26 +182,26 @@ type ChatCompletionsCompatConfig struct {
 	// SendStreamOptions emits stream_options: {include_usage: true} (default
 	// true). Set false for gateways that reject stream_options; token usage
 	// then stays unreported on streaming responses.
-	SendStreamOptions *bool `json:"send_stream_options,omitempty" yaml:"send_stream_options,omitempty"`
+	SendStreamOptions *bool `json:"send_stream_options,omitzero" yaml:"send_stream_options,omitempty"`
 	// InferFinishReason derives a normal completion when a compatible gateway
 	// ends the stream without emitting finish_reason (default false). Text-only
 	// streams finalize as "stop" and tool-call streams as "tool_calls" instead
 	// of being marked interrupted.
-	InferFinishReason *bool `json:"infer_finish_reason,omitempty" yaml:"infer_finish_reason,omitempty"`
+	InferFinishReason *bool `json:"infer_finish_reason,omitzero" yaml:"infer_finish_reason,omitempty"`
 	// RequiresToolResultName emits the paired tool name on tool result messages
 	// (default false). Some compatible gateways require the name in addition to
 	// tool_call_id.
-	RequiresToolResultName *bool `json:"requires_tool_result_name,omitempty" yaml:"requires_tool_result_name,omitempty"`
+	RequiresToolResultName *bool `json:"requires_tool_result_name,omitzero" yaml:"requires_tool_result_name,omitempty"`
 	// RequiresAssistantAfterToolResult inserts a synthetic assistant message
 	// between a tool result and the next user message (default false). Some
 	// compatible gateways reject a user message that directly follows tool
 	// results.
-	RequiresAssistantAfterToolResult *bool `json:"requires_assistant_after_tool_result,omitempty" yaml:"requires_assistant_after_tool_result,omitempty"`
+	RequiresAssistantAfterToolResult *bool `json:"requires_assistant_after_tool_result,omitzero" yaml:"requires_assistant_after_tool_result,omitempty"`
 	// MCPSystemToolsMessage mounts runtime MCP function definitions in
 	// role:system messages at their conversation anchor instead of the
 	// top-level tools array. Default false: only enable it for models that
 	// accept the Kimi-compatible dynamic-tool shape.
-	MCPSystemToolsMessage *bool `json:"mcp_system_tools_message,omitempty" yaml:"mcp_system_tools_message,omitempty"`
+	MCPSystemToolsMessage *bool `json:"mcp_system_tools_message,omitzero" yaml:"mcp_system_tools_message,omitempty"`
 	// KeepReasoningEffort keeps the reasoning request controls when a
 	// current-turn assistant tool-call message replays without reasoning
 	// content (default false). Chord otherwise reads the missing reasoning
@@ -210,7 +210,7 @@ type ChatCompletionsCompatConfig struct {
 	// turn. Enable it for endpoints that accept reasoning controls without a
 	// reasoning-content replay contract, such as Grok on the Chat Completions
 	// wire.
-	KeepReasoningEffort *bool `json:"keep_reasoning_effort,omitempty" yaml:"keep_reasoning_effort,omitempty"`
+	KeepReasoningEffort *bool `json:"keep_reasoning_effort,omitzero" yaml:"keep_reasoning_effort,omitempty"`
 	// NativeThinking selects the request shape Chord uses to hand a model's
 	// thinking settings to a Chat Completions endpoint that translates the call
 	// into the model's native API. Empty (default) uses the protocol-generic
@@ -326,7 +326,7 @@ func (c *ReasoningContinuityCompatConfig) ReasoningContractValue() string {
 // that occasionally emit pseudo tool-call templates in reasoning/thinking
 // content instead of structured tool_calls.
 type ThinkingToolcallCompatConfig struct {
-	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Enabled *bool `json:"enabled,omitzero" yaml:"enabled,omitempty"`
 }
 
 // EnabledValue reports whether thinking-toolcall compatibility is enabled.

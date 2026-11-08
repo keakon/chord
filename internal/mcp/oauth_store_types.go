@@ -32,13 +32,13 @@ type CredentialSlot struct {
 	AuthGeneration      uint64                     `json:"auth_generation"`
 	TokenRevision       uint64                     `json:"token_revision"`
 	Status              string                     `json:"status"`
-	Binding             *CredentialBinding         `json:"binding,omitempty"`
-	Registration        *CredentialRegistration    `json:"registration,omitempty"`
-	PendingRegistration *CredentialRegistration    `json:"pending_registration,omitempty"`
-	Token               *CredentialToken           `json:"token,omitempty"`
+	Binding             *CredentialBinding         `json:"binding,omitzero"`
+	Registration        *CredentialRegistration    `json:"registration,omitzero"`
+	PendingRegistration *CredentialRegistration    `json:"pending_registration,omitzero"`
+	Token               *CredentialToken           `json:"token,omitzero"`
 	RejectedRevision    uint64                     `json:"rejected_revision,omitzero"`
-	RefreshBlocked      *CredentialRefreshBlocked  `json:"refresh_blocked,omitempty"`
-	RefreshInflight     *CredentialRefreshInflight `json:"refresh_inflight,omitempty"`
+	RefreshBlocked      *CredentialRefreshBlocked  `json:"refresh_blocked,omitzero"`
+	RefreshInflight     *CredentialRefreshInflight `json:"refresh_inflight,omitzero"`
 	ScopeRequirements   []ScopeRequirement         `json:"scope_requirements,omitempty"`
 }
 

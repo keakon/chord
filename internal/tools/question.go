@@ -52,7 +52,7 @@ type QuestionAnswer struct {
 
 type QuestionArgs struct {
 	Questions []QuestionItem `json:"questions,omitempty"`
-	Wait      *bool          `json:"wait,omitempty"`
+	Wait      *bool          `json:"wait,omitzero"`
 	WaitFor   []string       `json:"wait_for,omitempty"`
 }
 

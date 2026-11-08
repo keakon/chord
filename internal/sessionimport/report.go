@@ -51,9 +51,9 @@ type ImportReport struct {
 	ValidationFailures int `json:"validation_failures,omitzero"`
 
 	// Source-specific diagnostics.
-	Claude   *ClaudeImportReport   `json:"claude,omitempty"`
-	OpenCode *OpenCodeImportReport `json:"opencode,omitempty"`
-	Codex    *CodexImportReport    `json:"codex,omitempty"`
+	Claude   *ClaudeImportReport   `json:"claude,omitzero"`
+	OpenCode *OpenCodeImportReport `json:"opencode,omitzero"`
+	Codex    *CodexImportReport    `json:"codex,omitzero"`
 
 	// Import summary retained for CLI/report display.
 	ToolEntriesRendered int `json:"tool_entries_rendered,omitzero"`

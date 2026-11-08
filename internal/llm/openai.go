@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/texttruncate"
 
 	"github.com/keakon/golog/log"
@@ -116,26 +117,26 @@ type openAIRequest struct {
 	Messages            []openAIMessage      `json:"messages"`
 	Tools               []openAITool         `json:"tools,omitempty"`
 	ToolChoice          string               `json:"tool_choice,omitempty"`
-	ParallelToolCalls   *bool                `json:"parallel_tool_calls,omitempty"`
+	ParallelToolCalls   *bool                `json:"parallel_tool_calls,omitzero"`
 	MaxTokens           int                  `json:"max_tokens,omitzero"`
 	MaxCompletionTokens int                  `json:"max_completion_tokens,omitzero"`
 	Stream              bool                 `json:"stream"`
-	StreamOptions       *openAIStreamOptions `json:"stream_options,omitempty"`
+	StreamOptions       *openAIStreamOptions `json:"stream_options,omitzero"`
 	Temperature         float64              `json:"temperature,omitzero"`
 	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
 	Verbosity           string               `json:"verbosity,omitempty"`
 	// ExtraBody, Thinking, and EnableThinking are the dialect-specific carriers
 	// for a model served by a gateway that translates chat/completions into the
 	// model's native API; at most one is set (see openai_native_thinking.go).
-	ExtraBody      *openAIExtraBody   `json:"extra_body,omitempty"`
-	Thinking       *anthropicThinking `json:"thinking,omitempty"`
-	EnableThinking *bool              `json:"enable_thinking,omitempty"`
+	ExtraBody      *openAIExtraBody   `json:"extra_body,omitzero"`
+	Thinking       *anthropicThinking `json:"thinking,omitzero"`
+	EnableThinking *bool              `json:"enable_thinking,omitzero"`
 }
 
 // openAIMessage is a single message in the OpenAI API format.
 type openAIMessage struct {
 	Role    string `json:"role"`
-	Content any    `json:"content,omitempty"` // string or []openAIContentBlock; omitted when nil
+	Content any    `json:"content,omitzero"`
 	// Transient marks a request-scoped overlay (KindTurnOverlay source) that is
 	// not a real user turn. It is omitted from the wire; fillMissingReasoning
 	// skips it when computing the current-turn boundary so an overlay at the tail
@@ -145,7 +146,7 @@ type openAIMessage struct {
 	// serialized: thinking-mode backends (DeepSeek family) require every
 	// current-turn assistant tool-call message to carry reasoning_content,
 	// including turns whose upstream produced no reasoning at all.
-	ReasoningContent *string          `json:"reasoning_content,omitempty"`
+	ReasoningContent *string          `json:"reasoning_content,omitzero"`
 	Name             string           `json:"name,omitempty"`
 	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string           `json:"tool_call_id,omitempty"`
@@ -159,8 +160,8 @@ type openAIMessage struct {
 type openAIContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
-	ImageURL  *openAIImageURL `json:"image_url,omitempty"`
-	File      *openAIFile     `json:"file,omitempty"`
+	ImageURL  *openAIImageURL `json:"image_url,omitzero"`
+	File      *openAIFile     `json:"file,omitzero"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 }
 
@@ -191,9 +192,9 @@ type openAIToolCall struct {
 	// (extra_content.google.thought_signature). The top-level
 	// thought_signature and provider_specific_fields mirrors are read-only;
 	// they are never populated on a request.
-	ExtraContent           *openAIToolCallExtraContent   `json:"extra_content,omitempty"`
+	ExtraContent           *openAIToolCallExtraContent   `json:"extra_content,omitzero"`
 	ThoughtSignature       string                        `json:"thought_signature,omitempty"`
-	ProviderSpecificFields *openAIProviderSpecificFields `json:"provider_specific_fields,omitempty"`
+	ProviderSpecificFields *openAIProviderSpecificFields `json:"provider_specific_fields,omitzero"`
 }
 
 // openAIFunction is the function definition in a tool call.
@@ -218,7 +219,7 @@ type openAIFunctionDef struct {
 	// schema omits strict into strict mode (every property required), which
 	// silently makes schemas that rely on omitted optional fields
 	// inexpressible. Function conversion entry points set strict:false.
-	Strict *bool `json:"strict,omitempty"`
+	Strict *bool `json:"strict,omitzero"`
 }
 
 type openAIStreamChoice struct {
@@ -229,15 +230,15 @@ type openAIStreamChoice struct {
 
 type openAIStreamDelta struct {
 	Role             string           `json:"role,omitempty"`
-	Content          *string          `json:"content,omitempty"`
-	ReasoningContent *string          `json:"reasoning_content,omitempty"`
+	Content          *string          `json:"content,omitzero"`
+	ReasoningContent *string          `json:"reasoning_content,omitzero"`
 	Reasoning        reasoningAlias   `json:"reasoning,omitempty"`
 	ReasoningText    reasoningAlias   `json:"reasoning_text,omitempty"`
 	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
 	// ThinkingBlocks is the message-level Claude replay carrier; gateways that
 	// return it send the whole block array in one chunk.
 	ThinkingBlocks         []anthropicContent            `json:"thinking_blocks,omitempty"`
-	ProviderSpecificFields *openAIProviderSpecificFields `json:"provider_specific_fields,omitempty"`
+	ProviderSpecificFields *openAIProviderSpecificFields `json:"provider_specific_fields,omitzero"`
 }
 
 type reasoningAlias string
@@ -499,7 +500,7 @@ func (o *OpenAIProvider) CompleteStream(
 		if !tuning.DisableReasoning {
 			applyNativeThinking(&reqBody, dialect, tuning)
 		}
-		bodyBytes, err := json.Marshal(reqBody)
+		bodyBytes, err := jsonx.Marshal(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("marshal request body: %w", err)
 		}
@@ -813,7 +814,7 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 				// to be a JSON *string* (e.g. "{\"path\":\"README.md\"}"),
 				// not a raw JSON object.  tc.Args is json.RawMessage holding
 				// the parsed object bytes, so we must wrap it as a JSON string.
-				argsStr, err := json.Marshal(string(args))
+				argsStr, err := jsonx.Marshal(string(args))
 				if err != nil {
 					// Should never happen — string is always marshalable.
 					argsStr = args

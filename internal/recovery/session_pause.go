@@ -2,7 +2,6 @@ package recovery
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
 )
@@ -61,7 +61,7 @@ type PendingInput struct {
 	Kind                string                   `json:"kind,omitempty"`
 	FromUser            bool                     `json:"from_user"`
 	MailboxAckID        string                   `json:"mailbox_ack_id,omitempty"`
-	Mailbox             *message.MailboxMetadata `json:"mailbox,omitempty"`
+	Mailbox             *message.MailboxMetadata `json:"mailbox,omitzero"`
 	DrainContextAppends bool                     `json:"drain_context_appends,omitzero"`
 	Stage               string                   `json:"stage"`
 }
@@ -313,7 +313,7 @@ func samePendingToolCalls(a, b []message.ToolCall) bool {
 	}
 	// Compare the persisted representation: a nil RawMessage is serialized as
 	// null, and valid argument JSON may contain insignificant whitespace.
-	left, leftErr := json.Marshal(a)
-	right, rightErr := json.Marshal(b)
+	left, leftErr := jsonx.Marshal(a)
+	right, rightErr := jsonx.Marshal(b)
 	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
 }

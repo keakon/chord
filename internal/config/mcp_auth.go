@@ -31,7 +31,7 @@ type MCPOAuthConfig struct {
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty" yaml:"token_endpoint_auth_method,omitempty"`
 	ClientSecretEnv         string   `json:"client_secret_env,omitempty" yaml:"client_secret_env,omitempty"`
 	Scopes                  []string `json:"scopes,omitempty" yaml:"scopes,omitempty"`
-	CallbackPort            *int     `json:"callback_port,omitempty" yaml:"callback_port,omitempty"`
+	CallbackPort            *int     `json:"callback_port,omitzero" yaml:"callback_port,omitempty"`
 }
 
 // ValidateMCPAuth rejects invalid connection and authentication combinations.

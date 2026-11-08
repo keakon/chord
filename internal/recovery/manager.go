@@ -22,6 +22,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
@@ -60,14 +61,14 @@ type ToolActivityRecord struct {
 	// resolves a restored agent's binding from SubAgentMeta, not from here.
 	WorkDir           string                 `json:"workdir,omitempty"`
 	WorkDirGeneration uint64                 `json:"workdir_generation,omitzero"`
-	Audit             *message.ToolArgsAudit `json:"audit,omitempty"`
+	Audit             *message.ToolArgsAudit `json:"audit,omitzero"`
 	TS                int64                  `json:"ts"` // unix nanoseconds
 }
 
 // SessionSnapshot captures the recoverable state of a session at a point in
 // time. It is atomically written to snapshot.json for crash recovery.
 type SessionSnapshot struct {
-	Pause                     *SessionPauseCheckpoint  `json:"pause,omitempty"`
+	Pause                     *SessionPauseCheckpoint  `json:"pause,omitzero"`
 	Todos                     []TodoState              `json:"todos"`
 	ActiveAgents              []AgentSnapshot          `json:"active_agents"`
 	ModelName                 string                   `json:"model_name"`
@@ -80,7 +81,7 @@ type SessionSnapshot struct {
 	LastHistoryIndex          int                      `json:"last_history_index,omitzero"`
 	SessionEpoch              uint64                   `json:"session_epoch,omitzero"`
 	ActiveBackgroundObjects   []BackgroundObjectState  `json:"active_background_objects,omitempty"`
-	PendingCompactionResume   *PendingCompactionResume `json:"pending_compaction_resume,omitempty"`
+	PendingCompactionResume   *PendingCompactionResume `json:"pending_compaction_resume,omitzero"`
 	// LastModelDrivenApplyBatch is the request batch of the last successful
 	// model-driven apply (currentRequestBatch semantics). It survives crashes
 	// so a restored session keeps enforcing the minimum apply interval; the
@@ -98,7 +99,7 @@ type SessionSnapshot struct {
 	// It is written and read back as one object so a crash between acceptance
 	// and apply restores a not-applied proposal instead of losing it or
 	// mistaking it for an applied reset.
-	ModelDrivenProposal             *ModelDrivenProposalSnapshot `json:"model_driven_proposal,omitempty"`
+	ModelDrivenProposal             *ModelDrivenProposalSnapshot `json:"model_driven_proposal,omitzero"`
 	StageCompletionCandidateTurnID  uint64                       `json:"stage_completion_candidate_turn_id,omitzero"`
 	StageCompletionCandidatePending bool                         `json:"stage_completion_candidate_pending,omitzero"`
 }
@@ -364,7 +365,7 @@ func (r *RecoveryManager) persistedRecord(msg message.Message, durable bool) ([]
 	if err != nil {
 		return nil, persistWriteError(fmt.Errorf("persist binary parts: %w", err), true)
 	}
-	data, err := json.Marshal(msg)
+	data, err := jsonx.Marshal(msg)
 	if err != nil {
 		return nil, persistWriteError(err, true)
 	}
@@ -473,7 +474,7 @@ func (r *RecoveryManager) AppendToolActivity(rec ToolActivityRecord) error {
 		r.journalHandle = f
 		r.journalDirSyncPending = created
 	}
-	data, err := json.Marshal(rec)
+	data, err := jsonx.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("marshal tool-activity record: %w", err)
 	}
@@ -650,7 +651,7 @@ func (r *RecoveryManager) SaveSnapshot(snap *SessionSnapshot) error {
 		}
 		copy.Pause.PendingInputs = pending
 	}
-	data, err := json.Marshal(&copy)
+	data, err := jsonx.Marshal(&copy)
 	if err != nil {
 		return fmt.Errorf("marshal snapshot: %w", err)
 	}
@@ -707,7 +708,7 @@ func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) err
 		if err := message.ValidateDirectoryInstructions(msg); err != nil {
 			return err
 		}
-		raw, err := json.Marshal(msg)
+		raw, err := jsonx.Marshal(msg)
 		if err != nil {
 			return fmt.Errorf("rewrite log: marshal: %w", err)
 		}

@@ -34,7 +34,7 @@ type Event struct {
 	ClaudeCodeVersion string   `json:"claude_code_version,omitempty"`
 	Tools             []string `json:"tools,omitempty"`
 
-	Message     *Message     `json:"message,omitempty"`
+	Message     *Message     `json:"message,omitzero"`
 	StreamEvent *StreamEvent `json:"-"`
 
 	// result fields.
@@ -45,14 +45,14 @@ type Event struct {
 	NumTurns          int                   `json:"num_turns,omitzero"`
 	TotalCostUSD      float64               `json:"total_cost_usd,omitzero"`
 	TerminalReason    string                `json:"terminal_reason,omitempty"`
-	Usage             *Usage                `json:"usage,omitempty"`
+	Usage             *Usage                `json:"usage,omitzero"`
 	ModelUsage        map[string]ModelUsage `json:"modelUsage,omitempty"`
 	PermissionDenials []PermissionDenial    `json:"permission_denials,omitempty"`
 
 	// control_request / control_response.
 	RequestID string               `json:"request_id,omitempty"`
-	Request   *ControlRequest      `json:"request,omitempty"`
-	Response  *ControlResponseBody `json:"response,omitempty"`
+	Request   *ControlRequest      `json:"request,omitzero"`
+	Response  *ControlResponseBody `json:"response,omitzero"`
 }
 
 type PermissionDenial struct {
@@ -67,7 +67,7 @@ type Message struct {
 	Model      string         `json:"model,omitempty"`
 	Content    []ContentBlock `json:"content,omitempty"`
 	StopReason string         `json:"stop_reason,omitempty"`
-	Usage      *Usage         `json:"usage,omitempty"`
+	Usage      *Usage         `json:"usage,omitzero"`
 	Error      string         `json:"error,omitempty"`
 }
 
@@ -88,8 +88,8 @@ type ContentBlock struct {
 // persisted message.
 type StreamEvent struct {
 	Type         string        `json:"type"`
-	Delta        *StreamDelta  `json:"delta,omitempty"`
-	ContentBlock *ContentBlock `json:"content_block,omitempty"`
+	Delta        *StreamDelta  `json:"delta,omitzero"`
+	ContentBlock *ContentBlock `json:"content_block,omitzero"`
 }
 
 type StreamDelta struct {

@@ -8,9 +8,9 @@ import (
 // LimitOverride contains only the token limits verified for this route.
 // An explicit input: 0 removes an inherited independent input limit.
 type LimitOverride struct {
-	Context *int `json:"context,omitempty" yaml:"context,omitempty"`
-	Input   *int `json:"input,omitempty" yaml:"input,omitempty"`
-	Output  *int `json:"output,omitempty" yaml:"output,omitempty"`
+	Context *int `json:"context,omitzero" yaml:"context,omitempty"`
+	Input   *int `json:"input,omitzero" yaml:"input,omitempty"`
+	Output  *int `json:"output,omitzero" yaml:"output,omitempty"`
 }
 
 // ApplyTo returns route facts without mutating the shared model facts.

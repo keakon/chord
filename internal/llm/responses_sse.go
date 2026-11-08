@@ -109,7 +109,7 @@ type responsesCompletedPayload struct {
 	ID                string                 `json:"id"`
 	Status            string                 `json:"status"`
 	Output            []responsesOutputEntry `json:"output"`
-	Usage             *responsesUsagePayload `json:"usage,omitempty"`
+	Usage             *responsesUsagePayload `json:"usage,omitzero"`
 	IncompleteDetails *struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details,omitempty"`

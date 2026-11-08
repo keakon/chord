@@ -22,6 +22,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/httpheader"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm/mediacache"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/texttruncate"
@@ -84,14 +85,14 @@ type anthropicRequest struct {
 	System       []anthropicContent     `json:"system,omitempty"`
 	Messages     []anthropicMessage     `json:"messages"`
 	Tools        []anthropicTool        `json:"tools,omitempty"`
-	ToolChoice   *anthropicToolChoice   `json:"tool_choice,omitempty"`
+	ToolChoice   *anthropicToolChoice   `json:"tool_choice,omitzero"`
 	Stream       bool                   `json:"stream"`
-	Temperature  *float64               `json:"temperature,omitempty"`
-	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
-	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+	Temperature  *float64               `json:"temperature,omitzero"`
+	Thinking     *anthropicThinking     `json:"thinking,omitzero"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitzero"`
 	Speed        string                 `json:"speed,omitempty"`
-	CacheControl *anthropicCacheCtrl    `json:"cache_control,omitempty"`
-	Metadata     *anthropicMetadata     `json:"metadata,omitempty"`
+	CacheControl *anthropicCacheCtrl    `json:"cache_control,omitzero"`
+	Metadata     *anthropicMetadata     `json:"metadata,omitzero"`
 }
 
 // anthropicThinking configures extended thinking.
@@ -139,16 +140,16 @@ type anthropicContent struct {
 	Raw          json.RawMessage       `json:"-"`
 	Type         string                `json:"type"`
 	Text         string                `json:"text,omitempty"`
-	Thinking     string                `json:"thinking,omitempty"`      // thinking block: content
-	Signature    string                `json:"signature,omitempty"`     // thinking block: signature (required for replay)
-	Data         string                `json:"data,omitempty"`          // redacted_thinking block: encrypted payload (required for replay)
-	ID           string                `json:"id,omitempty"`            // tool_use: tool call ID
-	Name         string                `json:"name,omitempty"`          // tool_use: tool name
-	Input        json.RawMessage       `json:"input,omitempty"`         // tool_use: tool arguments
-	ToolUseID    string                `json:"tool_use_id,omitempty"`   // tool_result: corresponding tool call ID
-	Content      any                   `json:"content,omitempty"`       // tool_result: string or []anthropicContent
-	Source       *anthropicImageSource `json:"source,omitempty"`        // image block
-	CacheControl *anthropicCacheCtrl   `json:"cache_control,omitempty"` // prompt caching marker
+	Thinking     string                `json:"thinking,omitempty"`    // thinking block: content
+	Signature    string                `json:"signature,omitempty"`   // thinking block: signature (required for replay)
+	Data         string                `json:"data,omitempty"`        // redacted_thinking block: encrypted payload (required for replay)
+	ID           string                `json:"id,omitempty"`          // tool_use: tool call ID
+	Name         string                `json:"name,omitempty"`        // tool_use: tool name
+	Input        json.RawMessage       `json:"input,omitempty"`       // tool_use: tool arguments
+	ToolUseID    string                `json:"tool_use_id,omitempty"` // tool_result: corresponding tool call ID
+	Content      any                   `json:"content,omitzero"`
+	Source       *anthropicImageSource `json:"source,omitzero"`
+	CacheControl *anthropicCacheCtrl   `json:"cache_control,omitzero"`
 }
 
 // anthropicImageSource is the base64 source block shared by image blocks and
@@ -170,7 +171,7 @@ type anthropicTool struct {
 	Name         string              `json:"name"`
 	Description  string              `json:"description"`
 	InputSchema  toolSchema          `json:"input_schema"`
-	CacheControl *anthropicCacheCtrl `json:"cache_control,omitempty"`
+	CacheControl *anthropicCacheCtrl `json:"cache_control,omitzero"`
 }
 
 // anthropicErrorResponse is returned in the HTTP body for non-streaming errors.
@@ -227,7 +228,7 @@ func (a *AnthropicProvider) CompleteStream(
 					hostedReq.Metadata = &anthropicMetadata{UserID: userID}
 				}
 			}
-			hostedBody, err := json.Marshal(hostedReq)
+			hostedBody, err := jsonx.Marshal(hostedReq)
 			if err != nil {
 				return nil, fmt.Errorf("marshal request body: %w", err)
 			}
@@ -310,7 +311,7 @@ func (a *AnthropicProvider) CompleteStream(
 			reqBody.Metadata = &anthropicMetadata{UserID: userIDPayload}
 		}
 
-		bodyBytes, err := json.Marshal(reqBody)
+		bodyBytes, err := jsonx.Marshal(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("marshal request body: %w", err)
 		}

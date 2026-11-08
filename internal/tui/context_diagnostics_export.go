@@ -36,7 +36,7 @@ func exportContextDiagnostics(view agent.ContextDiagnosticsView) []byte {
 		Available         bool            `json:"available"`
 		Historical        bool            `json:"historical"`
 		UnavailableReason string          `json:"unavailable_reason,omitempty"`
-		Snapshot          *exportSnapshot `json:"snapshot,omitempty"`
+		Snapshot          *exportSnapshot `json:"snapshot,omitzero"`
 	}{SchemaVersion: 1, Available: view.Available, Historical: view.Historical}
 	if !view.Available {
 		if view.UnavailableReason == "unsupported" {

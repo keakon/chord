@@ -1163,7 +1163,7 @@ type replaceEditArgs struct {
 	Edits      []replaceEditArgs `json:"edits,omitempty"`
 	OldString  string            `json:"old_string"`
 	NewString  string            `json:"new_string"`
-	ReplaceAll *bool             `json:"replace_all,omitempty"`
+	ReplaceAll *bool             `json:"replace_all,omitzero"`
 }
 
 // parseReplaceEditArgs extracts the text-replacement args of an Edit tool call.

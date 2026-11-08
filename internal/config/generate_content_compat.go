@@ -5,8 +5,8 @@ import "fmt"
 // GenerateContentCompatConfig controls native Generate Content request handling.
 // Nil leaves inherit defaults; false explicitly disables continuation.
 type GenerateContentCompatConfig struct {
-	AutomaticContinuation    *bool `json:"automatic_continuation,omitempty" yaml:"automatic_continuation,omitempty"`
-	SingleRequestOutputLimit *int  `json:"single_request_output_limit,omitempty" yaml:"single_request_output_limit,omitempty"`
+	AutomaticContinuation    *bool `json:"automatic_continuation,omitzero" yaml:"automatic_continuation,omitempty"`
+	SingleRequestOutputLimit *int  `json:"single_request_output_limit,omitzero" yaml:"single_request_output_limit,omitempty"`
 }
 
 // ResolveGenerateContentCompat resolves materialized configuration into an owned snapshot.

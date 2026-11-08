@@ -45,15 +45,15 @@ type ModelFacts struct {
 	ID               string         `json:"id"` // stable catalog ID, e.g. "openai/gpt-6.1-sol"
 	Released         string         `json:"released,omitempty"`
 	CodingSources    []Source       `json:"coding_sources,omitempty"`
-	Connection       *Connection    `json:"connection,omitempty"`
+	Connection       *Connection    `json:"connection,omitzero"`
 	Context          int            `json:"context"`
 	Input            int            `json:"input,omitzero"`
 	Output           int            `json:"output"`
 	InputModalities  []string       `json:"input_modalities,omitempty"` // default: text only
 	ReasoningOptions []string       `json:"reasoning_options,omitempty"`
-	Cost             *Cost          `json:"cost,omitempty"`
+	Cost             *Cost          `json:"cost,omitzero"`
 	Sources          []Source       `json:"sources"`
-	Profile          *ConfigProfile `json:"config_profile,omitempty"`
+	Profile          *ConfigProfile `json:"config_profile,omitzero"`
 }
 
 // Endpoint is one verified endpoint contract: what a preset stands for.
@@ -79,12 +79,12 @@ type Variant struct {
 // sends by default. These defaults do not assert that omitted fields are
 // rejected. A nil field leaves the normal protocol default in effect.
 type ResponsesContract struct {
-	SendStore             *bool `json:"send_store,omitempty"`
-	SendReasoningInclude  *bool `json:"send_reasoning_include,omitempty"`
-	SendToolChoice        *bool `json:"send_tool_choice,omitempty"`
-	SendPromptCacheKey    *bool `json:"send_prompt_cache_key,omitempty"`
-	SendMaxOutputTokens   *bool `json:"send_max_output_tokens,omitempty"`
-	SendParallelToolCalls *bool `json:"send_parallel_tool_calls,omitempty"`
+	SendStore             *bool `json:"send_store,omitzero"`
+	SendReasoningInclude  *bool `json:"send_reasoning_include,omitzero"`
+	SendToolChoice        *bool `json:"send_tool_choice,omitzero"`
+	SendPromptCacheKey    *bool `json:"send_prompt_cache_key,omitzero"`
+	SendMaxOutputTokens   *bool `json:"send_max_output_tokens,omitzero"`
+	SendParallelToolCalls *bool `json:"send_parallel_tool_calls,omitzero"`
 }
 
 // Binding ties one endpoint to one wire model ID served under that endpoint,
@@ -95,10 +95,10 @@ type Binding struct {
 	WireModelID     string                          `json:"wire_model_id"`
 	ModelID         string                          `json:"model_id"`
 	Variants        map[string]Variant              `json:"variants,omitempty"`
-	Responses       *ResponsesContract              `json:"responses,omitempty"`
-	Limit           *LimitOverride                  `json:"limit,omitempty"`
+	Responses       *ResponsesContract              `json:"responses,omitzero"`
+	Limit           *LimitOverride                  `json:"limit,omitzero"`
 	InputModalities []string                        `json:"input_modalities,omitempty"`
-	Profile         *ConfigProfile                  `json:"config_profile,omitempty"`
+	Profile         *ConfigProfile                  `json:"config_profile,omitzero"`
 }
 
 // CatalogSource records which upstream revision a catalog snapshot was
@@ -112,7 +112,7 @@ type CatalogSource struct {
 // Catalog is the validated in-memory form of the embedded data.
 type Catalog struct {
 	Version   string            `json:"version"`
-	Source    *CatalogSource    `json:"source,omitempty"`
+	Source    *CatalogSource    `json:"source,omitzero"`
 	Endpoints []Endpoint        `json:"endpoints"`
 	Models    []ModelFacts      `json:"models"`
 	Bindings  []Binding         `json:"bindings"`

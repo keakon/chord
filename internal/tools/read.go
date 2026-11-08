@@ -29,8 +29,8 @@ type readLSP interface {
 
 type readArgs struct {
 	Path   string `json:"path"`
-	Offset *int   `json:"offset,omitempty"` // 1-based start line; 0 or absent means the first line
-	Limit  *int   `json:"limit,omitempty"`  // number of lines; defaults to 2000
+	Offset *int   `json:"offset,omitzero"`
+	Limit  *int   `json:"limit,omitzero"`
 }
 
 // ExtractReadPathFromArgsInDir returns the absolute path targeted by a Read

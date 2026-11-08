@@ -43,7 +43,7 @@ type AgentConfig struct {
 	Color        string           `json:"color,omitempty" yaml:"color,omitempty"`
 	Permission   yaml.Node        `json:"-" yaml:"permission"`
 	MCP          MCPConfig        `json:"mcp,omitempty" yaml:"mcp,omitempty"`
-	Backend      *BackendConfig   `json:"backend,omitempty" yaml:"backend,omitempty"`
+	Backend      *BackendConfig   `json:"backend,omitzero" yaml:"backend,omitempty"`
 	Delegation   DelegationConfig `json:"delegation" yaml:"delegation,omitempty"`
 	Prompt       string           `json:"-" yaml:"prompt,omitempty"`
 	PromptAlt    string           `json:"-" yaml:"system_prompt,omitempty"`
@@ -102,7 +102,7 @@ func (c *AgentConfig) UnmarshalYAML(node *yaml.Node) error {
 type DelegationConfig struct {
 	MaxChildren int   `json:"max_children,omitzero" yaml:"max_children,omitempty"`
 	MaxDepth    int   `json:"max_depth,omitzero" yaml:"max_depth,omitempty"`
-	ChildJoin   *bool `json:"child_join,omitempty" yaml:"child_join,omitempty"`
+	ChildJoin   *bool `json:"child_join,omitzero" yaml:"child_join,omitempty"`
 }
 
 const (

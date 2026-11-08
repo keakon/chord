@@ -17,13 +17,13 @@ import (
 // client that always sends a choice (Codex sends "auto") still receive it.
 type responsesHostedRequest struct {
 	Model             string               `json:"model"`
-	Instructions      *string              `json:"instructions,omitempty"`
+	Instructions      *string              `json:"instructions,omitzero"`
 	Input             []responsesInputItem `json:"input"`
 	Tools             []json.RawMessage    `json:"tools"`
 	ToolChoice        json.RawMessage      `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool                `json:"parallel_tool_calls,omitempty"`
+	ParallelToolCalls *bool                `json:"parallel_tool_calls,omitzero"`
 	MaxOutputTokens   int                  `json:"max_output_tokens,omitzero"`
-	Store             *bool                `json:"store,omitempty"`
+	Store             *bool                `json:"store,omitzero"`
 	Stream            bool                 `json:"stream"`
 	Include           []string             `json:"include,omitempty"`
 	ServiceTier       string               `json:"service_tier,omitempty"`

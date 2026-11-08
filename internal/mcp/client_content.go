@@ -22,19 +22,19 @@ type toolCallResult struct {
 
 type toolCallContent struct {
 	Type     string            `json:"type"`
-	Text     *string           `json:"text,omitempty"`
+	Text     *string           `json:"text,omitzero"`
 	Data     string            `json:"data,omitempty"`
 	MimeType string            `json:"mimeType,omitempty"`
 	Name     string            `json:"name,omitempty"`
 	URI      string            `json:"uri,omitempty"`
-	Resource *toolCallResource `json:"resource,omitempty"`
+	Resource *toolCallResource `json:"resource,omitzero"`
 }
 
 type toolCallResource struct {
 	URI      string  `json:"uri"`
 	MimeType string  `json:"mimeType,omitempty"`
-	Text     *string `json:"text,omitempty"`
-	Blob     *string `json:"blob,omitempty"`
+	Text     *string `json:"text,omitzero"`
+	Blob     *string `json:"blob,omitzero"`
 }
 
 // normalizeToolCallResult projects MCP content onto the existing text/image

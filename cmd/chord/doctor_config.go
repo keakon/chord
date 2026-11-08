@@ -28,14 +28,14 @@ type doctorConfigFileReport struct {
 
 type doctorConfigCatalogReport struct {
 	Version          string                      `json:"version"`
-	Source           *modelcatalog.CatalogSource `json:"source,omitempty"`
+	Source           *modelcatalog.CatalogSource `json:"source,omitzero"`
 	Commit           string                      `json:"commit,omitempty"`
 	FromRefreshCache bool                        `json:"from_refresh_cache"`
 	CacheDetail      string                      `json:"cache_detail,omitempty"`
 }
 
 type doctorConfigReport struct {
-	Query   *doctorConfigQuery        `json:"query,omitempty"`
+	Query   *doctorConfigQuery        `json:"query,omitzero"`
 	Files   []doctorConfigFileReport  `json:"files"`
 	Catalog doctorConfigCatalogReport `json:"catalog"`
 	// Errors are problems of the effective config the runtime would start

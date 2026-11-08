@@ -107,7 +107,7 @@ type doctorModelResult struct {
 	Status         string             `json:"result"`
 	LatencySeconds float64            `json:"latency_seconds,omitzero"`
 	TextChunks     int                `json:"text_chunks,omitzero"`
-	Usage          *doctorUsageResult `json:"usage,omitempty"`
+	Usage          *doctorUsageResult `json:"usage,omitzero"`
 	Error          string             `json:"error,omitempty"`
 }
 

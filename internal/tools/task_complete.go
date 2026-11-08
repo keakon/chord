@@ -23,7 +23,7 @@ type completeArgs struct {
 	Artifacts            []ArtifactRef   `json:"artifacts,omitempty"`
 	ResultType           string          `json:"result_type,omitempty"`
 	Result               json.RawMessage `json:"result,omitempty"`
-	ResultRef            *ResultRef      `json:"result_ref,omitempty"`
+	ResultRef            *ResultRef      `json:"result_ref,omitzero"`
 }
 
 func (CompleteTool) Name() string { return NameComplete }

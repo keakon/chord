@@ -61,7 +61,7 @@ type ModelCost struct {
 	CacheRead              float64                 `json:"cache_read" yaml:"cache_read"`
 	CacheWrite             float64                 `json:"cache_write" yaml:"cache_write"`
 	CacheWrite1h           float64                 `json:"cache_write_1h" yaml:"cache_write_1h"`
-	ServiceTierMultipliers *ServiceTierMultipliers `json:"service_tier_multipliers,omitempty" yaml:"service_tier_multipliers,omitempty"`
+	ServiceTierMultipliers *ServiceTierMultipliers `json:"service_tier_multipliers,omitzero" yaml:"service_tier_multipliers,omitempty"`
 	InputTiers             []ModelCostInputTier    `json:"input_tiers,omitempty" yaml:"input_tiers,omitempty"`
 }
 

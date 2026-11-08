@@ -85,7 +85,7 @@ type Message struct {
 	Reason     string   `json:"reason,omitempty"`
 	ExitCode   int      `json:"exit_code,omitzero"`
 	ExitSignal int      `json:"exit_signal,omitzero"`
-	Cleanup    *Cleanup `json:"cleanup,omitempty"`
+	Cleanup    *Cleanup `json:"cleanup,omitzero"`
 	Error      string   `json:"error,omitempty"`
 }
 

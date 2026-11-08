@@ -71,7 +71,7 @@ type imageOperation struct {
 	Candidates        []imageCandidateReceipt  `json:"candidates,omitempty"`
 	OutputFormat      string                   `json:"output_format,omitempty"`
 	Background        string                   `json:"background,omitempty"`
-	Failure           *imagegen.FailureDetails `json:"failure,omitempty"`
+	Failure           *imagegen.FailureDetails `json:"failure,omitzero"`
 }
 
 func saveImageOperation(ctx context.Context, dir, path string, op imageOperation) error {

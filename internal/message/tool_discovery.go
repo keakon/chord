@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/toolname"
 )
 
@@ -14,7 +15,7 @@ const ToolDiscoveryLoaded = "loaded"
 type ToolDiscoveryEntry struct {
 	Name       string          `json:"name,omitempty"`
 	Status     string          `json:"status"`
-	Definition *ToolDefinition `json:"definition,omitempty"`
+	Definition *ToolDefinition `json:"definition,omitzero"`
 }
 
 type ToolDiscoveryResult struct {
@@ -61,7 +62,7 @@ func ProjectToolDiscoveryHistory(messages []Message) []Message {
 		if !changed {
 			return
 		}
-		raw, err := json.Marshal(result)
+		raw, err := jsonx.Marshal(result)
 		if err != nil {
 			return
 		}

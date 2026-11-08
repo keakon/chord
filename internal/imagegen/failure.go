@@ -26,8 +26,8 @@ var zeroQuotaLimit = regexp.MustCompile(`(?i)\blimit:\s*0(?:[,;\s]|$)`)
 type FailureDetails struct {
 	Message           string               `json:"message,omitempty"`
 	Param             string               `json:"param,omitempty"`
-	Request           *RequestDiagnostics  `json:"request,omitempty"`
-	Response          *ResponseDiagnostics `json:"response,omitempty"`
+	Request           *RequestDiagnostics  `json:"request,omitzero"`
+	Response          *ResponseDiagnostics `json:"response,omitzero"`
 	Category          string               `json:"category"`
 	HTTPStatus        int                  `json:"http_status,omitzero"`
 	Code              string               `json:"code,omitempty"`
@@ -35,7 +35,7 @@ type FailureDetails struct {
 	Status            string               `json:"status,omitempty"`
 	Reason            string               `json:"reason,omitempty"`
 	ZeroQuota         bool                 `json:"zero_quota,omitzero"`
-	RetryAfterSeconds *float64             `json:"retry_after_seconds,omitempty"`
+	RetryAfterSeconds *float64             `json:"retry_after_seconds,omitzero"`
 	SkippedTargets    []string             `json:"skipped_targets,omitempty"`
 }
 

@@ -18,6 +18,7 @@ import (
 
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/httpheader"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 )
@@ -84,22 +85,22 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 type codexWSResponseCreate struct {
 	Type              string               `json:"type"`
 	Model             string               `json:"model"`
-	Instructions      *string              `json:"instructions,omitempty"`
+	Instructions      *string              `json:"instructions,omitzero"`
 	Input             []responsesInputItem `json:"input"`
 	Tools             []responsesTool      `json:"tools"`
 	ToolChoice        string               `json:"tool_choice,omitempty"`
-	ParallelToolCalls *bool                `json:"parallel_tool_calls,omitempty"`
+	ParallelToolCalls *bool                `json:"parallel_tool_calls,omitzero"`
 	Store             bool                 `json:"store"`
-	Generate          *bool                `json:"generate,omitempty"`
+	Generate          *bool                `json:"generate,omitzero"`
 	Stream            bool                 `json:"stream"`
 	// Responses clients always send include as an array; encrypted reasoning is
 	// requested only when the request carries a reasoning block.
 	Include            []string               `json:"include"`
-	PromptCacheOptions *responsesCacheControl `json:"prompt_cache_options,omitempty"`
+	PromptCacheOptions *responsesCacheControl `json:"prompt_cache_options,omitzero"`
 	PromptCacheKey     string                 `json:"prompt_cache_key,omitempty"`
 	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
-	Reasoning          *reasoningConfig       `json:"reasoning,omitempty"`
-	Text               *textConfig            `json:"text,omitempty"`
+	Reasoning          *reasoningConfig       `json:"reasoning,omitzero"`
+	Text               *textConfig            `json:"text,omitzero"`
 	ClientMetadata     map[string]string      `json:"client_metadata,omitempty"`
 }
 
@@ -108,7 +109,7 @@ func (e codexWSResponseCreate) MarshalJSON() ([]byte, error) {
 	e.Input = normalizeResponsesInput(e.Input)
 	e.Tools = normalizeResponsesTools(e.Tools)
 	e.Include = normalizeResponsesInclude(e.Include)
-	return json.Marshal(alias(e))
+	return jsonx.Marshal(alias(e))
 }
 
 func responsesHTTPSBaseToWSS(httpsBase string) (string, error) {
@@ -364,7 +365,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	turnStateIdentity string,
 	freeform bool,
 ) (*message.Response, []responsesInputItem, error) {
-	payload, err := json.Marshal(env)
+	payload, err := jsonx.Marshal(env)
 	if err != nil {
 		return nil, nil, fmt.Errorf("codex ws marshal: %w", err)
 	}

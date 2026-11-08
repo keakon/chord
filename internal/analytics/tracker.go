@@ -53,7 +53,7 @@ type SessionStats struct {
 	ByModel          map[string]*ModelStats `json:"by_model"`
 	ByAgent          map[string]*AgentStats `json:"by_agent,omitempty"`
 	ByTask           map[string]*AgentStats `json:"by_task,omitempty"`
-	Untracked        *AgentStats            `json:"untracked,omitempty"`
+	Untracked        *AgentStats            `json:"untracked,omitzero"`
 	// CompactionLifecycle counts context-compaction lifecycle diagnostic
 	// events keyed by "stage/trigger" (e.g. "applied/model_driven",
 	// "skipped/model_driven"). It powers the /stats compaction-frequency

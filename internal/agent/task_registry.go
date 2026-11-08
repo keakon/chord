@@ -54,14 +54,14 @@ type ExternalTaskSession struct {
 	// whether its process group was torn down.
 	RunID    string                    `json:"run_id,omitempty"`
 	Inputs   []externalTaskInput       `json:"inputs,omitempty"`
-	Baseline *externalCheckoutBaseline `json:"baseline,omitempty"`
+	Baseline *externalCheckoutBaseline `json:"baseline,omitzero"`
 }
 
 type externalTaskInput struct {
 	ID      string                   `json:"id"`
 	Content string                   `json:"content"`
 	State   string                   `json:"state"`
-	Mailbox *message.MailboxMetadata `json:"mailbox,omitempty"`
+	Mailbox *message.MailboxMetadata `json:"mailbox,omitzero"`
 }
 
 const (
@@ -124,7 +124,7 @@ type DurableTaskRecord struct {
 	LastArtifactRefs     []tools.ArtifactRef `json:"last_artifact_refs,omitempty"`
 	// Usage is the task's cumulative reported usage. A live runtime seeds it
 	// back on rehydration, so the count spans attempts.
-	Usage *AgentUsage `json:"usage,omitempty"`
+	Usage *AgentUsage `json:"usage,omitzero"`
 	// EscalationCount and EscalationMailboxID track needs_repair escalations the
 	// owner has not answered. They live on the durable task rather than a turn so
 	// the budget spans attempts: the loop they converge is exactly the one that
@@ -132,11 +132,11 @@ type DurableTaskRecord struct {
 	// the count (see buildTaskRecordFromSub).
 	EscalationCount     int                 `json:"escalation_count,omitzero"`
 	EscalationMailboxID string              `json:"escalation_mailbox_id,omitempty"`
-	LastCompletion      *CompletionEnvelope `json:"last_completion,omitempty"`
-	PendingCompletion   *CompletionEnvelope `json:"pending_completion,omitempty"`
+	LastCompletion      *CompletionEnvelope `json:"last_completion,omitzero"`
+	PendingCompletion   *CompletionEnvelope `json:"pending_completion,omitzero"`
 	// ExternalSession addresses a task executed by an external coding-agent
 	// backend. Chord owns the session id; the external CLI owns the transcript.
-	ExternalSession      *ExternalTaskSession `json:"external_session,omitempty"`
+	ExternalSession      *ExternalTaskSession `json:"external_session,omitzero"`
 	SuspectedStallReason string               `json:"suspected_stall_reason,omitempty"`
 	Persistence          PersistenceHealth    `json:"persistence"`
 	RuntimeParked        bool                 `json:"runtime_parked,omitzero"`
@@ -147,7 +147,7 @@ type DurableTaskRecord struct {
 	ClosedReason         string               `json:"closed_reason,omitempty"`
 	Attempt              uint64               `json:"attempt,omitzero"`
 	LifecycleRevision    uint64               `json:"lifecycle_revision,omitzero"`
-	LatestSettlement     *TaskSettlement      `json:"latest_settlement,omitempty"`
+	LatestSettlement     *TaskSettlement      `json:"latest_settlement,omitzero"`
 	SettlementDurable    bool                 `json:"settlement_durable,omitzero"`
 }
 

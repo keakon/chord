@@ -25,7 +25,7 @@ type LSPServerConfig struct {
 // Either Command (stdio transport) or URL (HTTP transport) must be set.
 type MCPServerConfig struct {
 	Auth         string            `json:"auth,omitempty" yaml:"auth,omitempty"`
-	OAuth        *MCPOAuthConfig   `json:"oauth,omitempty" yaml:"oauth,omitempty"`
+	OAuth        *MCPOAuthConfig   `json:"oauth,omitzero" yaml:"oauth,omitempty"`
 	Command      string            `json:"command,omitempty" yaml:"command,omitempty"`             // executable (for stdio transport)
 	Args         []string          `json:"args,omitempty" yaml:"args,omitempty"`                   // command arguments
 	Env          []string          `json:"env,omitempty" yaml:"env,omitempty"`                     // optional environment variables

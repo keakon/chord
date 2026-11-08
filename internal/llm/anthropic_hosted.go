@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -31,7 +32,7 @@ type anthropicHostedRequest struct {
 	ToolChoice json.RawMessage    `json:"tool_choice,omitempty"`
 	Stream     bool               `json:"stream"`
 	Container  string             `json:"container,omitempty"`
-	Metadata   *anthropicMetadata `json:"metadata,omitempty"`
+	Metadata   *anthropicMetadata `json:"metadata,omitzero"`
 }
 
 // newAnthropicHostedRequest builds the wire request for a hosted sub-request.
@@ -56,7 +57,7 @@ func newAnthropicHostedRequest(model, systemPrompt, query string, ht *HostedTool
 		Stream:    true,
 	}
 	if len(req.Messages) == 0 {
-		user, err := json.Marshal(map[string]string{"role": "user", "content": query})
+		user, err := jsonx.Marshal(map[string]string{"role": "user", "content": query})
 		if err != nil {
 			return anthropicHostedRequest{}, fmt.Errorf("marshal hosted prompt: %w", err)
 		}

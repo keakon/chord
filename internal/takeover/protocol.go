@@ -144,8 +144,8 @@ type request struct {
 type response struct {
 	Protocol int     `json:"protocol"`
 	Source   Record  `json:"source"`
-	Status   *Status `json:"status,omitempty"`
-	Error    *Error  `json:"error,omitempty"`
+	Status   *Status `json:"status,omitzero"`
+	Error    *Error  `json:"error,omitzero"`
 }
 
 func readFrame(r io.Reader, dst any) error {

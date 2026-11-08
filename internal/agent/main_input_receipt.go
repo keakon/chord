@@ -11,7 +11,7 @@ const (
 // InputResultEvent reports consumption of one input, not completion of its
 // model work or durable delivery across a disconnected control-plane client.
 type InputResultEvent struct {
-	Target        *InputTarget `json:"target,omitempty"`
+	Target        *InputTarget `json:"target,omitzero"`
 	InputID       string       `json:"input_id,omitempty"`
 	Revision      uint64       `json:"revision,omitzero"`
 	QueueRevision uint64       `json:"queue_revision,omitzero"`

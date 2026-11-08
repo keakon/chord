@@ -16,15 +16,15 @@ type ConfigProfile struct {
 	// data to avoid making the catalog depend on config's Go types.
 	Model      map[string]any     `json:"model,omitempty"`
 	Compat     map[string]any     `json:"compat,omitempty"`
-	Compaction *CompactionProfile `json:"compaction,omitempty"`
+	Compaction *CompactionProfile `json:"compaction,omitzero"`
 	Sources    []Source           `json:"sources,omitempty"`
 }
 
 // CompactionProfile contains model-level compaction hints, not the user's
 // global context.compaction strategy.
 type CompactionProfile struct {
-	Threshold *float64 `json:"threshold,omitempty"`
-	Reminder  *float64 `json:"reminder,omitempty"`
+	Threshold *float64 `json:"threshold,omitzero"`
+	Reminder  *float64 `json:"reminder,omitzero"`
 	Notes     string   `json:"notes,omitempty"`
 }
 

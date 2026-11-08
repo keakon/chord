@@ -85,23 +85,23 @@ func (r *ModelCatalogRef) UnmarshalJSON(data []byte) error {
 
 // ModelConfig specifies a model and its parameters.
 type ModelConfig struct {
-	ImageGeneration       *ImageModelConfig            `json:"image_generation,omitempty" yaml:"image_generation,omitempty"`
-	NativeImageGeneration *NativeImageGenerationConfig `json:"native_image_generation,omitempty" yaml:"native_image_generation,omitempty"`
-	NativeWebSearch       *NativeWebSearchConfig       `json:"native_web_search,omitempty" yaml:"native_web_search,omitempty"`
+	ImageGeneration       *ImageModelConfig            `json:"image_generation,omitzero" yaml:"image_generation,omitempty"`
+	NativeImageGeneration *NativeImageGenerationConfig `json:"native_image_generation,omitzero" yaml:"native_image_generation,omitempty"`
+	NativeWebSearch       *NativeWebSearchConfig       `json:"native_web_search,omitzero" yaml:"native_web_search,omitempty"`
 	Name                  string                       `json:"name" yaml:"name"`
 	Limit                 ModelLimit                   `json:"limit" yaml:"limit"`
-	Catalog               *ModelCatalogRef             `json:"catalog,omitempty" yaml:"catalog,omitempty"`
-	Modalities            *ModelModalities             `json:"modalities,omitempty" yaml:"modalities,omitempty"`
+	Catalog               *ModelCatalogRef             `json:"catalog,omitzero" yaml:"catalog,omitempty"`
+	Modalities            *ModelModalities             `json:"modalities,omitzero" yaml:"modalities,omitempty"`
 	SupportedServiceTiers []ServiceTier                `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"` // explicit non-standard tiers supported by this model
-	Compaction            *ModelCompactionConfig       `json:"compaction,omitempty" yaml:"compaction,omitempty"`                           // per-model compaction threshold/reminder overrides; nil inherits the global context.compaction values
-	Thinking              *ThinkingConfig              `json:"thinking,omitempty" yaml:"thinking,omitempty"`
-	Reasoning             *ReasoningConfig             `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
-	Text                  *TextConfig                  `json:"text,omitempty" yaml:"text,omitempty"`
-	ParallelToolCalls     *bool                        `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = inherit provider default (itself defaulting to true); non-nil = explicit override
-	PromptCache           *PromptCacheConfig           `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
-	Compat                *ModelCompatConfig           `json:"compat,omitempty" yaml:"compat,omitempty"`
-	Cost                  *ModelCost                   `json:"cost,omitempty" yaml:"cost,omitempty"`
-	Store                 *bool                        `json:"store,omitempty" yaml:"store,omitempty"`     // model-level Responses storage preference; nil inherits provider/default false
+	Compaction            *ModelCompactionConfig       `json:"compaction,omitzero" yaml:"compaction,omitempty"`
+	Thinking              *ThinkingConfig              `json:"thinking,omitzero" yaml:"thinking,omitempty"`
+	Reasoning             *ReasoningConfig             `json:"reasoning,omitzero" yaml:"reasoning,omitempty"`
+	Text                  *TextConfig                  `json:"text,omitzero" yaml:"text,omitempty"`
+	ParallelToolCalls     *bool                        `json:"parallel_tool_calls,omitzero" yaml:"parallel_tool_calls,omitempty"`
+	PromptCache           *PromptCacheConfig           `json:"prompt_cache,omitzero" yaml:"prompt_cache,omitempty"`
+	Compat                *ModelCompatConfig           `json:"compat,omitzero" yaml:"compat,omitempty"`
+	Cost                  *ModelCost                   `json:"cost,omitzero" yaml:"cost,omitempty"`
+	Store                 *bool                        `json:"store,omitzero" yaml:"store,omitempty"`
 	Emulate               string                       `json:"emulate,omitempty" yaml:"emulate,omitempty"` // client this model presents as on the wire ("codex", "claude"); empty inherits the provider-level emulate value
 	Variants              map[string]ModelVariant      `json:"variants,omitempty" yaml:"variants,omitempty"`
 }
@@ -251,7 +251,7 @@ type ThinkingConfig struct {
 	Budget          int    `json:"budget,omitzero" yaml:"budget,omitempty"`
 	Effort          string `json:"effort,omitempty" yaml:"effort,omitempty"`
 	Display         string `json:"display,omitempty" yaml:"display,omitempty"`
-	IncludeThoughts *bool  `json:"include_thoughts,omitempty" yaml:"include_thoughts,omitempty"`
+	IncludeThoughts *bool  `json:"include_thoughts,omitzero" yaml:"include_thoughts,omitempty"`
 	Level           string `json:"level,omitempty" yaml:"level,omitempty"`
 }
 
@@ -282,7 +282,7 @@ func (t *ThinkingConfig) EffectiveType() string {
 type PromptCacheConfig struct {
 	Mode       string `json:"mode,omitempty" yaml:"mode,omitempty"`
 	TTL        string `json:"ttl,omitempty" yaml:"ttl,omitempty"`
-	CacheTools *bool  `json:"cache_tools,omitempty" yaml:"cache_tools,omitempty"`
+	CacheTools *bool  `json:"cache_tools,omitzero" yaml:"cache_tools,omitempty"`
 }
 
 // CacheToolsEnabled reports whether tool schema caching is enabled.
@@ -313,11 +313,11 @@ type ReasoningConfig struct {
 // For Anthropic models: set Thinking to override type/budget/effort/display.
 // For OpenAI Responses API models: set Reasoning to override effort/summary.
 type ModelVariant struct {
-	Thinking          *ThinkingConfig    `json:"thinking,omitempty" yaml:"thinking,omitempty"`
-	Reasoning         *ReasoningConfig   `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
-	Text              *TextConfig        `json:"text,omitempty" yaml:"text,omitempty"`
-	ParallelToolCalls *bool              `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = inherit model default; non-nil = override provider request hint
-	PromptCache       *PromptCacheConfig `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
+	Thinking          *ThinkingConfig    `json:"thinking,omitzero" yaml:"thinking,omitempty"`
+	Reasoning         *ReasoningConfig   `json:"reasoning,omitzero" yaml:"reasoning,omitempty"`
+	Text              *TextConfig        `json:"text,omitzero" yaml:"text,omitempty"`
+	ParallelToolCalls *bool              `json:"parallel_tool_calls,omitzero" yaml:"parallel_tool_calls,omitempty"`
+	PromptCache       *PromptCacheConfig `json:"prompt_cache,omitzero" yaml:"prompt_cache,omitempty"`
 }
 
 // TextConfig controls output presentation knobs shared by GPT-5 family APIs.

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 )
 
@@ -43,7 +44,7 @@ type SessionMeta struct {
 	WorktreeTimeline []WorktreeTimelineEntry `json:"worktree_timeline,omitempty"`
 
 	// ImportedFrom captures external import provenance (chord import).
-	ImportedFrom *ImportMeta `json:"imported_from,omitempty"`
+	ImportedFrom *ImportMeta `json:"imported_from,omitzero"`
 
 	// MCPEnabledServers records the manual MCP servers this session intends to
 	// have enabled. It is the user's durable intent, not a connection snapshot:
@@ -222,7 +223,7 @@ func SaveSessionMeta(sessionDir string, meta SessionMeta) error {
 
 func saveSessionMeta(sessionDir string, meta SessionMeta) error {
 	meta.MCPEnabledServers = NormalizeMCPEnabledServers(meta.MCPEnabledServers)
-	data, err := json.Marshal(meta)
+	data, err := jsonx.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("marshal session meta: %w", err)
 	}

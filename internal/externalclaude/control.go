@@ -54,8 +54,8 @@ type ControlResponseBody struct {
 type Frame struct {
 	Type      string               `json:"type"`
 	RequestID string               `json:"request_id,omitempty"`
-	Request   *ControlRequest      `json:"request,omitempty"`
-	Response  *ControlResponseBody `json:"response,omitempty"`
+	Request   *ControlRequest      `json:"request,omitzero"`
+	Response  *ControlResponseBody `json:"response,omitzero"`
 }
 
 // PermissionDecision is the allow/deny payload Chord returns for can_use_tool.

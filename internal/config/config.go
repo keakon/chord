@@ -24,31 +24,31 @@ type Config struct {
 	// DesktopNotification, when true, enables terminal notifications in local TUI.
 	// Chord auto-selects the terminal OSC protocol by environment (for example, OSC 777 vs OSC 9).
 	// YAML: desktop_notification: true
-	DesktopNotification *bool `json:"desktop_notification,omitempty" yaml:"desktop_notification,omitempty"`
+	DesktopNotification *bool `json:"desktop_notification,omitzero" yaml:"desktop_notification,omitempty"`
 	// DesktopNotificationForeground controls notifications while the TUI is focused.
 	// Nil defaults to true. YAML: desktop_notification_foreground: true
-	DesktopNotificationForeground *bool `json:"desktop_notification_foreground,omitempty" yaml:"desktop_notification_foreground,omitempty"`
+	DesktopNotificationForeground *bool `json:"desktop_notification_foreground,omitzero" yaml:"desktop_notification_foreground,omitempty"`
 	// PreventSleep requests host sleep prevention during agent work on macOS, Linux, and Windows.
 	// Defaults to false; applies to TUI, headless, and ACP. Platform services and policies limit coverage. YAML: prevent_sleep: true
-	PreventSleep        *bool                       `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
-	KeyMap              KeyMapConfig                `json:"keymap,omitempty" yaml:"keymap,omitempty"`                             // custom key bindings (snake_case action → key list)
-	Commands            map[string]string           `json:"commands,omitempty" yaml:"commands,omitempty"`                         // custom slash commands: "/cmd" → text to send as message
-	IMESwitchTarget     string                      `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"`       // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
-	LogLevel            string                      `json:"log_level" yaml:"log_level"`                                           // log verbosity: "debug", "info" (default), "warn", "error"
-	Paths               PathsConfig                 `json:"paths" yaml:"paths,omitempty"`                                         // user-level state/cache/logs path overrides
-	Maintenance         MaintenanceConfig           `json:"maintenance" yaml:"maintenance,omitempty"`                             // optional cleanup/status checks
-	LSP                 LSPConfig                   `json:"lsp" yaml:"lsp"`                                                       // LSP server config
-	Diagnostics         DiagnosticsConfig           `json:"diagnostics" yaml:"diagnostics,omitempty"`                             // post-tool diagnostics config
-	MCP                 MCPConfig                   `json:"mcp,omitempty" yaml:"mcp,omitempty"`                                   // MCP server configs
-	Hooks               HookConfig                  `json:"hooks" yaml:"hooks,omitempty"`                                         // lifecycle hook configs
-	MaxOutputTokens     int                         `json:"max_output_tokens" yaml:"max_output_tokens"`                           // global output token cap (0 = use DefaultOutputTokenMax)
-	StreamRetryRounds   int                         `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                       // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
-	Proxy               string                      `json:"proxy,omitempty" yaml:"proxy,omitempty"`                               // global proxy URL (http/https/socks5), empty = no proxy
-	Memory              MemoryConfig                `json:"memory" yaml:"memory,omitempty"`                                       // project memory auto-extraction
-	WebFetch            WebFetchConfig              `json:"web_fetch" yaml:"web_fetch,omitempty"`                                 // WebFetch-specific options
-	HostedTools         map[string]HostedToolConfig `json:"hosted_tools,omitempty" yaml:"hosted_tools,omitempty"`                 // provider-side (hosted) tool catalog: local tool surface + per-family wire declarations
-	Worktree            WorktreeConfig              `json:"worktree" yaml:"worktree,omitempty"`                                   // git worktree integration options
-	ThinkingTranslation *ThinkingTranslationConfig  `json:"thinking_translation,omitempty" yaml:"thinking_translation,omitempty"` // optional thinking translation enhancement
+	PreventSleep        *bool                       `json:"prevent_sleep,omitzero" yaml:"prevent_sleep,omitempty"`
+	KeyMap              KeyMapConfig                `json:"keymap,omitempty" yaml:"keymap,omitempty"`                       // custom key bindings (snake_case action → key list)
+	Commands            map[string]string           `json:"commands,omitempty" yaml:"commands,omitempty"`                   // custom slash commands: "/cmd" → text to send as message
+	IMESwitchTarget     string                      `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"` // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
+	LogLevel            string                      `json:"log_level" yaml:"log_level"`                                     // log verbosity: "debug", "info" (default), "warn", "error"
+	Paths               PathsConfig                 `json:"paths" yaml:"paths,omitempty"`                                   // user-level state/cache/logs path overrides
+	Maintenance         MaintenanceConfig           `json:"maintenance" yaml:"maintenance,omitempty"`                       // optional cleanup/status checks
+	LSP                 LSPConfig                   `json:"lsp" yaml:"lsp"`                                                 // LSP server config
+	Diagnostics         DiagnosticsConfig           `json:"diagnostics" yaml:"diagnostics,omitempty"`                       // post-tool diagnostics config
+	MCP                 MCPConfig                   `json:"mcp,omitempty" yaml:"mcp,omitempty"`                             // MCP server configs
+	Hooks               HookConfig                  `json:"hooks" yaml:"hooks,omitempty"`                                   // lifecycle hook configs
+	MaxOutputTokens     int                         `json:"max_output_tokens" yaml:"max_output_tokens"`                     // global output token cap (0 = use DefaultOutputTokenMax)
+	StreamRetryRounds   int                         `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                 // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
+	Proxy               string                      `json:"proxy,omitempty" yaml:"proxy,omitempty"`                         // global proxy URL (http/https/socks5), empty = no proxy
+	Memory              MemoryConfig                `json:"memory" yaml:"memory,omitempty"`                                 // project memory auto-extraction
+	WebFetch            WebFetchConfig              `json:"web_fetch" yaml:"web_fetch,omitempty"`                           // WebFetch-specific options
+	HostedTools         map[string]HostedToolConfig `json:"hosted_tools,omitempty" yaml:"hosted_tools,omitempty"`           // provider-side (hosted) tool catalog: local tool surface + per-family wire declarations
+	Worktree            WorktreeConfig              `json:"worktree" yaml:"worktree,omitempty"`                             // git worktree integration options
+	ThinkingTranslation *ThinkingTranslationConfig  `json:"thinking_translation,omitzero" yaml:"thinking_translation,omitempty"`
 	// Emulation defines payloads selected by provider/model emulate keys.
 	Emulation EmulationConfig `json:"emulation,omitzero" yaml:"emulation,omitempty"`
 }
@@ -57,11 +57,11 @@ type Config struct {
 type WebFetchConfig struct {
 	// UserAgent overrides the default browser-like User-Agent. Nil = inherit builtin default;
 	// non-nil empty string explicitly resets to builtin default when merging project config.
-	UserAgent *string `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`
+	UserAgent *string `json:"user_agent,omitzero" yaml:"user_agent,omitempty"`
 	// Proxy specifies the proxy URL for WebFetch requests. Nil = use global proxy;
 	// non-nil empty string = "direct" (explicitly disable proxy); non-empty = use that proxy.
 	// Supported schemes: http, https, socks5.
-	Proxy *string `json:"proxy,omitempty" yaml:"proxy,omitempty"`
+	Proxy *string `json:"proxy,omitzero" yaml:"proxy,omitempty"`
 }
 
 // MemoryConfig controls automatic project memory extraction. Reading an
@@ -72,7 +72,7 @@ type WebFetchConfig struct {
 type MemoryConfig struct {
 	// Enabled enables automatic extraction for this machine + project.
 	// Nil means unset (defaults to false).
-	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Enabled *bool `json:"enabled,omitzero" yaml:"enabled,omitempty"`
 	// ModelPool is the name of the model pool to use for extraction requests.
 	// When set, extraction uses this dedicated pool instead of the main model
 	// pool, which avoids inheriting aggressive reasoning settings (e.g. effort:max)

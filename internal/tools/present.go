@@ -28,8 +28,8 @@ type PresentArtifact struct {
 	SizeBytes *int64 `json:"size_bytes"`
 }
 type PresentFile struct {
-	Path        *string          `json:"path,omitempty"`
-	Artifact    *PresentArtifact `json:"artifact,omitempty"`
+	Path        *string          `json:"path,omitzero"`
+	Artifact    *PresentArtifact `json:"artifact,omitzero"`
 	Description string           `json:"description,omitempty"`
 }
 type PresentArgs struct {

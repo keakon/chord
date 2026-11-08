@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
 )
@@ -64,7 +65,7 @@ func (j NativeRequestJournal) Begin(request any, continuations []string) (string
 type nativeRequestResult struct {
 	Outcome  message.NativeRequestOutcome `json:"outcome"`
 	Error    string                       `json:"error,omitempty"`
-	Response *message.Response            `json:"response,omitempty"`
+	Response *message.Response            `json:"response,omitzero"`
 }
 
 func (j NativeRequestJournal) Finish(id string, outcome message.NativeRequestOutcome, response *message.Response, callErr error) error {
@@ -109,7 +110,7 @@ func (j NativeRequestJournal) write(name string, value any) error {
 	if filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
 		return fmt.Errorf("invalid native receipt name")
 	}
-	raw, err := json.Marshal(value)
+	raw, err := jsonx.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("encode native receipt: %w", err)
 	}

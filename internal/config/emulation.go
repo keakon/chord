@@ -21,10 +21,10 @@ const (
 // there are no per-provider or per-model payload definitions.
 type EmulationConfig struct {
 	// Codex writes Responses requests the way the Codex client does.
-	Codex *CodexEmulationConfig `json:"codex,omitempty" yaml:"codex,omitempty"`
+	Codex *CodexEmulationConfig `json:"codex,omitzero" yaml:"codex,omitempty"`
 	// Claude adds the Claude Code client's request identity on messages-wire
 	// requests.
-	Claude *ClaudeEmulationConfig `json:"claude,omitempty" yaml:"claude,omitempty"`
+	Claude *ClaudeEmulationConfig `json:"claude,omitzero" yaml:"claude,omitempty"`
 }
 
 // payloadFor returns the payload a client name references, or nil when the name

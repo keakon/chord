@@ -190,7 +190,7 @@ type CompactionConfig struct {
 	// The pointer distinguishes an explicit value from an unset one: unset
 	// enables it, so a project setting this false overrides the default and a
 	// global false like any other scalar override.
-	ModelDriven *bool `json:"model_driven,omitempty" yaml:"model_driven,omitempty"`
+	ModelDriven *bool `json:"model_driven,omitzero" yaml:"model_driven,omitempty"`
 	// RetainRecentTokens is the estimated-token budget for the newest real
 	// user messages (plus a dangling interrupted assistant reply) kept
 	// verbatim inside every compaction checkpoint, so the continuation can
@@ -216,8 +216,8 @@ func (c CompactionConfig) ModelDrivenEnabled() bool {
 // (nil, inherit global) from an explicit value; a zero threshold disables
 // automatic compaction for that model (and its reminders).
 type ModelCompactionConfig struct {
-	Threshold *float64 `json:"threshold,omitempty" yaml:"threshold,omitempty"`
-	Reminder  *float64 `json:"reminder,omitempty" yaml:"reminder,omitempty"`
+	Threshold *float64 `json:"threshold,omitzero" yaml:"threshold,omitempty"`
+	Reminder  *float64 `json:"reminder,omitzero" yaml:"reminder,omitempty"`
 }
 
 // validCompactionFraction reports whether a configured compaction threshold or

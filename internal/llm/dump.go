@@ -17,6 +17,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -32,8 +33,8 @@ type LLMDump struct {
 	HTTPHeaders    http.Header     `json:"http_headers,omitempty"`
 	HTTPBody       string          `json:"http_body,omitempty"`
 	SSEChunks      []string        `json:"sse_chunks"`
-	Response       *DumpResponse   `json:"response,omitempty"`
-	Recovery       *DumpRecovery   `json:"recovery,omitempty"`
+	Response       *DumpResponse   `json:"response,omitzero"`
+	Recovery       *DumpRecovery   `json:"recovery,omitzero"`
 	Error          string          `json:"error,omitempty"`
 	DurationMS     int64           `json:"duration_ms"`
 }
@@ -300,7 +301,7 @@ func (w *dumpJSONWriter) beginField(name string) {
 		w.wroteField = true
 	}
 	w.writeString("\n  ")
-	nameJSON, err := json.Marshal(name)
+	nameJSON, err := jsonx.Marshal(name)
 	if err != nil {
 		w.err = err
 		return
@@ -317,7 +318,7 @@ func (w *dumpJSONWriter) field(name string, value any) {
 	if w.err != nil {
 		return
 	}
-	data, err := json.Marshal(value)
+	data, err := jsonx.Marshal(value)
 	if err != nil {
 		w.err = err
 		return

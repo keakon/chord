@@ -36,8 +36,8 @@ type doctorConfigQuery struct {
 	GlobalPath    string                        `json:"global_path"`
 	ProjectPath   string                        `json:"project_path"`
 	ProjectExists bool                          `json:"project_exists"`
-	Result        *config.ModelFieldExplanation `json:"result,omitempty"`
-	Error         *doctorConfigQueryError       `json:"error,omitempty"`
+	Result        *config.ModelFieldExplanation `json:"result,omitzero"`
+	Error         *doctorConfigQueryError       `json:"error,omitzero"`
 }
 
 func validateDoctorConfigQuery(opts doctorConfigOptions) (string, *doctorConfigQueryError) {

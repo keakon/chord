@@ -158,13 +158,13 @@ type ExplainInput struct {
 	Field        ExplainField        `json:"field"`
 	Value        any                 `json:"value"`
 	SourceStatus ExplainSourceStatus `json:"source_status"`
-	Source       *ExplainSource      `json:"source,omitempty"`
+	Source       *ExplainSource      `json:"source,omitzero"`
 }
 type ExplainDeclaration struct {
 	Source      ExplainSource          `json:"source"`
 	Kind        ExplainDeclarationKind `json:"kind"`
 	Effect      ExplainEffect          `json:"effect"`
-	Value       any                    `json:"value,omitempty"`
+	Value       any                    `json:"value,omitzero"`
 	Diagnostics []Diagnostic           `json:"diagnostics,omitempty"`
 }
 type ExplainEditTarget struct {
@@ -184,10 +184,10 @@ type ModelFieldExplanation struct {
 	ValueState   ExplainValueState    `json:"value_state"`
 	Value        any                  `json:"value"`
 	SourceStatus ExplainSourceStatus  `json:"source_status"`
-	Source       *ExplainSource       `json:"source,omitempty"`
+	Source       *ExplainSource       `json:"source,omitzero"`
 	Declarations []ExplainDeclaration `json:"declarations"`
 	Diagnostics  []Diagnostic         `json:"diagnostics"`
-	EditTarget   *ExplainEditTarget   `json:"edit_target,omitempty"`
+	EditTarget   *ExplainEditTarget   `json:"edit_target,omitzero"`
 	Notes        []ExplainNote        `json:"notes"`
 }
 

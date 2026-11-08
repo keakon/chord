@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/worktree"
 
@@ -38,7 +39,7 @@ type subAgentMeta struct {
 	WorkDirGeneration       uint64              `json:"work_dir_generation,omitzero"`
 	PendingCompleteIntent   bool                `json:"pending_complete_intent,omitzero"`
 	PendingCompleteSummary  string              `json:"pending_complete_summary,omitempty"`
-	PendingCompleteEnvelope *CompletionEnvelope `json:"pending_complete_envelope,omitempty"`
+	PendingCompleteEnvelope *CompletionEnvelope `json:"pending_complete_envelope,omitzero"`
 	LastMailboxID           string              `json:"last_mailbox_id,omitempty"`
 	LastReplyMessageID      string              `json:"last_reply_message_id,omitempty"`
 	LastReplyToMailboxID    string              `json:"last_reply_to_mailbox_id,omitempty"`
@@ -110,7 +111,7 @@ func (a *MainAgent) persistSubAgentMetaToSession(sub *SubAgent, sessionDir strin
 		meta.PendingCompleteEnvelope = normalizeCompletionEnvelope(pendingComplete.Envelope)
 	}
 	write := func() error {
-		data, err := json.MarshalIndent(meta, "", "  ")
+		data, err := jsonx.MarshalIndent(meta, "", "  ")
 		if err != nil {
 			return err
 		}

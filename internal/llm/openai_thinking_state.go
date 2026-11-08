@@ -25,7 +25,7 @@ import (
 // openAIToolCallExtraContent is the vendor-scoped passthrough object on a tool
 // call; Gemini thought signatures ride under google.thought_signature.
 type openAIToolCallExtraContent struct {
-	Google *openAIGoogleThoughtSignature `json:"google,omitempty"`
+	Google *openAIGoogleThoughtSignature `json:"google,omitzero"`
 }
 
 type openAIGoogleThoughtSignature struct {

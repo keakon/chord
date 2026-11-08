@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -38,10 +39,10 @@ type TaskSettlement struct {
 	TerminalRevision uint64                   `json:"terminal_revision"`
 	Outcome          string                   `json:"outcome"`
 	Summary          string                   `json:"summary,omitempty"`
-	Completion       *CompletionEnvelope      `json:"completion,omitempty"`
+	Completion       *CompletionEnvelope      `json:"completion,omitzero"`
 	ArtifactRefs     []tools.ArtifactRef      `json:"artifact_refs,omitempty"`
-	ResultRef        *tools.ResultRef         `json:"result_ref,omitempty"`
-	Contract         *TaskContractDiagnostics `json:"contract,omitempty"`
+	ResultRef        *tools.ResultRef         `json:"result_ref,omitzero"`
+	Contract         *TaskContractDiagnostics `json:"contract,omitzero"`
 	SettledAt        time.Time                `json:"settled_at"`
 }
 
@@ -95,7 +96,7 @@ func canonicalTaskSettlement(settlement *TaskSettlement) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("invalid task settlement outcome %q", settlement.Outcome)
 	}
-	return json.Marshal(settlement)
+	return jsonx.Marshal(settlement)
 }
 
 func taskSettlementContentEqual(left, right *TaskSettlement) bool {

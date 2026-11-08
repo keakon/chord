@@ -32,8 +32,8 @@ type DeliverySource struct {
 }
 type FileLocator struct {
 	Kind      string                `json:"kind"`
-	Workspace *WorkspaceFileLocator `json:"workspace,omitempty"`
-	Artifact  *ArtifactFileLocator  `json:"artifact,omitempty"`
+	Workspace *WorkspaceFileLocator `json:"workspace,omitzero"`
+	Artifact  *ArtifactFileLocator  `json:"artifact,omitzero"`
 }
 type WorkspaceFileLocator struct {
 	Root string `json:"root"`

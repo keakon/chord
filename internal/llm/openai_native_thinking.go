@@ -108,19 +108,19 @@ func applyNativeThinking(req *openAIRequest, dialect nativeThinkingDialect, tuni
 // openAIExtraBody is the provider-scoped passthrough object on the Chat
 // Completions body.
 type openAIExtraBody struct {
-	Google *openAIGoogleExtraBody `json:"google,omitempty"`
+	Google *openAIGoogleExtraBody `json:"google,omitzero"`
 }
 
 type openAIGoogleExtraBody struct {
-	ThinkingConfig *openAIGoogleThinkingConfig `json:"thinking_config,omitempty"`
+	ThinkingConfig *openAIGoogleThinkingConfig `json:"thinking_config,omitzero"`
 }
 
 // openAIGoogleThinkingConfig mirrors generationConfig.thinkingConfig with the
 // snake_case keys of the chat-completions compatibility convention.
 type openAIGoogleThinkingConfig struct {
-	ThinkingBudget  *int   `json:"thinking_budget,omitempty"`
+	ThinkingBudget  *int   `json:"thinking_budget,omitzero"`
 	ThinkingLevel   string `json:"thinking_level,omitempty"`
-	IncludeThoughts *bool  `json:"include_thoughts,omitempty"`
+	IncludeThoughts *bool  `json:"include_thoughts,omitzero"`
 }
 
 // geminiThinkingExtraBody maps the configured Gemini thinking knobs onto the

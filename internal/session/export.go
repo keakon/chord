@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/convformat"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -24,7 +25,7 @@ type ExportedSession struct {
 	Version   string            `json:"version"`
 	CreatedAt time.Time         `json:"created_at"`
 	Messages  []ExportedMessage `json:"messages"`
-	Stats     *SessionStats     `json:"stats,omitempty"`
+	Stats     *SessionStats     `json:"stats,omitzero"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
@@ -34,15 +35,15 @@ type ExportedSession struct {
 // Note: multi-part user attachments (e.g. image ContentParts) are intentionally
 // not embedded in export files; only the plain message Content is exported.
 type ExportedMessage struct {
-	Usage                     *message.TokenUsage            `json:"usage,omitempty"`
+	Usage                     *message.TokenUsage            `json:"usage,omitzero"`
 	DeliveredFiles            []message.DeliveredFile        `json:"delivered_files,omitempty"`
 	CompactionDeliveredFiles  []message.DeliveredFile        `json:"compaction_delivered_files,omitempty"`
 	FileLinkBaseDir           string                         `json:"file_link_base_dir,omitempty"`
-	DirectoryInstructions     *message.DirectoryInstructions `json:"directory_instructions,omitempty"`
-	SkillActivation           *message.SkillActivationFact   `json:"skill_activation,omitempty"`
-	SkillDiscovery            *message.SkillDiscoveryRecord  `json:"skill_discovery,omitempty"`
-	CompactionSkillActivation *message.SkillActivationCarry  `json:"compaction_skill_activation,omitempty"`
-	CompactionTaskEvidence    *message.TaskEvidence          `json:"compaction_task_evidence,omitempty"`
+	DirectoryInstructions     *message.DirectoryInstructions `json:"directory_instructions,omitzero"`
+	SkillActivation           *message.SkillActivationFact   `json:"skill_activation,omitzero"`
+	SkillDiscovery            *message.SkillDiscoveryRecord  `json:"skill_discovery,omitzero"`
+	CompactionSkillActivation *message.SkillActivationCarry  `json:"compaction_skill_activation,omitzero"`
+	CompactionTaskEvidence    *message.TaskEvidence          `json:"compaction_task_evidence,omitzero"`
 	Role                      message.Role                   `json:"role"`
 	Content                   string                         `json:"content"`
 	Kind                      string                         `json:"kind,omitempty"`
@@ -53,20 +54,20 @@ type ExportedMessage struct {
 	ToolDiffRemoved           int                            `json:"tool_diff_removed,omitzero"` // full removed-line count before diff truncation
 	ToolDurationMs            int64                          `json:"tool_duration_ms,omitzero"`
 	LSPReviews                []message.LSPReview            `json:"lsp_reviews,omitempty"`
-	Audit                     *message.ToolArgsAudit         `json:"audit,omitempty"`
-	FileState                 *message.ToolFileState         `json:"file_state,omitempty"`
+	Audit                     *message.ToolArgsAudit         `json:"audit,omitzero"`
+	FileState                 *message.ToolFileState         `json:"file_state,omitzero"`
 	FileAttributionIncomplete bool                           `json:"file_attribution_incomplete,omitzero"`
 	ToolChangedPaths          []string                       `json:"tool_changed_paths,omitempty"`
 	ToolCalls                 []ExportedToolCall             `json:"tool_calls,omitempty"`
 	ThinkingBlocks            []message.ThinkingBlock        `json:"thinking_blocks,omitempty"`
 	ResponsesOutput           []message.ResponsesOutputItem  `json:"responses_output,omitempty"`
-	NativeTools               *message.NativeToolHistory     `json:"native_tools,omitempty"`
+	NativeTools               *message.NativeToolHistory     `json:"native_tools,omitzero"`
 	GeminiParts               []message.GeminiReplayPart     `json:"gemini_parts,omitempty"`
 	ReasoningContent          string                         `json:"reasoning_content,omitempty"`
 	IsCompactionSummary       bool                           `json:"is_compaction_summary,omitzero"`
 	CompactionRequestSources  map[string]string              `json:"compaction_request_sources,omitempty"`
 	CompactionFileRevisions   map[string]string              `json:"compaction_file_revisions,omitempty"`
-	Provenance                *message.MessageProvenance     `json:"provenance,omitempty"`
+	Provenance                *message.MessageProvenance     `json:"provenance,omitzero"`
 	Timestamp                 time.Time                      `json:"timestamp"`
 	// ToolRecoveryState classifies synthetic restore / barrier-failure results
 	// (not_started / outcome_unknown). Ordinary results leave it empty.
@@ -219,7 +220,7 @@ func ExportToFile(session *ExportedSession, path string) error {
 		return fmt.Errorf("session is nil")
 	}
 
-	data, err := json.MarshalIndent(session, "", "  ")
+	data, err := jsonx.MarshalIndent(session, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal session: %w", err)
 	}

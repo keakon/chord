@@ -113,8 +113,8 @@ type shellArgs struct {
 	Command         string `json:"command"`
 	Description     string `json:"description,omitempty"`
 	Workdir         string `json:"workdir,omitempty"`
-	TimeoutMs       *int   `json:"timeout_ms,omitempty"`
-	YieldTimeMs     *int   `json:"yield_time_ms,omitempty"`
+	TimeoutMs       *int   `json:"timeout_ms,omitzero"`
+	YieldTimeMs     *int   `json:"yield_time_ms,omitzero"`
 	RunInBackground bool   `json:"run_in_background,omitzero"`
 }
 

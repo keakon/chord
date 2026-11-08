@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -75,7 +76,7 @@ type QuestionSnapshot struct {
 	UserSourceID string             `json:"user_source_id,omitempty"`
 	// Revision is the latest durable revise answer for this question, projected
 	// into status and events. Outcome and ResultID keep naming the original decision.
-	Revision *tools.QuestionAnswer `json:"revision,omitempty"`
+	Revision *tools.QuestionAnswer `json:"revision,omitzero"`
 }
 
 func (q QuestionSnapshot) pending() bool { return q.Outcome == "" }
@@ -87,12 +88,12 @@ func (q QuestionSnapshot) answer() tools.QuestionAnswer {
 type QuestionFact struct {
 	Operation     string                `json:"operation"`
 	ScopeID       string                `json:"scope_id,omitempty"`
-	Paused        *bool                 `json:"paused,omitempty"`
+	Paused        *bool                 `json:"paused,omitzero"`
 	Receipt       QuestionReceipt       `json:"receipt"`
 	TransactionID string                `json:"transaction_id"`
 	Fingerprint   string                `json:"fingerprint"`
 	Updates       []QuestionSnapshot    `json:"updates,omitempty"`
-	Result        *tools.QuestionAnswer `json:"result,omitempty"`
+	Result        *tools.QuestionAnswer `json:"result,omitzero"`
 	Consumed      []string              `json:"consumed,omitempty"`
 	ClosedScopeID string                `json:"closed_scope_id,omitempty"`
 	SourceID      string                `json:"source_id,omitempty"`
@@ -418,7 +419,7 @@ func projectQuestionSnapshot(q QuestionSnapshot, r *questionRuntime) QuestionSna
 }
 
 func questionFingerprint(v any) string {
-	b, _ := json.Marshal(v)
+	b, _ := jsonx.Marshal(v)
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
@@ -463,7 +464,7 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 		for _, q := range r.records {
 			if q.pending() {
 				pending++
-				data, _ := json.Marshal(q.Item)
+				data, _ := jsonx.Marshal(q.Item)
 				pendingBytes += len(data)
 			}
 		}
@@ -474,7 +475,7 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 			if item.ResponsePolicy == "" {
 				item.ResponsePolicy = tools.QuestionPolicyUserRequired
 			}
-			data, _ := json.Marshal(item)
+			data, _ := jsonx.Marshal(item)
 			pendingBytes += len(data)
 		}
 		if pendingBytes > maxPendingQuestionBytes {
@@ -714,7 +715,7 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 		}
 	}
 	fact.Receipt = receipt
-	payload, err := json.Marshal(fact)
+	payload, err := jsonx.Marshal(fact)
 	if err != nil {
 		return fact, msg, receipt, fmt.Errorf("encode question fact: %w", err)
 	}

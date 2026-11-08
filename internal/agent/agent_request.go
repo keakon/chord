@@ -48,7 +48,7 @@ type DurableAgentRequest struct {
 	Message          string                `json:"message"`
 	State            string                `json:"state"`
 	CreatedAt        time.Time             `json:"created_at"`
-	Response         *DurableAgentResponse `json:"response,omitempty"`
+	Response         *DurableAgentResponse `json:"response,omitzero"`
 }
 
 func cloneDurableAgentRequest(in *DurableAgentRequest) *DurableAgentRequest {

@@ -31,14 +31,14 @@ type JSONRPCRequest struct {
 	JSONRPC string `json:"jsonrpc"`
 	ID      int    `json:"id"`
 	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
+	Params  any    `json:"params,omitzero"`
 }
 
 // JSONRPCNotification is a JSON-RPC 2.0 notification (no ID, no response expected).
 type JSONRPCNotification struct {
 	JSONRPC string `json:"jsonrpc"`
 	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
+	Params  any    `json:"params,omitzero"`
 }
 
 // JSONRPCResponse is a JSON-RPC 2.0 response.
@@ -46,14 +46,14 @@ type JSONRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int             `json:"id"`
 	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *JSONRPCError   `json:"error,omitempty"`
+	Error   *JSONRPCError   `json:"error,omitzero"`
 }
 
 // JSONRPCError is a JSON-RPC 2.0 error object.
 type JSONRPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
+	Data    any    `json:"data,omitzero"`
 }
 
 func (e *JSONRPCError) Error() string {

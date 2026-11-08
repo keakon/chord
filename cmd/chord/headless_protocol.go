@@ -80,9 +80,9 @@ type headlessQuestionPayload struct {
 	OptionDetails   []string              `json:"option_details,omitempty"`
 	Multiple        bool                  `json:"multiple,omitzero"`
 	RequestID       string                `json:"request_id,omitempty"`
-	Deadline        *time.Time            `json:"deadline,omitempty"`
+	Deadline        *time.Time            `json:"deadline,omitzero"`
 	AgentID         string                `json:"agent_id,omitempty"`
-	RevisionResult  *tools.QuestionAnswer `json:"revision_result,omitempty"`
+	RevisionResult  *tools.QuestionAnswer `json:"revision_result,omitzero"`
 }
 
 // headlessHandoffCancelledReasonSuperseded is the reason carried by a
@@ -187,16 +187,16 @@ func (s *headlessState) stampHeadlessSeq(bump bool, envs ...*headlessEnvelope) u
 type headlessEnvelope struct {
 	Type    string `json:"type"`
 	Seq     uint64 `json:"seq,omitzero"`
-	Payload any    `json:"payload,omitempty"`
+	Payload any    `json:"payload,omitzero"`
 }
 
 // headlessCommand represents a command received from stdin.
 type headlessCommand struct {
-	InputTarget           *agent.InputTarget           `json:"target,omitempty"`
+	InputTarget           *agent.InputTarget           `json:"target,omitzero"`
 	InputID               string                       `json:"input_id,omitempty"`
-	ExpectedRevision      *uint64                      `json:"expected_revision,omitempty"`
-	ExpectedQueueRevision *uint64                      `json:"expected_queue_revision,omitempty"`
-	ExpectedViewVersion   *uint64                      `json:"expected_view_version,omitempty"`
+	ExpectedRevision      *uint64                      `json:"expected_revision,omitzero"`
+	ExpectedQueueRevision *uint64                      `json:"expected_queue_revision,omitzero"`
+	ExpectedViewVersion   *uint64                      `json:"expected_view_version,omitzero"`
 	DeliveryPolicy        recovery.InputDeliveryPolicy `json:"delivery_policy,omitempty"`
 	ContentPresent        bool                         `json:"-"`
 

@@ -17,7 +17,7 @@ const (
 
 type toolsListResult struct {
 	Tools      []MCPToolDef `json:"tools"`
-	NextCursor *string      `json:"nextCursor,omitempty"`
+	NextCursor *string      `json:"nextCursor,omitzero"`
 }
 
 // ListTools discovers the complete directory. A failed page never publishes

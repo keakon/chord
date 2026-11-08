@@ -83,10 +83,10 @@ type CompletionEnvelope struct {
 	// Worktree describes the checkout the worker produced its result in. The
 	// owner needs the branch and base commit to pick up the right copy of the
 	// work, so a completion that only says "done" is not actionable.
-	Worktree   *CompletionWorktree `json:"worktree,omitempty"`
+	Worktree   *CompletionWorktree `json:"worktree,omitzero"`
 	ResultType string              `json:"result_type,omitempty"`
 	Result     json.RawMessage     `json:"result,omitempty"`
-	ResultRef  *tools.ResultRef    `json:"result_ref,omitempty"`
+	ResultRef  *tools.ResultRef    `json:"result_ref,omitzero"`
 }
 
 // CompletionWorktree reports where a worker's changes live.
@@ -115,7 +115,7 @@ type SubAgentMailboxMessage struct {
 	Priority       SubAgentMailboxPriority `json:"priority"`
 	Summary        string                  `json:"summary"`
 	Payload        string                  `json:"payload,omitempty"`
-	Completion     *CompletionEnvelope     `json:"completion,omitempty"`
+	Completion     *CompletionEnvelope     `json:"completion,omitzero"`
 	RequiresAck    bool                    `json:"requires_ack,omitzero"`
 	Consumed       bool                    `json:"consumed,omitzero"`
 	CreatedAt      time.Time               `json:"created_at"`

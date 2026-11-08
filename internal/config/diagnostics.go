@@ -14,7 +14,7 @@ const (
 
 // DiagnosticsConfig controls diagnostics appended after mutating tool calls.
 type DiagnosticsConfig struct {
-	Enabled *bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Enabled *bool                   `json:"enabled,omitzero" yaml:"enabled,omitempty"`
 	Python  PythonDiagnosticsConfig `json:"python" yaml:"python"`
 	LSP     LSPDiagnosticsConfig    `json:"lsp" yaml:"lsp"`
 }
@@ -27,7 +27,7 @@ type LSPDiagnosticsConfig struct {
 	// verbatim. Must be > 0: a write that should effectively not wait
 	// configures a small positive value (100-500ms), because 0 would disable
 	// the wait entirely.
-	WaitTimeoutMS *int `json:"wait_timeout_ms,omitempty" yaml:"wait_timeout_ms,omitempty"`
+	WaitTimeoutMS *int `json:"wait_timeout_ms,omitzero" yaml:"wait_timeout_ms,omitempty"`
 }
 
 // PythonDiagnosticsConfig controls Python-specific post-tool diagnostics.

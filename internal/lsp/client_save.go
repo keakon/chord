@@ -134,7 +134,7 @@ type saveRegistration struct {
 type saveDocumentFilter struct {
 	Language string          `json:"language,omitempty"`
 	Scheme   string          `json:"scheme,omitempty"`
-	Pattern  *string         `json:"pattern,omitempty"`
+	Pattern  *string         `json:"pattern,omitzero"`
 	Notebook json.RawMessage `json:"notebook,omitempty"`
 }
 

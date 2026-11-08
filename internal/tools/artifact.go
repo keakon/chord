@@ -506,8 +506,8 @@ type ReadArtifactTool struct{}
 type readArtifactArgs struct {
 	Path           string `json:"path,omitempty"`
 	RelPath        string `json:"rel_path,omitempty"`
-	Offset         *int   `json:"offset,omitempty"`
-	Limit          *int   `json:"limit,omitempty"`
+	Offset         *int   `json:"offset,omitzero"`
+	Limit          *int   `json:"limit,omitzero"`
 	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
 }
 

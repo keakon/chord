@@ -19,6 +19,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/httpheader"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm/mediacache"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/texttruncate"
@@ -80,14 +81,14 @@ func (g *GeminiProvider) SetTraceWriter(w *TraceWriter) {
 type geminiRequest struct {
 	ContinuationToken string                  `json:"continuationToken,omitempty"`
 	Contents          []geminiContent         `json:"contents"`
-	SystemInstruction *geminiContent          `json:"system_instruction,omitempty"`
+	SystemInstruction *geminiContent          `json:"system_instruction,omitzero"`
 	Tools             []geminiTool            `json:"tools,omitempty"`
-	ToolConfig        *geminiToolConfig       `json:"toolConfig,omitempty"`
-	GenerationConfig  *geminiGenerationConfig `json:"generationConfig,omitempty"`
+	ToolConfig        *geminiToolConfig       `json:"toolConfig,omitzero"`
+	GenerationConfig  *geminiGenerationConfig `json:"generationConfig,omitzero"`
 }
 
 type geminiToolConfig struct {
-	FunctionCallingConfig *geminiFunctionCallingConfig `json:"functionCallingConfig,omitempty"`
+	FunctionCallingConfig *geminiFunctionCallingConfig `json:"functionCallingConfig,omitzero"`
 }
 
 type geminiFunctionCallingConfig struct {
@@ -95,9 +96,9 @@ type geminiFunctionCallingConfig struct {
 }
 
 type geminiThinkingConfig struct {
-	ThinkingBudget  *int   `json:"thinkingBudget,omitempty"`
+	ThinkingBudget  *int   `json:"thinkingBudget,omitzero"`
 	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
-	IncludeThoughts *bool  `json:"includeThoughts,omitempty"`
+	IncludeThoughts *bool  `json:"includeThoughts,omitzero"`
 }
 
 // normalizeGeminiThinking collapses the Gemini thinking knobs into a shape the
@@ -138,7 +139,7 @@ func geminiIncludeThoughts(t GeminiTuning) *bool {
 
 type geminiGenerationConfig struct {
 	MaxOutputTokens int                   `json:"maxOutputTokens,omitzero"`
-	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitzero"`
 }
 
 type geminiContent struct {
@@ -148,9 +149,9 @@ type geminiContent struct {
 
 type geminiPart struct {
 	Text             string                  `json:"text,omitempty"`
-	InlineData       *geminiInlineData       `json:"inlineData,omitempty"`
-	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
-	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
+	InlineData       *geminiInlineData       `json:"inlineData,omitzero"`
+	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitzero"`
+	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitzero"`
 	Thought          bool                    `json:"thought,omitzero"`
 	// ThoughtSignature is an opaque signature attached by thinking models.
 	// It must be preserved and replayed verbatim with the same part in
@@ -218,7 +219,7 @@ type geminiStreamChunk struct {
 		FinishReason      string        `json:"finishReason"`
 		ContinuationToken string        `json:"continuationToken,omitempty"`
 	} `json:"candidates"`
-	UsageMetadata *geminiUsageMetadata `json:"usageMetadata,omitempty"`
+	UsageMetadata *geminiUsageMetadata `json:"usageMetadata,omitzero"`
 }
 
 type geminiErrorResponse struct {
@@ -302,7 +303,7 @@ func (g *GeminiProvider) CompleteStream(
 			reqBody.GenerationConfig = &genCfg
 		}
 
-		bodyBytes, err := json.Marshal(reqBody)
+		bodyBytes, err := jsonx.Marshal(reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("marshal request body: %w", err)
 		}

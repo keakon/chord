@@ -40,8 +40,8 @@ type OAuthStateRecord struct {
 	CodexSecondaryUsedPct   float64               `json:"codex_secondary_used_pct,omitzero"`
 	CodexSecondaryWindowMin int64                 `json:"codex_secondary_window_minutes,omitzero"`
 	CodexSecondaryResetAt   int64                 `json:"codex_secondary_reset_at,omitzero"`
-	CodexHasCredits         *bool                 `json:"codex_has_credits,omitempty"`
-	CodexUnlimited          *bool                 `json:"codex_unlimited,omitempty"`
+	CodexHasCredits         *bool                 `json:"codex_has_credits,omitzero"`
+	CodexUnlimited          *bool                 `json:"codex_unlimited,omitzero"`
 	CodexBalance            string                `json:"codex_balance,omitempty"`
 }
 

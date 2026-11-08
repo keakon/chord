@@ -323,18 +323,18 @@ type Message struct {
 	CompactionDeliveredFiles   []DeliveredFile           `json:"compaction_delivered_files,omitempty"`
 	FileLinkBaseDir            string                    `json:"file_link_base_dir,omitempty"`
 	DiagnosticSource           string                    `json:"-"`
-	DirectoryInstructions      *DirectoryInstructions    `json:"directory_instructions,omitempty"`
+	DirectoryInstructions      *DirectoryInstructions    `json:"directory_instructions,omitzero"`
 	DirectoryInstructionRefs   []DirectoryInstructionRef `json:"-"`
 	DirectoryInstructionDigest string                    `json:"-"`
-	SkillActivation            *SkillActivationFact      `json:"skill_activation,omitempty"`
-	SkillDiscovery             *SkillDiscoveryRecord     `json:"skill_discovery,omitempty"`
-	CompactionSkillActivation  *SkillActivationCarry     `json:"compaction_skill_activation,omitempty"`
-	CompactionTaskEvidence     *TaskEvidence             `json:"compaction_task_evidence,omitempty"`
+	SkillActivation            *SkillActivationFact      `json:"skill_activation,omitzero"`
+	SkillDiscovery             *SkillDiscoveryRecord     `json:"skill_discovery,omitzero"`
+	CompactionSkillActivation  *SkillActivationCarry     `json:"compaction_skill_activation,omitzero"`
+	CompactionTaskEvidence     *TaskEvidence             `json:"compaction_task_evidence,omitzero"`
 	// InputID and InputRequestID are local recovery/control-plane metadata;
 	// neither field is sent to providers or included in independent exports.
 	InputRequestID   string                `json:"input_request_id,omitempty"`
 	InputID          string                `json:"input_id,omitempty"`
-	NativeTools      *NativeToolHistory    `json:"native_tools,omitempty"`
+	NativeTools      *NativeToolHistory    `json:"native_tools,omitzero"`
 	Question         json.RawMessage       `json:"question,omitempty"`
 	Role             Role                  `json:"role"` // "user", "assistant", "tool"
 	Content          string                `json:"content"`
@@ -359,24 +359,24 @@ type Message struct {
 	// before the split, where Content is the only copy.
 	ToolPayload               string             `json:"tool_payload,omitempty"`
 	ToolNotes                 []string           `json:"tool_notes,omitempty"`
-	FileState                 *ToolFileState     `json:"file_state,omitempty"`                 // durable file-state metadata for restore-time safety sentinels
+	FileState                 *ToolFileState     `json:"file_state,omitzero"`
 	ToolChangedPaths          []string           `json:"tool_changed_paths,omitempty"`         // runtime-observed workspace paths attributed to this tool result
 	FileAttributionIncomplete bool               `json:"file_attribution_incomplete,omitzero"` // successful mutation could not be mapped to exact workspace paths
 	LSPReviews                []LSPReview        `json:"lsp_reviews,omitempty"`                // per-file, per-server last-review snapshots for directly edited files
-	Audit                     *ToolArgsAudit     `json:"audit,omitempty"`                      // tool-call audit metadata when effective args differ after confirmation
-	IsCompactionSummary       bool               `json:"is_compaction_summary,omitzero"`       // first user message after compaction (summary of archived history)
-	CompactionSummaryMode     string             `json:"compaction_summary_mode,omitempty"`    // how the archived history was preserved (see CompactionSummaryMode* constants)
-	CompactionManual          bool               `json:"compaction_manual,omitzero"`           // checkpoint came from the runtime summarizer started by a manual /compact; false for model-driven checkpoints submitted during that compaction
-	CompactionWindowNumber    uint64             `json:"compaction_window_number,omitzero"`    // committed context window carried by the checkpoint
-	CompactionFileRevisions   map[string]string  `json:"compaction_file_revisions,omitempty"`  // key-file revisions captured when this checkpoint was created
-	StopReason                string             `json:"stop_reason,omitempty"`                // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
-	Provenance                *MessageProvenance `json:"provenance,omitempty"`                 // optional producer/source metadata for model-compat replay decisions
+	Audit                     *ToolArgsAudit     `json:"audit,omitzero"`
+	IsCompactionSummary       bool               `json:"is_compaction_summary,omitzero"`      // first user message after compaction (summary of archived history)
+	CompactionSummaryMode     string             `json:"compaction_summary_mode,omitempty"`   // how the archived history was preserved (see CompactionSummaryMode* constants)
+	CompactionManual          bool               `json:"compaction_manual,omitzero"`          // checkpoint came from the runtime summarizer started by a manual /compact; false for model-driven checkpoints submitted during that compaction
+	CompactionWindowNumber    uint64             `json:"compaction_window_number,omitzero"`   // committed context window carried by the checkpoint
+	CompactionFileRevisions   map[string]string  `json:"compaction_file_revisions,omitempty"` // key-file revisions captured when this checkpoint was created
+	StopReason                string             `json:"stop_reason,omitempty"`               // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
+	Provenance                *MessageProvenance `json:"provenance,omitzero"`
 	// CompactionRequestSources holds full-source fingerprints for request-copy
 	// projection. It is persisted for resume and never sent as prompt content.
 	CompactionRequestSources map[string]string `json:"compaction_request_sources,omitempty"`
 	// Usage carries provider usage on imported messages; runtime session totals
 	// are restored from the usage ledger, not by re-aggregating this field.
-	Usage *TokenUsage `json:"usage,omitempty"`
+	Usage *TokenUsage `json:"usage,omitzero"`
 	Kind  string      `json:"kind,omitempty"` // control/display subtype, e.g. "loop_notice"
 	// NoticeLevel carries the context-pressure level of a KindContextNotice
 	// message (pressure|imminent|warning). It is TUI metadata for the card
@@ -387,8 +387,8 @@ type Message struct {
 	// continues the cycle counter past the IDs already on disk instead of
 	// opening a duplicate cycle for pressure the transcript already records.
 	PressureCycleID uint64           `json:"pressure_cycle_id,omitzero"`
-	Mailbox         *MailboxMetadata `json:"mailbox,omitempty"` // durable metadata for a mailbox message actually sent to an agent
-	MailboxAckID    string           `json:"-"`                 // transient runtime-only mailbox ack marker; never persisted
+	Mailbox         *MailboxMetadata `json:"mailbox,omitzero"`
+	MailboxAckID    string           `json:"-"` // transient runtime-only mailbox ack marker; never persisted
 	// MCPTools carries a request-only provider mount. It never enters ctxmgr or
 	// session JSONL; MainAgent reconstructs it at a fixed conversation anchor.
 	MCPTools []ToolDefinition `json:"-"`
@@ -629,7 +629,7 @@ type ContextTokenUsage struct {
 // TokenUsage records billable usage and an optional logical context observation.
 // OutputTokens includes reasoning; cache and reasoning fields are subsets where indicated.
 type TokenUsage struct {
-	Context            *ContextTokenUsage `json:"context,omitempty"`
+	Context            *ContextTokenUsage `json:"context,omitzero"`
 	InputTokens        int                `json:"input_tokens"`
 	OutputTokens       int                `json:"output_tokens"`
 	CacheReadTokens    int                `json:"cache_read_input_tokens"`
@@ -767,10 +767,12 @@ const (
 	OriginUser = "user"
 )
 
-// Response represents a complete LLM response.
+// Response represents a complete LLM response. NativeRequestDuration is plain
+// int64 nanoseconds: the value is wire-visible and the v2 engine has no
+// integer representation for time.Duration.
 type Response struct {
 	UsageReported         bool
-	NativeRequestDuration time.Duration
+	NativeRequestDuration int64 `json:"native_request_duration_ns"`
 	NativeTools           *NativeToolHistory
 	Content               string
 	ThinkingBlocks        []ThinkingBlock // non-nil when extended thinking was enabled
