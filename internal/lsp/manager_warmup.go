@@ -288,7 +288,6 @@ func (m *Manager) resyncAfterWait(ctx context.Context, absPath, content string, 
 		mergeServerErrors(sync.serverErrors, errs)
 		m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+formatServerErrors(errs))
 	}
-	sync.after = time.Now()
 	sync.token = m.beginDiagnosticsSync(absPath)
 
 	versions := make(map[string]int32)

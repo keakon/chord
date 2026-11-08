@@ -236,7 +236,7 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 	if prepared.coldStart || prepared.grace {
 		prepared.waitTimeout = min(prepared.waitTimeout, max(coldStartWriteBudget-time.Since(prepared.began), 0))
 	}
-	req := diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.after, immediateServers: m.immediateDiagnosticsServers(prepared.sync.serverVersions), unversionedServers: m.unversionedDiagnosticsServers(prepared.sync.serverVersions)}
+	req := diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.token.after, immediateServers: m.immediateDiagnosticsServers(prepared.sync.serverVersions), unversionedServers: m.unversionedDiagnosticsServers(prepared.sync.serverVersions)}
 	diagWaitStart := time.Now()
 	_, notified, lastSeq, baseline := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, req, prepared.waitTimeout)
 	diagWait := time.Since(diagWaitStart)

@@ -99,8 +99,8 @@ func TestRealTypeScriptLargeFileIncludesSemanticDiagnostic(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// This test checks semantic coverage, not the interactive wait budget.
-	// Real workspace analysis can exceed the default wait under suite load.
+	// TypeScript publishes syntax and semantics separately without a final
+	// marker. Coverage includes findings delivered after the foreground wait.
 	m := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"typescript": {Command: server, Args: []string{"--stdio"}, FileTypes: []string{".ts"}},
@@ -118,7 +118,27 @@ func TestRealTypeScriptLargeFileIncludesSemanticDiagnostic(t *testing.T) {
 	delete(m.admittedAt, testKey(m, "typescript"))
 	m.clientsMu.Unlock()
 	out := m.AfterFileWriteToolResult(ctx, path, content, "wrote main.ts", true, WatchedFileChanged, "")
-	if !strings.Contains(out, "not assignable") {
-		t.Fatalf("large-file semantic diagnostics were omitted: %q", out)
+	if strings.Contains(out, "not assignable") {
+		return
+	}
+	deadline := time.NewTimer(lateDiagnosticsWindow)
+	defer deadline.Stop()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		items := m.PendingLateDiagnostics([]string{path}, root, "")
+		for _, item := range items {
+			if strings.Contains(item.Lines, "not assignable") {
+				m.AckLateDiagnostics(items)
+				return
+			}
+		}
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			t.Fatalf("large-file semantic diagnostics were omitted from immediate and late results: %q", out)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
 	}
 }

@@ -13,7 +13,8 @@ import (
 // publish for the same document version still counts as part of that write.
 // gopls publishes its analysis pass (staticcheck and analyzers) about
 // diagnosticsDelay plus analysis time after the type-check pass the wait
-// returned on; a few seconds on large packages.
+// returned on; a few seconds on large packages. 15s covers typical cases
+// without excessive retention overhead.
 const lateDiagnosticsWindow = 15 * time.Second
 
 // lateWatchRetention drops watches nobody claimed. A watch is otherwise kept
@@ -25,24 +26,25 @@ const lateWatchRetention = 10 * time.Minute
 // replayed, so a handful is plenty.
 const latePublishRetention = 8
 
-// latePublish records one versioned publish so a watch created just after the
+// latePublish records a publish so a watch created just after the
 // wait consumed an earlier publish can still claim it.
 type latePublish struct {
 	seq         uint64
 	serverID    string
 	client      clientKey
 	version     int32
+	generation  uint64
 	receivedAt  time.Time
 	diagnostics []Diagnostic
 }
 
 // lateWatch follows one post-write wait after it returned. Only Chord-synced
-// versions are trusted: a publish counts when its server and version match the
-// sync the wait verified, so an external change to the file can never be
-// reported as fallout from this write.
+// versions are trusted. Servers that never echo versions use the sync's
+// receipt boundary and client generation; claim-time disk checks still apply.
 type lateWatch struct {
-	seq      uint64
-	versions map[string]int32
+	seq                uint64
+	versions           map[string]int32
+	unversionedServers map[string]bool
 	// writerAgentID is the agent whose write produced this watch. Follow-ups
 	// are only claimed by that agent: a worker's write may appear in the
 	// main transcript, but its late diagnostics belong to the worker.
@@ -176,15 +178,16 @@ func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]in
 	}
 	m.lateSeq++
 	watch := &lateWatch{
-		seq:           m.lateSeq,
-		versions:      versions,
-		writerAgentID: writerAgentID,
-		generations:   maps.Clone(generations),
-		token:         token,
-		baseline:      baseline,
-		frozen:        make(map[string][]Diagnostic, len(versions)),
-		registered:    now,
-		deadline:      now.Add(lateDiagnosticsWindow),
+		seq:                m.lateSeq,
+		versions:           versions,
+		unversionedServers: m.unversionedDiagnosticsServers(versions),
+		writerAgentID:      writerAgentID,
+		generations:        maps.Clone(generations),
+		token:              token,
+		baseline:           baseline,
+		frozen:             make(map[string][]Diagnostic, len(versions)),
+		registered:         now,
+		deadline:           now.Add(lateDiagnosticsWindow),
 	}
 	m.pruneLateWatchClientsLocked(watch)
 	for server := range watch.versions {
@@ -211,7 +214,7 @@ func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]in
 		if _, owner := watch.generations[publish.client]; !owner {
 			continue
 		}
-		if want, ok := watch.versions[publish.serverID]; !ok || want != publish.version {
+		if !watch.acceptsPublish(publish) {
 			continue
 		}
 		watch.frozen[publish.serverID] = publish.diagnostics
@@ -223,6 +226,19 @@ func (m *Manager) watchLateDiagnostics(path string, serverVersions map[string]in
 	// publishes after its own wait.
 	delete(m.latePublishes, path)
 	return true
+}
+
+func (watch *lateWatch) acceptsPublish(publish latePublish) bool {
+	want, owner := watch.versions[publish.serverID]
+	if !owner {
+		return false
+	}
+	if publish.version != 0 {
+		return publish.version == want
+	}
+	return watch.unversionedServers[publish.serverID] &&
+		!watch.token.after.IsZero() && !publish.receivedAt.Before(watch.token.after) &&
+		publish.generation == watch.generations[publish.client]
 }
 
 // batchWatchGenerations replaces each listed client's generation with its
@@ -327,18 +343,21 @@ func (m *Manager) noteLateDiagnosticsPublish(path string, key clientKey, version
 	}
 	m.latePublishSeq++
 	seq := m.latePublishSeq
-	if version != 0 {
+	publish := latePublish{
+		seq:         seq,
+		serverID:    key.name,
+		client:      key,
+		version:     version,
+		generation:  m.lateSyncSeq[key],
+		receivedAt:  receivedAt,
+		diagnostics: diagnostics,
+	}
+	unversioned := m.cfg != nil && publishesUnversioned(key.name, m.cfg.LSP[key.name])
+	if version != 0 || unversioned && publish.generation > 0 {
 		if m.latePublishes == nil {
 			m.latePublishes = make(map[string][]latePublish)
 		}
-		publishes := append(m.latePublishes[path], latePublish{
-			seq:         seq,
-			serverID:    key.name,
-			client:      key,
-			version:     version,
-			receivedAt:  receivedAt,
-			diagnostics: diagnostics,
-		})
+		publishes := append(m.latePublishes[path], publish)
 		if len(publishes) > latePublishRetention {
 			publishes = publishes[len(publishes)-latePublishRetention:]
 		}
@@ -353,11 +372,9 @@ func (m *Manager) noteLateDiagnosticsPublish(path string, key clientKey, version
 		return seq
 	}
 	dropClient := false
-	if want, owner := watch.versions[key.name]; owner {
+	if _, owner := watch.versions[key.name]; owner {
 		switch {
-		case version == 0:
-			dropClient = true
-		case version != want:
+		case !watch.acceptsPublish(publish):
 			dropClient = true
 		case receivedAt.After(watch.deadline):
 			// A late analysis pass stays unclaimed; the watch expires on

@@ -5,7 +5,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"time"
 
 	pnprotocol "github.com/keakon/x/powernap/pkg/lsp/protocol"
 )
@@ -22,7 +21,6 @@ type afterWriteSync struct {
 	// every server the sync reached, so a server absent from both maps was
 	// never an owner.
 	serverErrors map[string]error
-	after        time.Time
 	token        diagnosticSyncToken
 }
 
@@ -42,7 +40,6 @@ func (m *Manager) syncAfterWrite(ctx context.Context, absPath, content string, c
 			m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+formatServerErrors(errs))
 		}
 	}
-	sync.after = time.Now()
 	sync.token = m.beginDiagnosticsSync(absPath)
 	versions, generations, errs := afterWriteDidChange(m, ctx, absPath, content)
 	sync.serverVersions = versions

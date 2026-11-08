@@ -110,6 +110,7 @@ type diagnosticSyncToken struct {
 	path       string
 	mtime      time.Time
 	generation uint64
+	after      time.Time
 	// confirmable reports whether the sync that produced this token delivered
 	// every notification it attempted. A token from a partially failed sync
 	// must never clear the path's stale flag: a server that missed a
@@ -126,6 +127,7 @@ func (m *Manager) beginDiagnosticsSync(path string) diagnosticSyncToken {
 		return diagnosticSyncToken{}
 	}
 	path = normalizeWaiterPath(path)
+	after := time.Now()
 	info, err := os.Stat(path)
 	m.diagMu.Lock()
 	state := m.diagState[path]
@@ -138,7 +140,7 @@ func (m *Manager) beginDiagnosticsSync(path string) diagnosticSyncToken {
 	}
 	m.diagState[path] = state
 	m.diagMu.Unlock()
-	return diagnosticSyncToken{path: path, mtime: state.mtime, generation: state.generation}
+	return diagnosticSyncToken{path: path, mtime: state.mtime, generation: state.generation, after: after}
 }
 
 // confirmDiagnosticsSync makes a path eligible for future other-file output
