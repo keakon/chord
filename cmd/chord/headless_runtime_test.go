@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -177,6 +178,43 @@ func TestRunHeadlessWithDepsDrainsEventsBeforeClosingOutput(t *testing.T) {
 	}
 	if findHeadlessEnvelopeValue(decodeHeadlessJSONLines(t, stdout.Bytes()), "context_notice") == nil {
 		t.Fatal("event emitted before shutdown was lost")
+	}
+}
+
+func TestRunHeadlessDrainsRepeatedTransfersAfterCommandExit(t *testing.T) {
+	ac := newTestAppContext(t)
+	ac.Ctx, ac.Cancel = context.WithCancel(t.Context())
+	defer ac.Cancel()
+	events := make(chan agent.AgentEvent, 3)
+	rt := &fakeHeadlessRuntime{
+		events: events, backend: &mockBackend{},
+		onClose: func() {
+			// Runtime.Close runs after the command loop has stopped receiving
+			// transfer completions. Fill its one-slot channel, then send again.
+			for range 2 {
+				events <- agent.SessionTransferEvent{Status: recovery.SessionPauseStatus{
+					TransferIdentity: recovery.TransferIdentity{TransferID: "sample-transfer"},
+					State:            recovery.SessionPauseSaved,
+				}}
+			}
+			events <- agent.ContextNoticeEvent{Level: "pressure", Message: "drained after transfers", MessageIndex: 1}
+			close(events)
+		},
+	}
+	var stdout bytes.Buffer
+	err := runHeadlessWithDeps(headlessRunDeps{
+		initApp: func(bool, string, sessionStartupOptions) (*AppContext, error) { return ac, nil },
+		createRuntime: func(*AppContext) (headlessRuntime, error) {
+			return rt, nil
+		},
+		stdin: strings.NewReader(""), stdout: &stdout,
+	})
+	if err != nil {
+		t.Fatalf("runHeadlessWithDeps: %v", err)
+	}
+	envs := decodeHeadlessJSONLines(t, stdout.Bytes())
+	if findHeadlessEnvelopeValue(envs, "context_notice") == nil {
+		t.Fatal("transfer completion blocked the remaining event drain")
 	}
 }
 

@@ -426,7 +426,10 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 							err = fmt.Errorf("released transfer output unavailable")
 						}
 					}
-					transferDone <- err
+					select {
+					case transferDone <- err:
+					case <-ac.Ctx.Done():
+					}
 				}
 				continue
 			}
