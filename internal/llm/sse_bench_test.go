@@ -709,5 +709,7 @@ func reconstructSSEBenchmarkBody(provider string, chunks []string) ([]byte, erro
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", provider)
 	}
-	return buf.Bytes(), nil
+	// A dump retains payloads, not the final transport delimiter. A synthetic
+	// boundary would prevent EOF recovery of an incomplete final event.
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n\n")), nil
 }
