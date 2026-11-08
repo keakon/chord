@@ -206,9 +206,7 @@ func TestReapDeletionFailureKeepsDirectoryAndRunsCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reap deletion failure blocked the run: %v: %s", err, blockedOutput)
 	}
-	if !bytes.Contains(blockedOutput, []byte("retained")) {
-		t.Fatalf("missing retained diagnostic: %s", blockedOutput)
-	}
+	assertRetainedPreviousRun(t, string(blockedOutput), dir, "remove test work directory")
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("stale run disappeared: %v", err)
 	}
@@ -419,6 +417,19 @@ func assertNoRuns(t *testing.T, base string) {
 	}
 }
 
+// assertRetainedPreviousRun requires the stale-directory diagnostic for one
+// previous run: the historical prefix, that directory's path, and the reason.
+func assertRetainedPreviousRun(t *testing.T, output, dir, reason string) {
+	t.Helper()
+	const prefix = "test-runner: previous run directory retained; continuing setup: "
+	for line := range strings.SplitSeq(output, "\n") {
+		if strings.HasPrefix(line, prefix+dir+": ") && strings.Contains(line, reason) {
+			return
+		}
+	}
+	t.Fatalf("missing retained previous run diagnostic for %s (reason %q): %s", dir, reason, output)
+}
+
 func TestRunLockAndUnknownRecords(t *testing.T) {
 	base := t.TempDir()
 	var diagnostics bytes.Buffer
@@ -429,6 +440,11 @@ func TestRunLockAndUnknownRecords(t *testing.T) {
 	second, err := newRun(base, &diagnostics)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A held lock means the owner may still be running: the directory is
+	// skipped silently, and a missing receipt alone must not warn.
+	if strings.Contains(diagnostics.String(), "previous run directory retained") {
+		t.Fatalf("held locks reported as retained previous runs: %s", diagnostics.String())
 	}
 	_ = second.lock.Close()
 	_ = first.lock.Close()
@@ -441,9 +457,59 @@ func TestRunLockAndUnknownRecords(t *testing.T) {
 		if _, err := os.Stat(dir); err != nil {
 			t.Fatalf("unknown run removed: %v", err)
 		}
+		assertRetainedPreviousRun(t, diagnostics.String(), dir, "read process cleanup receipt")
 	}
-	if strings.Count(diagnostics.String(), "retained") != 2 {
+	if strings.Count(diagnostics.String(), "previous run directory retained") != 2 {
 		t.Fatalf("unknown states were not reported: %s", diagnostics.String())
+	}
+}
+
+// A previous run directory without a cleanup receipt is retained while the new
+// command proceeds; the command's own result follows its existing rules.
+func TestMissingReceiptRunRetainedAcrossCommandResults(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args func(base string) []string
+		code int
+	}{
+		{"success", func(string) []string { return []string{os.Args[0], "child-fixture", "success"} }, 0},
+		{"command failure", func(string) []string { return []string{os.Args[0], "child-fixture", "failure"} }, 7},
+		{"launch failure", func(base string) []string { return []string{filepath.Join(base, "missing")} }, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			stale, err := newRun(base, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := stale.lock.Close(); err != nil {
+				t.Fatal(err)
+			}
+			cmd := runnerCommand(t, base, tc.args(base)...)
+			var output bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &output, &output
+			startCommand(t, cmd)
+			err = waitCommand(t, cmd)
+			if got := commandCode(err); got != tc.code {
+				t.Fatalf("exit = %d, want %d: %s", got, tc.code, output.String())
+			}
+			assertRetainedPreviousRun(t, output.String(), stale.dir, "read process cleanup receipt")
+			if _, err := os.Stat(stale.dir); err != nil {
+				t.Fatalf("missing-receipt run removed: %v", err)
+			}
+			// The current command kept its own cleanup rules: only the stale
+			// run directory remains beside the registry lock.
+			assertCacheUsers(t, base, 0)
+			entries, err := os.ReadDir(filepath.Join(base, runsDirectory))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if entry.Name() != registryLock && entry.Name() != filepath.Base(stale.dir) {
+					t.Errorf("leftover: %s", entry.Name())
+				}
+			}
+		})
 	}
 }
 

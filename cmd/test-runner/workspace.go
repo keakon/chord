@@ -21,6 +21,11 @@ const (
 	readyFile     = "reclaimable"
 )
 
+// retainedRunDiagnostic reports a previous run directory kept in place while
+// this command's setup continues: the cause is per-directory evidence or
+// removal failure, not a failure of the current command.
+const retainedRunDiagnostic = "test-runner: previous run directory retained; continuing setup: %s: %v\n"
+
 type testRun struct {
 	dir  string
 	id   string
@@ -82,7 +87,7 @@ func reapRuns(root string, diagnostics io.Writer) error {
 		}
 		dir := filepath.Join(root, entry.Name())
 		if err := privateDirectory(dir); err != nil {
-			fmt.Fprintf(diagnostics, "test-runner: retained %s: %v\n", dir, err)
+			fmt.Fprintf(diagnostics, retainedRunDiagnostic, dir, err)
 			continue
 		}
 		// Do not create missing lock files: incomplete registration is not
@@ -92,17 +97,17 @@ func reapRuns(root string, diagnostics io.Writer) error {
 			continue
 		}
 		if err != nil {
-			fmt.Fprintf(diagnostics, "test-runner: retained %s: %v\n", dir, err)
+			fmt.Fprintf(diagnostics, retainedRunDiagnostic, dir, err)
 			continue
 		}
 		run := testRun{dir: dir, id: id, lock: lock}
 		if err := run.ready(); err != nil {
-			fmt.Fprintf(diagnostics, "test-runner: retained %s: %v\n", dir, err)
+			fmt.Fprintf(diagnostics, retainedRunDiagnostic, dir, err)
 		} else if err := run.removeFiles(); err != nil {
 			// Recovery must not fail the new command: the stale directory is
 			// proven complete, so keeping it with a diagnostic lets the next
 			// run retry while this one proceeds.
-			fmt.Fprintf(diagnostics, "test-runner: retained %s: %v\n", dir, err)
+			fmt.Fprintf(diagnostics, retainedRunDiagnostic, dir, err)
 		}
 		_ = lock.Close()
 	}
