@@ -66,14 +66,14 @@ type grepArgs struct {
 func (a *grepArgs) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Pattern  json.RawMessage `json:"pattern"`
-		Patterns json.RawMessage `json:"patterns,omitempty"`
-		Paths    json.RawMessage `json:"paths,omitempty"`
-		Includes json.RawMessage `json:"includes,omitempty"`
-		Path     json.RawMessage `json:"path,omitempty"`
-		Glob     json.RawMessage `json:"glob,omitempty"`
+		Patterns json.RawMessage `json:"patterns,omitzero"`
+		Paths    json.RawMessage `json:"paths,omitzero"`
+		Includes json.RawMessage `json:"includes,omitzero"`
+		Path     json.RawMessage `json:"path,omitzero"`
+		Glob     json.RawMessage `json:"glob,omitzero"`
 		// ContextLines is decoded by hand so an integral float such as 2.0,
 		// which the integer schema admits, is accepted here too.
-		ContextLines json.RawMessage `json:"context_lines,omitempty"`
+		ContextLines json.RawMessage `json:"context_lines,omitzero"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err

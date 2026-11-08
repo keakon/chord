@@ -176,7 +176,7 @@ type geminiInlineData struct {
 
 type geminiFunctionCall struct {
 	Name string          `json:"name"`
-	Args json.RawMessage `json:"args,omitempty"`
+	Args json.RawMessage `json:"args,omitzero"`
 }
 
 type geminiFunctionResponse struct {

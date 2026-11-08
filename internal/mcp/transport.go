@@ -19,6 +19,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/sse"
 )
 
@@ -45,7 +46,7 @@ type JSONRPCNotification struct {
 type JSONRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int             `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
+	Result  json.RawMessage `json:"result,omitzero"`
 	Error   *JSONRPCError   `json:"error,omitzero"`
 }
 
@@ -225,7 +226,7 @@ func (t *StdioTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCR
 	t.mu.Unlock()
 
 	// Marshal and write.
-	data, err := json.Marshal(req)
+	data, err := jsonx.Marshal(req)
 	if err != nil {
 		t.removePending(req.ID)
 		return JSONRPCResponse{}, newCallFailure(callNotSent, fmt.Errorf("mcp stdio: marshal request: %w", err))
@@ -296,7 +297,7 @@ func (t *StdioTransport) Notify(_ context.Context, notif JSONRPCNotification) er
 	}
 	t.mu.Unlock()
 
-	data, err := json.Marshal(notif)
+	data, err := jsonx.Marshal(notif)
 	if err != nil {
 		return fmt.Errorf("mcp stdio: marshal notification: %w", err)
 	}
@@ -584,7 +585,7 @@ func readSSERPCResponse(body io.Reader, wantID int) (JSONRPCResponse, error) {
 
 // Send posts a JSON-RPC request and reads the response.
 func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCResponse, error) {
-	data, err := json.Marshal(req)
+	data, err := jsonx.Marshal(req)
 	if err != nil {
 		return JSONRPCResponse{}, newCallFailure(callNotSent, newTransportFailure("mcp http: cannot encode request", SendNotSent, err))
 	}
@@ -626,7 +627,7 @@ func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCRe
 
 // Notify sends a JSON-RPC notification via HTTP POST (fire-and-forget).
 func (t *HTTPTransport) Notify(ctx context.Context, notif JSONRPCNotification) error {
-	data, err := json.Marshal(notif)
+	data, err := jsonx.Marshal(notif)
 	if err != nil {
 		return newTransportFailure("mcp http: cannot encode notification", SendNotSent, err)
 	}

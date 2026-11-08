@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // AgentInfo holds the name and description of an available SubAgent type.
@@ -75,7 +77,7 @@ type delegateArgs struct {
 	// Optional result contract the worker's reported result must satisfy. The
 	// declared schema is only an object at the tool surface; the accepted
 	// subset is compiled and checked here before a worker is started.
-	ResultSchema json.RawMessage `json:"result_schema,omitempty"`
+	ResultSchema json.RawMessage `json:"result_schema,omitzero"`
 }
 
 func (DelegateTool) Name() string { return NameDelegate }
@@ -184,7 +186,7 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	if strings.TrimSpace(handle.Message) == "" {
 		handle.Message = "running in background"
 	}
-	out, err := json.Marshal(handle)
+	out, err := jsonx.Marshal(handle)
 	if err != nil {
 		return "", fmt.Errorf("marshal task handle: %w", err)
 	}

@@ -20,7 +20,7 @@ type responsesHostedRequest struct {
 	Instructions      *string              `json:"instructions,omitzero"`
 	Input             []responsesInputItem `json:"input"`
 	Tools             []json.RawMessage    `json:"tools"`
-	ToolChoice        json.RawMessage      `json:"tool_choice,omitempty"`
+	ToolChoice        json.RawMessage      `json:"tool_choice,omitzero"`
 	ParallelToolCalls *bool                `json:"parallel_tool_calls,omitzero"`
 	MaxOutputTokens   int                  `json:"max_output_tokens,omitzero"`
 	Store             *bool                `json:"store,omitzero"`

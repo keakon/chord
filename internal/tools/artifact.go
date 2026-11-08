@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tooloutput"
@@ -139,7 +140,7 @@ func canonicalResultObject(resultType string, raw json.RawMessage) (string, []by
 	if err := json.Unmarshal(trimmed, &object); err != nil || object == nil {
 		return "", nil, fmt.Errorf("result must be a JSON object")
 	}
-	canonical, err := json.Marshal(object)
+	canonical, err := jsonx.Marshal(object)
 	if err != nil {
 		return "", nil, fmt.Errorf("canonicalize result: %w", err)
 	}
@@ -264,7 +265,7 @@ type saveArtifactArgs struct {
 	MimeType    string          `json:"mime_type,omitempty"`
 	Mode        string          `json:"mode,omitempty"`
 	ResultType  string          `json:"result_type,omitempty"`
-	Result      json.RawMessage `json:"result,omitempty"`
+	Result      json.RawMessage `json:"result,omitzero"`
 }
 
 func (SaveArtifactTool) Name() string { return NameSaveArtifact }
@@ -348,7 +349,7 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		if err != nil {
 			return "", err
 		}
-		out, err := json.Marshal(ref)
+		out, err := jsonx.Marshal(ref)
 		if err != nil {
 			return "", err
 		}
@@ -454,7 +455,7 @@ func (SaveArtifactTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if err != nil {
 		return "", fmt.Errorf("hash artifact: %w", err)
 	}
-	out, err := json.Marshal(NormalizeArtifactRef(ref))
+	out, err := jsonx.Marshal(NormalizeArtifactRef(ref))
 	if err != nil {
 		return "", err
 	}

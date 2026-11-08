@@ -29,7 +29,7 @@ type anthropicHostedRequest struct {
 	System     []anthropicContent `json:"system,omitempty"`
 	Messages   []json.RawMessage  `json:"messages"`
 	Tools      []json.RawMessage  `json:"tools"`
-	ToolChoice json.RawMessage    `json:"tool_choice,omitempty"`
+	ToolChoice json.RawMessage    `json:"tool_choice,omitzero"`
 	Stream     bool               `json:"stream"`
 	Container  string             `json:"container,omitempty"`
 	Metadata   *anthropicMetadata `json:"metadata,omitzero"`

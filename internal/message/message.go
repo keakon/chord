@@ -335,7 +335,7 @@ type Message struct {
 	InputRequestID   string                `json:"input_request_id,omitempty"`
 	InputID          string                `json:"input_id,omitempty"`
 	NativeTools      *NativeToolHistory    `json:"native_tools,omitzero"`
-	Question         json.RawMessage       `json:"question,omitempty"`
+	Question         json.RawMessage       `json:"question,omitzero"`
 	Role             Role                  `json:"role"` // "user", "assistant", "tool"
 	Content          string                `json:"content"`
 	Parts            []ContentPart         `json:"parts,omitempty"`             // multi-part content (text + images); when set, supersedes Content

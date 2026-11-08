@@ -103,7 +103,7 @@ type DurableTaskRecord struct {
 	TaskDesc             string              `json:"task_desc,omitempty"`
 	PlanTaskRef          string              `json:"plan_task_ref,omitempty"`
 	SemanticTaskKey      string              `json:"semantic_task_key,omitempty"`
-	ResultSchema         json.RawMessage     `json:"result_schema,omitempty"`
+	ResultSchema         json.RawMessage     `json:"result_schema,omitzero"`
 	OwnerAgentID         string              `json:"owner_agent_id,omitempty"`
 	OwnerTaskID          string              `json:"owner_task_id,omitempty"`
 	Depth                int                 `json:"depth,omitzero"`

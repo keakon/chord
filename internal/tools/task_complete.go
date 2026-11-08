@@ -22,7 +22,7 @@ type completeArgs struct {
 	FollowUpRecommended  []string        `json:"follow_up_recommended,omitempty"`
 	Artifacts            []ArtifactRef   `json:"artifacts,omitempty"`
 	ResultType           string          `json:"result_type,omitempty"`
-	Result               json.RawMessage `json:"result,omitempty"`
+	Result               json.RawMessage `json:"result,omitzero"`
 	ResultRef            *ResultRef      `json:"result_ref,omitzero"`
 }
 

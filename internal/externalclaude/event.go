@@ -58,7 +58,7 @@ type Event struct {
 type PermissionDenial struct {
 	ToolName  string          `json:"tool_name,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
-	ToolInput json.RawMessage `json:"tool_input,omitempty"`
+	ToolInput json.RawMessage `json:"tool_input,omitzero"`
 }
 
 type Message struct {
@@ -76,9 +76,9 @@ type ContentBlock struct {
 	Text      string          `json:"text,omitempty"`
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
+	Input     json.RawMessage `json:"input,omitzero"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   json.RawMessage `json:"content,omitempty"`
+	Content   json.RawMessage `json:"content,omitzero"`
 	IsError   bool            `json:"is_error,omitzero"`
 	Thinking  string          `json:"thinking,omitempty"`
 }
@@ -125,7 +125,7 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	type eventFields Event
 	fields := struct {
 		*eventFields
-		Event json.RawMessage `json:"event,omitempty"`
+		Event json.RawMessage `json:"event,omitzero"`
 	}{eventFields: (*eventFields)(e)}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err

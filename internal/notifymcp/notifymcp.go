@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -27,7 +29,7 @@ const (
 type Request struct {
 	Kind    string          `json:"kind,omitempty"`
 	Message string          `json:"message"`
-	Payload json.RawMessage `json:"payload,omitempty"`
+	Payload json.RawMessage `json:"payload,omitzero"`
 }
 
 // DeliverFunc forwards a validated notification to the owning worker.
@@ -35,15 +37,15 @@ type DeliverFunc func(context.Context, Request) error
 
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
+	ID      json.RawMessage `json:"id,omitzero"`
 	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
+	Params  json.RawMessage `json:"params,omitzero"`
 }
 
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
+	ID      json.RawMessage `json:"id,omitzero"`
+	Result  json.RawMessage `json:"result,omitzero"`
 	Error   *rpcError       `json:"error,omitzero"`
 }
 
@@ -104,7 +106,7 @@ func initializeResult(params json.RawMessage) json.RawMessage {
 	if version == "" {
 		version = protocolVersion
 	}
-	result, _ := json.Marshal(map[string]any{
+	result, _ := jsonx.Marshal(map[string]any{
 		"protocolVersion": version,
 		"capabilities":    map[string]any{"tools": map[string]any{}},
 		"serverInfo":      map[string]any{"name": "chord-notify", "version": "1"},
@@ -140,7 +142,7 @@ func toolsListResult() json.RawMessage {
 			"additionalProperties": false,
 		},
 	}
-	result, _ := json.Marshal(map[string]any{"tools": []any{tool}})
+	result, _ := jsonx.Marshal(map[string]any{"tools": []any{tool}})
 	return result
 }
 
@@ -199,12 +201,12 @@ func callTool(ctx context.Context, params json.RawMessage, deliver DeliverFunc) 
 }
 
 func resultResponse(id json.RawMessage, result json.RawMessage) json.RawMessage {
-	data, _ := json.Marshal(rpcResponse{JSONRPC: "2.0", ID: id, Result: result})
+	data, _ := jsonx.Marshal(rpcResponse{JSONRPC: "2.0", ID: id, Result: result})
 	return data
 }
 
 func notificationResponse() json.RawMessage {
-	data, _ := json.Marshal(rpcResponse{JSONRPC: "2.0", Result: json.RawMessage(`{}`)})
+	data, _ := jsonx.Marshal(rpcResponse{JSONRPC: "2.0", Result: json.RawMessage(`{}`)})
 	return data
 }
 
@@ -212,19 +214,19 @@ func errorResponse(id json.RawMessage, code int, message string) json.RawMessage
 	if len(bytes.TrimSpace(id)) == 0 {
 		id = json.RawMessage("null")
 	}
-	data, _ := json.Marshal(rpcResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: message}})
+	data, _ := jsonx.Marshal(rpcResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: message}})
 	return data
 }
 
 func toolContent(text string) json.RawMessage {
-	result, _ := json.Marshal(map[string]any{
+	result, _ := jsonx.Marshal(map[string]any{
 		"content": []any{map[string]any{"type": "text", "text": text}},
 	})
 	return result
 }
 
 func toolError(text string) json.RawMessage {
-	result, _ := json.Marshal(map[string]any{
+	result, _ := jsonx.Marshal(map[string]any{
 		"content": []any{map[string]any{"type": "text", "text": text}},
 		"isError": true,
 	})

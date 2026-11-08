@@ -181,7 +181,7 @@ type AgentSnapshot struct {
 	WorkDirGeneration       uint64          `json:"work_dir_generation,omitzero"`
 	PendingCompleteIntent   bool            `json:"pending_complete_intent,omitzero"`
 	PendingCompleteSummary  string          `json:"pending_complete_summary,omitempty"`
-	PendingCompleteEnvelope json.RawMessage `json:"pending_complete_envelope,omitempty"`
+	PendingCompleteEnvelope json.RawMessage `json:"pending_complete_envelope,omitzero"`
 	Persistence             struct {
 		State       string    `json:"state"`
 		LastError   string    `json:"last_error,omitempty"`

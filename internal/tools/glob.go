@@ -37,8 +37,8 @@ type globArgs struct {
 // executor can attach a result-level hint nudging the documented array shape.
 func (a *globArgs) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Patterns json.RawMessage `json:"patterns,omitempty"`
-		Pattern  json.RawMessage `json:"pattern,omitempty"`
+		Patterns json.RawMessage `json:"patterns,omitzero"`
+		Pattern  json.RawMessage `json:"pattern,omitzero"`
 		Path     string          `json:"path,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {

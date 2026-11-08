@@ -140,12 +140,12 @@ type anthropicContent struct {
 	Raw          json.RawMessage       `json:"-"`
 	Type         string                `json:"type"`
 	Text         string                `json:"text,omitempty"`
-	Thinking     string                `json:"thinking,omitempty"`    // thinking block: content
-	Signature    string                `json:"signature,omitempty"`   // thinking block: signature (required for replay)
-	Data         string                `json:"data,omitempty"`        // redacted_thinking block: encrypted payload (required for replay)
-	ID           string                `json:"id,omitempty"`          // tool_use: tool call ID
-	Name         string                `json:"name,omitempty"`        // tool_use: tool name
-	Input        json.RawMessage       `json:"input,omitempty"`       // tool_use: tool arguments
+	Thinking     string                `json:"thinking,omitempty"`  // thinking block: content
+	Signature    string                `json:"signature,omitempty"` // thinking block: signature (required for replay)
+	Data         string                `json:"data,omitempty"`      // redacted_thinking block: encrypted payload (required for replay)
+	ID           string                `json:"id,omitempty"`        // tool_use: tool call ID
+	Name         string                `json:"name,omitempty"`      // tool_use: tool name
+	Input        json.RawMessage       `json:"input,omitzero"`
 	ToolUseID    string                `json:"tool_use_id,omitempty"` // tool_result: corresponding tool call ID
 	Content      any                   `json:"content,omitzero"`
 	Source       *anthropicImageSource `json:"source,omitzero"`

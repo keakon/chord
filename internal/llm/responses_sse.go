@@ -94,7 +94,7 @@ type responsesStreamItem struct {
 	ID               string          `json:"id,omitempty"`
 	CallID           string          `json:"call_id,omitempty"`
 	Name             string          `json:"name,omitempty"`
-	Arguments        json.RawMessage `json:"arguments,omitempty"`
+	Arguments        json.RawMessage `json:"arguments,omitzero"`
 	Input            string          `json:"input,omitempty"` // custom_tool_call freeform text
 	EncryptedContent string          `json:"encrypted_content,omitempty"`
 	// Content carries a message item's content parts. It is empty on

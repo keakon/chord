@@ -70,16 +70,16 @@ type sseContentBlockStart struct {
 	Type         string `json:"type"`
 	Index        int    `json:"index"`
 	ContentBlock struct {
-		Type      string          `json:"type"`                  // "text", "tool_use", "thinking", or "redacted_thinking"
-		Text      string          `json:"text,omitempty"`        // for text blocks
-		Thinking  string          `json:"thinking,omitempty"`    // for thinking blocks
-		Signature string          `json:"signature,omitempty"`   // for thinking blocks
-		ID        string          `json:"id,omitempty"`          // for tool_use and server_tool_use blocks
-		Name      string          `json:"name,omitempty"`        // for tool_use and server_tool_use blocks
-		Input     json.RawMessage `json:"input,omitempty"`       // for tool_use blocks (usually {})
+		Type      string          `json:"type"`                // "text", "tool_use", "thinking", or "redacted_thinking"
+		Text      string          `json:"text,omitempty"`      // for text blocks
+		Thinking  string          `json:"thinking,omitempty"`  // for thinking blocks
+		Signature string          `json:"signature,omitempty"` // for thinking blocks
+		ID        string          `json:"id,omitempty"`        // for tool_use and server_tool_use blocks
+		Name      string          `json:"name,omitempty"`      // for tool_use and server_tool_use blocks
+		Input     json.RawMessage `json:"input,omitzero"`
 		Data      string          `json:"data,omitempty"`        // for redacted_thinking blocks (encrypted payload)
 		ToolUseID string          `json:"tool_use_id,omitempty"` // for web_search_tool_result blocks
-		Content   json.RawMessage `json:"content,omitempty"`     // for web_search_tool_result blocks (result array or error object)
+		Content   json.RawMessage `json:"content,omitzero"`
 	} `json:"content_block"`
 }
 

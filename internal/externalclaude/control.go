@@ -3,6 +3,8 @@ package externalclaude
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // Control subtypes exchanged over stdout/stdin in stream-json mode.
@@ -25,16 +27,16 @@ type ControlRequest struct {
 	Subtype string `json:"subtype"`
 
 	ToolName              string          `json:"tool_name,omitempty"`
-	Input                 json.RawMessage `json:"input,omitempty"`
+	Input                 json.RawMessage `json:"input,omitzero"`
 	ToolUseID             string          `json:"tool_use_id,omitempty"`
-	PermissionSuggestions json.RawMessage `json:"permission_suggestions,omitempty"`
+	PermissionSuggestions json.RawMessage `json:"permission_suggestions,omitzero"`
 	BlockedPath           string          `json:"blocked_path,omitempty"`
 	AgentID               string          `json:"agent_id,omitempty"`
 
 	AppendSystemPrompt string `json:"appendSystemPrompt,omitempty"`
 
 	ServerName string          `json:"server_name,omitempty"`
-	Message    json.RawMessage `json:"message,omitempty"`
+	Message    json.RawMessage `json:"message,omitzero"`
 }
 
 // MCPHandler serves one JSON-RPC message from an SDK MCP server. Claude Code
@@ -46,7 +48,7 @@ type MCPHandler func(ctx context.Context, serverName string, message json.RawMes
 type ControlResponseBody struct {
 	Subtype   string          `json:"subtype,omitempty"`
 	RequestID string          `json:"request_id,omitempty"`
-	Response  json.RawMessage `json:"response,omitempty"`
+	Response  json.RawMessage `json:"response,omitzero"`
 	Error     string          `json:"error,omitempty"`
 }
 
@@ -61,12 +63,12 @@ type Frame struct {
 // PermissionDecision is the allow/deny payload Chord returns for can_use_tool.
 type PermissionDecision struct {
 	Behavior     string          `json:"behavior"`
-	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
+	UpdatedInput json.RawMessage `json:"updatedInput,omitzero"`
 	Message      string          `json:"message,omitempty"`
 }
 
 func AllowPermission(requestID string, updatedInput json.RawMessage) Frame {
-	decision, _ := json.Marshal(PermissionDecision{
+	decision, _ := jsonx.Marshal(PermissionDecision{
 		Behavior:     PermissionBehaviorAllow,
 		UpdatedInput: updatedInput,
 	})
@@ -81,7 +83,7 @@ func AllowPermission(requestID string, updatedInput json.RawMessage) Frame {
 }
 
 func DenyPermission(requestID, message string) Frame {
-	decision, _ := json.Marshal(PermissionDecision{
+	decision, _ := jsonx.Marshal(PermissionDecision{
 		Behavior: PermissionBehaviorDeny,
 		Message:  message,
 	})
@@ -115,7 +117,7 @@ func MCPMessageResponse(requestID string, response json.RawMessage) Frame {
 	if len(response) == 0 {
 		response = json.RawMessage(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"MCP handler returned no response"}}`)
 	}
-	body, _ := json.Marshal(struct {
+	body, _ := jsonx.Marshal(struct {
 		MCPResponse json.RawMessage `json:"mcp_response"`
 	}{MCPResponse: response})
 	return Frame{

@@ -28,7 +28,7 @@ type MCPToolDef struct {
 	Name         string          `json:"name"`
 	Description  string          `json:"description"`
 	InputSchema  map[string]any  `json:"inputSchema"`
-	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
+	OutputSchema json.RawMessage `json:"outputSchema,omitzero"`
 	Annotations  map[string]any  `json:"annotations,omitempty"`
 }
 

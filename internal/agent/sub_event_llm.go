@@ -327,7 +327,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 				FollowUpRecommended  []string            `json:"follow_up_recommended,omitempty"`
 				Artifacts            []tools.ArtifactRef `json:"artifacts,omitempty"`
 				ResultType           string              `json:"result_type,omitempty"`
-				Result               json.RawMessage     `json:"result,omitempty"`
+				Result               json.RawMessage     `json:"result,omitzero"`
 				ResultRef            *tools.ResultRef    `json:"result_ref,omitzero"`
 			}
 			if err := json.Unmarshal(tc.Args, &args); err != nil {

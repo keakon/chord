@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/permission"
 )
 
@@ -49,7 +50,7 @@ type notifyArgs struct {
 	MessageType   string          `json:"message_type,omitempty"`
 	Subtype       string          `json:"subtype,omitempty"`
 	CorrelationID string          `json:"correlation_id,omitempty"`
-	Payload       json.RawMessage `json:"payload,omitempty"`
+	Payload       json.RawMessage `json:"payload,omitzero"`
 }
 
 // AgentNotifyPayload is the structured owner-update payload emitted by Notify.
@@ -59,7 +60,7 @@ type AgentNotifyPayload struct {
 	MessageType   string          `json:"message_type,omitempty"`
 	Subtype       string          `json:"subtype,omitempty"`
 	CorrelationID string          `json:"correlation_id,omitempty"`
-	Payload       json.RawMessage `json:"payload,omitempty"`
+	Payload       json.RawMessage `json:"payload,omitzero"`
 }
 
 func (NotifyTool) Name() string { return NameNotify }
@@ -232,7 +233,7 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 				}
 				return "", err
 			}
-			out, err := json.Marshal(handle)
+			out, err := jsonx.Marshal(handle)
 			if err != nil {
 				return "", fmt.Errorf("marshal notify handle: %w", err)
 			}
@@ -248,7 +249,7 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		if err != nil {
 			return "", err
 		}
-		out, err := json.Marshal(handle)
+		out, err := jsonx.Marshal(handle)
 		if err != nil {
 			return "", fmt.Errorf("marshal notify handle: %w", err)
 		}

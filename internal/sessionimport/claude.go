@@ -77,9 +77,9 @@ type claudeContentBlock struct {
 	Signature string          `json:"signature,omitempty"`
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
+	Input     json.RawMessage `json:"input,omitzero"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   json.RawMessage `json:"content,omitempty"`
+	Content   json.RawMessage `json:"content,omitzero"`
 }
 
 type claudeNode struct {

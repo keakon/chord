@@ -85,7 +85,7 @@ type CompletionEnvelope struct {
 	// work, so a completion that only says "done" is not actionable.
 	Worktree   *CompletionWorktree `json:"worktree,omitzero"`
 	ResultType string              `json:"result_type,omitempty"`
-	Result     json.RawMessage     `json:"result,omitempty"`
+	Result     json.RawMessage     `json:"result,omitzero"`
 	ResultRef  *tools.ResultRef    `json:"result_ref,omitzero"`
 }
 
@@ -126,7 +126,7 @@ type SubAgentMailboxMessage struct {
 	TargetTaskID   string                  `json:"target_task_id,omitempty"`
 	TargetAttempt  uint64                  `json:"target_attempt,omitzero"`
 	CorrelationID  string                  `json:"correlation_id,omitempty"`
-	MessagePayload json.RawMessage         `json:"message_payload,omitempty"`
+	MessagePayload json.RawMessage         `json:"message_payload,omitzero"`
 	ArtifactRefs   []tools.ArtifactRef     `json:"artifact_refs,omitempty"`
 	Durability     AgentMessageDurability  `json:"durability,omitempty"`
 	// ReportOnly marks a mailbox row whose kind/subtype are user-supplied
