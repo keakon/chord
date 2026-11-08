@@ -34,7 +34,7 @@ type SessionMeta struct {
 	WorktreeName   string `json:"worktree_name,omitempty"`
 	WorktreeBranch string `json:"worktree_branch,omitempty"`
 	WorktreePath   string `json:"worktree_path,omitempty"`
-	IsMainWorktree bool   `json:"is_main_worktree,omitempty"`
+	IsMainWorktree bool   `json:"is_main_worktree,omitzero"`
 
 	// WorktreeTimeline is the durable boundary record of checkout switches
 	// (see WorktreeTimelineEntry). It keeps the newest
@@ -76,8 +76,8 @@ type WorktreeTimelineEntry struct {
 	Branch     string    `json:"branch,omitempty"`
 	Path       string    `json:"path,omitempty"`
 	Head       string    `json:"head,omitempty"`
-	Generation uint64    `json:"generation,omitempty"`
-	Fallback   bool      `json:"fallback,omitempty"`
+	Generation uint64    `json:"generation,omitzero"`
+	Fallback   bool      `json:"fallback,omitzero"`
 	Detail     string    `json:"detail,omitempty"`
 	At         time.Time `json:"at"`
 }

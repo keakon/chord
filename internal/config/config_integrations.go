@@ -10,7 +10,7 @@ type LSPConfig map[string]LSPServerConfig
 
 // LSPServerConfig configures a single LSP server.
 type LSPServerConfig struct {
-	Disabled    bool              `json:"disabled,omitempty" yaml:"disabled,omitempty"`
+	Disabled    bool              `json:"disabled,omitzero" yaml:"disabled,omitempty"`
 	Command     string            `json:"command,omitempty" yaml:"command,omitempty"`
 	Args        []string          `json:"args,omitempty" yaml:"args,omitempty"`
 	Env         map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
@@ -18,7 +18,7 @@ type LSPServerConfig struct {
 	RootMarkers []string          `json:"root_markers,omitempty" yaml:"root_markers,omitempty"`
 	InitOptions map[string]any    `json:"init_options,omitempty" yaml:"init_options,omitempty"`
 	Options     map[string]any    `json:"options,omitempty" yaml:"options,omitempty"`
-	Timeout     int               `json:"timeout,omitempty" yaml:"timeout,omitempty"` // seconds, default 30
+	Timeout     int               `json:"timeout,omitzero" yaml:"timeout,omitempty"` // seconds, default 30
 }
 
 // MCPServerConfig defines an MCP server connection.
@@ -32,8 +32,8 @@ type MCPServerConfig struct {
 	URL          string            `json:"url,omitempty" yaml:"url,omitempty"`                     // HTTP URL (for HTTP transport)
 	Headers      map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`             // extra HTTP headers (for HTTP transport); values starting with $ are expanded from the environment
 	AllowedTools []string          `json:"allowed_tools,omitempty" yaml:"allowed_tools,omitempty"` // optional remote MCP tool allowlist
-	Manual       bool              `json:"manual,omitempty" yaml:"manual,omitempty"`               // when true, do not auto-start; must be enabled via /mcp or shortcut
-	Deferred     bool              `json:"deferred,omitempty" yaml:"deferred,omitempty"`           // expose schemas only after tool_search; connection/enable intent is unchanged
+	Manual       bool              `json:"manual,omitzero" yaml:"manual,omitempty"`                // when true, do not auto-start; must be enabled via /mcp or shortcut
+	Deferred     bool              `json:"deferred,omitzero" yaml:"deferred,omitempty"`            // expose schemas only after tool_search; connection/enable intent is unchanged
 }
 
 // MCPConfig holds MCP server configurations keyed by server name.
@@ -99,22 +99,22 @@ func (c HookCommand) MarshalYAML() (any, error) {
 type HookEntry struct {
 	Name            string            `json:"name,omitempty" yaml:"name,omitempty"`
 	Command         HookCommand       `json:"command" yaml:"command"`
-	Timeout         int               `json:"timeout,omitempty" yaml:"timeout,omitempty"` // seconds, default 30
+	Timeout         int               `json:"timeout,omitzero" yaml:"timeout,omitempty"` // seconds, default 30
 	Tools           []string          `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Paths           []string          `json:"paths,omitempty" yaml:"paths,omitempty"`
 	Agents          []string          `json:"agents,omitempty" yaml:"agents,omitempty"`
 	AgentKinds      []string          `json:"agent_kinds,omitempty" yaml:"agent_kinds,omitempty"`
 	Models          []string          `json:"models,omitempty" yaml:"models,omitempty"`
-	MinChangedFiles int               `json:"min_changed_files,omitempty" yaml:"min_changed_files,omitempty"`
-	OnlyOnError     bool              `json:"only_on_error,omitempty" yaml:"only_on_error,omitempty"`
+	MinChangedFiles int               `json:"min_changed_files,omitzero" yaml:"min_changed_files,omitempty"`
+	OnlyOnError     bool              `json:"only_on_error,omitzero" yaml:"only_on_error,omitempty"`
 	Join            string            `json:"join,omitempty" yaml:"join,omitempty"`
 	Result          string            `json:"result,omitempty" yaml:"result,omitempty"`
 	ResultFormat    string            `json:"result_format,omitempty" yaml:"result_format,omitempty"`
-	MaxResultLines  int               `json:"max_result_lines,omitempty" yaml:"max_result_lines,omitempty"`
-	MaxResultBytes  int               `json:"max_result_bytes,omitempty" yaml:"max_result_bytes,omitempty"`
-	DebounceMS      int               `json:"debounce_ms,omitempty" yaml:"debounce_ms,omitempty"`
+	MaxResultLines  int               `json:"max_result_lines,omitzero" yaml:"max_result_lines,omitempty"`
+	MaxResultBytes  int               `json:"max_result_bytes,omitzero" yaml:"max_result_bytes,omitempty"`
+	DebounceMS      int               `json:"debounce_ms,omitzero" yaml:"debounce_ms,omitempty"`
 	Concurrency     string            `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
-	RetryOnFailure  int               `json:"retry_on_failure,omitempty" yaml:"retry_on_failure,omitempty"`
-	RetryDelayMS    int               `json:"retry_delay_ms,omitempty" yaml:"retry_delay_ms,omitempty"`
+	RetryOnFailure  int               `json:"retry_on_failure,omitzero" yaml:"retry_on_failure,omitempty"`
+	RetryDelayMS    int               `json:"retry_delay_ms,omitzero" yaml:"retry_delay_ms,omitempty"`
 	Environment     map[string]string `json:"environment,omitempty" yaml:"environment,omitempty"`
 }

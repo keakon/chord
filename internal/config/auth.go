@@ -66,7 +66,7 @@ type oauthTokenClaims struct {
 	ChatGPTAccountUserID string `json:"chatgpt_account_user_id,omitempty"`
 	UserID               string `json:"user_id,omitempty"`
 	Email                string `json:"email,omitempty"`
-	ExpiresAt            int64  `json:"exp,omitempty"`
+	ExpiresAt            int64  `json:"exp,omitzero"`
 	Organizations        []struct {
 		ID string `json:"id"`
 	} `json:"organizations,omitempty"`

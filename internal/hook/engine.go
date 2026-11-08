@@ -141,7 +141,7 @@ type Envelope struct {
 	Point         string    `json:"point"`
 	Timestamp     time.Time `json:"timestamp"`
 	SessionID     string    `json:"session_id"`
-	TurnID        uint64    `json:"turn_id,omitempty"`
+	TurnID        uint64    `json:"turn_id,omitzero"`
 	AgentID       string    `json:"agent_id"`
 	AgentKind     string    `json:"agent_kind"`
 	ProjectRoot   string    `json:"project_root,omitempty"`
@@ -163,8 +163,8 @@ type AutomationResult struct {
 	Summary       string `json:"summary,omitempty"`
 	Body          string `json:"body,omitempty"`
 	Severity      string `json:"severity,omitempty"`
-	AppendContext bool   `json:"append_context,omitempty"`
-	Notify        bool   `json:"notify,omitempty"`
+	AppendContext bool   `json:"append_context,omitzero"`
+	Notify        bool   `json:"notify,omitzero"`
 }
 
 // AutomationJobResult is one completed joinable automation hook run.

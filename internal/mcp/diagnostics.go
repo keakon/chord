@@ -98,7 +98,7 @@ type Diagnostic struct {
 	SuggestedAction          string       `json:"suggested_action,omitempty"`
 	SendEvidence             SendEvidence `json:"send_evidence,omitempty"`
 	ControlNetworkMode       string       `json:"control_network_mode,omitempty"`
-	ProxyEnvironmentDetected bool         `json:"proxy_environment_detected,omitempty"`
+	ProxyEnvironmentDetected bool         `json:"proxy_environment_detected,omitzero"`
 }
 
 type OperationView struct {

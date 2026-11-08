@@ -20,7 +20,7 @@ type manualUndo struct {
 	Before  []ManagedEntry `json:"before"`
 	After   []ManagedEntry `json:"after"`
 	Changed []string       `json:"changed"`
-	Undo    bool           `json:"undo,omitempty"`
+	Undo    bool           `json:"undo,omitzero"`
 }
 
 func (m *Manager) manualUndoPath() string {

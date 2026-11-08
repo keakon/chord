@@ -27,7 +27,7 @@ type ArtifactRef struct {
 	Path           string `json:"path,omitempty"`
 	Description    string `json:"description,omitempty"`
 	MimeType       string `json:"mime_type,omitempty"`
-	SizeBytes      int64  `json:"size_bytes,omitempty"`
+	SizeBytes      int64  `json:"size_bytes,omitzero"`
 	CreatedByTask  string `json:"created_by_task,omitempty"`
 	CreatedByAgent string `json:"created_by_agent,omitempty"`
 	SHA256         string `json:"sha256,omitempty"`

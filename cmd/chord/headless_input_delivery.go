@@ -40,7 +40,7 @@ type headlessInputQueue struct {
 	Works          []recovery.DeliveryWork  `json:"works"`
 	Inputs         []headlessInputQueueItem `json:"inputs"`
 	Blocked        string                   `json:"blocked,omitempty"`
-	RestoredHeld   bool                     `json:"restored_held,omitempty"`
+	RestoredHeld   bool                     `json:"restored_held,omitzero"`
 }
 
 func inputQueueProjection(snapshot *agent.InputQueueSnapshot) *headlessInputQueue {

@@ -148,7 +148,7 @@ type HostedToolConfig struct {
 	// ImagePaths selects base64 images from completed raw result objects.
 	ImagePaths []string `json:"image_paths,omitempty" yaml:"image_paths,omitempty"`
 	// TimeoutSeconds caps one local execution; 0 uses the shared default.
-	TimeoutSeconds int `json:"timeout_s,omitempty" yaml:"timeout_s,omitempty"`
+	TimeoutSeconds int `json:"timeout_s,omitzero" yaml:"timeout_s,omitempty"`
 	// Declarations maps a supported provider wire type (messages, responses)
 	// to that family's declaration. A family without an entry cannot carry
 	// the tool.

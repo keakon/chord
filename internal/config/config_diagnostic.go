@@ -37,8 +37,8 @@ type Diagnostic struct {
 	PathSegments []string `json:"path_segments,omitempty"`
 	// Line and Col locate the offending node (1-based, as reported by the
 	// YAML parser). Zero when the problem has no single location.
-	Line int `json:"line,omitempty"`
-	Col  int `json:"col,omitempty"`
+	Line int `json:"line,omitzero"`
+	Col  int `json:"col,omitzero"`
 	// Message states what is wrong in user-facing wording.
 	Message string `json:"message"`
 	// Continues reports whether config loading proceeds despite the problem.

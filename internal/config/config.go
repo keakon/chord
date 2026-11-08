@@ -95,7 +95,7 @@ type SkillsConfig struct {
 
 // DiffConfig controls TUI diff rendering behavior.
 type DiffConfig struct {
-	InlineMaxColumns int `json:"inline_max_columns,omitempty" yaml:"inline_max_columns,omitempty"` // hard cutoff for one-line inline diff; <=0 uses default 200
+	InlineMaxColumns int `json:"inline_max_columns,omitzero" yaml:"inline_max_columns,omitempty"` // hard cutoff for one-line inline diff; <=0 uses default 200
 }
 
 // DefaultConfig returns a Config with hardcoded defaults.

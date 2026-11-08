@@ -25,8 +25,8 @@ type ExtractionCheckpoint struct {
 // SessionCoverage is one session's extraction coverage.
 type SessionCoverage struct {
 	SourceFingerprint    string    `json:"source_fingerprint"`
-	ProjectedMessages    int       `json:"projected_message_count,omitempty"`
-	CompactionGeneration uint64    `json:"compaction_generation,omitempty"`
+	ProjectedMessages    int       `json:"projected_message_count,omitzero"`
+	CompactionGeneration uint64    `json:"compaction_generation,omitzero"`
 	ExtractedAt          time.Time `json:"extracted_at"`
 }
 

@@ -97,7 +97,7 @@ type doctorUsageResult struct {
 type doctorModelResult struct {
 	Source         string             `json:"source"`
 	PoolName       string             `json:"pool_name,omitempty"`
-	PoolIndex      int                `json:"pool_index,omitempty"`
+	PoolIndex      int                `json:"pool_index,omitzero"`
 	ProviderName   string             `json:"provider,omitempty"`
 	ModelName      string             `json:"model,omitempty"`
 	VariantName    string             `json:"variant,omitempty"`
@@ -105,8 +105,8 @@ type doctorModelResult struct {
 	ProviderType   string             `json:"type,omitempty"`
 	Transport      string             `json:"transport,omitempty"`
 	Status         string             `json:"result"`
-	LatencySeconds float64            `json:"latency_seconds,omitempty"`
-	TextChunks     int                `json:"text_chunks,omitempty"`
+	LatencySeconds float64            `json:"latency_seconds,omitzero"`
+	TextChunks     int                `json:"text_chunks,omitzero"`
 	Usage          *doctorUsageResult `json:"usage,omitempty"`
 	Error          string             `json:"error,omitempty"`
 }
@@ -132,8 +132,8 @@ type doctorModelsReport struct {
 	Summary       doctorModelsSummary  `json:"summary"`
 	FailedModels  []doctorModelFailure `json:"failed_models,omitempty"`
 	ConfigErrors  []doctorModelFailure `json:"config_errors,omitempty"`
-	Canceled      bool                 `json:"canceled,omitempty"`
-	ExecutionTime float64              `json:"execution_time_seconds,omitempty"`
+	Canceled      bool                 `json:"canceled,omitzero"`
+	ExecutionTime float64              `json:"execution_time_seconds,omitzero"`
 }
 
 func newDoctorCmd() *cobra.Command {

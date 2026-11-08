@@ -51,7 +51,7 @@ type WalltimeStats struct {
 	Tool       int64 `json:"tool_ns"`
 	Cooldown   int64 `json:"cooldown_ns"`
 	UserWait   int64 `json:"user_wait_ns"`
-	Compaction int64 `json:"compaction_ns,omitempty"`
+	Compaction int64 `json:"compaction_ns,omitzero"`
 }
 
 // IsZero reports whether every bucket is zero.

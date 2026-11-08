@@ -137,7 +137,7 @@ func geminiIncludeThoughts(t GeminiTuning) *bool {
 }
 
 type geminiGenerationConfig struct {
-	MaxOutputTokens int                   `json:"maxOutputTokens,omitempty"`
+	MaxOutputTokens int                   `json:"maxOutputTokens,omitzero"`
 	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
@@ -151,7 +151,7 @@ type geminiPart struct {
 	InlineData       *geminiInlineData       `json:"inlineData,omitempty"`
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
-	Thought          bool                    `json:"thought,omitempty"`
+	Thought          bool                    `json:"thought,omitzero"`
 	// ThoughtSignature is an opaque signature attached by thinking models.
 	// It must be preserved and replayed verbatim with the same part in
 	// conversation history (Gemini 3 requires it on functionCall parts).

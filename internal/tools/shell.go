@@ -115,7 +115,7 @@ type shellArgs struct {
 	Workdir         string `json:"workdir,omitempty"`
 	TimeoutMs       *int   `json:"timeout_ms,omitempty"`
 	YieldTimeMs     *int   `json:"yield_time_ms,omitempty"`
-	RunInBackground bool   `json:"run_in_background,omitempty"`
+	RunInBackground bool   `json:"run_in_background,omitzero"`
 }
 
 // killGracePeriod is how long a process group gets between SIGTERM and SIGKILL.

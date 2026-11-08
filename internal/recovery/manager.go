@@ -59,7 +59,7 @@ type ToolActivityRecord struct {
 	// the started fact attributable to the checkout it ran in; the resume path
 	// resolves a restored agent's binding from SubAgentMeta, not from here.
 	WorkDir           string                 `json:"workdir,omitempty"`
-	WorkDirGeneration uint64                 `json:"workdir_generation,omitempty"`
+	WorkDirGeneration uint64                 `json:"workdir_generation,omitzero"`
 	Audit             *message.ToolArgsAudit `json:"audit,omitempty"`
 	TS                int64                  `json:"ts"` // unix nanoseconds
 }
@@ -75,10 +75,10 @@ type SessionSnapshot struct {
 	ModelPoolCurrentModelPool string                   `json:"model_pool_current_model_pool,omitempty"`
 	ModelPoolAgentOverrides   map[string]string        `json:"model_pool_agent_overrides,omitempty"`
 	CreatedAt                 time.Time                `json:"created_at"`
-	ContextReading            int                      `json:"context_reading,omitempty"` // display-only; restored as stale until a new response
-	CompactionGeneration      uint64                   `json:"compaction_generation,omitempty"`
-	LastHistoryIndex          int                      `json:"last_history_index,omitempty"`
-	SessionEpoch              uint64                   `json:"session_epoch,omitempty"`
+	ContextReading            int                      `json:"context_reading,omitzero"` // display-only; restored as stale until a new response
+	CompactionGeneration      uint64                   `json:"compaction_generation,omitzero"`
+	LastHistoryIndex          int                      `json:"last_history_index,omitzero"`
+	SessionEpoch              uint64                   `json:"session_epoch,omitzero"`
 	ActiveBackgroundObjects   []BackgroundObjectState  `json:"active_background_objects,omitempty"`
 	PendingCompactionResume   *PendingCompactionResume `json:"pending_compaction_resume,omitempty"`
 	// LastModelDrivenApplyBatch is the request batch of the last successful
@@ -86,12 +86,12 @@ type SessionSnapshot struct {
 	// so a restored session keeps enforcing the minimum apply interval; the
 	// current > last comparison guards against uint64 underflow when the
 	// in-memory batch counter restarts at 0 after restore.
-	LastModelDrivenApplyBatch            uint64 `json:"last_model_driven_apply_batch,omitempty"`
+	LastModelDrivenApplyBatch            uint64 `json:"last_model_driven_apply_batch,omitzero"`
 	LastModelDrivenCheckpointFingerprint string `json:"last_model_driven_checkpoint_fingerprint,omitempty"`
 	// AutoCompactRequestGeneration is the monotonic id of the last armed
 	// usage-driven auto-compact request. It is persisted so a restored session
 	// never reuses a generation (and its externalization-warning claim).
-	AutoCompactRequestGeneration uint64 `json:"auto_compact_request_generation,omitempty"`
+	AutoCompactRequestGeneration uint64 `json:"auto_compact_request_generation,omitzero"`
 	// ModelDrivenProposal is the single persisted record of the most recent
 	// model-driven compact_context attempt (identity, lifecycle status,
 	// runtime-owned reason/time and the audit copy of the accepted arguments).
@@ -99,8 +99,8 @@ type SessionSnapshot struct {
 	// and apply restores a not-applied proposal instead of losing it or
 	// mistaking it for an applied reset.
 	ModelDrivenProposal             *ModelDrivenProposalSnapshot `json:"model_driven_proposal,omitempty"`
-	StageCompletionCandidateTurnID  uint64                       `json:"stage_completion_candidate_turn_id,omitempty"`
-	StageCompletionCandidatePending bool                         `json:"stage_completion_candidate_pending,omitempty"`
+	StageCompletionCandidateTurnID  uint64                       `json:"stage_completion_candidate_turn_id,omitzero"`
+	StageCompletionCandidatePending bool                         `json:"stage_completion_candidate_pending,omitzero"`
 }
 
 type ModelDrivenProposalSnapshot struct {
@@ -118,7 +118,7 @@ type BackgroundObjectState struct {
 	Description   string    `json:"description,omitempty"`
 	Command       string    `json:"command"`
 	StartedAt     time.Time `json:"started_at"`
-	MaxRuntimeSec int       `json:"max_runtime_sec,omitempty"`
+	MaxRuntimeSec int       `json:"max_runtime_sec,omitzero"`
 	Status        string    `json:"status"`
 	FinishedAt    time.Time `json:"finished_at"`
 }
@@ -168,8 +168,8 @@ type AgentSnapshot struct {
 	RunningModelRef  string `json:"running_model_ref,omitempty"`
 	OwnerAgentID     string `json:"owner_agent_id,omitempty"`
 	OwnerTaskID      string `json:"owner_task_id,omitempty"`
-	Depth            int    `json:"depth,omitempty"`
-	JoinToOwner      bool   `json:"join_to_owner,omitempty"`
+	Depth            int    `json:"depth,omitzero"`
+	JoinToOwner      bool   `json:"join_to_owner,omitzero"`
 	State            string `json:"state,omitempty"`
 	LastSummary      string `json:"last_summary,omitempty"`
 	// WorkDir is the agent's active checkout at snapshot time and
@@ -177,8 +177,8 @@ type AgentSnapshot struct {
 	// post-crash attribution; the resume path resolves a restored agent's
 	// binding from SubAgentMeta, not from these fields.
 	WorkDir                 string          `json:"work_dir,omitempty"`
-	WorkDirGeneration       uint64          `json:"work_dir_generation,omitempty"`
-	PendingCompleteIntent   bool            `json:"pending_complete_intent,omitempty"`
+	WorkDirGeneration       uint64          `json:"work_dir_generation,omitzero"`
+	PendingCompleteIntent   bool            `json:"pending_complete_intent,omitzero"`
 	PendingCompleteSummary  string          `json:"pending_complete_summary,omitempty"`
 	PendingCompleteEnvelope json.RawMessage `json:"pending_complete_envelope,omitempty"`
 	Persistence             struct {

@@ -117,11 +117,11 @@ type openAIRequest struct {
 	Tools               []openAITool         `json:"tools,omitempty"`
 	ToolChoice          string               `json:"tool_choice,omitempty"`
 	ParallelToolCalls   *bool                `json:"parallel_tool_calls,omitempty"`
-	MaxTokens           int                  `json:"max_tokens,omitempty"`
-	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
+	MaxTokens           int                  `json:"max_tokens,omitzero"`
+	MaxCompletionTokens int                  `json:"max_completion_tokens,omitzero"`
 	Stream              bool                 `json:"stream"`
 	StreamOptions       *openAIStreamOptions `json:"stream_options,omitempty"`
-	Temperature         float64              `json:"temperature,omitempty"`
+	Temperature         float64              `json:"temperature,omitzero"`
 	ReasoningEffort     string               `json:"reasoning_effort,omitempty"`
 	Verbosity           string               `json:"verbosity,omitempty"`
 	// ExtraBody, Thinking, and EnableThinking are the dialect-specific carriers
@@ -183,7 +183,7 @@ type openAIToolCall struct {
 	// Index is only present in streaming response deltas (identifies which
 	// tool call a chunk belongs to). It must be omitted from request bodies
 	// where it is always zero and confuses strict OpenAI-compatible APIs.
-	Index    int            `json:"index,omitempty"`
+	Index    int            `json:"index,omitzero"`
 	ID       string         `json:"id"`
 	Type     string         `json:"type"`
 	Function openAIFunction `json:"function"`

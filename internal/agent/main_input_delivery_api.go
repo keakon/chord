@@ -81,7 +81,7 @@ type InputQueueSnapshot struct {
 	Blocked     string                       `json:"blocked,omitempty"`
 	// RestoredHeld reports that inputs restored with the session wait for the
 	// user to continue or send a message before any of them starts.
-	RestoredHeld bool `json:"restored_held,omitempty"`
+	RestoredHeld bool `json:"restored_held,omitzero"`
 }
 
 func (s *InputQueueSnapshot) Clone() *InputQueueSnapshot {
@@ -97,7 +97,7 @@ type InputQueueOperationResultEvent struct {
 	Target        InputTarget `json:"target"`
 	OperationID   string      `json:"operation_id"`
 	InputID       string      `json:"input_id,omitempty"`
-	ItemRevision  uint64      `json:"item_revision,omitempty"`
+	ItemRevision  uint64      `json:"item_revision,omitzero"`
 	QueueRevision uint64      `json:"queue_revision"`
 	Result        string      `json:"result"`
 	Reason        string      `json:"reason,omitempty"`

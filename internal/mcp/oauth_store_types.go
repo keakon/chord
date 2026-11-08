@@ -36,7 +36,7 @@ type CredentialSlot struct {
 	Registration        *CredentialRegistration    `json:"registration,omitempty"`
 	PendingRegistration *CredentialRegistration    `json:"pending_registration,omitempty"`
 	Token               *CredentialToken           `json:"token,omitempty"`
-	RejectedRevision    uint64                     `json:"rejected_revision,omitempty"`
+	RejectedRevision    uint64                     `json:"rejected_revision,omitzero"`
 	RefreshBlocked      *CredentialRefreshBlocked  `json:"refresh_blocked,omitempty"`
 	RefreshInflight     *CredentialRefreshInflight `json:"refresh_inflight,omitempty"`
 	ScopeRequirements   []ScopeRequirement         `json:"scope_requirements,omitempty"`
@@ -60,7 +60,7 @@ type CredentialRegistration struct {
 	TokenAuthMethod string    `json:"token_auth_method"`
 	GrantTypes      []string  `json:"grant_types"`
 	ResponseTypes   []string  `json:"response_types"`
-	AuthGeneration  uint64    `json:"auth_generation,omitempty"`
+	AuthGeneration  uint64    `json:"auth_generation,omitzero"`
 }
 
 type CredentialToken struct {
@@ -68,7 +68,7 @@ type CredentialToken struct {
 	RefreshToken    string    `json:"refresh_token,omitempty"`
 	IssuedAt        time.Time `json:"issued_at"`
 	ExpiresAt       time.Time `json:"expires_at,omitzero"`
-	LifetimeSeconds int64     `json:"lifetime_seconds,omitempty"`
+	LifetimeSeconds int64     `json:"lifetime_seconds,omitzero"`
 	RequestedScopes []string  `json:"requested_scopes"`
 	GrantedScopes   []string  `json:"granted_scopes"`
 }

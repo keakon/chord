@@ -7,7 +7,7 @@ const MaxTaskEvidencePaths = 128
 type TaskEvidence struct {
 	TaskID                    string   `json:"task_id"`
 	ChangedPaths              []string `json:"changed_paths,omitempty"`
-	FileAttributionIncomplete bool     `json:"file_attribution_incomplete,omitempty"`
+	FileAttributionIncomplete bool     `json:"file_attribution_incomplete,omitzero"`
 }
 
 func (e *TaskEvidence) Clone() *TaskEvidence {

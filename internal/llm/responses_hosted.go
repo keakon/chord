@@ -22,7 +22,7 @@ type responsesHostedRequest struct {
 	Tools             []json.RawMessage    `json:"tools"`
 	ToolChoice        json.RawMessage      `json:"tool_choice,omitempty"`
 	ParallelToolCalls *bool                `json:"parallel_tool_calls,omitempty"`
-	MaxOutputTokens   int                  `json:"max_output_tokens,omitempty"`
+	MaxOutputTokens   int                  `json:"max_output_tokens,omitzero"`
 	Store             *bool                `json:"store,omitempty"`
 	Stream            bool                 `json:"stream"`
 	Include           []string             `json:"include,omitempty"`

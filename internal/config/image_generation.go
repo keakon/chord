@@ -15,7 +15,7 @@ import (
 type ImageGenerationConfig struct {
 	Enabled        bool   `json:"enabled" yaml:"enabled"`
 	ModelPool      string `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
-	TimeoutSeconds int    `json:"timeout_seconds,omitempty" yaml:"timeout_seconds,omitempty"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitzero" yaml:"timeout_seconds,omitempty"`
 }
 
 // ImageModelConfig describes an image-only model's wire contract.

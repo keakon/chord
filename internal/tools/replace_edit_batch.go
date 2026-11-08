@@ -13,7 +13,7 @@ import (
 type textReplacement struct {
 	OldString  string  `json:"old_string"`
 	NewString  *string `json:"new_string"`
-	ReplaceAll bool    `json:"replace_all,omitempty"`
+	ReplaceAll bool    `json:"replace_all,omitzero"`
 }
 
 type replacementSpan struct {

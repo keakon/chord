@@ -64,10 +64,10 @@ type SidebarServerEntry struct {
 	Name     string `json:"name"`
 	Root     string `json:"root,omitempty"`
 	OK       bool   `json:"ok"`
-	Pending  bool   `json:"pending,omitempty"`
+	Pending  bool   `json:"pending,omitzero"`
 	Error    string `json:"error,omitempty"`
-	Errors   int    `json:"errors,omitempty"`
-	Warnings int    `json:"warnings,omitempty"`
+	Errors   int    `json:"errors,omitzero"`
+	Warnings int    `json:"warnings,omitzero"`
 }
 
 type diagnosticsEvent struct {

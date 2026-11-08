@@ -48,7 +48,7 @@ type ExternalTaskSession struct {
 	// SessionEstablished records that the CLI acknowledged initialize for
 	// this session. A generated session id alone does not prove a transcript
 	// exists; resume must not use --resume until this is true.
-	SessionEstablished bool `json:"session_established,omitempty"`
+	SessionEstablished bool `json:"session_established,omitzero"`
 	// RunID identifies the last supervisor run launched for this task. It is
 	// persisted before the launch, so a receipt of exactly this run proves
 	// whether its process group was torn down.
@@ -106,8 +106,8 @@ type DurableTaskRecord struct {
 	ResultSchema         json.RawMessage     `json:"result_schema,omitempty"`
 	OwnerAgentID         string              `json:"owner_agent_id,omitempty"`
 	OwnerTaskID          string              `json:"owner_task_id,omitempty"`
-	Depth                int                 `json:"depth,omitempty"`
-	JoinToOwner          bool                `json:"join_to_owner,omitempty"`
+	Depth                int                 `json:"depth,omitzero"`
+	JoinToOwner          bool                `json:"join_to_owner,omitzero"`
 	State                string              `json:"state,omitempty"`
 	ResumePolicy         string              `json:"resume_policy,omitempty"`
 	LatestInstanceID     string              `json:"latest_instance_id,omitempty"`
@@ -130,7 +130,7 @@ type DurableTaskRecord struct {
 	// the budget spans attempts: the loop they converge is exactly the one that
 	// crosses attempts. EscalationMailboxID names the mailbox whose answer zeroes
 	// the count (see buildTaskRecordFromSub).
-	EscalationCount     int                 `json:"escalation_count,omitempty"`
+	EscalationCount     int                 `json:"escalation_count,omitzero"`
 	EscalationMailboxID string              `json:"escalation_mailbox_id,omitempty"`
 	LastCompletion      *CompletionEnvelope `json:"last_completion,omitempty"`
 	PendingCompletion   *CompletionEnvelope `json:"pending_completion,omitempty"`
@@ -139,16 +139,16 @@ type DurableTaskRecord struct {
 	ExternalSession      *ExternalTaskSession `json:"external_session,omitempty"`
 	SuspectedStallReason string               `json:"suspected_stall_reason,omitempty"`
 	Persistence          PersistenceHealth    `json:"persistence"`
-	RuntimeParked        bool                 `json:"runtime_parked,omitempty"`
-	CreatedTurn          uint64               `json:"created_turn,omitempty"`
-	LastUpdatedTurn      uint64               `json:"last_updated_turn,omitempty"`
+	RuntimeParked        bool                 `json:"runtime_parked,omitzero"`
+	CreatedTurn          uint64               `json:"created_turn,omitzero"`
+	LastUpdatedTurn      uint64               `json:"last_updated_turn,omitzero"`
 	CreatedAt            time.Time            `json:"created_at"`
 	UpdatedAt            time.Time            `json:"updated_at"`
 	ClosedReason         string               `json:"closed_reason,omitempty"`
-	Attempt              uint64               `json:"attempt,omitempty"`
-	LifecycleRevision    uint64               `json:"lifecycle_revision,omitempty"`
+	Attempt              uint64               `json:"attempt,omitzero"`
+	LifecycleRevision    uint64               `json:"lifecycle_revision,omitzero"`
 	LatestSettlement     *TaskSettlement      `json:"latest_settlement,omitempty"`
-	SettlementDurable    bool                 `json:"settlement_durable,omitempty"`
+	SettlementDurable    bool                 `json:"settlement_durable,omitzero"`
 }
 
 func durableTaskRegistryPath(sessionDir string) string {

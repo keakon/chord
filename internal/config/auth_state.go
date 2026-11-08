@@ -30,16 +30,16 @@ type OAuthStateRecord struct {
 	AccountID               string                `json:"account_id,omitempty"`
 	Email                   string                `json:"email,omitempty"`
 	RefreshSHA256           string                `json:"refresh_sha256,omitempty"`
-	Expires                 int64                 `json:"expires,omitempty"`
+	Expires                 int64                 `json:"expires,omitzero"`
 	Status                  OAuthCredentialStatus `json:"status,omitempty"`
-	UpdatedAt               int64                 `json:"updated_at,omitempty"`
-	LastWarmupAt            int64                 `json:"last_warmup_at,omitempty"`
-	CodexPrimaryUsedPct     float64               `json:"codex_primary_used_pct,omitempty"`
-	CodexPrimaryWindowMin   int64                 `json:"codex_primary_window_minutes,omitempty"`
-	CodexPrimaryResetAt     int64                 `json:"codex_primary_reset_at,omitempty"`
-	CodexSecondaryUsedPct   float64               `json:"codex_secondary_used_pct,omitempty"`
-	CodexSecondaryWindowMin int64                 `json:"codex_secondary_window_minutes,omitempty"`
-	CodexSecondaryResetAt   int64                 `json:"codex_secondary_reset_at,omitempty"`
+	UpdatedAt               int64                 `json:"updated_at,omitzero"`
+	LastWarmupAt            int64                 `json:"last_warmup_at,omitzero"`
+	CodexPrimaryUsedPct     float64               `json:"codex_primary_used_pct,omitzero"`
+	CodexPrimaryWindowMin   int64                 `json:"codex_primary_window_minutes,omitzero"`
+	CodexPrimaryResetAt     int64                 `json:"codex_primary_reset_at,omitzero"`
+	CodexSecondaryUsedPct   float64               `json:"codex_secondary_used_pct,omitzero"`
+	CodexSecondaryWindowMin int64                 `json:"codex_secondary_window_minutes,omitzero"`
+	CodexSecondaryResetAt   int64                 `json:"codex_secondary_reset_at,omitzero"`
 	CodexHasCredits         *bool                 `json:"codex_has_credits,omitempty"`
 	CodexUnlimited          *bool                 `json:"codex_unlimited,omitempty"`
 	CodexBalance            string                `json:"codex_balance,omitempty"`

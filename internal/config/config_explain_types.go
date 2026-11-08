@@ -144,9 +144,9 @@ type ExplainSource struct {
 	Kind           ExplainSourceKind `json:"kind"`
 	PathSegments   []string          `json:"path_segments"`
 	File           string            `json:"file,omitempty"`
-	Line           int               `json:"line,omitempty"`
-	Col            int               `json:"col,omitempty"`
-	Inherited      bool              `json:"inherited,omitempty"`
+	Line           int               `json:"line,omitzero"`
+	Col            int               `json:"col,omitzero"`
+	Inherited      bool              `json:"inherited,omitzero"`
 	CatalogModelID string            `json:"catalog_model_id,omitempty"`
 	CatalogVersion string            `json:"catalog_version,omitempty"`
 	Preset         string            `json:"preset,omitempty"`
@@ -171,8 +171,8 @@ type ExplainEditTarget struct {
 	File         string            `json:"file"`
 	PathSegments []string          `json:"path_segments"`
 	Action       ExplainEditAction `json:"action"`
-	Line         int               `json:"line,omitempty"`
-	Col          int               `json:"col,omitempty"`
+	Line         int               `json:"line,omitzero"`
+	Col          int               `json:"col,omitzero"`
 }
 type ExplainNote struct {
 	Code    ExplainNoteCode `json:"code"`

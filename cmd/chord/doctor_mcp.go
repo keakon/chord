@@ -23,7 +23,7 @@ type doctorMCPReport struct {
 }
 type doctorMCPTarget struct {
 	ControlNetworkMode       string                     `json:"control_network_mode,omitempty"`
-	ProxyEnvironmentDetected bool                       `json:"proxy_environment_detected,omitempty"`
+	ProxyEnvironmentDetected bool                       `json:"proxy_environment_detected,omitzero"`
 	Ref                      mcp.ServerRef              `json:"ref"`
 	Auth                     mcp.AuthState              `json:"auth"`
 	Operations               []mcp.OperationView        `json:"operations"`

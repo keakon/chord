@@ -177,7 +177,7 @@ type doctorSkillResourceEntry struct {
 	Status      string `json:"status"`
 	Reason      string `json:"reason,omitempty"`
 	Detail      string `json:"detail,omitempty"`
-	Placeholder bool   `json:"placeholder,omitempty"`
+	Placeholder bool   `json:"placeholder,omitzero"`
 }
 
 // doctorSkillDescription reports the description in its original form and in
@@ -238,7 +238,7 @@ type doctorSkillEntry struct {
 	// Scope is the priority tier of the directory the skill came from.
 	Scope string `json:"scope,omitempty"`
 	// Priority is the 1-based position of that directory in the search path.
-	Priority int `json:"priority,omitempty"`
+	Priority int `json:"priority,omitzero"`
 	// Sidecar names the sidecar file that supplied the effective metadata.
 	Sidecar string `json:"sidecar,omitempty"`
 	// Paths holds the conditional activation patterns.
@@ -359,7 +359,7 @@ type doctorSkillsReport struct {
 	Actions []doctorSkillAction `json:"actions,omitempty"`
 	// ActionTotal counts the items found, including the ones the report left
 	// out to stay short.
-	ActionTotal int `json:"action_total,omitempty"`
+	ActionTotal int `json:"action_total,omitzero"`
 }
 
 func newDoctorSkillsCmd() *cobra.Command {

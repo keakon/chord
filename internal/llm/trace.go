@@ -21,42 +21,42 @@ type LLMTraceRecord struct {
 	Provider           string             `json:"provider"`
 	Model              string             `json:"model"`
 	Transport          string             `json:"transport,omitempty"`
-	HTTPStatus         int                `json:"http_status,omitempty"`
+	HTTPStatus         int                `json:"http_status,omitzero"`
 	DurationMS         int64              `json:"duration_ms"`
 	Error              string             `json:"error,omitempty"`
 	StopReason         string             `json:"stop_reason,omitempty"`
 	Statuses           []string           `json:"statuses,omitempty"`
-	ProgressBytes      int64              `json:"progress_bytes,omitempty"`
-	ProgressEvents     int64              `json:"progress_events,omitempty"`
-	FirstEventMS       int64              `json:"first_event_ms,omitempty"`
-	FirstSemanticMS    int64              `json:"first_semantic_event_ms,omitempty"`
-	FirstVisibleTextMS int64              `json:"first_visible_text_ms,omitempty"`
-	FirstToolArgsMS    int64              `json:"first_tool_args_ms,omitempty"`
+	ProgressBytes      int64              `json:"progress_bytes,omitzero"`
+	ProgressEvents     int64              `json:"progress_events,omitzero"`
+	FirstEventMS       int64              `json:"first_event_ms,omitzero"`
+	FirstSemanticMS    int64              `json:"first_semantic_event_ms,omitzero"`
+	FirstVisibleTextMS int64              `json:"first_visible_text_ms,omitzero"`
+	FirstToolArgsMS    int64              `json:"first_tool_args_ms,omitzero"`
 	LastEventType      string             `json:"last_event_type,omitempty"`
-	MaxEventGapMS      int64              `json:"max_event_gap_ms,omitempty"`
-	MaxSemanticGapMS   int64              `json:"max_semantic_event_gap_ms,omitempty"`
-	CompletedWaitMS    int64              `json:"completed_wait_ms,omitempty"`
-	WaitingCompletedMS int64              `json:"waiting_completed_ms,omitempty"`
+	MaxEventGapMS      int64              `json:"max_event_gap_ms,omitzero"`
+	MaxSemanticGapMS   int64              `json:"max_semantic_event_gap_ms,omitzero"`
+	CompletedWaitMS    int64              `json:"completed_wait_ms,omitzero"`
+	WaitingCompletedMS int64              `json:"waiting_completed_ms,omitzero"`
 	TimeoutSource      string             `json:"timeout_source,omitempty"`
-	UsageMissing       bool               `json:"usage_missing,omitempty"`
-	TextChunks         int                `json:"text_chunks,omitempty"`
-	TextChars          int                `json:"text_chars,omitempty"`
-	ThinkingChars      int                `json:"thinking_chars,omitempty"`
-	FinalContentChars  int                `json:"final_content_chars,omitempty"`
-	FinalThinkingChars int                `json:"final_thinking_chars,omitempty"`
-	FinalToolCalls     int                `json:"final_tool_calls,omitempty"`
+	UsageMissing       bool               `json:"usage_missing,omitzero"`
+	TextChunks         int                `json:"text_chunks,omitzero"`
+	TextChars          int                `json:"text_chars,omitzero"`
+	ThinkingChars      int                `json:"thinking_chars,omitzero"`
+	FinalContentChars  int                `json:"final_content_chars,omitzero"`
+	FinalThinkingChars int                `json:"final_thinking_chars,omitzero"`
+	FinalToolCalls     int                `json:"final_tool_calls,omitzero"`
 	ToolCalls          []LLMTraceToolCall `json:"tool_calls,omitempty"`
 }
 
 type LLMTraceToolCall struct {
 	ID             string `json:"id,omitempty"`
 	Name           string `json:"name,omitempty"`
-	Started        bool   `json:"started,omitempty"`
-	DeltaCount     int    `json:"delta_count,omitempty"`
-	ArgsBytes      int    `json:"args_bytes,omitempty"`
-	Ended          bool   `json:"ended,omitempty"`
-	Finalized      bool   `json:"finalized,omitempty"`
-	FinalJSONValid bool   `json:"final_json_valid,omitempty"`
+	Started        bool   `json:"started,omitzero"`
+	DeltaCount     int    `json:"delta_count,omitzero"`
+	ArgsBytes      int    `json:"args_bytes,omitzero"`
+	Ended          bool   `json:"ended,omitzero"`
+	Finalized      bool   `json:"finalized,omitzero"`
+	FinalJSONValid bool   `json:"final_json_valid,omitzero"`
 }
 
 type TraceWriter struct {

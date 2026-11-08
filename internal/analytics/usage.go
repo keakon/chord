@@ -13,10 +13,10 @@ import (
 type UsageSnapshot struct {
 	InputTokens        int64 `json:"input_tokens"`
 	OutputTokens       int64 `json:"output_tokens"`
-	CacheReadTokens    int64 `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens   int64 `json:"cache_write_tokens,omitempty"`
-	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens,omitempty"`
-	ReasoningTokens    int64 `json:"reasoning_tokens,omitempty"`
+	CacheReadTokens    int64 `json:"cache_read_tokens,omitzero"`
+	CacheWriteTokens   int64 `json:"cache_write_tokens,omitzero"`
+	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens,omitzero"`
+	ReasoningTokens    int64 `json:"reasoning_tokens,omitzero"`
 }
 
 // BillingUsage records normalized, mutually-exclusive billing buckets.
@@ -25,9 +25,9 @@ type UsageSnapshot struct {
 type BillingUsage struct {
 	InputTokens        int64 `json:"input_tokens"`
 	OutputTokens       int64 `json:"output_tokens"`
-	CacheReadTokens    int64 `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens   int64 `json:"cache_write_tokens,omitempty"`
-	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens,omitempty"`
+	CacheReadTokens    int64 `json:"cache_read_tokens,omitzero"`
+	CacheWriteTokens   int64 `json:"cache_write_tokens,omitzero"`
+	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens,omitzero"`
 	BillingTotalTokens int64 `json:"billing_total_tokens"`
 }
 
@@ -54,10 +54,10 @@ type PricingSnapshot struct {
 	OutputPerMillion       float64            `json:"output_per_million"`
 	CacheReadPerMillion    float64            `json:"cache_read_per_million"`
 	CacheWritePerMillion   float64            `json:"cache_write_per_million"`
-	CacheWrite1hPerMillion float64            `json:"cache_write_1h_per_million,omitempty"`
+	CacheWrite1hPerMillion float64            `json:"cache_write_1h_per_million,omitzero"`
 	ServiceTier            config.ServiceTier `json:"service_tier,omitempty"`
-	ServiceTierMultiplier  float64            `json:"service_tier_multiplier,omitempty"`
-	InputTierAboveTokens   int64              `json:"input_tier_above_tokens,omitempty"`
+	ServiceTierMultiplier  float64            `json:"service_tier_multiplier,omitzero"`
+	InputTierAboveTokens   int64              `json:"input_tier_above_tokens,omitzero"`
 }
 
 // UsageSnapshotFromTokenUsage converts runtime usage into a persisted snapshot.

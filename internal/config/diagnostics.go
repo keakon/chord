@@ -48,19 +48,19 @@ type DiagnosticBackendConfig struct {
 
 // PythonLargeFileDiagnosticsConfig controls when Python diagnostics use a quick backend.
 type PythonLargeFileDiagnosticsConfig struct {
-	LineThreshold                   int    `json:"line_threshold,omitempty" yaml:"line_threshold,omitempty"`
-	ByteThreshold                   int    `json:"byte_threshold,omitempty" yaml:"byte_threshold,omitempty"`
+	LineThreshold                   int    `json:"line_threshold,omitzero" yaml:"line_threshold,omitempty"`
+	ByteThreshold                   int    `json:"byte_threshold,omitzero" yaml:"byte_threshold,omitempty"`
 	Strategy                        string `json:"strategy,omitempty" yaml:"strategy,omitempty"`
-	RunSemanticWhenQuickUnavailable bool   `json:"run_semantic_when_quick_unavailable,omitempty" yaml:"run_semantic_when_quick_unavailable,omitempty"`
+	RunSemanticWhenQuickUnavailable bool   `json:"run_semantic_when_quick_unavailable,omitzero" yaml:"run_semantic_when_quick_unavailable,omitempty"`
 }
 
 // DiagnosticOutputConfig limits diagnostic text appended to tool results.
 type DiagnosticOutputConfig struct {
-	MaxNearDiagnostics    int `json:"max_near_diagnostics,omitempty" yaml:"max_near_diagnostics,omitempty"`
-	MaxOutsideDiagnostics int `json:"max_outside_diagnostics,omitempty" yaml:"max_outside_diagnostics,omitempty"`
-	MaxTotalDiagnostics   int `json:"max_total_diagnostics,omitempty" yaml:"max_total_diagnostics,omitempty"`
-	NearRangeBeforeLines  int `json:"near_range_before_lines,omitempty" yaml:"near_range_before_lines,omitempty"`
-	NearRangeAfterLines   int `json:"near_range_after_lines,omitempty" yaml:"near_range_after_lines,omitempty"`
+	MaxNearDiagnostics    int `json:"max_near_diagnostics,omitzero" yaml:"max_near_diagnostics,omitempty"`
+	MaxOutsideDiagnostics int `json:"max_outside_diagnostics,omitzero" yaml:"max_outside_diagnostics,omitempty"`
+	MaxTotalDiagnostics   int `json:"max_total_diagnostics,omitzero" yaml:"max_total_diagnostics,omitempty"`
+	NearRangeBeforeLines  int `json:"near_range_before_lines,omitzero" yaml:"near_range_before_lines,omitempty"`
+	NearRangeAfterLines   int `json:"near_range_after_lines,omitzero" yaml:"near_range_after_lines,omitempty"`
 }
 
 func DefaultDiagnosticsConfig() DiagnosticsConfig {

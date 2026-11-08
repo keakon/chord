@@ -5,7 +5,7 @@ package config
 // expose split limits, and Output is the requested-output hard cap.
 type ModelLimit struct {
 	Context int `json:"context" yaml:"context"`
-	Input   int `json:"input,omitempty" yaml:"input,omitempty"`
+	Input   int `json:"input,omitzero" yaml:"input,omitempty"`
 	Output  int `json:"output" yaml:"output"`
 	// ContextDerived marks a Context that normalizeModelLimits computed from
 	// Input+Output rather than explicit configuration. Derived totals must not

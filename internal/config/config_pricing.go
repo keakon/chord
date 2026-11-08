@@ -28,8 +28,8 @@ func NormalizeServiceTier(raw string) ServiceTier {
 
 // ServiceTierMultipliers stores optional per-tier price multipliers.
 type ServiceTierMultipliers struct {
-	Fast float64 `json:"fast,omitempty" yaml:"fast,omitempty"`
-	Slow float64 `json:"slow,omitempty" yaml:"slow,omitempty"`
+	Fast float64 `json:"fast,omitzero" yaml:"fast,omitempty"`
+	Slow float64 `json:"slow,omitzero" yaml:"slow,omitempty"`
 }
 
 // ModelCostInputTier overrides the flat top-level prices above a strict token threshold.

@@ -100,8 +100,8 @@ func (c *AgentConfig) UnmarshalYAML(node *yaml.Node) error {
 }
 
 type DelegationConfig struct {
-	MaxChildren int   `json:"max_children,omitempty" yaml:"max_children,omitempty"`
-	MaxDepth    int   `json:"max_depth,omitempty" yaml:"max_depth,omitempty"`
+	MaxChildren int   `json:"max_children,omitzero" yaml:"max_children,omitempty"`
+	MaxDepth    int   `json:"max_depth,omitzero" yaml:"max_depth,omitempty"`
 	ChildJoin   *bool `json:"child_join,omitempty" yaml:"child_join,omitempty"`
 }
 

@@ -248,7 +248,7 @@ func (m *ModelConfig) SupportedServiceTierSet(providerPreset string, providerTie
 // Display is valid only for enabled/adaptive modes.
 type ThinkingConfig struct {
 	Type            string `json:"type,omitempty" yaml:"type,omitempty"`
-	Budget          int    `json:"budget,omitempty" yaml:"budget,omitempty"`
+	Budget          int    `json:"budget,omitzero" yaml:"budget,omitempty"`
 	Effort          string `json:"effort,omitempty" yaml:"effort,omitempty"`
 	Display         string `json:"display,omitempty" yaml:"display,omitempty"`
 	IncludeThoughts *bool  `json:"include_thoughts,omitempty" yaml:"include_thoughts,omitempty"`

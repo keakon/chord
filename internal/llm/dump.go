@@ -28,7 +28,7 @@ type LLMDump struct {
 	Model          string          `json:"model"`
 	RequestBody    json.RawMessage `json:"request_body"`
 	RequestHeaders http.Header     `json:"request_headers,omitempty"`
-	HTTPStatus     int             `json:"http_status,omitempty"`
+	HTTPStatus     int             `json:"http_status,omitzero"`
 	HTTPHeaders    http.Header     `json:"http_headers,omitempty"`
 	HTTPBody       string          `json:"http_body,omitempty"`
 	SSEChunks      []string        `json:"sse_chunks"`
@@ -66,9 +66,9 @@ type DumpToolCall struct {
 type DumpTokenUsage struct {
 	InputTokens      int `json:"input_tokens"`
 	OutputTokens     int `json:"output_tokens"`
-	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
-	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
+	CacheReadTokens  int `json:"cache_read_tokens,omitzero"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitzero"`
+	ReasoningTokens  int `json:"reasoning_tokens,omitzero"`
 }
 
 // DumpWriter writes LLM dump files to a directory.

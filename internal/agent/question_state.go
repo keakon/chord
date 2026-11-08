@@ -67,8 +67,8 @@ type QuestionSnapshot struct {
 	Selected     []string           `json:"selected,omitempty"`
 	SelectedIDs  []string           `json:"selected_ids,omitempty"`
 	Timer        string             `json:"timer"`
-	Duration     int64              `json:"duration_ns,omitempty"`
-	Remaining    int64              `json:"remaining_ns,omitempty"`
+	Duration     int64              `json:"duration_ns,omitzero"`
+	Remaining    int64              `json:"remaining_ns,omitzero"`
 	Deadline     time.Time          `json:"deadline"`
 	Dependency   string             `json:"dependency,omitempty"`
 	ReplacedBy   string             `json:"replaced_by,omitempty"`
@@ -105,19 +105,19 @@ type QuestionOperation struct {
 	Operation           string   `json:"operation"`
 	OperationID         string   `json:"operation_id"`
 	QuestionID          string   `json:"request_id"`
-	Version             uint64   `json:"version,omitempty"`
+	Version             uint64   `json:"version,omitzero"`
 	Answers             []string `json:"answers,omitempty"`
-	Custom              bool     `json:"custom,omitempty"`
+	Custom              bool     `json:"custom,omitzero"`
 	ReplacementID       string   `json:"replacement_id,omitempty"`
 	UserText            string   `json:"user_text,omitempty"`
-	SupportsInteraction bool     `json:"supports_interaction,omitempty"`
+	SupportsInteraction bool     `json:"supports_interaction,omitzero"`
 }
 
 type QuestionReceipt struct {
 	SessionID   string               `json:"session_id,omitempty"`
 	Accepted    bool                 `json:"accepted"`
 	Status      string               `json:"status,omitempty"`
-	Version     uint64               `json:"version,omitempty"`
+	Version     uint64               `json:"version,omitzero"`
 	Error       string               `json:"error,omitempty"`
 	Result      tools.QuestionResult `json:"result"`
 	Questions   []QuestionSnapshot   `json:"questions,omitempty"`

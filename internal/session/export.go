@@ -47,15 +47,15 @@ type ExportedMessage struct {
 	Content                   string                         `json:"content"`
 	Kind                      string                         `json:"kind,omitempty"`
 	ToolCallID                string                         `json:"tool_call_id,omitempty"`
-	ToolStatus                string                         `json:"tool_status,omitempty"`       // success / error / cancelled outcome of a tool result
-	ToolDiff                  string                         `json:"tool_diff,omitempty"`         // unified diff for Write/Edit results
-	ToolDiffAdded             int                            `json:"tool_diff_added,omitempty"`   // full added-line count before diff truncation
-	ToolDiffRemoved           int                            `json:"tool_diff_removed,omitempty"` // full removed-line count before diff truncation
-	ToolDurationMs            int64                          `json:"tool_duration_ms,omitempty"`
+	ToolStatus                string                         `json:"tool_status,omitempty"`      // success / error / cancelled outcome of a tool result
+	ToolDiff                  string                         `json:"tool_diff,omitempty"`        // unified diff for Write/Edit results
+	ToolDiffAdded             int                            `json:"tool_diff_added,omitzero"`   // full added-line count before diff truncation
+	ToolDiffRemoved           int                            `json:"tool_diff_removed,omitzero"` // full removed-line count before diff truncation
+	ToolDurationMs            int64                          `json:"tool_duration_ms,omitzero"`
 	LSPReviews                []message.LSPReview            `json:"lsp_reviews,omitempty"`
 	Audit                     *message.ToolArgsAudit         `json:"audit,omitempty"`
 	FileState                 *message.ToolFileState         `json:"file_state,omitempty"`
-	FileAttributionIncomplete bool                           `json:"file_attribution_incomplete,omitempty"`
+	FileAttributionIncomplete bool                           `json:"file_attribution_incomplete,omitzero"`
 	ToolChangedPaths          []string                       `json:"tool_changed_paths,omitempty"`
 	ToolCalls                 []ExportedToolCall             `json:"tool_calls,omitempty"`
 	ThinkingBlocks            []message.ThinkingBlock        `json:"thinking_blocks,omitempty"`
@@ -63,7 +63,7 @@ type ExportedMessage struct {
 	NativeTools               *message.NativeToolHistory     `json:"native_tools,omitempty"`
 	GeminiParts               []message.GeminiReplayPart     `json:"gemini_parts,omitempty"`
 	ReasoningContent          string                         `json:"reasoning_content,omitempty"`
-	IsCompactionSummary       bool                           `json:"is_compaction_summary,omitempty"`
+	IsCompactionSummary       bool                           `json:"is_compaction_summary,omitzero"`
 	CompactionRequestSources  map[string]string              `json:"compaction_request_sources,omitempty"`
 	CompactionFileRevisions   map[string]string              `json:"compaction_file_revisions,omitempty"`
 	Provenance                *message.MessageProvenance     `json:"provenance,omitempty"`
@@ -90,9 +90,9 @@ type ExportedToolCall struct {
 type SessionStats struct {
 	InputTokens      int64              `json:"input_tokens"`
 	OutputTokens     int64              `json:"output_tokens"`
-	CacheReadTokens  int64              `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64              `json:"cache_write_tokens,omitempty"`
-	ReasoningTokens  int64              `json:"reasoning_tokens,omitempty"`
+	CacheReadTokens  int64              `json:"cache_read_tokens,omitzero"`
+	CacheWriteTokens int64              `json:"cache_write_tokens,omitzero"`
+	ReasoningTokens  int64              `json:"reasoning_tokens,omitzero"`
 	LLMCalls         int64              `json:"llm_calls"`
 	EstimatedCost    float64            `json:"estimated_cost"`
 	ByModel          map[string]float64 `json:"by_model,omitempty"`

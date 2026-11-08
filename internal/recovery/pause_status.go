@@ -27,7 +27,7 @@ type SessionPauseStatus struct {
 	TransferIdentity
 	State             string                `json:"state"`
 	StartedAt         time.Time             `json:"started_at"`
-	WaitExpired       bool                  `json:"wait_expired,omitempty"`
+	WaitExpired       bool                  `json:"wait_expired,omitzero"`
 	Blockers          []SessionPauseBlocker `json:"blockers,omitempty"`
 	BlockerCount      int                   `json:"blocker_count"`
 	PendingInputCount int                   `json:"pending_input_count"`

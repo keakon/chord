@@ -97,7 +97,7 @@ type anthropicRequest struct {
 // anthropicThinking configures extended thinking.
 type anthropicThinking struct {
 	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens,omitempty"`
+	BudgetTokens int    `json:"budget_tokens,omitzero"`
 	Display      string `json:"display,omitempty"`
 }
 

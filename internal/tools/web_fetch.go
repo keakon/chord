@@ -50,8 +50,8 @@ type webFetchTransportPool struct {
 
 type webFetchArgs struct {
 	URL       string `json:"url"`
-	Raw       bool   `json:"raw,omitempty"`        // return raw text without HTML->Markdown conversion
-	TimeoutMs int    `json:"timeout_ms,omitempty"` // request deadline in milliseconds (default 30000, capped at 120000)
+	Raw       bool   `json:"raw,omitzero"`        // return raw text without HTML->Markdown conversion
+	TimeoutMs int    `json:"timeout_ms,omitzero"` // request deadline in milliseconds (default 30000, capped at 120000)
 }
 
 // WebFetchDefaultTimeoutMs is the request deadline applied when timeout_ms is

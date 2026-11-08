@@ -47,7 +47,7 @@ type ModelFacts struct {
 	CodingSources    []Source       `json:"coding_sources,omitempty"`
 	Connection       *Connection    `json:"connection,omitempty"`
 	Context          int            `json:"context"`
-	Input            int            `json:"input,omitempty"`
+	Input            int            `json:"input,omitzero"`
 	Output           int            `json:"output"`
 	InputModalities  []string       `json:"input_modalities,omitempty"` // default: text only
 	ReasoningOptions []string       `json:"reasoning_options,omitempty"`

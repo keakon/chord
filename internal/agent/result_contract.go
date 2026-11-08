@@ -46,7 +46,7 @@ const maxResultContractDiagnosticValueRunes = 512
 type TaskContractDiagnostics struct {
 	Category            string                   `json:"category"`
 	Violations          []message.InvalidToolArg `json:"violations,omitempty"`
-	RemainingViolations int                      `json:"remaining_violations,omitempty"`
+	RemainingViolations int                      `json:"remaining_violations,omitzero"`
 	ResultRef           *tools.ResultRef         `json:"result_ref,omitempty"`
 	InlineResultPreview string                   `json:"inline_result_preview,omitempty"`
 }

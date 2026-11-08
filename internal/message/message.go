@@ -74,7 +74,7 @@ type ContentPart struct {
 	// stamped when the part is materialized to disk, so byte/token estimates
 	// account for the payload without loading it: restored parts keep Data
 	// empty (the blob is resolved lazily) while still reporting their size.
-	DataBytes int64 `json:"data_bytes,omitempty"`
+	DataBytes int64 `json:"data_bytes,omitzero"`
 }
 
 // IsBinary reports whether the part carries out-of-band binary bytes (an image
@@ -143,7 +143,7 @@ type InvalidToolArg struct {
 type ToolArgsAudit struct {
 	OriginalArgsJSON  string           `json:"original_args_json,omitempty"`
 	EffectiveArgsJSON string           `json:"effective_args_json,omitempty"`
-	UserModified      bool             `json:"user_modified,omitempty"`
+	UserModified      bool             `json:"user_modified,omitzero"`
 	EditSummary       string           `json:"edit_summary,omitempty"`
 	IgnoredArgs       []IgnoredToolArg `json:"ignored_args,omitempty"`
 	InvalidArgs       []InvalidToolArg `json:"invalid_args,omitempty"`
@@ -165,9 +165,9 @@ type ToolFileState struct {
 type ToolFileChange struct {
 	Path       string `json:"path"`
 	TargetPath string `json:"target_path,omitempty"`
-	Added      int    `json:"added,omitempty"`
-	Removed    int    `json:"removed,omitempty"`
-	Deleted    bool   `json:"deleted,omitempty"`
+	Added      int    `json:"added,omitzero"`
+	Removed    int    `json:"removed,omitzero"`
+	Deleted    bool   `json:"deleted,omitzero"`
 }
 
 // TrackedFileState records the observed state of one file at tool completion.
@@ -175,9 +175,9 @@ type TrackedFileState struct {
 	Path         string `json:"path"`
 	SHA256       string `json:"sha256,omitempty"`
 	Exists       bool   `json:"exists"`
-	ChangedStart int    `json:"changed_start,omitempty"` // 1-based pre-edit line range; zero means whole file/unknown
-	ChangedEnd   int    `json:"changed_end,omitempty"`
-	LineDelta    int    `json:"line_delta,omitempty"`
+	ChangedStart int    `json:"changed_start,omitzero"` // 1-based pre-edit line range; zero means whole file/unknown
+	ChangedEnd   int    `json:"changed_end,omitzero"`
+	LineDelta    int    `json:"line_delta,omitzero"`
 }
 
 func (s *ToolFileState) Clone() *ToolFileState {
@@ -211,8 +211,8 @@ func (s *ToolFileState) HasChanges() bool {
 type LSPReview struct {
 	Path     string `json:"path,omitempty"`
 	ServerID string `json:"server_id,omitempty"`
-	Errors   int    `json:"errors,omitempty"`
-	Warnings int    `json:"warnings,omitempty"`
+	Errors   int    `json:"errors,omitzero"`
+	Warnings int    `json:"warnings,omitzero"`
 }
 
 // Clone returns a deep copy of the audit payload.
@@ -345,11 +345,11 @@ type Message struct {
 	ReasoningContent string                `json:"reasoning_content,omitempty"` // assistant only; OpenAI-compatible reasoning/thinking text for chain replay
 	ToolCalls        []ToolCall            `json:"tool_calls,omitempty"`        // non-nil for assistant tool_use
 	ToolCallID       string                `json:"tool_call_id,omitempty"`      // non-empty for tool results
-	RequestBatch     uint64                `json:"request_batch,omitempty"`     // main-model request sequence that produced this assistant message
+	RequestBatch     uint64                `json:"request_batch,omitzero"`      // main-model request sequence that produced this assistant message
 	ToolDiff         string                `json:"tool_diff,omitempty"`         // unified diff for Write/Edit tool results
-	ToolDiffAdded    int                   `json:"tool_diff_added,omitempty"`   // total added lines for Write/Edit; computed before diff truncation
-	ToolDiffRemoved  int                   `json:"tool_diff_removed,omitempty"` // total removed lines for Write/Edit; computed before diff truncation
-	ToolDurationMs   int64                 `json:"tool_duration_ms,omitempty"`  // final tool elapsed time in milliseconds for restored footer display
+	ToolDiffAdded    int                   `json:"tool_diff_added,omitzero"`    // total added lines for Write/Edit; computed before diff truncation
+	ToolDiffRemoved  int                   `json:"tool_diff_removed,omitzero"`  // total removed lines for Write/Edit; computed before diff truncation
+	ToolDurationMs   int64                 `json:"tool_duration_ms,omitzero"`   // final tool elapsed time in milliseconds for restored footer display
 	ToolStatus       string                `json:"tool_status,omitempty"`       // terminal tool status: success|error|cancelled
 	// ToolPayload is the tool's raw output before diagnostic notes were
 	// appended, and ToolNotes are those notes. Content stays the model-visible
@@ -359,18 +359,18 @@ type Message struct {
 	// before the split, where Content is the only copy.
 	ToolPayload               string             `json:"tool_payload,omitempty"`
 	ToolNotes                 []string           `json:"tool_notes,omitempty"`
-	FileState                 *ToolFileState     `json:"file_state,omitempty"`                  // durable file-state metadata for restore-time safety sentinels
-	ToolChangedPaths          []string           `json:"tool_changed_paths,omitempty"`          // runtime-observed workspace paths attributed to this tool result
-	FileAttributionIncomplete bool               `json:"file_attribution_incomplete,omitempty"` // successful mutation could not be mapped to exact workspace paths
-	LSPReviews                []LSPReview        `json:"lsp_reviews,omitempty"`                 // per-file, per-server last-review snapshots for directly edited files
-	Audit                     *ToolArgsAudit     `json:"audit,omitempty"`                       // tool-call audit metadata when effective args differ after confirmation
-	IsCompactionSummary       bool               `json:"is_compaction_summary,omitempty"`       // first user message after compaction (summary of archived history)
-	CompactionSummaryMode     string             `json:"compaction_summary_mode,omitempty"`     // how the archived history was preserved (see CompactionSummaryMode* constants)
-	CompactionManual          bool               `json:"compaction_manual,omitempty"`           // checkpoint came from the runtime summarizer started by a manual /compact; false for model-driven checkpoints submitted during that compaction
-	CompactionWindowNumber    uint64             `json:"compaction_window_number,omitempty"`    // committed context window carried by the checkpoint
-	CompactionFileRevisions   map[string]string  `json:"compaction_file_revisions,omitempty"`   // key-file revisions captured when this checkpoint was created
-	StopReason                string             `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
-	Provenance                *MessageProvenance `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
+	FileState                 *ToolFileState     `json:"file_state,omitempty"`                 // durable file-state metadata for restore-time safety sentinels
+	ToolChangedPaths          []string           `json:"tool_changed_paths,omitempty"`         // runtime-observed workspace paths attributed to this tool result
+	FileAttributionIncomplete bool               `json:"file_attribution_incomplete,omitzero"` // successful mutation could not be mapped to exact workspace paths
+	LSPReviews                []LSPReview        `json:"lsp_reviews,omitempty"`                // per-file, per-server last-review snapshots for directly edited files
+	Audit                     *ToolArgsAudit     `json:"audit,omitempty"`                      // tool-call audit metadata when effective args differ after confirmation
+	IsCompactionSummary       bool               `json:"is_compaction_summary,omitzero"`       // first user message after compaction (summary of archived history)
+	CompactionSummaryMode     string             `json:"compaction_summary_mode,omitempty"`    // how the archived history was preserved (see CompactionSummaryMode* constants)
+	CompactionManual          bool               `json:"compaction_manual,omitzero"`           // checkpoint came from the runtime summarizer started by a manual /compact; false for model-driven checkpoints submitted during that compaction
+	CompactionWindowNumber    uint64             `json:"compaction_window_number,omitzero"`    // committed context window carried by the checkpoint
+	CompactionFileRevisions   map[string]string  `json:"compaction_file_revisions,omitempty"`  // key-file revisions captured when this checkpoint was created
+	StopReason                string             `json:"stop_reason,omitempty"`                // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
+	Provenance                *MessageProvenance `json:"provenance,omitempty"`                 // optional producer/source metadata for model-compat replay decisions
 	// CompactionRequestSources holds full-source fingerprints for request-copy
 	// projection. It is persisted for resume and never sent as prompt content.
 	CompactionRequestSources map[string]string `json:"compaction_request_sources,omitempty"`
@@ -386,7 +386,7 @@ type Message struct {
 	// KindContextNotice row. One cycle writes at most one row, and a restore
 	// continues the cycle counter past the IDs already on disk instead of
 	// opening a duplicate cycle for pressure the transcript already records.
-	PressureCycleID uint64           `json:"pressure_cycle_id,omitempty"`
+	PressureCycleID uint64           `json:"pressure_cycle_id,omitzero"`
 	Mailbox         *MailboxMetadata `json:"mailbox,omitempty"` // durable metadata for a mailbox message actually sent to an agent
 	MailboxAckID    string           `json:"-"`                 // transient runtime-only mailbox ack marker; never persisted
 	// MCPTools carries a request-only provider mount. It never enters ctxmgr or
@@ -410,9 +410,9 @@ type MailboxMetadata struct {
 	MessageType   string `json:"message_type,omitempty"`
 	Subtype       string `json:"subtype,omitempty"`
 	SourceTaskID  string `json:"source_task_id,omitempty"`
-	SourceAttempt uint64 `json:"source_attempt,omitempty"`
+	SourceAttempt uint64 `json:"source_attempt,omitzero"`
 	TargetTaskID  string `json:"target_task_id,omitempty"`
-	TargetAttempt uint64 `json:"target_attempt,omitempty"`
+	TargetAttempt uint64 `json:"target_attempt,omitzero"`
 	CorrelationID string `json:"correlation_id,omitempty"`
 	InReplyTo     string `json:"in_reply_to,omitempty"`
 }
@@ -634,7 +634,7 @@ type TokenUsage struct {
 	OutputTokens       int                `json:"output_tokens"`
 	CacheReadTokens    int                `json:"cache_read_input_tokens"`
 	CacheWriteTokens   int                `json:"cache_creation_input_tokens"`
-	CacheWrite1hTokens int                `json:"cache_creation_1h_input_tokens,omitempty"`
+	CacheWrite1hTokens int                `json:"cache_creation_1h_input_tokens,omitzero"`
 	ReasoningTokens    int                `json:"reasoning_tokens"`
 
 	// Transient raw-provider semantics. The LLM client normalizes successful
@@ -729,7 +729,7 @@ type MessageProvenance struct {
 	ModelRef     string `json:"model_ref,omitempty"`   // provider/model[@variant]
 	WireFamily   string `json:"wire_family,omitempty"` // anthropic|openai-chat|openai-responses|gemini|unknown
 	NativeFamily string `json:"native_family,omitempty"`
-	Imported     bool   `json:"imported,omitempty"`
+	Imported     bool   `json:"imported,omitzero"`
 	// Origin names who triggered a synthesized message when that is not the
 	// model. It stays empty for ordinary messages; a skill pair injected by the
 	// user's explicit /skill request carries OriginUser, so exports and

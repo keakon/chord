@@ -24,11 +24,11 @@ type externalCheckoutBaseline struct {
 	Branch string `json:"branch,omitempty"`
 	// BranchUnknown records that the branch could not be read at startup; it is
 	// reported with the completion instead of silently leaving the field empty.
-	BranchUnknown bool `json:"branch_unknown,omitempty"`
+	BranchUnknown bool `json:"branch_unknown,omitzero"`
 	// StatusUnknown separates "git could not be asked" from "git said clean":
 	// a timed-out status check must never produce a trusted diff stat.
-	StatusUnknown bool `json:"status_unknown,omitempty"`
-	Dirty         bool `json:"dirty,omitempty"`
+	StatusUnknown bool `json:"status_unknown,omitzero"`
+	Dirty         bool `json:"dirty,omitzero"`
 }
 
 func captureExternalCheckoutBaseline(dir string) *externalCheckoutBaseline {

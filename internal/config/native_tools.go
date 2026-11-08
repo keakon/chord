@@ -19,7 +19,7 @@ type NativeWebSearchConfig struct {
 	Preauthorized  bool     `json:"preauthorized" yaml:"preauthorized"`
 	AllowedDomains []string `json:"allowed_domains,omitempty" yaml:"allowed_domains,omitempty"`
 	BlockedDomains []string `json:"blocked_domains,omitempty" yaml:"blocked_domains,omitempty"`
-	MaxUses        int      `json:"max_uses,omitempty" yaml:"max_uses,omitempty"`
+	MaxUses        int      `json:"max_uses,omitzero" yaml:"max_uses,omitempty"`
 }
 
 func (c NativeWebSearchConfig) Validate(protocol, endpoint string) error {

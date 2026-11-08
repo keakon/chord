@@ -13,11 +13,11 @@ const (
 type InputResultEvent struct {
 	Target        *InputTarget `json:"target,omitempty"`
 	InputID       string       `json:"input_id,omitempty"`
-	Revision      uint64       `json:"revision,omitempty"`
-	QueueRevision uint64       `json:"queue_revision,omitempty"`
+	Revision      uint64       `json:"revision,omitzero"`
+	QueueRevision uint64       `json:"queue_revision,omitzero"`
 	RequestID     string       `json:"request_id"`
 	Status        string       `json:"status"`
-	TurnID        uint64       `json:"turn_id,omitempty"`
+	TurnID        uint64       `json:"turn_id,omitzero"`
 	Message       string       `json:"message,omitempty"`
 }
 

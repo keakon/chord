@@ -18,14 +18,14 @@ type TaskHandle struct {
 	TaskID            string `json:"task_id"`
 	AgentID           string `json:"agent_id"`
 	PreviousAgentID   string `json:"previous_agent_id,omitempty"`
-	Rehydrated        bool   `json:"rehydrated,omitempty"`
+	Rehydrated        bool   `json:"rehydrated,omitzero"`
 	Message           string `json:"message"`
 	PlanTaskRef       string `json:"plan_task_ref,omitempty"`
 	SemanticTaskKey   string `json:"semantic_task_key,omitempty"`
 	SuggestedTaskID   string `json:"suggested_task_id,omitempty"`
 	SuggestedAgentID  string `json:"suggested_agent_id,omitempty"`
 	SuggestedAction   string `json:"suggested_action,omitempty"`
-	DuplicateDetected bool   `json:"duplicate_detected,omitempty"`
+	DuplicateDetected bool   `json:"duplicate_detected,omitzero"`
 }
 
 // SubAgentRequest is one delegation request. It is a struct rather than a

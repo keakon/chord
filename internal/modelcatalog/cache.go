@@ -37,9 +37,9 @@ type Candidate struct {
 	ModelID string `json:"model_id,omitempty"`
 	// Context, Input, Output and InputModalities are observed reference
 	// values; zero/absent means not observed, never a default.
-	Context         int      `json:"context,omitempty"`
-	Input           int      `json:"input,omitempty"`
-	Output          int      `json:"output,omitempty"`
+	Context         int      `json:"context,omitzero"`
+	Input           int      `json:"input,omitzero"`
+	Output          int      `json:"output,omitzero"`
 	InputModalities []string `json:"input_modalities,omitempty"`
 	Sources         []Source `json:"sources"`
 	Notes           string   `json:"notes,omitempty"`

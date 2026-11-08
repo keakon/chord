@@ -38,8 +38,8 @@ type AuthorizationServerMetadata struct {
 	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported,omitempty"`
 	CodeChallengeMethodsSupported              []string `json:"code_challenge_methods_supported"`
 	ScopesSupported                            []string `json:"scopes_supported,omitempty"`
-	ClientIDMetadataDocumentSupported          bool     `json:"client_id_metadata_document_supported,omitempty"`
-	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported,omitempty"`
+	ClientIDMetadataDocumentSupported          bool     `json:"client_id_metadata_document_supported,omitzero"`
+	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported,omitzero"`
 }
 
 // OAuthDiscovery contains validated protocol metadata, never tokens. It must

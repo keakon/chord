@@ -40,8 +40,8 @@ type Request struct {
 type Image struct {
 	Data   []byte `json:"-"`
 	MIME   string `json:"mime_type,omitempty"`
-	Width  int    `json:"width,omitempty"`
-	Height int    `json:"height,omitempty"`
+	Width  int    `json:"width,omitzero"`
+	Height int    `json:"height,omitzero"`
 }
 
 type Candidate struct {

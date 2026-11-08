@@ -29,12 +29,12 @@ type FailureDetails struct {
 	Request           *RequestDiagnostics  `json:"request,omitempty"`
 	Response          *ResponseDiagnostics `json:"response,omitempty"`
 	Category          string               `json:"category"`
-	HTTPStatus        int                  `json:"http_status,omitempty"`
+	HTTPStatus        int                  `json:"http_status,omitzero"`
 	Code              string               `json:"code,omitempty"`
 	Type              string               `json:"type,omitempty"`
 	Status            string               `json:"status,omitempty"`
 	Reason            string               `json:"reason,omitempty"`
-	ZeroQuota         bool                 `json:"zero_quota,omitempty"`
+	ZeroQuota         bool                 `json:"zero_quota,omitzero"`
 	RetryAfterSeconds *float64             `json:"retry_after_seconds,omitempty"`
 	SkippedTargets    []string             `json:"skipped_targets,omitempty"`
 }

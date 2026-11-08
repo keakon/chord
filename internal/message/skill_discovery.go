@@ -25,7 +25,7 @@ type SkillDiscoveryRecord struct {
 	ContextEpoch uint64               `json:"context_epoch"`
 	Mode         string               `json:"mode"`
 	Skills       []SkillActivationRef `json:"skills,omitempty"`
-	Omitted      int                  `json:"omitted,omitempty"`
+	Omitted      int                  `json:"omitted,omitzero"`
 }
 type SkillActivationCarry struct {
 	TaskID       string                `json:"task_id"`

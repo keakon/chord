@@ -78,16 +78,16 @@ type Status struct {
 	recovery.TransferIdentity
 	State             string    `json:"state"`
 	StartedAt         time.Time `json:"started_at"`
-	WaitExpired       bool      `json:"wait_expired,omitempty"`
-	PendingInputs     int       `json:"pending_inputs,omitempty"`
+	WaitExpired       bool      `json:"wait_expired,omitzero"`
+	PendingInputs     int       `json:"pending_inputs,omitzero"`
 	CheckpointID      string    `json:"checkpoint_id,omitempty"`
 	ErrorCode         string    `json:"error_code,omitempty"`
 	Message           string    `json:"message,omitempty"`
 	RecoverableAction string    `json:"recoverable_action,omitempty"`
 	Blockers          []Blocker `json:"blockers,omitempty"`
 	BlockerCount      int       `json:"blocker_count"`
-	BlockerOffset     int       `json:"blocker_offset,omitempty"`
-	NextOffset        int       `json:"next_offset,omitempty"`
+	BlockerOffset     int       `json:"blocker_offset,omitzero"`
+	NextOffset        int       `json:"next_offset,omitzero"`
 }
 
 func PublicStatus(s recovery.SessionPauseStatus) Status { return pageStatus(s, 0) }
@@ -139,7 +139,7 @@ type request struct {
 	Source        Record                    `json:"source"`
 	Action        string                    `json:"action"`
 	Identity      recovery.TransferIdentity `json:"identity"`
-	BlockerOffset int                       `json:"blocker_offset,omitempty"`
+	BlockerOffset int                       `json:"blocker_offset,omitzero"`
 }
 type response struct {
 	Protocol int     `json:"protocol"`

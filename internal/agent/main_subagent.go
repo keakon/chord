@@ -26,8 +26,8 @@ import (
 // report; native runtimes leave CostKnown false.
 type AgentUsage struct {
 	Tokens    message.TokenUsage `json:"tokens"`
-	CostUSD   float64            `json:"cost_usd,omitempty"`
-	CostKnown bool               `json:"cost_known,omitempty"`
+	CostUSD   float64            `json:"cost_usd,omitzero"`
+	CostKnown bool               `json:"cost_known,omitzero"`
 }
 
 // TotalTokens returns the display total over every billable class: input

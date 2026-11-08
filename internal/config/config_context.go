@@ -16,20 +16,20 @@ type ContextConfig struct {
 // accepts either a mapping of per-rule fields or the boolean shorthand
 // `reduction: false`, which disables request-level reduction entirely.
 type ContextReductionConfig struct {
-	ConfirmAgeTurns         int `json:"confirm_age_turns,omitempty" yaml:"confirm_age_turns,omitempty"`
-	ErrorAgeTurns           int `json:"error_age_turns,omitempty" yaml:"error_age_turns,omitempty"`
-	HighRiskProtectAgeTurns int `json:"high_risk_protect_age_turns,omitempty" yaml:"high_risk_protect_age_turns,omitempty"`
-	DiffProtectAgeTurns     int `json:"diff_protect_age_turns,omitempty" yaml:"diff_protect_age_turns,omitempty"`
-	ShellSuccessAgeTurns    int `json:"shell_success_age_turns,omitempty" yaml:"shell_success_age_turns,omitempty"`
-	ShellSuccessBytes       int `json:"shell_success_bytes,omitempty" yaml:"shell_success_bytes,omitempty"`
-	ShellReadOnlyAgeTurns   int `json:"shell_read_only_age_turns,omitempty" yaml:"shell_read_only_age_turns,omitempty"`
-	ReadLikeAgeTurns        int `json:"read_like_age_turns,omitempty" yaml:"read_like_age_turns,omitempty"`
-	ReadLikeOutputBytes     int `json:"read_like_output_bytes,omitempty" yaml:"read_like_output_bytes,omitempty"`
-	StaleAgeTurns           int `json:"stale_age_turns,omitempty" yaml:"stale_age_turns,omitempty"`
-	StaleOutputBytes        int `json:"stale_output_bytes,omitempty" yaml:"stale_output_bytes,omitempty"`
-	WrapUpGraceRequests     int `json:"wrap_up_grace_requests,omitempty" yaml:"wrap_up_grace_requests,omitempty"`
-	MinToolResultsPrune     int `json:"min_tool_results_prune,omitempty" yaml:"min_tool_results_prune,omitempty"`
-	MinIncrementalTokens    int `json:"min_incremental_saved_tokens,omitempty" yaml:"min_incremental_saved_tokens,omitempty"`
+	ConfirmAgeTurns         int `json:"confirm_age_turns,omitzero" yaml:"confirm_age_turns,omitempty"`
+	ErrorAgeTurns           int `json:"error_age_turns,omitzero" yaml:"error_age_turns,omitempty"`
+	HighRiskProtectAgeTurns int `json:"high_risk_protect_age_turns,omitzero" yaml:"high_risk_protect_age_turns,omitempty"`
+	DiffProtectAgeTurns     int `json:"diff_protect_age_turns,omitzero" yaml:"diff_protect_age_turns,omitempty"`
+	ShellSuccessAgeTurns    int `json:"shell_success_age_turns,omitzero" yaml:"shell_success_age_turns,omitempty"`
+	ShellSuccessBytes       int `json:"shell_success_bytes,omitzero" yaml:"shell_success_bytes,omitempty"`
+	ShellReadOnlyAgeTurns   int `json:"shell_read_only_age_turns,omitzero" yaml:"shell_read_only_age_turns,omitempty"`
+	ReadLikeAgeTurns        int `json:"read_like_age_turns,omitzero" yaml:"read_like_age_turns,omitempty"`
+	ReadLikeOutputBytes     int `json:"read_like_output_bytes,omitzero" yaml:"read_like_output_bytes,omitempty"`
+	StaleAgeTurns           int `json:"stale_age_turns,omitzero" yaml:"stale_age_turns,omitempty"`
+	StaleOutputBytes        int `json:"stale_output_bytes,omitzero" yaml:"stale_output_bytes,omitempty"`
+	WrapUpGraceRequests     int `json:"wrap_up_grace_requests,omitzero" yaml:"wrap_up_grace_requests,omitempty"`
+	MinToolResultsPrune     int `json:"min_tool_results_prune,omitzero" yaml:"min_tool_results_prune,omitempty"`
+	MinIncrementalTokens    int `json:"min_incremental_saved_tokens,omitzero" yaml:"min_incremental_saved_tokens,omitempty"`
 
 	mode contextReductionMode
 }
@@ -175,16 +175,16 @@ func contextReductionFieldError(keyNode *yaml.Node) string {
 // CompactionConfig controls durable compaction backend, output profile, and
 // input-budget reservation used by auto-compaction / oversize recovery.
 type CompactionConfig struct {
-	Threshold float64 `json:"threshold,omitempty" yaml:"threshold,omitempty"`
+	Threshold float64 `json:"threshold,omitzero" yaml:"threshold,omitempty"`
 	Profile   string  `json:"profile,omitempty" yaml:"profile,omitempty"`
-	Reserved  int     `json:"reserved,omitempty" yaml:"reserved,omitempty"`
+	Reserved  int     `json:"reserved,omitzero" yaml:"reserved,omitempty"`
 	ModelPool string  `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
 	// Reminder is the context-pressure reminder line as a usage fraction.
 	// Zero means "not configured": the runtime derives it as
 	// min(0.60, threshold*0.90). Unlike threshold, zero is not a disable
 	// signal; CompactionReminderDisabled (-1) disables the reminder while
 	// keeping automatic compaction.
-	Reminder float64 `json:"reminder,omitempty" yaml:"reminder,omitempty"`
+	Reminder float64 `json:"reminder,omitzero" yaml:"reminder,omitempty"`
 	// ModelDriven exposes the compact_context tool so the model can request a
 	// durable context checkpoint once its working state is externalized.
 	// The pointer distinguishes an explicit value from an unset one: unset
@@ -198,7 +198,7 @@ type CompactionConfig struct {
 	// history. Zero (or omitted) uses the built-in default; there is no
 	// disable value. Only the message text counts toward the budget, and
 	// blocks carried from the previous checkpoint consume the same budget.
-	RetainRecentTokens int `json:"retain_recent_tokens,omitempty" yaml:"retain_recent_tokens,omitempty"`
+	RetainRecentTokens int `json:"retain_recent_tokens,omitzero" yaml:"retain_recent_tokens,omitempty"`
 }
 
 // CompactionReminderDisabled is the reminder value that switches the

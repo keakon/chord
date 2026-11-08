@@ -47,7 +47,7 @@ type headlessConfirmPayload struct {
 	ToolName                string             `json:"tool_name"`
 	ArgsJSON                string             `json:"args_json"`
 	RequestID               string             `json:"request_id,omitempty"`
-	TimeoutMS               int64              `json:"timeout_ms,omitempty"`
+	TimeoutMS               int64              `json:"timeout_ms,omitzero"`
 	NeedsApproval           []string           `json:"needs_approval,omitempty"`
 	AlreadyAllowed          []string           `json:"already_allowed,omitempty"`
 	NeedsApprovalRules      []string           `json:"needs_approval_rules,omitempty"`
@@ -68,7 +68,7 @@ type headlessQuestionPayload struct {
 	DefaultOptionID string                `json:"default_option_id,omitempty"`
 	OptionIDs       []string              `json:"option_ids,omitempty"`
 	Timer           string                `json:"timer"`
-	DurationSeconds int64                 `json:"duration_seconds,omitempty"`
+	DurationSeconds int64                 `json:"duration_seconds,omitzero"`
 	Outcome         string                `json:"reason,omitempty"`
 	ResultID        string                `json:"result_id,omitempty"`
 	Selected        []string              `json:"selected,omitempty"`
@@ -78,7 +78,7 @@ type headlessQuestionPayload struct {
 	Question        string                `json:"question"`
 	Options         []string              `json:"options"`
 	OptionDetails   []string              `json:"option_details,omitempty"`
-	Multiple        bool                  `json:"multiple,omitempty"`
+	Multiple        bool                  `json:"multiple,omitzero"`
 	RequestID       string                `json:"request_id,omitempty"`
 	Deadline        *time.Time            `json:"deadline,omitempty"`
 	AgentID         string                `json:"agent_id,omitempty"`
@@ -186,7 +186,7 @@ func (s *headlessState) stampHeadlessSeq(bump bool, envs ...*headlessEnvelope) u
 // omitted everywhere else.
 type headlessEnvelope struct {
 	Type    string `json:"type"`
-	Seq     uint64 `json:"seq,omitempty"`
+	Seq     uint64 `json:"seq,omitzero"`
 	Payload any    `json:"payload,omitempty"`
 }
 
@@ -220,11 +220,11 @@ type headlessCommand struct {
 	RuleScope           string             `json:"rule_scope,omitempty"` // session | project | user_global
 	Answers             []string           `json:"answers,omitempty"`
 	OperationID         string             `json:"operation_id,omitempty"`
-	Version             uint64             `json:"version,omitempty"`
-	Custom              bool               `json:"custom,omitempty"`
+	Version             uint64             `json:"version,omitzero"`
+	Custom              bool               `json:"custom,omitzero"`
 	ReplacementID       string             `json:"replacement_id,omitempty"`
 	UserText            string             `json:"user_text,omitempty"`
-	SupportsInteraction bool               `json:"supports_interaction,omitempty"`
+	SupportsInteraction bool               `json:"supports_interaction,omitzero"`
 	Events              []string           `json:"events,omitempty"` // for subscribe command
 }
 

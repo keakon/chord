@@ -44,7 +44,7 @@ type grepArgs struct {
 	// 0 (the default) keeps the historical match-only output byte for byte;
 	// a positive value adds up to that many lines before and after each hit,
 	// with adjacent hit windows merged so a shared line is emitted once.
-	ContextLines int `json:"context_lines,omitempty"`
+	ContextLines int `json:"context_lines,omitzero"`
 	// RequestedContextLines is the decoded value the caller sent, kept
 	// unclamped so the clamp note can quote it.
 	RequestedContextLines float64 `json:"-"`

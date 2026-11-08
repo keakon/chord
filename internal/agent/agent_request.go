@@ -44,7 +44,7 @@ type DurableAgentRequest struct {
 	SourceTaskID     string                `json:"source_task_id"`
 	SourceAttempt    uint64                `json:"source_attempt"`
 	TargetTaskID     string                `json:"target_task_id,omitempty"`
-	TargetAttempt    uint64                `json:"target_attempt,omitempty"`
+	TargetAttempt    uint64                `json:"target_attempt,omitzero"`
 	Message          string                `json:"message"`
 	State            string                `json:"state"`
 	CreatedAt        time.Time             `json:"created_at"`

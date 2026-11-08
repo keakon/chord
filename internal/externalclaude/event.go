@@ -39,11 +39,11 @@ type Event struct {
 
 	// result fields.
 	Result            string                `json:"result,omitempty"`
-	IsError           bool                  `json:"is_error,omitempty"`
-	DurationMS        int64                 `json:"duration_ms,omitempty"`
-	DurationAPIMS     int64                 `json:"duration_api_ms,omitempty"`
-	NumTurns          int                   `json:"num_turns,omitempty"`
-	TotalCostUSD      float64               `json:"total_cost_usd,omitempty"`
+	IsError           bool                  `json:"is_error,omitzero"`
+	DurationMS        int64                 `json:"duration_ms,omitzero"`
+	DurationAPIMS     int64                 `json:"duration_api_ms,omitzero"`
+	NumTurns          int                   `json:"num_turns,omitzero"`
+	TotalCostUSD      float64               `json:"total_cost_usd,omitzero"`
 	TerminalReason    string                `json:"terminal_reason,omitempty"`
 	Usage             *Usage                `json:"usage,omitempty"`
 	ModelUsage        map[string]ModelUsage `json:"modelUsage,omitempty"`
@@ -79,7 +79,7 @@ type ContentBlock struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
-	IsError   bool            `json:"is_error,omitempty"`
+	IsError   bool            `json:"is_error,omitzero"`
 	Thinking  string          `json:"thinking,omitempty"`
 }
 

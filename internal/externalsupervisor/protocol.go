@@ -71,20 +71,20 @@ type Message struct {
 	Env         []string `json:"env,omitempty"`
 	Dir         string   `json:"dir,omitempty"`
 	ReceiptDir  string   `json:"receipt_dir,omitempty"`
-	KillGraceMS int64    `json:"kill_grace_ms,omitempty"`
+	KillGraceMS int64    `json:"kill_grace_ms,omitzero"`
 
 	// started: the process-group identity the supervisor bound for this run.
-	PID        int    `json:"pid,omitempty"`
-	PGID       int    `json:"pgid,omitempty"`
+	PID        int    `json:"pid,omitzero"`
+	PGID       int    `json:"pgid,omitzero"`
 	StartToken string `json:"start_token,omitempty"`
 
 	// stop: how long the managed process may take to go away on its own.
-	GraceMS int64 `json:"grace_ms,omitempty"`
+	GraceMS int64 `json:"grace_ms,omitzero"`
 
 	// exited and error: how the run ended and what the teardown achieved.
 	Reason     string   `json:"reason,omitempty"`
-	ExitCode   int      `json:"exit_code,omitempty"`
-	ExitSignal int      `json:"exit_signal,omitempty"`
+	ExitCode   int      `json:"exit_code,omitzero"`
+	ExitSignal int      `json:"exit_signal,omitzero"`
 	Cleanup    *Cleanup `json:"cleanup,omitempty"`
 	Error      string   `json:"error,omitempty"`
 }
@@ -109,15 +109,15 @@ type Receipt struct {
 	Command        string    `json:"command"`
 	Args           []string  `json:"args,omitempty"`
 	Dir            string    `json:"dir,omitempty"`
-	ProcessStarted bool      `json:"process_started,omitempty"`
+	ProcessStarted bool      `json:"process_started,omitzero"`
 	PID            int       `json:"pid"`
 	PGID           int       `json:"pgid"`
 	StartToken     string    `json:"start_token,omitempty"`
 	StartedAt      time.Time `json:"started_at"`
 	FinishedAt     time.Time `json:"finished_at"`
 	Reason         string    `json:"reason"`
-	ExitCode       int       `json:"exit_code,omitempty"`
-	ExitSignal     int       `json:"exit_signal,omitempty"`
+	ExitCode       int       `json:"exit_code,omitzero"`
+	ExitSignal     int       `json:"exit_signal,omitzero"`
 	Cleanup        Cleanup   `json:"cleanup"`
 }
 

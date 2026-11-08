@@ -98,7 +98,7 @@ func DefaultProjectionLimits() ProjectionLimits {
 // source, uncut text never does.
 type BoundedText struct {
 	Text      string `json:"text"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Truncated bool   `json:"truncated,omitzero"`
 	Ref       string `json:"ref,omitempty"`
 }
 
@@ -124,13 +124,13 @@ type ProjectedToolCall struct {
 	Name            string                  `json:"name"`
 	Status          string                  `json:"status"`
 	RecoveryState   string                  `json:"recovery_state,omitempty"`
-	DurationMs      int64                   `json:"duration_ms,omitempty"`
+	DurationMs      int64                   `json:"duration_ms,omitzero"`
 	Args            BoundedText             `json:"args"`
 	ResultDigest    string                  `json:"result_digest,omitempty"`
 	Ref             string                  `json:"ref"`
 	Rejected        bool                    `json:"rejected"`
 	RejectionSource string                  `json:"rejection_source"`
-	ResultUnknown   bool                    `json:"result_unknown,omitempty"`
+	ResultUnknown   bool                    `json:"result_unknown,omitzero"`
 	// Origin names who triggered the call when that is observable and not the
 	// model itself. A user-triggered /skill load persists a synthesized call
 	// carrying OriginUser, so consumers can tell it apart from a model call
@@ -143,8 +143,8 @@ type ProjectedFileChange struct {
 	Path        string `json:"path"`
 	TargetPath  string `json:"target_path,omitempty"`
 	Op          string `json:"op"`
-	Added       int    `json:"added,omitempty"`
-	Removed     int    `json:"removed,omitempty"`
+	Added       int    `json:"added,omitzero"`
+	Removed     int    `json:"removed,omitzero"`
 	Attribution string `json:"attribution"`
 }
 
@@ -169,7 +169,7 @@ type ProjectedTurn struct {
 	AssistantFinalText       BoundedText             `json:"assistant_final_text"`
 	ToolCalls                []ProjectedToolCall     `json:"tool_calls,omitempty"`
 	FileChanges              []ProjectedFileChange   `json:"file_changes,omitempty"`
-	CompactionBoundary       bool                    `json:"compaction_boundary,omitempty"`
+	CompactionBoundary       bool                    `json:"compaction_boundary,omitzero"`
 	ArchiveRef               string                  `json:"archive_ref,omitempty"`
 	Provenance               ProjectedProvenance     `json:"provenance"`
 }

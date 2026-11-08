@@ -17,5 +17,5 @@ package config
 type ThinkingTranslationConfig struct {
 	TargetLanguage string `json:"target_language,omitempty" yaml:"target_language,omitempty"`
 	ModelPool      string `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
-	MaxChars       int    `json:"max_chars,omitempty" yaml:"max_chars,omitempty"`
+	MaxChars       int    `json:"max_chars,omitzero" yaml:"max_chars,omitempty"`
 }

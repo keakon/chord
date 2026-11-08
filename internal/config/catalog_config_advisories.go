@@ -43,8 +43,8 @@ type CatalogConfigAdvisory struct {
 type CatalogAdvisoryOrigin struct {
 	Layer OriginLayer `json:"layer"`
 	File  string      `json:"file,omitempty"`
-	Line  int         `json:"line,omitempty"`
-	Col   int         `json:"col,omitempty"`
+	Line  int         `json:"line,omitzero"`
+	Col   int         `json:"col,omitzero"`
 }
 
 // OriginRef returns the declaring file and line of the current value, or ""

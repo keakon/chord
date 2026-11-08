@@ -33,7 +33,7 @@ type TransferIdentity struct {
 // SessionPauseCheckpoint preserves accepted input independently of runtime queues.
 // Complete means contents are sealed, not that the source lock was released.
 type SessionPauseCheckpoint struct {
-	InputDeliveryRevision uint64           `json:"input_delivery_revision,omitempty"`
+	InputDeliveryRevision uint64           `json:"input_delivery_revision,omitzero"`
 	Identity              TransferIdentity `json:"identity"`
 	CheckpointID          string           `json:"checkpoint_id"`
 	Paused                bool             `json:"paused"`
@@ -62,7 +62,7 @@ type PendingInput struct {
 	FromUser            bool                     `json:"from_user"`
 	MailboxAckID        string                   `json:"mailbox_ack_id,omitempty"`
 	Mailbox             *message.MailboxMetadata `json:"mailbox,omitempty"`
-	DrainContextAppends bool                     `json:"drain_context_appends,omitempty"`
+	DrainContextAppends bool                     `json:"drain_context_appends,omitzero"`
 	Stage               string                   `json:"stage"`
 }
 

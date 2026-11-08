@@ -30,7 +30,7 @@ type responseOutputItemAdded struct {
 	Index       int                 `json:"index"`
 	OutputIndex int                 `json:"output_index"`
 	Item        responsesStreamItem `json:"item"`
-	SequenceNum int                 `json:"sequence_number,omitempty"`
+	SequenceNum int                 `json:"sequence_number,omitzero"`
 }
 
 type responseOutputTextDelta struct {

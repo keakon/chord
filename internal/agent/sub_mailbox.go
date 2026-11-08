@@ -75,7 +75,7 @@ type CompletionEnvelope struct {
 	BlockedReason             string              `json:"blocked_reason,omitempty"`
 	ReportedFilesChanged      []string            `json:"reported_files_changed,omitempty"`
 	ActualFilesChanged        []string            `json:"actual_files_changed,omitempty"`
-	FileAttributionIncomplete bool                `json:"file_attribution_incomplete,omitempty"`
+	FileAttributionIncomplete bool                `json:"file_attribution_incomplete,omitzero"`
 	RemainingLimitations      []string            `json:"remaining_limitations,omitempty"`
 	KnownRisks                []string            `json:"known_risks,omitempty"`
 	FollowUpRecommended       []string            `json:"follow_up_recommended,omitempty"`
@@ -95,7 +95,7 @@ type CompletionWorktree struct {
 	Branch     string `json:"branch,omitempty"`
 	Path       string `json:"path,omitempty"`
 	Base       string `json:"base,omitempty"`
-	Generation uint64 `json:"generation,omitempty"`
+	Generation uint64 `json:"generation,omitzero"`
 	// DiffStat is `git diff --stat` against Base, covering committed and
 	// uncommitted changes. DiffError is set instead when it could not be
 	// computed, so the owner sees "unknown" rather than an empty diff.
@@ -107,7 +107,7 @@ type SubAgentMailboxMessage struct {
 	MessageID      string                  `json:"message_id"`
 	AgentID        string                  `json:"agent_id"`
 	TaskID         string                  `json:"task_id"`
-	Attempt        uint64                  `json:"attempt,omitempty"`
+	Attempt        uint64                  `json:"attempt,omitzero"`
 	OwnerAgentID   string                  `json:"owner_agent_id,omitempty"`
 	OwnerTaskID    string                  `json:"owner_task_id,omitempty"`
 	InReplyTo      string                  `json:"in_reply_to,omitempty"`
@@ -116,15 +116,15 @@ type SubAgentMailboxMessage struct {
 	Summary        string                  `json:"summary"`
 	Payload        string                  `json:"payload,omitempty"`
 	Completion     *CompletionEnvelope     `json:"completion,omitempty"`
-	RequiresAck    bool                    `json:"requires_ack,omitempty"`
-	Consumed       bool                    `json:"consumed,omitempty"`
+	RequiresAck    bool                    `json:"requires_ack,omitzero"`
+	Consumed       bool                    `json:"consumed,omitzero"`
 	CreatedAt      time.Time               `json:"created_at"`
 	MessageType    AgentMessageType        `json:"message_type,omitempty"`
 	Subtype        string                  `json:"subtype,omitempty"`
 	SourceTaskID   string                  `json:"source_task_id,omitempty"`
-	SourceAttempt  uint64                  `json:"source_attempt,omitempty"`
+	SourceAttempt  uint64                  `json:"source_attempt,omitzero"`
 	TargetTaskID   string                  `json:"target_task_id,omitempty"`
-	TargetAttempt  uint64                  `json:"target_attempt,omitempty"`
+	TargetAttempt  uint64                  `json:"target_attempt,omitzero"`
 	CorrelationID  string                  `json:"correlation_id,omitempty"`
 	MessagePayload json.RawMessage         `json:"message_payload,omitempty"`
 	ArtifactRefs   []tools.ArtifactRef     `json:"artifact_refs,omitempty"`
@@ -136,7 +136,7 @@ type SubAgentMailboxMessage struct {
 	// syncTaskRecordFromMailbox): only rows produced by genuine lifecycle
 	// events (completion, failure, escalation) may flip a task to terminal or
 	// waiting state. Persisted so a replay keeps the distinction.
-	ReportOnly     bool `json:"report_only,omitempty"`
+	ReportOnly     bool `json:"report_only,omitzero"`
 	persistPending bool `json:"-"`
 	// rollbackAppendOffset records where the last persist of this message
 	// appended its mailbox.jsonl line (-1 when none or unknown), so a guarded
@@ -149,7 +149,7 @@ type SubAgentMailboxMessage struct {
 type SubAgentMailboxAckRecord struct {
 	MessageID        string    `json:"message_id"`
 	Outcome          string    `json:"outcome"`
-	TurnID           uint64    `json:"turn_id,omitempty"`
+	TurnID           uint64    `json:"turn_id,omitzero"`
 	InReplyTo        string    `json:"in_reply_to,omitempty"`
 	ReplyMessageID   string    `json:"reply_message_id,omitempty"`
 	ReplyToMailboxID string    `json:"reply_to_mailbox_id,omitempty"`

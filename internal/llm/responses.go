@@ -128,7 +128,7 @@ type responsesRequest struct {
 	Reasoning          *reasoningConfig       `json:"reasoning,omitempty"`
 	Store              bool                   `json:"store"`
 	Include            []string               `json:"include"`
-	MaxOutputTokens    int                    `json:"max_output_tokens,omitempty"`
+	MaxOutputTokens    int                    `json:"max_output_tokens,omitzero"`
 	PromptCacheKey     string                 `json:"prompt_cache_key,omitempty"`
 	PromptCacheOptions *responsesCacheControl `json:"prompt_cache_options,omitempty"`
 	Text               *textConfig            `json:"text,omitempty"`
@@ -325,7 +325,7 @@ type responsesTurnMetadataPayload struct {
 	ContextWindowID        string `json:"context_window_id,omitempty"`
 	Sandbox                string `json:"sandbox,omitempty"`
 	RequestKind            string `json:"request_kind,omitempty"`
-	TurnStartedAtUnixMilli int64  `json:"turn_started_at_unix_ms,omitempty"`
+	TurnStartedAtUnixMilli int64  `json:"turn_started_at_unix_ms,omitzero"`
 }
 
 func responsesClientMetadata(wire responsesWireIdentity, state *ResponsesTurnState) map[string]string {

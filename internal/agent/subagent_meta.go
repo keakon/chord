@@ -27,7 +27,7 @@ type subAgentMeta struct {
 	RunningModelRef  string `json:"running_model_ref,omitempty"`
 	OwnerAgentID     string `json:"owner_agent_id,omitempty"`
 	OwnerTaskID      string `json:"owner_task_id,omitempty"`
-	Depth            int    `json:"depth,omitempty"`
+	Depth            int    `json:"depth,omitzero"`
 	State            string `json:"state,omitempty"`
 	LastSummary      string `json:"last_summary,omitempty"`
 	// WorkDir is the agent's active checkout and WorkDirGeneration its binding
@@ -35,8 +35,8 @@ type subAgentMeta struct {
 	// resumed transcript's relative paths are not resolved against a
 	// different one.
 	WorkDir                 string              `json:"work_dir,omitempty"`
-	WorkDirGeneration       uint64              `json:"work_dir_generation,omitempty"`
-	PendingCompleteIntent   bool                `json:"pending_complete_intent,omitempty"`
+	WorkDirGeneration       uint64              `json:"work_dir_generation,omitzero"`
+	PendingCompleteIntent   bool                `json:"pending_complete_intent,omitzero"`
 	PendingCompleteSummary  string              `json:"pending_complete_summary,omitempty"`
 	PendingCompleteEnvelope *CompletionEnvelope `json:"pending_complete_envelope,omitempty"`
 	LastMailboxID           string              `json:"last_mailbox_id,omitempty"`

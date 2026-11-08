@@ -311,7 +311,7 @@ func (JobListTool) Description() string {
 }
 
 type jobListArgs struct {
-	IncludeFinished bool `json:"include_finished,omitempty"`
+	IncludeFinished bool `json:"include_finished,omitzero"`
 }
 
 func (JobListTool) Parameters() map[string]any {

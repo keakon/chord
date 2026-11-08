@@ -19,7 +19,7 @@ type NativeImageGenerationConfig struct {
 	Quality       string `json:"quality,omitempty" yaml:"quality,omitempty"`
 	Background    string `json:"background,omitempty" yaml:"background,omitempty"`
 	OutputFormat  string `json:"output_format,omitempty" yaml:"output_format,omitempty"`
-	MaxUses       int    `json:"max_uses,omitempty" yaml:"max_uses,omitempty"`
+	MaxUses       int    `json:"max_uses,omitzero" yaml:"max_uses,omitempty"`
 }
 
 func (c NativeImageGenerationConfig) Validate(protocol, endpoint string) error {

@@ -17,7 +17,7 @@ import (
 type toolCallResult struct {
 	Content           []toolCallContent `json:"content"`
 	StructuredContent json.RawMessage   `json:"structuredContent,omitempty"`
-	IsError           bool              `json:"isError,omitempty"`
+	IsError           bool              `json:"isError,omitzero"`
 }
 
 type toolCallContent struct {

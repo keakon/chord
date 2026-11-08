@@ -37,7 +37,7 @@ type UsageEvent struct {
 	AgentName        string            `json:"agent_name,omitempty"`
 	TaskID           string            `json:"task_id,omitempty"`
 	Purpose          string            `json:"purpose,omitempty"`
-	TurnID           uint64            `json:"turn_id,omitempty"`
+	TurnID           uint64            `json:"turn_id,omitzero"`
 	SelectedModelRef string            `json:"selected_model_ref,omitempty"`
 	RunningModelRef  string            `json:"running_model_ref,omitempty"`
 	Provider         string            `json:"provider,omitempty"`
@@ -60,11 +60,11 @@ type UsageAggregate struct {
 	LLMCalls            int64   `json:"llm_calls"`
 	InputTokens         int64   `json:"input_tokens"`
 	OutputTokens        int64   `json:"output_tokens"`
-	CacheReadTokens     int64   `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens    int64   `json:"cache_write_tokens,omitempty"`
-	ReasoningTokens     int64   `json:"reasoning_tokens,omitempty"`
-	ProviderTotalTokens int64   `json:"provider_total_tokens,omitempty"`
-	BillingTotalTokens  int64   `json:"billing_total_tokens,omitempty"`
+	CacheReadTokens     int64   `json:"cache_read_tokens,omitzero"`
+	CacheWriteTokens    int64   `json:"cache_write_tokens,omitzero"`
+	ReasoningTokens     int64   `json:"reasoning_tokens,omitzero"`
+	ProviderTotalTokens int64   `json:"provider_total_tokens,omitzero"`
+	BillingTotalTokens  int64   `json:"billing_total_tokens,omitzero"`
 	TotalCost           float64 `json:"total_cost"`
 }
 
@@ -76,7 +76,7 @@ type SessionUsageSummary struct {
 	CreatedAt     time.Time `json:"created_at"`
 	LastUpdatedAt time.Time `json:"last_updated_at"`
 	LastEventID   string    `json:"last_event_id,omitempty"`
-	EventCount    int64     `json:"event_count,omitempty"`
+	EventCount    int64     `json:"event_count,omitzero"`
 	Timezone      string    `json:"timezone,omitempty"`
 	// FirstUserMessage previews the head of the current transcript. It is
 	// synthetic — flagged by FirstUserMessageIsCompactionSummary — when it was
@@ -86,7 +86,7 @@ type SessionUsageSummary struct {
 	// A synthetic preview is still shown to identify the session, but nothing
 	// may treat it as a record of the user's first request.
 	FirstUserMessage                    string `json:"first_user_message,omitempty"`
-	FirstUserMessageIsCompactionSummary bool   `json:"first_user_message_is_compaction_summary,omitempty"`
+	FirstUserMessageIsCompactionSummary bool   `json:"first_user_message_is_compaction_summary,omitzero"`
 	// OriginalFirstUserMessage is the user's first request, preserved across
 	// compaction. It is only ever filled from a source that observed the
 	// pre-compaction head, never re-derived from a replaced transcript.
@@ -194,7 +194,7 @@ func LoadSessionUsageSummary(sessionDir string) (*SessionUsageSummary, error) {
 type CachedSessionUsageMetadata struct {
 	LastUpdatedAt                       time.Time `json:"last_updated_at"`
 	FirstUserMessage                    string    `json:"first_user_message,omitempty"`
-	FirstUserMessageIsCompactionSummary bool      `json:"first_user_message_is_compaction_summary,omitempty"`
+	FirstUserMessageIsCompactionSummary bool      `json:"first_user_message_is_compaction_summary,omitzero"`
 	OriginalFirstUserMessage            string    `json:"original_first_user_message,omitempty"`
 }
 

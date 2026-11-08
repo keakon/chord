@@ -30,7 +30,7 @@ type QuestionItem struct {
 	Question        string           `json:"question"`
 	Header          string           `json:"header"`
 	Options         []QuestionOption `json:"options,omitempty"`
-	Multiple        bool             `json:"multiple,omitempty"`
+	Multiple        bool             `json:"multiple,omitzero"`
 	ResponsePolicy  string           `json:"response_policy,omitempty"`
 	DefaultOptionID string           `json:"default_option_id,omitempty"`
 }

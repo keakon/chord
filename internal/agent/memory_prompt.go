@@ -156,14 +156,14 @@ type memoryExtractionInput struct {
 	// conclusion twice across sessions.
 	PendingPromotions   []string                       `json:"pending_promotions,omitempty"`
 	ActiveMemory        []memoryExtractionActiveRecord `json:"active_memory,omitempty"`
-	ActiveMemoryOmitted int                            `json:"active_memory_omitted,omitempty"`
+	ActiveMemoryOmitted int                            `json:"active_memory_omitted,omitzero"`
 	// ActiveMemoryLimit is the soft cap on active index entries, derived from the
 	// reminder budget. It is what turns "consolidate instead of appending" from
 	// advice into a condition the model can actually evaluate.
-	ActiveMemoryLimit int `json:"active_memory_limit,omitempty"`
+	ActiveMemoryLimit int `json:"active_memory_limit,omitzero"`
 	// RemovalAllowance is the per-run cap on retire requests plus promotions
 	// carrying source_id, the same number ParseExtractionOutput enforces.
-	RemovalAllowance int                          `json:"removal_allowance,omitempty"`
+	RemovalAllowance int                          `json:"removal_allowance,omitzero"`
 	Transcript       []memoryExtractionTranscript `json:"transcript"`
 }
 
@@ -180,7 +180,7 @@ type memoryExtractionActiveRecord struct {
 type memoryExtractionTranscript struct {
 	Role    sessionview.Kind `json:"role"`
 	Content string           `json:"content"`
-	Omitted bool             `json:"truncated,omitempty"`
+	Omitted bool             `json:"truncated,omitzero"`
 }
 
 // buildMemoryExtractionPrompt renders the extraction input: bounded repository

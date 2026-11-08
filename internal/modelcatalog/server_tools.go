@@ -22,7 +22,7 @@ type ServerToolCapability struct {
 	Contract    string   `json:"contract,omitempty" yaml:"contract,omitempty"`
 	Evidence    string   `json:"evidence,omitempty" yaml:"evidence,omitempty"`
 	Sources     []Source `json:"sources,omitempty" yaml:"sources,omitempty"`
-	ClientTools bool     `json:"client_tools,omitempty" yaml:"client_tools,omitempty"`
+	ClientTools bool     `json:"client_tools,omitzero" yaml:"client_tools,omitempty"`
 }
 
 func validateServerTools(binding Binding, endpoint Endpoint) error {

@@ -34,7 +34,7 @@ func (a NativeToolAuthorization) Equal(other NativeToolAuthorization) bool {
 // NativeToolHistory is an immutable receipt for server-side execution in a
 // main request. It must never be interpreted as client-dispatched ToolCalls.
 type NativeToolHistory struct {
-	OutcomeUnknown bool                    `json:"outcome_unknown,omitempty"`
+	OutcomeUnknown bool                    `json:"outcome_unknown,omitzero"`
 	Authorization  NativeToolAuthorization `json:"authorization"`
 	RequestIDs     []string                `json:"request_ids"`
 	Target         string                  `json:"target"`
