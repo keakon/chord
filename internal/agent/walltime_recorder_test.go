@@ -144,7 +144,7 @@ func TestWalltimeRecorderAppendsAndRepointsLedger(t *testing.T) {
 		t.Fatalf("BuildSessionEvidence: %v", err)
 	}
 	got := walltime[identity.MainAgentID]
-	if got.Tool != 1500*time.Millisecond || got.UserWait != 250*time.Millisecond {
+	if got.Tool != int64(1500*time.Millisecond) || got.UserWait != int64(250*time.Millisecond) {
 		t.Fatalf("recorded walltime = %#v, want tool 1.5s + user wait 250ms", got)
 	}
 
@@ -154,7 +154,7 @@ func TestWalltimeRecorderAppendsAndRepointsLedger(t *testing.T) {
 	rec.recordTarget(rec.captureAt(identity.MainAgentID, "", 0), analytics.WalltimePurposeCooldown, 300*time.Millisecond)
 
 	otherStats := walltimeStatsFor(t, ledgerB)
-	if otherStats[identity.MainAgentID].Cooldown != 300*time.Millisecond {
+	if otherStats[identity.MainAgentID].Cooldown != int64(300*time.Millisecond) {
 		t.Fatalf("repointed ledger cooldown = %v, want 300ms", otherStats[identity.MainAgentID].Cooldown)
 	}
 }
@@ -197,10 +197,10 @@ func TestWalltimeRecorderConcurrentRecordAndRepoint(t *testing.T) {
 	statsB := walltimeStatsFor(t, ledgerB)
 	var total time.Duration
 	if s := statsA[identity.MainAgentID]; s != nil {
-		total += s.Tool
+		total += time.Duration(s.Tool)
 	}
 	if s := statsB[identity.MainAgentID]; s != nil {
-		total += s.Tool
+		total += time.Duration(s.Tool)
 	}
 	tracked := rec.statsForAgent(identity.MainAgentID).Tool
 	// The tracker only reflects the current session generation; a segment
@@ -212,7 +212,7 @@ func TestWalltimeRecorderConcurrentRecordAndRepoint(t *testing.T) {
 	if total <= 0 {
 		t.Fatalf("no recorded segments made it into either ledger")
 	}
-	if tracked > total {
+	if time.Duration(tracked) > total {
 		t.Fatalf("tracker tool = %v exceeds ledger total %v", tracked, total)
 	}
 }
@@ -235,7 +235,7 @@ func TestLateSettlementWritesPinnedLedger(t *testing.T) {
 	rec.recordTarget(target, analytics.WalltimePurposeModel, 2*time.Second)
 
 	statsA := walltimeStatsFor(t, ledgerA)
-	if s := statsA[identity.MainAgentID]; s == nil || s.Model != 2*time.Second {
+	if s := statsA[identity.MainAgentID]; s == nil || s.Model != int64(2*time.Second) {
 		t.Fatalf("ledgerA model = %+v, want 2s in the pinned session", s)
 	}
 	statsB := walltimeStatsFor(t, ledgerB)
@@ -249,10 +249,10 @@ func TestLateSettlementWritesPinnedLedger(t *testing.T) {
 	// A fresh segment in session B still accounts normally.
 	rec.recordTarget(rec.captureAt(identity.MainAgentID, "", 0), analytics.WalltimePurposeTool, time.Second)
 	statsB = walltimeStatsFor(t, ledgerB)
-	if s := statsB[identity.MainAgentID]; s == nil || s.Tool != time.Second {
+	if s := statsB[identity.MainAgentID]; s == nil || s.Tool != int64(time.Second) {
 		t.Fatalf("ledgerB tool = %+v, want 1s", s)
 	}
-	if tracked := rec.statsForAgent(identity.MainAgentID).Tool; tracked != time.Second {
+	if tracked := rec.statsForAgent(identity.MainAgentID).Tool; tracked != int64(time.Second) {
 		t.Fatalf("current tracker tool = %v, want 1s", tracked)
 	}
 }
@@ -296,10 +296,10 @@ func TestWalltimeRecorderNsPrecisionRoundTrips(t *testing.T) {
 
 	stats := walltimeStatsFor(t, ledger)
 	got := stats[identity.MainAgentID].Tool
-	if got != want {
+	if got != int64(want) {
 		t.Fatalf("ledger tool = %v, want %v (lossless round-trip)", got, want)
 	}
-	if tracked := rec.statsForAgent(identity.MainAgentID).Tool; tracked != want {
+	if tracked := rec.statsForAgent(identity.MainAgentID).Tool; tracked != int64(want) {
 		t.Fatalf("tracker tool = %v, want %v", tracked, want)
 	}
 }
@@ -329,7 +329,7 @@ func TestWalltimeRecorderFlushesThroughPersistencePump(t *testing.T) {
 	rec.flush()
 
 	stats := walltimeStatsFor(t, ledger)
-	if got := stats[identity.MainAgentID].Tool; got != 3*time.Millisecond {
+	if got := stats[identity.MainAgentID].Tool; got != int64(3*time.Millisecond) {
 		t.Fatalf("pumped tool duration = %v, want 3ms", got)
 	}
 }

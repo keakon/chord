@@ -44,12 +44,14 @@ func IsWalltimePurpose(purpose string) bool {
 // WalltimeStats is one agent's cumulative wall-clock time distribution. The
 // four display buckets mirror the TIME sidebar section. Compaction is
 // tracked as an internal sub-total of Model and is not displayed separately.
+// Buckets are plain int64 nanoseconds: the values are wire-visible (the tags
+// are named _ns) and the v2 engine has no integer duration representation.
 type WalltimeStats struct {
-	Model      time.Duration `json:"model_ns"`
-	Tool       time.Duration `json:"tool_ns"`
-	Cooldown   time.Duration `json:"cooldown_ns"`
-	UserWait   time.Duration `json:"user_wait_ns"`
-	Compaction time.Duration `json:"compaction_ns,omitempty"`
+	Model      int64 `json:"model_ns"`
+	Tool       int64 `json:"tool_ns"`
+	Cooldown   int64 `json:"cooldown_ns"`
+	UserWait   int64 `json:"user_wait_ns"`
+	Compaction int64 `json:"compaction_ns,omitempty"`
 }
 
 // IsZero reports whether every bucket is zero.
@@ -102,16 +104,16 @@ func addWalltimeDuration(s *WalltimeStats, purpose string, d time.Duration) {
 	}
 	switch purpose {
 	case WalltimePurposeModel:
-		s.Model += d
+		s.Model += int64(d)
 	case WalltimePurposeCompaction:
-		s.Model += d
-		s.Compaction += d
+		s.Model += int64(d)
+		s.Compaction += int64(d)
 	case WalltimePurposeTool:
-		s.Tool += d
+		s.Tool += int64(d)
 	case WalltimePurposeCooldown:
-		s.Cooldown += d
+		s.Cooldown += int64(d)
 	case WalltimePurposeUserWait:
-		s.UserWait += d
+		s.UserWait += int64(d)
 	}
 }
 

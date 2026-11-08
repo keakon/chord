@@ -66,7 +66,7 @@ func TestQuestionPauseRetainsZeroRemainingAndShutdownCommit(t *testing.T) {
 	}
 	b.restoreQuestions(msgs)
 	q := b.questions.records[id]
-	if q.Timer != QuestionTimerSuspended || q.Remaining != time.Hour-10*time.Second {
+	if q.Timer != QuestionTimerSuspended || q.Remaining != int64(time.Hour-10*time.Second) {
 		t.Fatalf("shutdown remaining: %+v", q)
 	}
 }

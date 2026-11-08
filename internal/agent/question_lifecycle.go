@@ -150,7 +150,7 @@ func (a *MainAgent) prepareQuestionLifecycle(c *questionCommand) (QuestionFact, 
 				fact.Updates = append(fact.Updates, q)
 			}
 			if paused && q.Timer == QuestionTimerArmed {
-				q.Remaining = max(q.Deadline.Sub(c.received), 0)
+				q.Remaining = max(int64(q.Deadline.Sub(c.received)), 0)
 				q.Timer = QuestionTimerSuspended
 				q.Deadline = time.Time{}
 				q.Version++

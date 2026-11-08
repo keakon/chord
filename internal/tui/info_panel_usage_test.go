@@ -445,11 +445,11 @@ func TestRenderInfoPanelTimeBlockHiddenWhenAllBucketsZero(t *testing.T) {
 func TestRenderInfoPanelTimeBlockShowsBucketsAndPercent(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.walltimeStats = analytics.WalltimeStats{
-		Model:      72 * time.Second,
-		Tool:       38 * time.Second,
-		Cooldown:   12 * time.Second,
-		UserWait:   4 * time.Second,
-		Compaction: 8 * time.Second,
+		Model:      int64(72 * time.Second),
+		Tool:       int64(38 * time.Second),
+		Cooldown:   int64(12 * time.Second),
+		UserWait:   int64(4 * time.Second),
+		Compaction: int64(8 * time.Second),
 	}
 	m := NewModel(backend)
 	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(60, 24)), "TIME")
@@ -474,7 +474,7 @@ func TestRenderInfoPanelTimeBlockShowsBucketsAndPercent(t *testing.T) {
 
 func TestRenderInfoPanelTimeBlockDropsUnitsInsteadOfEllipsis(t *testing.T) {
 	backend := newInfoPanelAgent()
-	backend.walltimeStats = analytics.WalltimeStats{Model: 1*time.Hour + 41*time.Minute + 25*time.Second}
+	backend.walltimeStats = analytics.WalltimeStats{Model: int64(time.Hour) + int64(41*time.Minute) + int64(25*time.Second)}
 	m := NewModel(backend)
 
 	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(21, 24)), "TIME")
@@ -490,8 +490,8 @@ func TestRenderInfoPanelTimeBlockDropsUnitsInsteadOfEllipsis(t *testing.T) {
 func TestRenderInfoPanelTimeBlockDoesNotDisplayCompactionSeparately(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.walltimeStats = analytics.WalltimeStats{
-		Model:      1*time.Hour + 41*time.Minute + 25*time.Second,
-		Compaction: 8 * time.Second,
+		Model:      int64(time.Hour) + int64(41*time.Minute) + int64(25*time.Second),
+		Compaction: int64(8 * time.Second),
 	}
 	m := NewModel(backend)
 
@@ -523,10 +523,10 @@ func TestRenderInfoPanelTimeBlockAllBucketsSumToHundred(t *testing.T) {
 	// when Cooldown and User wait participate in the share.
 	backend := newInfoPanelAgent()
 	backend.walltimeStats = analytics.WalltimeStats{
-		Model:    30 * time.Second,
-		Tool:     30 * time.Second,
-		Cooldown: 30 * time.Second,
-		UserWait: 30 * time.Second,
+		Model:    int64(30 * time.Second),
+		Tool:     int64(30 * time.Second),
+		Cooldown: int64(30 * time.Second),
+		UserWait: int64(30 * time.Second),
 	}
 	m := NewModel(backend)
 	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(60, 24)), "TIME")
@@ -543,10 +543,10 @@ func TestRenderInfoPanelTimeBlockSkewNeverGoesNegative(t *testing.T) {
 	// remainder must keep every displayed share >= 0 and sum to exactly 100.
 	backend := newInfoPanelAgent()
 	backend.walltimeStats = analytics.WalltimeStats{
-		Model:    1000 * time.Second,
-		Tool:     1 * time.Second,
-		Cooldown: 1 * time.Second,
-		UserWait: 1 * time.Second,
+		Model:    int64(1000 * time.Second),
+		Tool:     int64(1 * time.Second),
+		Cooldown: int64(1 * time.Second),
+		UserWait: int64(1 * time.Second),
 	}
 	m := NewModel(backend)
 	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(60, 24)), "TIME")
@@ -564,9 +564,9 @@ func TestRenderInfoPanelTimeBlockSubSecondToolHidden(t *testing.T) {
 	// percentage split, so the displayed buckets still sum to 100.
 	backend := newInfoPanelAgent()
 	backend.walltimeStats = analytics.WalltimeStats{
-		Model:    90 * time.Second,
-		Tool:     300 * time.Millisecond,
-		Cooldown: 10 * time.Second,
+		Model:    int64(90 * time.Second),
+		Tool:     int64(300 * time.Millisecond),
+		Cooldown: int64(10 * time.Second),
 	}
 	m := NewModel(backend)
 	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(60, 24)), "TIME")
@@ -587,9 +587,9 @@ func TestRenderInfoPanelTimeBlockDoesNotDisplaySubsecondCompaction(t *testing.T)
 	// as a separate TIME item, even when the Model bucket is hidden.
 	backend := newInfoPanelAgent()
 	backend.walltimeStats = analytics.WalltimeStats{
-		Model:      400 * time.Millisecond,
-		Tool:       30 * time.Second,
-		Compaction: 400 * time.Millisecond,
+		Model:      int64(400 * time.Millisecond),
+		Tool:       int64(30 * time.Second),
+		Compaction: int64(400 * time.Millisecond),
 	}
 	m := NewModel(backend)
 	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(60, 24)), "TIME")
@@ -610,8 +610,8 @@ func TestRenderInfoPanelTimeBlockHiddenWhenAllBucketsSubSecond(t *testing.T) {
 	// whole TIME section is hidden.
 	backend := newInfoPanelAgent()
 	backend.walltimeStats = analytics.WalltimeStats{
-		Tool:     300 * time.Millisecond,
-		UserWait: 400 * time.Millisecond,
+		Tool:     int64(300 * time.Millisecond),
+		UserWait: int64(400 * time.Millisecond),
 	}
 	m := NewModel(backend)
 	out := infoPanelPlainLines(m.renderInfoPanel(60, 24))
@@ -622,7 +622,7 @@ func TestRenderInfoPanelTimeBlockHiddenWhenAllBucketsSubSecond(t *testing.T) {
 
 func TestRenderInfoPanelTimeBlockHidesZeroBuckets(t *testing.T) {
 	backend := newInfoPanelAgent()
-	backend.walltimeStats = analytics.WalltimeStats{Model: 90 * time.Second}
+	backend.walltimeStats = analytics.WalltimeStats{Model: int64(90 * time.Second)}
 	m := NewModel(backend)
 	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(42, 24)), "TIME")
 	joined := strings.Join(lines, "\n")
@@ -640,12 +640,12 @@ func TestInfoPanelFingerprintChangesWhenWalltimeBucketChanges(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)
 	first := m.infoPanelFingerprint(42, 24, m.captureInfoPanelIntegrations())
-	backend.walltimeStats = analytics.WalltimeStats{Tool: 3 * time.Second}
+	backend.walltimeStats = analytics.WalltimeStats{Tool: int64(3 * time.Second)}
 	second := m.infoPanelFingerprint(42, 24, m.captureInfoPanelIntegrations())
 	if first == second {
 		t.Fatalf("fingerprint must change when a walltime bucket changes")
 	}
-	backend.walltimeStats = analytics.WalltimeStats{Tool: 3 * time.Second, Cooldown: 1 * time.Second}
+	backend.walltimeStats = analytics.WalltimeStats{Tool: int64(3 * time.Second), Cooldown: int64(1 * time.Second)}
 	third := m.infoPanelFingerprint(42, 24, m.captureInfoPanelIntegrations())
 	if third == second {
 		t.Fatalf("fingerprint must change when a second bucket appears")
@@ -654,7 +654,7 @@ func TestInfoPanelFingerprintChangesWhenWalltimeBucketChanges(t *testing.T) {
 
 func TestRenderInfoPanelTimeBlockCooldownOnlyShowsFullPercent(t *testing.T) {
 	backend := newInfoPanelAgent()
-	backend.walltimeStats = analytics.WalltimeStats{Cooldown: 45 * time.Second}
+	backend.walltimeStats = analytics.WalltimeStats{Cooldown: int64(45 * time.Second)}
 	m := NewModel(backend)
 	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(42, 24)), "TIME")
 	joined := strings.Join(lines, "\n")
@@ -665,7 +665,7 @@ func TestRenderInfoPanelTimeBlockCooldownOnlyShowsFullPercent(t *testing.T) {
 
 func TestRenderInfoPanelTimeBlockModelZeroWithToolShowsToolOnly(t *testing.T) {
 	backend := newInfoPanelAgent()
-	backend.walltimeStats = analytics.WalltimeStats{Tool: 30 * time.Second}
+	backend.walltimeStats = analytics.WalltimeStats{Tool: int64(30 * time.Second)}
 	m := NewModel(backend)
 	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(42, 24)), "TIME")
 	joined := strings.Join(lines, "\n")

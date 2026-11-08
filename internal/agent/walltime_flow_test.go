@@ -80,7 +80,7 @@ func TestWalltimeMainToolResultSettlesToolTime(t *testing.T) {
 	}})
 
 	stats := a.walltime.statsForAgent(identity.MainAgentID)
-	if stats.Tool != 1200*time.Millisecond {
+	if stats.Tool != int64(1200*time.Millisecond) {
 		t.Fatalf("main walltime tool = %v, want 1.2s after a completed tool result", stats.Tool)
 	}
 }
@@ -101,10 +101,10 @@ func TestWalltimeToolResultKeepsAgentAndSessionAttribution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSessionEvidence(old): %v", err)
 	}
-	if got := oldStats[identity.MainAgentID].Tool; got != time.Second {
+	if got := oldStats[identity.MainAgentID].Tool; got != int64(time.Second) {
 		t.Fatalf("old main tool time = %v, want 1s", got)
 	}
-	if got := oldStats["worker-1"].Tool; got != 2*time.Second {
+	if got := oldStats["worker-1"].Tool; got != int64(2*time.Second) {
 		t.Fatalf("old worker tool time = %v, want 2s", got)
 	}
 	if current := recorder.statsForAgent(identity.MainAgentID); !current.IsZero() {

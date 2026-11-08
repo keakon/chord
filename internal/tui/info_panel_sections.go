@@ -283,17 +283,17 @@ func (m *Model) buildInfoPanelTimeBlock(lineW int) string {
 		dur time.Duration
 	}
 	rows := make([]bucketRow, 0, 4)
-	if stats.Model >= time.Second {
-		rows = append(rows, bucketRow{"Model", stats.Model})
+	if time.Duration(stats.Model) >= time.Second {
+		rows = append(rows, bucketRow{"Model", time.Duration(stats.Model)})
 	}
-	if stats.Tool >= time.Second {
-		rows = append(rows, bucketRow{"Tools", stats.Tool})
+	if time.Duration(stats.Tool) >= time.Second {
+		rows = append(rows, bucketRow{"Tools", time.Duration(stats.Tool)})
 	}
-	if stats.Cooldown >= time.Second {
-		rows = append(rows, bucketRow{"Cooldown", stats.Cooldown})
+	if time.Duration(stats.Cooldown) >= time.Second {
+		rows = append(rows, bucketRow{"Cooldown", time.Duration(stats.Cooldown)})
 	}
-	if stats.UserWait >= time.Second {
-		rows = append(rows, bucketRow{"User wait", stats.UserWait})
+	if time.Duration(stats.UserWait) >= time.Second {
+		rows = append(rows, bucketRow{"User wait", time.Duration(stats.UserWait)})
 	}
 	if len(rows) == 0 {
 		// Every bucket is sub-second: nothing worth showing.

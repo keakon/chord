@@ -26,7 +26,7 @@ func newExternalDisplayAgent() *externalDisplayAgent {
 	backend.contextCurrent = 50_000
 	backend.contextBytes = 10_000
 	backend.contextMessageCount = 12
-	backend.walltimeStats = analytics.WalltimeStats{Model: time.Minute}
+	backend.walltimeStats = analytics.WalltimeStats{Model: int64(time.Minute)}
 	backend.availableSkills = []*skill.Meta{{Name: "go-expert"}}
 	backend.invokedSkills = []*skill.Meta{{Name: "go-expert"}}
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", OK: true}}

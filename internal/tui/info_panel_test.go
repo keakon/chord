@@ -236,7 +236,7 @@ func TestRenderInfoPanelTransientSectionsKeepStableSectionsInPlace(t *testing.T)
 	backend := newInfoPanelAgent()
 	backend.contextCurrent = 12_300
 	backend.contextMessageCount = 4
-	backend.walltimeStats = analytics.WalltimeStats{Model: 2 * time.Second, Tool: time.Second}
+	backend.walltimeStats = analytics.WalltimeStats{Model: int64(2 * time.Second), Tool: int64(time.Second)}
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", OK: true}}
 
 	m := NewModel(backend)

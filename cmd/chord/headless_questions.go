@@ -15,7 +15,7 @@ type headlessQuestionsBackend interface {
 }
 
 func headlessQuestionSnapshot(q agent.QuestionSnapshot) *headlessQuestionPayload {
-	payload := &headlessQuestionPayload{BindingID: q.BindingID, ToolName: "question", Header: q.Item.Header, Question: q.Item.Question, Multiple: q.Item.Multiple, RequestID: q.ID, AgentID: q.AgentID, TaskID: q.TaskID, ScopeID: q.ScopeID, Version: q.Version, ResponsePolicy: q.Item.ResponsePolicy, DefaultOptionID: q.Item.DefaultOptionID, Timer: q.Timer, Outcome: q.Outcome, ResultID: q.ResultID, Selected: q.Selected, SelectedIDs: q.SelectedIDs, DurationSeconds: int64(q.Duration / time.Second)}
+	payload := &headlessQuestionPayload{BindingID: q.BindingID, ToolName: "question", Header: q.Item.Header, Question: q.Item.Question, Multiple: q.Item.Multiple, RequestID: q.ID, AgentID: q.AgentID, TaskID: q.TaskID, ScopeID: q.ScopeID, Version: q.Version, ResponsePolicy: q.Item.ResponsePolicy, DefaultOptionID: q.Item.DefaultOptionID, Timer: q.Timer, Outcome: q.Outcome, ResultID: q.ResultID, Selected: q.Selected, SelectedIDs: q.SelectedIDs, DurationSeconds: q.Duration / int64(time.Second)}
 	for _, o := range q.Item.Options {
 		payload.Options = append(payload.Options, o.Label)
 		payload.OptionDetails = append(payload.OptionDetails, o.Description)

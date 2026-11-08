@@ -242,7 +242,7 @@ func TestBuildSessionEvidenceFoldsWalltimeInOnePass(t *testing.T) {
 	if refs["main"].Running != "provider-a/model-1" {
 		t.Fatalf("refs[main] = %+v", refs["main"])
 	}
-	if got := walltime["main"].Tool; got != 3*time.Second {
+	if got := walltime["main"].Tool; got != int64(3*time.Second) {
 		t.Fatalf("walltime[main].Tool = %v, want 3s", got)
 	}
 }
@@ -305,7 +305,7 @@ func TestBuildSessionEvidenceDropsOutOfRangeWalltimeNs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSessionEvidence: %v", err)
 	}
-	if got := walltime["main"].Tool; got != 2*time.Second {
+	if got := walltime["main"].Tool; got != int64(2*time.Second) {
 		t.Fatalf("walltime[main].Tool = %v, want 2s (out-of-range ns dropped)", got)
 	}
 }

@@ -67,8 +67,8 @@ type QuestionSnapshot struct {
 	Selected     []string           `json:"selected,omitempty"`
 	SelectedIDs  []string           `json:"selected_ids,omitempty"`
 	Timer        string             `json:"timer"`
-	Duration     time.Duration      `json:"duration_ns,omitempty"`
-	Remaining    time.Duration      `json:"remaining_ns,omitempty"`
+	Duration     int64              `json:"duration_ns,omitempty"`
+	Remaining    int64              `json:"remaining_ns,omitempty"`
 	Deadline     time.Time          `json:"deadline"`
 	Dependency   string             `json:"dependency,omitempty"`
 	ReplacedBy   string             `json:"replaced_by,omitempty"`
@@ -493,10 +493,10 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 			}
 			if cfg := a.globalConfig; cfg != nil {
 				if item.ResponsePolicy == tools.QuestionPolicyDefaultAllowed {
-					q.Duration = time.Duration(cfg.QuestionAutoSelectTimeout) * time.Second
+					q.Duration = int64(time.Duration(cfg.QuestionAutoSelectTimeout) * time.Second)
 				}
 				if item.ResponsePolicy == tools.QuestionPolicyOptional {
-					q.Duration = time.Duration(cfg.QuestionTimeout) * time.Second
+					q.Duration = int64(time.Duration(cfg.QuestionTimeout) * time.Second)
 				}
 			}
 			if q.Duration > 0 {
@@ -545,7 +545,7 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 						a.defaultQuestion(&q)
 					} else {
 						q.Timer = QuestionTimerArmed
-						q.Deadline = c.received.Add(q.Remaining)
+						q.Deadline = c.received.Add(time.Duration(q.Remaining))
 					}
 				}
 			case QuestionOpInteract:

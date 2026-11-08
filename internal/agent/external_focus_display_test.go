@@ -47,7 +47,7 @@ func TestExternalTaskFocusHidesChordOwnedAgentData(t *testing.T) {
 			if got := a.GetTokenUsage(); got.InputTokens != 100 || got.OutputTokens != 10 {
 				t.Fatalf("main token usage = %+v, want 100/10", got)
 			}
-			if got := a.GetSidebarWalltimeStats(); got.Model != time.Second {
+			if got := a.GetSidebarWalltimeStats(); got.Model != int64(time.Second) {
 				t.Fatalf("main walltime = %+v, want 1s model time", got)
 			}
 			if got := a.GetContextMessageCount(); got != 1 {
