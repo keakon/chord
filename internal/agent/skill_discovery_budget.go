@@ -120,7 +120,7 @@ func buildSkillDiscoveryMessage(history []message.Message, view skillActivationV
 	for _, ref := range candidates {
 		name, _ := jsonx.Marshal(ref.Name)
 		description, _ := jsonx.Marshal(tools.TruncateSkillDescription(descriptions[ref.Name], skillDiscoveryDescriptionRunes))
-		line := fmt.Sprintf("- name: %s; description: %s\n", name, description)
+		line := fmt.Sprintf("- name: %s; description: %s\n", jsonx.EscapeForPrompt(name), jsonx.EscapeForPrompt(description))
 		if len(refs) >= maxEntries || content.Len()+len(line)+reserve > maxBytes {
 			continue
 		}

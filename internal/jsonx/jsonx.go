@@ -3,20 +3,14 @@
 // encoder in the repo produces the same bytes for the same value without each
 // call site restating the options.
 //
-// The option set is chosen to match the v1 API's output byte for byte, with
-// two deliberate deviations:
+// Maps are sorted, nil containers encode as null, and invalid UTF-8 in Go
+// strings becomes U+FFFD. Raw JSON retains member order, duplicate members,
+// number literals, string escapes, and invalid UTF-8 bytes. U+2028 and U+2029
+// are escaped in both Go strings and raw JSON.
 //
-//   - HTML characters (<, >, &) are not escaped. Nothing consumes the output
-//     as HTML; user-visible surfaces render markdown at most.
-//   - RawMessage payloads carrying invalid UTF-8 have those bytes rewritten to
-//     U+FFFD. The v1 writer passed them through verbatim; no v2 option
-//     reproduces that, and the lenient readers accept the normalized bytes, so
-//     the read/write closure holds.
-//
-// Everything else matches v1: map keys are sorted (Deterministic), nil slices
-// and maps marshal as null, duplicate members inside RawMessage pass through
-// verbatim, invalid UTF-8 in string fields becomes U+FFFD exactly like v1, and
-// the trailing newline of an Encoder is preserved by Encode.
+// HTML characters (<, >, &) are not escaped by default. Encoded values embedded
+// in prompt text require EscapeForPrompt so untrusted strings cannot introduce
+// tags into the surrounding text.
 package jsonx
 
 import (
@@ -28,9 +22,8 @@ import (
 	jsonv2 "encoding/json/v2"
 )
 
-// canonical options shared by every encoder in this package. Duplicate-name
-// and invalid-UTF-8 tolerance only affect RawMessage passthrough and string
-// fields exactly as the v1 API behaved.
+// Raw JSON may carry LLM arguments or provider replay data. Preserve its string
+// spelling and invalid bytes instead of silently rewriting transcript evidence.
 func canonical() []jsonv2.Options {
 	return []jsonv2.Options{
 		jsonv2.Deterministic(true),
@@ -38,11 +31,12 @@ func canonical() []jsonv2.Options {
 		jsonv2.FormatNilMapAsNull(true),
 		jsontext.AllowDuplicateNames(true),
 		jsontext.AllowInvalidUTF8(true),
+		jsontext.PreserveRawStrings(true),
+		jsontext.EscapeForJS(true),
 	}
 }
 
-// Marshal encodes v as compact JSON. It is the drop-in replacement for
-// json.Marshal.
+// Marshal encodes v as compact JSON with the canonical option set.
 func Marshal(v any) ([]byte, error) {
 	return jsonv2.Marshal(v, canonical()...)
 }

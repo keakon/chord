@@ -71,7 +71,7 @@ func nativeImageFallbackDefinitions(defs []message.ToolDefinition, provider *Pro
 		}
 		if len(options) > 0 {
 			encoded, _ := jsonx.Marshal(options)
-			requirements = " Preserve the configured output requirements: " + string(encoded) + "."
+			requirements = " Preserve the configured output requirements: " + string(jsonx.EscapeForPrompt(encoded)) + "."
 		}
 	}
 	// Native server IDs cannot become local edit references. Expose the saved

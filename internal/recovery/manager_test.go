@@ -821,13 +821,14 @@ func TestLoadMessages_LenientToolArgsRoundTrip(t *testing.T) {
 				Args: json.RawMessage(`{"value":"first","value":"last"}`),
 			},
 			{
-				// The canonical encoder rewrites invalid UTF-8 bytes inside a
-				// RawMessage payload as U+FFFD (the one documented deviation
-				// from the v1 API), so the reader must tolerate the normalized
-				// record the same way.
 				ID:   "call-2",
 				Name: "sample",
 				Args: json.RawMessage("{\"note\":\"x\xffy\"}"),
+			},
+			{
+				ID:   "call-3",
+				Name: "sample",
+				Args: json.RawMessage(`{"letter":"\u0041","number":1e1000}`),
 			},
 		},
 		ResponsesOutput: []message.ResponsesOutputItem{{
@@ -846,13 +847,14 @@ func TestLoadMessages_LenientToolArgsRoundTrip(t *testing.T) {
 	}
 	rm.Close()
 
-	// The writer must have persisted the duplicate-key arguments verbatim.
 	raw, err := os.ReadFile(filepath.Join(dir, "main.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `{"value":"first","value":"last"}`) {
-		t.Fatalf("tool args were not persisted verbatim: %s", raw)
+	for _, call := range assistant.ToolCalls {
+		if !strings.Contains(string(raw), string(call.Args)) {
+			t.Fatalf("tool args %q were not persisted verbatim: %q", call.ID, raw)
+		}
 	}
 
 	rm2 := NewRecoveryManager(dir)
@@ -864,14 +866,13 @@ func TestLoadMessages_LenientToolArgsRoundTrip(t *testing.T) {
 	if len(loaded) != 2 {
 		t.Fatalf("recovered %d messages, want 2 (later history must survive a lenient-args record)", len(loaded))
 	}
-	if len(loaded[0].ToolCalls) != 2 {
-		t.Fatalf("recovered %d tool calls, want 2", len(loaded[0].ToolCalls))
+	if len(loaded[0].ToolCalls) != len(assistant.ToolCalls) {
+		t.Fatalf("recovered %d tool calls, want %d", len(loaded[0].ToolCalls), len(assistant.ToolCalls))
 	}
-	if string(loaded[0].ToolCalls[0].Args) != `{"value":"first","value":"last"}` {
-		t.Fatalf("tool args not preserved verbatim: %s", loaded[0].ToolCalls[0].Args)
-	}
-	if loaded[0].ToolCalls[1].Args[0] != '{' || string(loaded[0].ToolCalls[1].Args) != "{\"note\":\"x\uFFFDy\"}" {
-		t.Fatalf("invalid-UTF-8 args not normalized to U+FFFD: %q", string(loaded[0].ToolCalls[1].Args))
+	for i, call := range assistant.ToolCalls {
+		if string(loaded[0].ToolCalls[i].Args) != string(call.Args) {
+			t.Fatalf("tool args %q not preserved verbatim: %q", call.ID, loaded[0].ToolCalls[i].Args)
+		}
 	}
 	if len(loaded[0].ResponsesOutput) != 1 || loaded[0].ResponsesOutput[0].Content[0].Text != "called" {
 		t.Fatalf("ResponsesOutput not recovered: %#v", loaded[0].ResponsesOutput)

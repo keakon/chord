@@ -15,7 +15,10 @@ import (
 func outputSchemaTestClient(t *testing.T, schema string) (*Client, *fakeTransport) {
 	t.Helper()
 	tr := newFakeTransport()
-	def := MCPToolDef{Name: "sample", OutputSchema: json.RawMessage(schema)}
+	def := MCPToolDef{Name: "sample"}
+	if schema != "" {
+		def.OutputSchema = json.RawMessage(schema)
+	}
 	tr.onMethod("tools/list", toolsListResult{Tools: []MCPToolDef{def}})
 	c := NewClientWithInfo("sample", tr, testClientInfo)
 	if _, err := c.ListTools(t.Context()); err != nil {

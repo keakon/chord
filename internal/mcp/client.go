@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"os"
@@ -160,13 +161,12 @@ func (c *Client) Initialize(ctx context.Context) error {
 func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMessage) (string, []message.ContentPart, error) {
 	// Bind validation to the directory visible when the call starts.
 	validators := c.outputValidators.Load()
-	// Parse args into a map so the MCP server receives a proper object. Strict
-	// decoding is safe for LLM-originated arguments: the execution pipeline's
-	// schema validation already shadows duplicate keys (recording the ignored
-	// values) and re-encodes the effective arguments before they get here.
+	// LLM arguments remain lenient here: schema validation only re-encodes
+	// arguments when it removes values, so accepted strings may still carry
+	// invalid UTF-8 in their original JSON.
 	var argsMap map[string]any
 	if len(args) > 0 {
-		if err := jsonv2.Unmarshal(args, &argsMap); err != nil {
+		if err := jsonv2.Unmarshal(args, &argsMap, jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true)); err != nil {
 			return "", nil, newCallFailure(callNotSent, fmt.Errorf("mcp tools/call: invalid args JSON: %w", err))
 		}
 	}

@@ -13,7 +13,7 @@ type sample struct {
 	Tags   []string        `json:"tags"`
 	Nil    []string        `json:"nil"`
 	Attrs  map[string]any  `json:"attrs"`
-	Raw    json.RawMessage `json:"raw,omitempty"`
+	Raw    json.RawMessage `json:"raw,omitzero"`
 	Hidden string          `json:"-"`
 }
 
@@ -71,25 +71,44 @@ func TestMarshalReplacesInvalidUTF8LikeV1(t *testing.T) {
 	}
 }
 
-// RawMessage payloads carrying invalid UTF-8 bytes are the one documented
-// deviation: v1 passed them through verbatim, the canonical encoder rewrites
-// them as U+FFFD. The lenient readers accept the normalized bytes, so the
-// read/write closure holds.
-func TestMarshalNormalizesInvalidUTF8InRawMessage(t *testing.T) {
-	raw := []byte(`{"note":"v`)
-	raw = append(raw, 0xff, 0xfe)
-	raw = append(raw, `"}`...)
-	got, err := Marshal(struct {
-		Raw json.RawMessage `json:"raw"`
-	}{Raw: raw})
+func TestEncodersPreserveRawMessage(t *testing.T) {
+	raw := json.RawMessage(`{"letter":"\u0041","slash":"a\/b","html":"\u003cfoo\u003e","number":1e1000,"x":1,"x":2,"note":"v` + "\xff\xfe\u2028\u2029" + `"}`)
+	value := sample{Name: "a\u2028b\u2029c", Raw: raw}
+	compact, err := json.Marshal(value)
 	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+		t.Fatal(err)
 	}
-	if !bytes.Contains(got, []byte("v\ufffd\ufffd")) {
-		t.Fatalf("output = %x, want invalid bytes normalized to U+FFFD", got)
+	indented, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !bytes.Contains(got, []byte(`"x":1,"x":2`)) && !bytes.Contains(got, []byte(`"note"`)) {
-		t.Fatalf("output = %s, want raw payload preserved", got)
+	for _, tc := range []struct {
+		name   string
+		encode func() ([]byte, error)
+		want   []byte
+	}{
+		{"Marshal", func() ([]byte, error) { return Marshal(value) }, compact},
+		{"MarshalIndent", func() ([]byte, error) { return MarshalIndent(value, "", "  ") }, indented},
+		{"Encode", func() ([]byte, error) {
+			var buf bytes.Buffer
+			err := Encode(&buf, value)
+			return buf.Bytes(), err
+		}, append(bytes.Clone(compact), '\n')},
+		{"EncodeIndent", func() ([]byte, error) {
+			var buf bytes.Buffer
+			err := EncodeIndent(&buf, value, "", "  ")
+			return buf.Bytes(), err
+		}, append(bytes.Clone(indented), '\n')},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, tc.want) {
+				t.Fatalf("output mismatch:\n want=%q\n got=%q", tc.want, got)
+			}
+		})
 	}
 }
 
@@ -152,5 +171,29 @@ func TestEncodeAppendsNewline(t *testing.T) {
 	}
 	if _, err := dec.ReadValue(); err == nil {
 		t.Fatal("second ReadValue: want EOF after single document")
+	}
+}
+
+// EscapeForPrompt escapes <, > and & in canonically encoded text without
+// disturbing the encoder's own escapes or the surrounding JSON structure.
+func TestEscapeForPrompt(t *testing.T) {
+	encoded, err := Marshal(map[string]any{"s": "<a>&'</a>", "n": 1})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got := string(EscapeForPrompt(encoded))
+	// Only <, > and & are escaped; the apostrophe stays literal.
+	want := `{"n":1,"s":"\u003ca\u003e\u0026'\u003c/a\u003e"}`
+	if got != want {
+		t.Fatalf("output = %s, want %s", got, want)
+	}
+	// The result must still be one valid JSON document decoding to the
+	// original value.
+	var back map[string]any
+	if err := json.Unmarshal([]byte(got), &back); err != nil {
+		t.Fatalf("escaped output is not valid JSON: %v", err)
+	}
+	if back["s"] != "<a>&'</a>" {
+		t.Fatalf("decoded value = %v, want the original string", back["s"])
 	}
 }

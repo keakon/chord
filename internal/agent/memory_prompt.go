@@ -201,7 +201,7 @@ func buildMemoryExtractionPrompt(projected []sessionview.Projected, agentsMD str
 		})
 	}
 	data, _ := jsonx.Marshal(input)
-	return "Extract durable project memory from this JSON input:\n" + string(data)
+	return "Extract durable project memory from this JSON input:\n" + string(jsonx.EscapeForPrompt(data))
 }
 
 // buildMemoryIndexReviewPrompt renders the whole-index audit input: the same
@@ -218,7 +218,7 @@ func buildMemoryIndexReviewPrompt(agentsMD string, active *memory.ActiveSnapshot
 	}
 	input.ActiveMemory, input.ActiveMemoryOmitted = activeMemoryForExtraction(active)
 	data, _ := jsonx.Marshal(input)
-	return "Review the active project memory in this JSON input:\n" + string(data)
+	return "Review the active project memory in this JSON input:\n" + string(jsonx.EscapeForPrompt(data))
 }
 
 func activeMemoryForExtraction(active *memory.ActiveSnapshot) ([]memoryExtractionActiveRecord, int) {
@@ -243,7 +243,7 @@ func activeMemoryForExtraction(active *memory.ActiveSnapshot) ([]memoryExtractio
 		}
 		candidate := append(items, item)
 		data, _ := jsonx.Marshal(candidate)
-		if len(data) > memoryExtractionActiveBytes || len(candidate) > memoryExtractionActiveRecords {
+		if len(jsonx.EscapeForPrompt(data)) > memoryExtractionActiveBytes || len(candidate) > memoryExtractionActiveRecords {
 			return items, len(active.Entries) - len(items)
 		}
 		items = candidate

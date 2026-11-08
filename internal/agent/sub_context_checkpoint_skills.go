@@ -71,7 +71,7 @@ func subAgentCheckpointSkills(s *SubAgent, messages []message.Message) string {
 	if len(omittedNames) > 0 {
 		encoded, err := jsonx.Marshal(omittedNames)
 		if err == nil {
-			result += "\n" + subAgentCheckpointOmittedNamesPrefix + string(encoded)
+			result += "\n" + subAgentCheckpointOmittedNamesPrefix + string(jsonx.EscapeForPrompt(encoded))
 		}
 	}
 	return result

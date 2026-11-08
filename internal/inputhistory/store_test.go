@@ -3,6 +3,7 @@ package inputhistory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 func historyRecord(id, body string) Record {
@@ -139,6 +142,49 @@ func TestInputHistoryDisabledAndSizeLimit(t *testing.T) {
 		t.Fatal(snap)
 	}
 }
+
+func TestInputHistoryEncodedSizeLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		maxBytes int64
+		length   int
+		limit    int64
+	}{
+		{"store bytes", 600, 200, 600},
+		{"record bytes", DefaultOptions().MaxBytes, MaxRecordBytes / 6, MaxRecordBytes},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := DefaultOptions()
+			opts.MaxBytes = tc.maxBytes
+			record := historyRecord("sample", strings.Repeat("\x01", tc.length))
+			encoded, err := jsonx.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.Size() > opts.MaxBytes || int64(len(encoded)+1) <= tc.limit {
+				t.Fatalf("fixture did not isolate the writer limit: estimate=%d, encoded=%d, limit=%d", record.Size(), len(encoded)+1, tc.limit)
+			}
+			s := historyStore(t, t.TempDir(), opts)
+			if admission := s.TryRecord(record); admission.Outcome != Queued {
+				t.Fatalf("record was rejected before encoding: %+v", admission)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			if err := s.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			status := s.Status()
+			if status.Reason != TooLarge || status.State != Failed || !errors.Is(status.Err, ErrTooLarge) {
+				t.Fatalf("encoded-size rejection was not reported: %+v", status)
+			}
+			snap, err := s.Snapshot(ctx, false)
+			if err != nil || len(snap.Entries) != 0 {
+				t.Fatalf("oversized record was retained: %+v, %v", snap, err)
+			}
+		})
+	}
+}
+
 func TestInputHistoryProcess(t *testing.T) {
 	if dir := os.Getenv("CHORD_INPUT_HISTORY_HELPER"); dir != "" {
 		s := New(dir, DefaultOptions())

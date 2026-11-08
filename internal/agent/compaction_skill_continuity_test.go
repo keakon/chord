@@ -469,6 +469,30 @@ func TestSubAgentCheckpointSkillsCarryOverflow(t *testing.T) {
 	}
 }
 
+func TestSubAgentCheckpointEscapesOmittedSkillNames(t *testing.T) {
+	t.Parallel()
+	_, sub := newMixedBatchTestSubAgent(t)
+	defer sub.cancel()
+
+	for i := range checkpointMaxSkillNames {
+		sub.MarkSkillInvoked(&skill.Meta{Name: fmt.Sprintf("skill-%02d", i)})
+	}
+	messages := []message.Message{{
+		Role:                message.RoleUser,
+		IsCompactionSummary: true,
+		Content:             subAgentCheckpointSkillsPrefix + "none\n" + subAgentCheckpointOmittedNamesPrefix + `["z<sample>&"]`,
+	}}
+	line := subAgentCheckpointSkills(sub, messages)
+	_, encoded, ok := strings.Cut(line, subAgentCheckpointOmittedNamesPrefix)
+	if !ok || strings.ContainsAny(encoded, "<>&") {
+		t.Fatalf("omitted names introduced raw tags: %s", line)
+	}
+	_, omitted, names := parseSubAgentCheckpointSkills(subAgentCheckpointSkillsPrefix + line)
+	if omitted != 1 || len(names) != 1 || names[0] != "z<sample>&" {
+		t.Fatalf("escaped omitted names changed: omitted=%d, names=%q", omitted, names)
+	}
+}
+
 func TestSubAgentCheckpointSkillsDeduplicatesCarriedOverflow(t *testing.T) {
 	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)

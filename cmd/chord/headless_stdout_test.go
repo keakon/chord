@@ -93,8 +93,7 @@ func TestStdoutWriterReportsJSONEncodingFailure(t *testing.T) {
 	}
 	select {
 	case err := <-out.errors():
-		var semErr *jsonv2.SemanticError
-		if !errors.As(err, &semErr) {
+		if _, ok := errors.AsType[*jsonv2.SemanticError](err); !ok {
 			t.Fatalf("writer error = %v, want a v2 semantic error", err)
 		}
 	case <-time.After(time.Second):

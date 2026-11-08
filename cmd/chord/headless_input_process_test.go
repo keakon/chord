@@ -85,11 +85,12 @@ func TestHeadlessStrictInputContract(t *testing.T) {
 	rt := &fakeHeadlessRuntime{events: events, backend: &mockBackend{}}
 
 	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
 	var mu sync.Mutex
 	var envelopes []headlessEnvelope
-	collectorDone := make(chan struct{})
+	collectorDone := make(chan error, 1)
 	go func() {
-		defer close(collectorDone)
 		scanner := bufio.NewScanner(pr)
 		for scanner.Scan() {
 			line := bytes.TrimSpace(scanner.Bytes())
@@ -104,6 +105,7 @@ func TestHeadlessStrictInputContract(t *testing.T) {
 			envelopes = append(envelopes, env)
 			mu.Unlock()
 		}
+		collectorDone <- scanner.Err()
 	}()
 
 	input := "{\"type\":\"status\",\"type\":\"subscribe\"}\n" + "{\"type\":\"stat\xffus\"}\n"
@@ -127,7 +129,10 @@ func TestHeadlessStrictInputContract(t *testing.T) {
 	}
 	pw.Close()
 	select {
-	case <-collectorDone:
+	case err := <-collectorDone:
+		if err != nil {
+			t.Fatalf("output collector failed: %v", err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("output collector did not stop")
 	}
