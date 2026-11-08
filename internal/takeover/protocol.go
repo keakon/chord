@@ -10,6 +10,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -97,13 +98,13 @@ func pageStatus(s recovery.SessionPauseStatus, offset int) Status {
 	start := min(max(offset, 0), len(s.Blockers))
 	limit := min(start+MaxBlockers, len(s.Blockers))
 	end := start
-	base, _ := json.Marshal(out)
+	base, _ := jsonx.Marshal(out)
 	encodedSize := len(base) + 32
 	for _, b := range s.Blockers[start:limit] {
 		blocker := Blocker{OwnerTaskID: boundedText(b.OwnerTaskID, 128), Type: boundedText(b.Kind, 64), StartedAt: b.StartedAt, Description: boundedText(b.Description, 256)}
 		// Leave room for the authenticated response envelope. JSON escaping
 		// can make short control-character descriptions much larger on wire.
-		data, err := json.Marshal(blocker)
+		data, err := jsonx.Marshal(blocker)
 		if err != nil || encodedSize+len(data)+1 > MaxFrameBytes/2 {
 			break
 		}
@@ -167,7 +168,7 @@ func readFrame(r io.Reader, dst any) error {
 	return nil
 }
 func writeFrame(w io.Writer, value any) error {
-	data, err := json.Marshal(value)
+	data, err := jsonx.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("encode takeover frame: %w", err)
 	}

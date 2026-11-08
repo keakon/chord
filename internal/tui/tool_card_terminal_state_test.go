@@ -295,7 +295,7 @@ func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
 		Content: `{"job_id":"job-8"}`, ResultContent: "line one\nline two\n[status: running]",
 		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
-		PersistedDuration: 30 * time.Second,
+		PersistedDuration: int64(30 * time.Second),
 	}
 	wide := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(wide, "job-8 · 2 new lines") {
@@ -330,7 +330,7 @@ func TestJobOutputHeaderSpendsItsWholeBudget(t *testing.T) {
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
 		Content: `{"job_id":"job-8"}`, ResultContent: "line one\nline two\n[status: running]",
 		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
-		PersistedDuration: 30 * time.Second,
+		PersistedDuration: int64(30 * time.Second),
 		// An ignored argument puts the styled option group on the header too,
 		// so the suffix width has to account for the group, the summary and
 		// the separator joining them.
@@ -396,7 +396,7 @@ func TestNarrowJobOutputCardKeepsIDWhenElapsedIsPresent(t *testing.T) {
 		ResultContent:     "line one\nline two\n[status: running]",
 		ResultDone:        true,
 		ResultStatus:      message.ToolStatusSuccess,
-		PersistedDuration: 30 * time.Second,
+		PersistedDuration: int64(30 * time.Second),
 	}
 	wide := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(wide, "job-8 · 2 new lines · ⏱ 30s") {

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/modelcatalog"
 )
 
@@ -449,7 +450,7 @@ func catalogConfigAdvisoryLogMessage(group []CatalogConfigAdvisory) string {
 }
 
 func formatCatalogAdvisoryValue(value any) string {
-	data, err := json.Marshal(value)
+	data, err := jsonx.Marshal(value)
 	if err != nil {
 		return fmt.Sprintf("%v", value)
 	}
@@ -558,7 +559,7 @@ func RecordCatalogConfigAdvisoryAcknowledgments(advisories ...CatalogConfigAdvis
 	if !changed {
 		return nil
 	}
-	data, err := json.MarshalIndent(&state, "", "  ")
+	data, err := jsonx.MarshalIndent(&state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}

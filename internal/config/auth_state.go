@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // OAuthStateKey identifies a persisted OAuth runtime state entry.
@@ -128,7 +130,7 @@ func SaveAuthState(path string, state AuthStateFile) error {
 }
 
 func saveAuthStateUnlocked(path string, state AuthStateFile) error {
-	data, err := json.MarshalIndent(normalizeAuthStateFile(state), "", "  ")
+	data, err := jsonx.MarshalIndent(normalizeAuthStateFile(state), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -172,7 +174,7 @@ func UpdateAuthStateFile(path string, mutate func(AuthStateFile) (bool, error)) 
 		return nil, false, err
 	}
 	state = normalizeAuthStateFile(state)
-	data, err := json.MarshalIndent(state, "", "  ")
+	data, err := jsonx.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return nil, false, err
 	}

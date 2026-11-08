@@ -1,10 +1,10 @@
 package memory
 
 import (
-	"encoding/json"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/sessionview"
 )
 
@@ -115,7 +115,7 @@ func BoundedSummary(idx *MemoryIndex) (string, bool) {
 // escapedWireLen is the byte length of s once the reminder JSON-serializes it,
 // quotes included.
 func escapedWireLen(s string) int {
-	encoded, err := json.Marshal(s)
+	encoded, err := jsonx.Marshal(s)
 	if err != nil {
 		return len(s)
 	}

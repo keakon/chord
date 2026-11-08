@@ -14,7 +14,6 @@ package gen
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/modelcatalog"
 )
 
@@ -241,7 +241,7 @@ func Generate(dir string) ([]byte, error) {
 	if _, err := LoadCandidates(dir, c); err != nil {
 		return nil, err
 	}
-	data, err := json.MarshalIndent(c, "", "  ")
+	data, err := jsonx.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal catalog: %w", err)
 	}

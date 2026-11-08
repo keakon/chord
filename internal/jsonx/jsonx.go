@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	"io"
+	"strings"
 
 	jsonv2 "encoding/json/v2"
 )
@@ -68,3 +69,16 @@ func MarshalIndent(v any, prefix, indent string) ([]byte, error) {
 func Encode(w io.Writer, v any) error {
 	return jsonv2.MarshalEncode(jsontext.NewEncoder(w), v, canonical()...)
 }
+
+// EscapeForPrompt escapes the three characters the v1 API escaped on top of
+// the JSON requirements. Some sites embed canonically encoded text verbatim
+// into prompt content (skill listings, memory reminders); there "<" in
+// untrusted content must surface as \u003c so it cannot forge Markdown/XML
+// tags in the surrounding text. The canonical encoder output contains these
+// characters only as literal string content, so replacing them afterwards is
+// exact.
+func EscapeForPrompt(encoded []byte) []byte {
+	return []byte(promptEscaper.Replace(string(encoded)))
+}
+
+var promptEscaper = strings.NewReplacer("<", `\u003c`, ">", `\u003e`, "&", `\u0026`)

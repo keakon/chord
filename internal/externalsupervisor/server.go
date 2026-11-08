@@ -2,7 +2,6 @@ package externalsupervisor
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"time"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // Supervisor exit codes. The managed process's own status travels in the
@@ -367,7 +368,7 @@ func writeReceipt(dir string, receipt Receipt) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
-	data, err := json.Marshal(receipt)
+	data, err := jsonx.Marshal(receipt)
 	if err != nil {
 		return
 	}

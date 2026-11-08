@@ -106,7 +106,7 @@ type Block struct {
 	ToolQueuedByExecutionEvent bool
 	ToolProgress               *agent.ToolProgressSnapshot // optional structured progress for running tools with real progress signals
 	Audit                      *message.ToolArgsAudit      // optional audit metadata for user-modified approved arguments
-	PersistedDuration          time.Duration               // restored final elapsed time from durable tool result metadata
+	PersistedDuration          int64                       // restored final elapsed time in nanoseconds from durable tool result metadata; the spill payload is wire-visible and the v2 engine has no integer representation for time.Duration
 
 	// BackgroundObjectID links a durable status/result block to a background
 	// service/job identifier so repeated finish notifications can update the same

@@ -113,7 +113,7 @@ func (b *Block) toolElapsed() time.Duration {
 		return 0
 	}
 	if b.ResultDone && b.PersistedDuration > 0 {
-		return b.PersistedDuration
+		return time.Duration(b.PersistedDuration)
 	}
 	if !b.StartedAt.IsZero() {
 		end := b.SettledAt

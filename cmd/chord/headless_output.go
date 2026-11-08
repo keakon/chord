@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
 	"time"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // stdoutWriter serializes JSON envelopes to stdout via a single goroutine.
@@ -49,7 +50,7 @@ func (w *stdoutWriter) run() {
 			close(barrier.done)
 			continue
 		}
-		line, err := json.Marshal(msg)
+		line, err := jsonx.Marshal(msg)
 		if err == nil && len(line)+1 > headlessMaxEnvelopeBytes {
 			err = fmt.Errorf("encoded envelope exceeds %d bytes", headlessMaxEnvelopeBytes)
 		}

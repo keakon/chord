@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 type headlessQuestionsBackend interface {
@@ -93,7 +93,7 @@ func headlessCachedQuestions(s *headlessState) []*headlessQuestionPayload {
 	slices.SortFunc(closed, func(x, y *headlessQuestionPayload) int { return strings.Compare(y.RequestID, x.RequestID) })
 	bytes := 0
 	for i, q := range closed {
-		data, err := json.Marshal(q)
+		data, err := jsonx.Marshal(q)
 		if err != nil || i == 32 || bytes+len(data) > 2<<20 {
 			break
 		}

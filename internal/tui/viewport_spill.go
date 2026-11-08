@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
@@ -113,7 +114,7 @@ func (s *ViewportSpillStore) Append(block *Block) (*BlockSpillRef, error) {
 	payloadBlock.streamTailSyntheticPrefixWidths = nil
 	payloadBlock.streamTailSoftWrapContinuations = nil
 
-	payload, err := json.Marshal(&payloadBlock)
+	payload, err := jsonx.Marshal(&payloadBlock)
 	if err != nil {
 		return nil, err
 	}

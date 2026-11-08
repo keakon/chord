@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -93,7 +94,7 @@ func legacyUserShellReadableBody(userLine, cmd, output string, failed bool) stri
 // human-readable body so session restore can roundtrip multiline content.
 func UserShellPersistedBody(userLine, cmd, output string, failed bool) string {
 	readable := UserShellReadableBody(cmd, output, failed)
-	payloadBytes, _ := json.Marshal(localShellPayload{
+	payloadBytes, _ := jsonx.Marshal(localShellPayload{
 		Version:  localShellPayloadVersion,
 		UserLine: userLine,
 		Command:  cmd,
@@ -212,7 +213,7 @@ func ignoredArgValueText(valueJSON string) string {
 			}
 			encoded = "true"
 		default:
-			marshaled, err := json.Marshal(typed)
+			marshaled, err := jsonx.Marshal(typed)
 			if err != nil {
 				return collapseWhitespace(value)
 			}

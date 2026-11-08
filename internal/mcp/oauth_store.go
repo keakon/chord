@@ -14,6 +14,7 @@ import (
 
 	"github.com/keakon/chord/internal/atomicfile"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const credentialFileLimit = 4 << 20
@@ -171,7 +172,7 @@ func (tx *CredentialTransaction) Commit() (atomicfile.ReplaceOutcome, error) {
 		tx.store.forget(tx.target.TargetID)
 		return atomicfile.NotReplaced, err
 	}
-	data, err := json.Marshal(tx.File)
+	data, err := jsonx.Marshal(tx.File)
 	if err != nil || len(data) > credentialFileLimit {
 		tx.store.forget(tx.target.TargetID)
 		return atomicfile.NotReplaced, storeFailure(ErrorCredentialStoreCorrupt, atomicfile.NotReplaced)

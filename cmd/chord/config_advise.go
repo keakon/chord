@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 type configAdviseOptions struct {
@@ -263,7 +264,7 @@ func catalogAdviceManualFixHint(advisory config.CatalogConfigAdvisory) string {
 }
 
 func formatCatalogCLIValue(value any) string {
-	data, err := json.Marshal(value)
+	data, err := jsonx.Marshal(value)
 	if err != nil {
 		return fmt.Sprintf("%v", value)
 	}

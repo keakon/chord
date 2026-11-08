@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/atomicfile"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // CacheSchemaVersion guards the refresh cache file. A binary that does not
@@ -179,7 +180,7 @@ func WriteCacheFile(path string, f *CacheFile) error {
 	if err := f.validate(); err != nil {
 		return fmt.Errorf("validate catalog cache: %w", err)
 	}
-	data, err := json.MarshalIndent(f, "", "  ")
+	data, err := jsonx.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal catalog cache: %w", err)
 	}

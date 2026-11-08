@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/worktree"
 )
 
@@ -26,7 +26,7 @@ type ServerRef struct {
 const MainOwner = "main"
 
 func identityHash(v any) string {
-	b, err := json.Marshal(v)
+	b, err := jsonx.Marshal(v)
 	if err != nil {
 		panic("MCP identity contains an unsupported value")
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/externalsupervisor"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -285,7 +286,7 @@ func (s *Session) WriteUserMessage(ctx context.Context, text string) error {
 func (s *Session) writeJSON(ctx context.Context, value any) error {
 	stop := context.AfterFunc(ctx, func() { _ = s.stdin.Close() })
 	defer stop()
-	data, err := json.Marshal(value)
+	data, err := jsonx.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("encode control frame: %w", err)
 	}

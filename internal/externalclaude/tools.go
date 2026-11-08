@@ -3,6 +3,7 @@ package externalclaude
 import (
 	"encoding/json"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/toolname"
 )
 
@@ -64,7 +65,7 @@ func remapFields(raw json.RawMessage, rename map[string]string) json.RawMessage 
 		delete(fields, from)
 		fields[to] = value
 	}
-	out, err := json.Marshal(fields)
+	out, err := jsonx.Marshal(fields)
 	if err != nil {
 		return raw
 	}
@@ -83,7 +84,7 @@ func remapGlob(raw json.RawMessage) json.RawMessage {
 		delete(fields, "pattern")
 		fields["patterns"] = wrapArray(pattern)
 	}
-	out, err := json.Marshal(fields)
+	out, err := jsonx.Marshal(fields)
 	if err != nil {
 		return raw
 	}
@@ -106,7 +107,7 @@ func remapGrep(raw json.RawMessage) json.RawMessage {
 		delete(fields, "glob")
 		fields["includes"] = wrapArray(glob)
 	}
-	out, err := json.Marshal(fields)
+	out, err := jsonx.Marshal(fields)
 	if err != nil {
 		return raw
 	}
@@ -114,7 +115,7 @@ func remapGrep(raw json.RawMessage) json.RawMessage {
 }
 
 func wrapArray(value json.RawMessage) json.RawMessage {
-	array, err := json.Marshal([]json.RawMessage{value})
+	array, err := jsonx.Marshal([]json.RawMessage{value})
 	if err != nil {
 		return value
 	}

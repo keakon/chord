@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/patchinput"
 	"github.com/keakon/chord/internal/textclean"
@@ -52,7 +53,7 @@ func NormalizeApplyPatchArgs(raw json.RawMessage) (json.RawMessage, error) {
 	if len(unwrapped) == 0 || unwrapped[0] != '{' {
 		// Bare freeform text (custom_tool_call wire input or anomalous
 		// gateway): treat the entire payload as the patch.
-		return json.Marshal(ApplyPatchArgs{Patch: string(unwrapped)})
+		return jsonx.Marshal(ApplyPatchArgs{Patch: string(unwrapped)})
 	}
 	if json.Valid(unwrapped) {
 		var obj map[string]json.RawMessage
@@ -77,7 +78,7 @@ func NormalizeApplyPatchArgs(raw json.RawMessage) (json.RawMessage, error) {
 	if strings.TrimSpace(args.Patch) == "" {
 		return nil, fmt.Errorf("patch is required")
 	}
-	return json.Marshal(ApplyPatchArgs{Patch: args.Patch})
+	return jsonx.Marshal(ApplyPatchArgs{Patch: args.Patch})
 }
 
 type MutationKind string

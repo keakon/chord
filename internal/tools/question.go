@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -178,7 +180,7 @@ func (t *QuestionTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	if err != nil {
 		return "", fmt.Errorf("question failed: %w", err)
 	}
-	data, err := json.Marshal(result)
+	data, err := jsonx.Marshal(result)
 	if err != nil {
 		return "", fmt.Errorf("marshal question result: %w", err)
 	}

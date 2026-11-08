@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/contextdiag"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
 )
@@ -118,7 +119,7 @@ func boundedDiagnosticJSON(v any) ([]byte, bool) {
 	if !visit(reflect.ValueOf(v), 0) {
 		return nil, false
 	}
-	data, err := json.Marshal(v)
+	data, err := jsonx.Marshal(v)
 	return data, err == nil
 }
 

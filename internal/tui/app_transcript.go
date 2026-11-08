@@ -722,7 +722,7 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 		block.ToolProgress = nil
 	}
 	if result.duration > 0 {
-		block.PersistedDuration = result.duration
+		block.PersistedDuration = int64(result.duration)
 	}
 	if result.diff != "" {
 		block.Diff = result.diff

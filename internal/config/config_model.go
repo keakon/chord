@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // ModelModalities declares which input modalities a model supports.
@@ -62,7 +64,7 @@ func (r ModelCatalogRef) MarshalJSON() ([]byte, error) {
 	if strings.TrimSpace(r.ID) == "" {
 		return nil, fmt.Errorf("catalog must be a non-empty string or false")
 	}
-	return json.Marshal(r.ID)
+	return jsonx.Marshal(r.ID)
 }
 
 func (r *ModelCatalogRef) UnmarshalJSON(data []byte) error {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/skill"
 )
 
@@ -170,9 +171,13 @@ func BuildStartupSkillListingDetailed(entries []SkillListingEntry, header string
 	shown := 0
 	rendered := SkillListing{Entries: make([]SkillListingRenderEntry, 0, len(entries))}
 	for _, entry := range entries {
-		name, _ := json.Marshal(entry.Name)
+		name, _ := jsonx.Marshal(entry.Name)
 		truncated := TruncateSkillDesc(entry.Desc)
-		desc, _ := json.Marshal(truncated)
+		desc, _ := jsonx.Marshal(truncated)
+		// The encoded name and description are embedded verbatim in prompt
+		// text; keep <, > and & escaped so untrusted descriptions cannot forge
+		// Markdown/XML-looking tags there.
+		name, desc = jsonx.EscapeForPrompt(name), jsonx.EscapeForPrompt(desc)
 		line := fmt.Sprintf("- name: %s; description: %s\n", name, desc)
 		record := SkillListingRenderEntry{Name: entry.Name}
 		switch {
@@ -195,7 +200,7 @@ func BuildStartupSkillListingDetailed(entries []SkillListingEntry, header string
 	if len(omitted) > 0 {
 		fmt.Fprintf(&body, "%d additional skills are listed by name below.\n", len(omitted))
 		slices.Sort(omitted)
-		names, _ := json.Marshal(omitted)
+		names, _ := jsonx.Marshal(omitted)
 		body.WriteString("Additional available skill names: ")
 		body.Write(names)
 		body.WriteByte('\n')
@@ -257,7 +262,7 @@ func substituteSkillPlaceholders(content, rootDir, args string) string {
 // user-triggered load records its call through this helper so the persisted
 // pair stays byte-shaped like a model-produced one.
 func SkillCallArguments(name, args string) (json.RawMessage, error) {
-	return json.Marshal(skillArgs{Name: name, Args: args})
+	return jsonx.Marshal(skillArgs{Name: name, Args: args})
 }
 
 // skillBodyDigestTag identifies the full-body fingerprint every complete skill

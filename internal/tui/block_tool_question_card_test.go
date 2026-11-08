@@ -358,7 +358,7 @@ func TestQuestionCardOmitsElapsedWaitTime(t *testing.T) {
 		ResultPayload:     `[{"selected":["internal/tools"]}]`,
 		ResultDone:        true,
 		ResultStatus:      message.ToolStatusSuccess,
-		PersistedDuration: 42 * time.Second,
+		PersistedDuration: int64(42 * time.Second),
 	}
 
 	plain := terminaltext.StripANSI(strings.Join(block.renderQuestionCall(120, ""), "\n"))

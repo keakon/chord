@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/permission"
 )
 
@@ -79,7 +80,7 @@ func (t *CancelTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 	if err != nil {
 		return "", err
 	}
-	out, err := json.Marshal(handle)
+	out, err := jsonx.Marshal(handle)
 	if err != nil {
 		return "", fmt.Errorf("marshal cancel handle: %w", err)
 	}

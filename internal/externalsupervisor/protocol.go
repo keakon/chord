@@ -22,6 +22,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // CommandName is the hidden chord subcommand that runs a supervisor. Chord
@@ -131,7 +133,7 @@ func writeLifecycleMessage(pipe *os.File, message Message, deadline time.Time) e
 }
 
 func writeMessage(writer io.Writer, message Message) error {
-	data, err := json.Marshal(message)
+	data, err := jsonx.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("encode lifecycle message: %w", err)
 	}

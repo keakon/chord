@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/modelcatalog"
 )
 
@@ -100,7 +101,7 @@ func RecordCatalogAdvisoryAcknowledgment(provider, model string) error {
 	} else {
 		state.Acks = append(state.Acks, entry)
 	}
-	data, err := json.MarshalIndent(&state, "", "  ")
+	data, err := jsonx.MarshalIndent(&state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}

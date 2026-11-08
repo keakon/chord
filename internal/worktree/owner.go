@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // OwnerKind describes which kind of chord actor created a worktree.
@@ -51,7 +53,7 @@ func WriteOwner(ctx context.Context, dir string, o Owner) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(o, "", "  ")
+	data, err := jsonx.MarshalIndent(o, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal worktree owner: %w", err)
 	}

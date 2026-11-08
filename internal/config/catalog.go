@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/modelcatalog"
 )
 
@@ -241,7 +242,7 @@ func customCatalogProfile(provider ProviderConfig, facts modelcatalog.ModelFacts
 	if selected != nil {
 		profile := modelcatalog.MergeConfigProfiles(facts.Profile, selected.Profile)
 		if selected.Responses != nil {
-			data, err := json.Marshal(selected.Responses)
+			data, err := jsonx.Marshal(selected.Responses)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -269,7 +270,7 @@ func prepareCatalogCompatDefaults(defaults *ModelConfig, provider *ProviderCompa
 		return nil
 	}
 	encode := func(value any) (map[string]any, error) {
-		data, err := json.Marshal(value)
+		data, err := jsonx.Marshal(value)
 		if err != nil {
 			return nil, err
 		}
@@ -315,7 +316,7 @@ func prepareCatalogCompatDefaults(defaults *ModelConfig, provider *ProviderCompa
 		defaults.Compat = nil
 		return nil
 	}
-	data, err := json.Marshal(base)
+	data, err := jsonx.Marshal(base)
 	if err != nil {
 		return err
 	}

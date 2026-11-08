@@ -1,12 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 type doctorQueryStatus string
@@ -86,7 +86,7 @@ func renderDoctorConfigQuery(out io.Writer, query *doctorConfigQuery) {
 	}
 	r := query.Result
 	fmt.Fprintf(out, "Model: %s\nField: %s\nView: disk\nGlobal config: %s\nProject config: %s (exists: %t)\n", r.Model, r.Field, query.GlobalPath, query.ProjectPath, query.ProjectExists)
-	value, _ := json.Marshal(r.Value)
+	value, _ := jsonx.Marshal(r.Value)
 	fmt.Fprintf(out, "Value: %s (%s)\nSource status: %s\n", value, r.ValueState, r.SourceStatus)
 	if r.Source != nil {
 		renderExplainSource(out, "Source", r.Source)
@@ -96,7 +96,7 @@ func renderDoctorConfigQuery(out io.Writer, query *doctorConfigQuery) {
 		for _, d := range r.Declarations {
 			value := ""
 			if d.Value != nil {
-				encoded, _ := json.Marshal(d.Value)
+				encoded, _ := jsonx.Marshal(d.Value)
 				value = " = " + string(encoded)
 			}
 			fmt.Fprintf(out, "  %s %s%s\n", d.Effect, d.Kind, value)
@@ -107,7 +107,7 @@ func renderDoctorConfigQuery(out io.Writer, query *doctorConfigQuery) {
 		fmt.Fprintf(out, "Related diagnostic: %s\n", d.String())
 	}
 	if target := r.EditTarget; target != nil {
-		path, _ := json.Marshal(target.PathSegments)
+		path, _ := jsonx.Marshal(target.PathSegments)
 		fmt.Fprintf(out, "Edit: %s %s %s", target.Action, target.File, path)
 		if target.Line > 0 {
 			fmt.Fprintf(out, " (line %d, column %d)", target.Line, target.Col)
@@ -120,7 +120,7 @@ func renderDoctorConfigQuery(out io.Writer, query *doctorConfigQuery) {
 	fmt.Fprintln(out)
 }
 func renderExplainSource(out io.Writer, label string, source *config.ExplainSource) {
-	path, _ := json.Marshal(source.PathSegments)
+	path, _ := jsonx.Marshal(source.PathSegments)
 	fmt.Fprintf(out, "%s: %s %s", label, source.Kind, path)
 	if source.File != "" {
 		fmt.Fprintf(out, " in %s", source.File)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -79,7 +80,7 @@ func (t ToolSearchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if err != nil {
 		return "", err
 	}
-	raw, err = json.Marshal(result)
+	raw, err = jsonx.Marshal(result)
 	if err != nil {
 		return "", fmt.Errorf("encode discovery result: %w", err)
 	}

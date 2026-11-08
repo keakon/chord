@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
@@ -202,7 +203,7 @@ func formatParamValue(v any) string {
 		}
 		return "true"
 	default:
-		b, _ := json.Marshal(v)
+		b, _ := jsonx.Marshal(v)
 		s := string(b)
 		if s == "null" || s == "{}" || s == "[]" {
 			return ""
@@ -279,7 +280,7 @@ func mapStringListParam(raw string, mapValue func(string) string) string {
 	for i, value := range values {
 		values[i] = mapValue(value)
 	}
-	b, err := json.Marshal(values)
+	b, err := jsonx.Marshal(values)
 	if err != nil {
 		return raw
 	}
@@ -735,7 +736,7 @@ func marshalStringListArg(values []string) string {
 	if len(sanitized) == 0 {
 		return ""
 	}
-	encoded, err := json.Marshal(sanitized)
+	encoded, err := jsonx.Marshal(sanitized)
 	if err != nil {
 		return ""
 	}

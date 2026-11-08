@@ -1,10 +1,11 @@
 package externalclaude
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 var managedTools = []string{
@@ -97,7 +98,7 @@ func managedSettings() string {
 		DisableAllHooks bool `json:"disableAllHooks"`
 	}{DisableAllHooks: true}
 	settings.Permissions.Ask = managedTools
-	data, _ := json.Marshal(settings)
+	data, _ := jsonx.Marshal(settings)
 	return string(data)
 }
 

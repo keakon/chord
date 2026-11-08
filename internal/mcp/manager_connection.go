@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // connectionEntry is the sole authority for a server's published connection,
@@ -382,7 +384,7 @@ func cloneToolDefinitions(defs []MCPToolDef) []MCPToolDef {
 	if defs == nil {
 		return nil
 	}
-	data, err := json.Marshal(defs)
+	data, err := jsonx.Marshal(defs)
 	if err != nil {
 		return nil
 	}
@@ -558,7 +560,7 @@ func (m *Manager) ServerNames() []string {
 }
 
 func toolSchemaHash(def MCPToolDef) string {
-	data, err := json.Marshal(def)
+	data, err := jsonx.Marshal(def)
 	if err != nil {
 		return ""
 	}

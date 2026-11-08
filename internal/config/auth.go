@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -457,7 +459,7 @@ func refreshOAuthTokenWithFormat(
 		if clientID != "" {
 			requestBody["client_id"] = clientID
 		}
-		payload, err := json.Marshal(requestBody)
+		payload, err := jsonx.Marshal(requestBody)
 		if err != nil {
 			return nil, fmt.Errorf("marshal token request: %w", err)
 		}

@@ -3,7 +3,6 @@ package testgit
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 type file struct {
@@ -36,7 +37,7 @@ func NewRepository(t testing.TB, contents map[string]string) string {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}
-	data, err := json.Marshal(contents)
+	data, err := jsonx.Marshal(contents)
 	if err != nil {
 		t.Fatal(err)
 	}

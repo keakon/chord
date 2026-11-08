@@ -7,6 +7,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/modelcatalog"
 )
 
@@ -22,7 +23,7 @@ func DecodeCatalogProfile(profile *modelcatalog.ConfigProfile) (ModelConfig, err
 	if len(profile.Compat) > 0 {
 		values["compat"] = profile.Compat
 	}
-	data, err := json.Marshal(values)
+	data, err := jsonx.Marshal(values)
 	if err != nil {
 		return model, fmt.Errorf("encode catalog profile: %w", err)
 	}

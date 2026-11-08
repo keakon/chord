@@ -1,12 +1,12 @@
 package tui
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/terminaltext"
@@ -21,7 +21,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	contentWidth := min(innerWidth-4, maxTextWidth)
 
-	argsJSON, _ := json.Marshal(map[string]string{"command": b.UserLocalShellCmd})
+	argsJSON, _ := jsonx.Marshal(map[string]string{"command": b.UserLocalShellCmd})
 	argsStr := string(argsJSON)
 	mainPart := firstDisplayLine(b.UserLocalShellCmd)
 	grayPart := ""

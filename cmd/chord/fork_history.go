@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/privatefs"
@@ -503,7 +504,7 @@ func writeForkTranscript(newDir, srcDir string, lines []string) (int, error) {
 				}
 			}
 			relocated = relocForkCheckpointPaths(relocated, srcDir, newDir)
-			record, err = json.Marshal(relocated)
+			record, err = jsonx.Marshal(relocated)
 			if err != nil {
 				return fail(fmt.Errorf("encode fork message: %w", err))
 			}

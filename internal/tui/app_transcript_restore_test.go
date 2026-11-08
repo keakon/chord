@@ -177,7 +177,7 @@ func TestMessagesToBlocksSkillToolRestoresDisplaySummary(t *testing.T) {
 	if block.ToolName != "skill" {
 		t.Fatalf("ToolName = %q, want Skill", block.ToolName)
 	}
-	if got, want := block.Content, `{"name":"skill-creator","result":"\u003cpath\u003e/tmp/skills/skill-creator/SKILL.md\u003c/path\u003e"}`; got != want {
+	if got, want := block.Content, `{"name":"skill-creator","result":"<path>/tmp/skills/skill-creator/SKILL.md</path>"}`; got != want {
 		t.Fatalf("Content = %q, want %q", got, want)
 	}
 	if !strings.Contains(block.ResultContent, "# Skill Creator") {
@@ -235,7 +235,7 @@ func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) 
 	if !ok {
 		t.Fatal("expected Skill tool block")
 	}
-	if got, want := block.Content, `{"name":"skill-creator","result":"\u003cpath\u003e/tmp/skills/skill-creator/SKILL.md\u003c/path\u003e"}`; got != want {
+	if got, want := block.Content, `{"name":"skill-creator","result":"<path>/tmp/skills/skill-creator/SKILL.md</path>"}`; got != want {
 		t.Fatalf("Content = %q, want %q", got, want)
 	}
 	if !strings.Contains(block.ResultContent, "# Skill Creator") {
@@ -862,8 +862,8 @@ func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) 
 	if strings.Contains(joined, "Deleted /tmp/obsolete.go") {
 		t.Fatalf("expected restored Delete block to drop the per-path row the header already names; got:\n%s", joined)
 	}
-	if block.PersistedDuration != 1234*time.Millisecond {
-		t.Fatalf("PersistedDuration = %v, want 1234ms", block.PersistedDuration)
+	if block.PersistedDuration != int64(1234*time.Millisecond) {
+		t.Fatalf("PersistedDuration = %v, want 1234ms", time.Duration(block.PersistedDuration))
 	}
 }
 

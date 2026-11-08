@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/text/unicode/norm"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -366,7 +368,7 @@ func writeProjectMetadata(pl *ProjectLocator) error {
 		return err
 	}
 	meta := ProjectMetadata{SchemaVersion: 1, ProjectKey: pl.ProjectKey, CanonicalRoot: pl.CanonicalRoot, LogicalRoot: pl.LogicalRoot, HomeRelativeRoot: pl.HomeRelativeRoot, SessionsDir: filepath.ToSlash(filepath.Join("sessions", pl.ProjectKey)), RuntimeCacheDir: filepath.ToSlash(filepath.Join("runtime", "session-cache", pl.ProjectKey)), DisplayName: filepath.Base(pl.CanonicalRoot), CreatedAt: created, LastUsedAt: now}
-	data, err := json.MarshalIndent(meta, "", "  ")
+	data, err := jsonx.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return err
 	}

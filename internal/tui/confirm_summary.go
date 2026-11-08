@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/terminaltext"
@@ -268,7 +269,7 @@ func buildPatchConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	handled["patch"] = true
 	if filePath == "" {
 		if patchText != "" {
-			args, _ := json.Marshal(map[string]any{"patch": patchText})
+			args, _ := jsonx.Marshal(map[string]any{"patch": patchText})
 			filePath = tools.ExtractEditPathFromArgs(args)
 		}
 		if filePath == "" {
@@ -584,7 +585,7 @@ func confirmFormatValue(value any) string {
 		}
 		return strconv.FormatFloat(v, 'f', -1, 64)
 	default:
-		buf, err := json.Marshal(v)
+		buf, err := jsonx.Marshal(v)
 		if err != nil {
 			return fmt.Sprintf("%v", v)
 		}

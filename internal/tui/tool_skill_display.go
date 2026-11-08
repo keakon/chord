@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/convformat"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -66,7 +67,7 @@ func buildSkillDisplayArgsJSON(name, result string) string {
 	if path := skillToolPathFromResult(result); path != "" {
 		display["result"] = "<path>" + path + "</path>"
 	}
-	b, err := json.Marshal(display)
+	b, err := jsonx.Marshal(display)
 	if err != nil {
 		return ""
 	}

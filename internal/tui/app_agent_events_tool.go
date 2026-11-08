@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -65,7 +66,7 @@ func applyPatchToolDisplayArgs(argsJSON string) string {
 		}
 		paths = append(paths, path)
 	}
-	b, err := json.Marshal(map[string]any{"paths": paths})
+	b, err := jsonx.Marshal(map[string]any{"paths": paths})
 	if err != nil {
 		return ""
 	}
@@ -76,7 +77,7 @@ func fileToolPathDisplayArgs(path string) string {
 	if path == "" {
 		return ""
 	}
-	b, err := json.Marshal(map[string]string{"path": path})
+	b, err := jsonx.Marshal(map[string]string{"path": path})
 	if err != nil {
 		return ""
 	}

@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"io"
 	"strings"
@@ -93,8 +93,9 @@ func TestStdoutWriterReportsJSONEncodingFailure(t *testing.T) {
 	}
 	select {
 	case err := <-out.errors():
-		if _, ok := errors.AsType[*json.UnsupportedTypeError](err); !ok {
-			t.Fatalf("writer error = %v, want unsupported JSON type", err)
+		var semErr *jsonv2.SemanticError
+		if !errors.As(err, &semErr) {
+			t.Fatalf("writer error = %v, want a v2 semantic error", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("writer did not report JSON encoding failure")

@@ -2,11 +2,12 @@ package modelcatalog
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // effectiveState is the immutable snapshot of everything the process resolves
@@ -223,8 +224,8 @@ func SameSnapshot(a, b *Catalog) bool {
 	if a == nil || b == nil || a.Source == nil || b.Source == nil || *a.Source != *b.Source {
 		return false
 	}
-	ad, ae := json.Marshal(a)
-	bd, be := json.Marshal(b)
+	ad, ae := jsonx.Marshal(a)
+	bd, be := jsonx.Marshal(b)
 	return ae == nil && be == nil && bytes.Equal(ad, bd)
 }
 

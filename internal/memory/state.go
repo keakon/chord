@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 )
 
@@ -119,7 +120,7 @@ func SaveCheckpoint(l *Layout, cp *ExtractionCheckpoint) error {
 		existing.Sessions = make(map[string]SessionCoverage)
 	}
 	maps.Copy(existing.Sessions, cp.Sessions)
-	data, err := json.MarshalIndent(existing, "", "  ")
+	data, err := jsonx.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal extraction checkpoint: %w", err)
 	}
@@ -142,7 +143,7 @@ func SaveFailure(l *Layout, sessionID string, err error) {
 	if err != nil {
 		f.Error = err.Error()
 	}
-	data, _ := json.MarshalIndent(f, "", "  ")
+	data, _ := jsonx.MarshalIndent(f, "", "  ")
 	data = append(data, '\n')
 	path := filepath.Join(l.StateDir, "last-failure.json")
 	tmpPath := path + ".tmp"

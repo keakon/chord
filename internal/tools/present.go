@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/filedelivery"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/permission"
@@ -178,7 +179,7 @@ func (t PresentTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		f.Source = message.DeliverySource{SessionID: filepath.Base(sessionDir), TaskID: TaskIDFromContext(ctx), ToolCallID: ToolCallIDFromContext(ctx), TurnID: strconv.FormatUint(TurnIDFromContext(ctx), 10), ItemIndex: i}
 		f.ID = message.DeliveryID(f.Source)
 		f.Description = args.Files[i].Description
-		keyBytes, _ := json.Marshal(loc)
+		keyBytes, _ := jsonx.Marshal(loc)
 		key := string(keyBytes)
 		if prior, ok := seen[key]; ok {
 			files[prior].Description = f.Description

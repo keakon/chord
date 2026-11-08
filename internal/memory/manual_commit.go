@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 )
 
@@ -31,7 +32,7 @@ func (m *Manager) manualPendingPath() string {
 }
 
 func (m *Manager) saveManualPending(op *manualUndo) error {
-	data, err := json.Marshal(op)
+	data, err := jsonx.Marshal(op)
 	if err != nil {
 		return err
 	}

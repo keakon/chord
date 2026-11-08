@@ -15,6 +15,7 @@ import (
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/imagegen"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
 )
@@ -79,7 +80,7 @@ func saveImageOperation(ctx context.Context, dir, path string, op imageOperation
 }
 
 func writeImageOperation(dir, path string, op imageOperation) error {
-	data, err := json.Marshal(op)
+	data, err := jsonx.Marshal(op)
 	if err != nil {
 		return fmt.Errorf("encode image operation: %w", err)
 	}
@@ -251,7 +252,7 @@ func (t *GenerateImageTool) Execute(ctx context.Context, raw json.RawMessage) (o
 	rel := filepath.ToSlash(filepath.Join("images", "operations", id+".json"))
 	path := filepath.Join(sessionDir, filepath.FromSlash(rel))
 	target := t.Backend.Target()
-	requestBytes, _ := json.Marshal(struct {
+	requestBytes, _ := jsonx.Marshal(struct {
 		Request imagegen.Request
 		Sources []string
 	}{r, sources})
@@ -360,7 +361,7 @@ func (t *GenerateImageTool) imageSummary(ctx context.Context, op imageOperation,
 	}
 	summary := op.ImageGenerationSummary
 	summary.Images = append([]GeneratedImage(nil), op.Images...)
-	data, err := json.Marshal(summary)
+	data, err := jsonx.Marshal(summary)
 	if err != nil {
 		return "", fmt.Errorf("encode image summary: %w", err)
 	}

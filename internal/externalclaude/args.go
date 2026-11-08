@@ -4,10 +4,11 @@
 package externalclaude
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -100,7 +101,7 @@ func buildMCPConfig(notify bool) (string, error) {
 			"name": MCPNotifyServerName,
 		}
 	}
-	data, err := json.Marshal(map[string]any{"mcpServers": servers})
+	data, err := jsonx.Marshal(map[string]any{"mcpServers": servers})
 	if err != nil {
 		return "", fmt.Errorf("encode MCP configuration: %w", err)
 	}

@@ -3,9 +3,10 @@ package filepreview
 import (
 	"container/list"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 type cacheEntry struct {
@@ -24,8 +25,8 @@ type Cache struct {
 }
 
 func filePreviewCacheKey(req Request, data []byte) string {
-	locator, _ := json.Marshal(req.File.Locator)
-	style, _ := json.Marshal(req.Style)
+	locator, _ := jsonx.Marshal(req.File.Locator)
+	style, _ := jsonx.Marshal(req.Style)
 	return fmt.Sprintf("%s/%x/%t/%d/%x", string(locator)+req.Session, sha256.Sum256(data), req.Markdown, req.Width, sha256.Sum256(style))
 }
 func (c *Cache) get(key string) (Result, bool) {

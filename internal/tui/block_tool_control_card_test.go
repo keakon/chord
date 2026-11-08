@@ -534,7 +534,7 @@ func TestDoneCallHeaderKeepsBareToolLine(t *testing.T) {
 		ResultStatus:      message.ToolStatusSuccess,
 		ResultContent:     "done",
 		DoneReport:        "## Completion status\n改动已全部提交",
-		PersistedDuration: 19 * time.Second,
+		PersistedDuration: int64(19 * time.Second),
 	}
 
 	lines := stripANSILines(block.renderDoneCall(100, ""))

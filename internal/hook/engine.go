@@ -16,6 +16,8 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
+
 	"github.com/bmatcuk/doublestar/v4"
 )
 
@@ -535,7 +537,7 @@ type hookInput struct {
 }
 
 func marshalHookInput(env Envelope) hookInput {
-	data, err := json.Marshal(env)
+	data, err := jsonx.Marshal(env)
 	return hookInput{json: data, err: err}
 }
 

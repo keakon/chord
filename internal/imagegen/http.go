@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/httpheader"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -166,7 +167,7 @@ func BuildRequest(ctx context.Context, t Target, r Request, key string) (*http.R
 		body = io.MultiReader(segments...)
 		contentType = w.FormDataContentType()
 	} else {
-		data, err := json.Marshal(fields)
+		data, err := jsonx.Marshal(fields)
 		if err != nil {
 			return nil, nil, fmt.Errorf("encode image request: %w", err)
 		}
@@ -353,7 +354,7 @@ func ParseResponse(ctx context.Context, t Target, data []byte) (*Result, error) 
 		result.RequestID = boundedImageText(result.RequestID, 1024)
 		result.Warnings = append(result.Warnings, "Provider request ID was truncated to fit the metadata limit.")
 	}
-	if usage, err := json.Marshal(result.Usage); err != nil || len(usage) > 16<<10 {
+	if usage, err := jsonx.Marshal(result.Usage); err != nil || len(usage) > 16<<10 {
 		result.Usage = nil
 		result.Warnings = append(result.Warnings, "Provider usage exceeded the metadata limit and was omitted; billing remains unknown.")
 	}

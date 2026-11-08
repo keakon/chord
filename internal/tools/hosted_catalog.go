@@ -1,13 +1,13 @@
 package tools
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/toolname"
 )
 
@@ -57,7 +57,7 @@ func ValidateHostedToolCatalog(user map[string]config.HostedToolConfig, registry
 		if kind, _ := spec.Parameters["type"].(string); kind != "object" {
 			return fmt.Errorf("hosted tool %q parameters must be an object schema", name)
 		}
-		if _, err := json.Marshal(spec.Parameters); err != nil {
+		if _, err := jsonx.Marshal(spec.Parameters); err != nil {
 			return fmt.Errorf("hosted tool %q parameters: %w", name, err)
 		}
 		if len(spec.Declarations) == 0 {
@@ -85,7 +85,7 @@ func ValidateHostedToolCatalog(user map[string]config.HostedToolConfig, registry
 					return fmt.Errorf("hosted tool %q declaration %q force must be a string or object", name, family)
 				}
 			}
-			if _, err := json.Marshal(decl); err != nil {
+			if _, err := jsonx.Marshal(decl); err != nil {
 				return fmt.Errorf("hosted tool %q declaration %q: %w", name, family, err)
 			}
 			if err := config.ValidateHostedToolHeaders(decl.Headers); err != nil {

@@ -2,7 +2,6 @@ package runtimecache
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -277,7 +277,7 @@ func projectKey(projectRoot string) (string, error) {
 }
 
 func writeSessionMeta(path string, meta sessionMeta) error {
-	data, err := json.MarshalIndent(meta, "", "  ")
+	data, err := jsonx.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal runtime cache meta: %w", err)
 	}

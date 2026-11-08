@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -314,7 +315,7 @@ func ResolveHostedDeclaration(spec HostedToolSpec, family string, args map[strin
 		return HostedDeclaration{}, fmt.Errorf("hosted tool %q %s declaration: %w", spec.Name, family, err)
 	}
 	resolved, _ := resolveHostedArgs(template, args)
-	toolJSON, err := json.Marshal(resolved)
+	toolJSON, err := jsonx.Marshal(resolved)
 	if err != nil {
 		return HostedDeclaration{}, fmt.Errorf("hosted tool %q %s declaration: %w", spec.Name, family, err)
 	}
@@ -324,7 +325,7 @@ func ResolveHostedDeclaration(spec HostedToolSpec, family string, args map[strin
 		Headers: maps.Clone(decl.Headers),
 	}
 	if decl.Force != nil {
-		forceJSON, err := json.Marshal(decl.Force)
+		forceJSON, err := jsonx.Marshal(decl.Force)
 		if err != nil {
 			return HostedDeclaration{}, fmt.Errorf("hosted tool %q %s tool_choice: %w", spec.Name, family, err)
 		}
@@ -344,7 +345,7 @@ func RenderHostedPrompt(spec HostedToolSpec, args map[string]any) string {
 		if len(args) == 0 {
 			return "{}"
 		}
-		encoded, err := json.Marshal(args)
+		encoded, err := jsonx.Marshal(args)
 		if err != nil || len(encoded) == 0 {
 			return "{}"
 		}
@@ -367,7 +368,7 @@ func hostedArgText(value any) string {
 	if text, ok := value.(string); ok {
 		return text
 	}
-	encoded, err := json.Marshal(value)
+	encoded, err := jsonx.Marshal(value)
 	if err != nil {
 		return fmt.Sprint(value)
 	}
@@ -377,7 +378,7 @@ func hostedArgText(value any) string {
 // copyHostedDeclaration deep-copies a declaration template through
 // JSON so placeholder resolution cannot mutate the shared catalog entry.
 func copyHostedDeclaration(tool map[string]any) (map[string]any, error) {
-	encoded, err := json.Marshal(tool)
+	encoded, err := jsonx.Marshal(tool)
 	if err != nil {
 		return nil, err
 	}

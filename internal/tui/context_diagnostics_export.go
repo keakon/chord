@@ -1,11 +1,11 @@
 package tui
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/contextdiag"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // This explicit envelope is the export boundary. Never marshal the agent view
@@ -84,7 +84,7 @@ func exportContextDiagnostics(view agent.ContextDiagnosticsView) []byte {
 		}
 		envelope.Snapshot = &exportSnapshot{WireFamily: s.WireFamily, Transport: s.Transport, Seq: s.ID.Seq, Attempt: s.ID.Attempt, Revision: s.Revision, Agent: scope + "/agent-1", Model: "model-1", State: s.State, StartedAt: started, FinishedAt: finished, EstimateScope: s.EstimateScope, Estimator: s.Estimator, Completeness: s.Completeness, Categories: s.Categories, Limitations: s.Limitations, Reduction: s.Reduction, Usage: s.Usage, Cache: s.Cache}
 	}
-	data, _ := json.MarshalIndent(envelope, "", "  ")
+	data, _ := jsonx.MarshalIndent(envelope, "", "  ")
 	return data
 }
 

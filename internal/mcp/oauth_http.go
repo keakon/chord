@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 const (
@@ -187,7 +189,7 @@ func (c *OAuthHTTPClient) PostFormWithBasic(ctx context.Context, endpoint string
 }
 
 func (c *OAuthHTTPClient) PostJSON(ctx context.Context, endpoint string, in, out any) error {
-	body, err := json.Marshal(in)
+	body, err := jsonx.Marshal(in)
 	if err != nil {
 		return &OAuthHTTPError{ErrorClass: ErrorProtocol, SendEvidence: SendNotSent, cause: err}
 	}

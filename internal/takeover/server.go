@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/recovery"
 )
@@ -115,7 +115,7 @@ func StartServer(options ServerOptions) (*Server, error) {
 	} else if !os.IsNotExist(err) {
 		return cleanup(err)
 	}
-	data, err := json.Marshal(record)
+	data, err := jsonx.Marshal(record)
 	if err != nil {
 		return cleanup(err)
 	}
@@ -145,7 +145,7 @@ func (s *Server) UpdateRecord(record Record) error {
 	if normalized.RuntimeID != s.record.RuntimeID || normalized.SocketPath != s.record.SocketPath || normalized.OwnerKind != s.record.OwnerKind {
 		return protocolError(CodeStaleSource, "runtime endpoint identity cannot change")
 	}
-	data, err := json.Marshal(normalized)
+	data, err := jsonx.Marshal(normalized)
 	if err != nil {
 		return err
 	}

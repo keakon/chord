@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/takeover"
 )
@@ -55,7 +55,7 @@ func writeTakeoverCLIStatus(out io.Writer, status recovery.SessionPauseStatus) e
 }
 
 func writeTakeoverCLIPublicStatus(out io.Writer, status takeover.Status) error {
-	data, err := json.Marshal(status)
+	data, err := jsonx.Marshal(status)
 	if err != nil {
 		return err
 	}

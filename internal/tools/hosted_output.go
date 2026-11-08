@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/imageutil"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -60,7 +61,7 @@ func (t HostedTool) renderResult(ctx context.Context, obs *message.HostedObserva
 	}
 	if hostedOutputNeedsArtifact(obs) {
 		if dir := SessionDirFromContext(ctx); dir != "" {
-			raw, err := json.Marshal(obs)
+			raw, err := jsonx.Marshal(obs)
 			if err != nil {
 				return "", fmt.Errorf("marshal hosted output: %w", err)
 			}

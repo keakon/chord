@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // HandoffTool signals that plan generation is complete and hands off control
@@ -71,7 +73,7 @@ func (t HandoffTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 	}
 
 	// Return structured JSON for handleToolResult to parse.
-	result, _ := json.Marshal(map[string]string{
+	result, _ := jsonx.Marshal(map[string]string{
 		"plan_path": planPath,
 	})
 	return string(result), nil

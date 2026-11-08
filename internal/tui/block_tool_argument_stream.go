@@ -6,6 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -306,7 +307,7 @@ func (b *Block) streamedDisplayArgs(raw, result string) string {
 		if len(s.values) == 0 {
 			return ""
 		}
-		args, _ := json.Marshal(s.values)
+		args, _ := jsonx.Marshal(s.values)
 		return string(args)
 	default:
 		return streamingToolDisplayArgs(b.ToolName, raw, result)

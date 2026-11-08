@@ -2,17 +2,17 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/keakon/chord/internal/imagegen"
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 func ImageTargetFingerprint(target imagegen.Target) string {
-	data, _ := json.Marshal(target)
+	data, _ := jsonx.Marshal(target)
 	return imageDigest(data)
 }
 

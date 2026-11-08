@@ -30,6 +30,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/llm"
 )
 
@@ -1087,7 +1088,7 @@ func requestOpenAICodexDeviceCode(ctx context.Context, client *http.Client, issu
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	body, err := json.Marshal(map[string]string{"client_id": clientID})
+	body, err := jsonx.Marshal(map[string]string{"client_id": clientID})
 	if err != nil {
 		return nil, fmt.Errorf("marshal device code request: %w", err)
 	}
@@ -1178,7 +1179,7 @@ func requestOpenAICodexDeviceAuthorizationCode(
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	body, err := json.Marshal(map[string]string{
+	body, err := jsonx.Marshal(map[string]string{
 		"device_auth_id": deviceAuthID,
 		"user_code":      userCode,
 	})

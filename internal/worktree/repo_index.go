@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // CurrentRepoIndexSchema is the schema version for RepoIndex on disk.
@@ -102,7 +104,7 @@ func SaveRepoIndex(stateDir string, idx *RepoIndex) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir repo index dir: %w", err)
 	}
-	data, err := json.MarshalIndent(idx, "", "  ")
+	data, err := jsonx.MarshalIndent(idx, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal repo index: %w", err)
 	}

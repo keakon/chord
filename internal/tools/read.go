@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/textfile"
 	"github.com/keakon/chord/internal/tooloutput"
 )
@@ -148,7 +149,7 @@ func readOutputFitsBudget(content string) bool {
 }
 
 func quoteReadHeaderValue(value string) string {
-	encoded, err := json.Marshal(value)
+	encoded, err := jsonx.Marshal(value)
 	if err != nil {
 		return "\"\""
 	}

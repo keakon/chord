@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/permission"
 )
 
@@ -61,7 +61,7 @@ func BuildPathDescriptor(meta *Meta) PathDescriptor {
 		AllowedTools, Paths, Resources                                     []string
 		DisableModelInvocation                                             bool
 	}{meta.Name, meta.Description, meta.WhenToUse, meta.ArgsHint, meta.Context, meta.Model, meta.Effort, allowed, d.Patterns, meta.Resources, meta.DisableModelInvocation}
-	data, _ := json.Marshal(revision)
+	data, _ := jsonx.Marshal(revision)
 	sum := sha256.Sum256(data)
 	d.Revision = hex.EncodeToString(sum[:])
 	return d
