@@ -2,27 +2,6 @@
 
 `chord headless` 是 Chord 的轻量控制面入口，适合 bot、gateway、自动化脚本接入。
 
-## 持久输入队列
-
-MainAgent 的 `send` 支持 `delivery_policy: "next_request"`（默认）和 `"after_completion"`。完成后执行的发送须提供 `request_id`。每次发送只收到一次 `input_result`：`handled`、`queued`、`started`、`rejected` 或 `unknown`。`queued` 确认已持久保存，不表示已经执行，后续不会再发送第二次 `started` 回执。`unknown` 要求客户端先核对队列和历史，不应自动重发。
-
-```json
-{"type":"send","request_id":"request-1","content":"Check the documentation","delivery_policy":"after_completion"}
-```
-
-`ready`、`ready_paused`、`session_switched` 和 `status_response` 可包含 `input_queue`。缺失或 null 表示尚未取得投影；空 `inputs` 数组表示确认空队列。订阅 `input_queue_changed` 获取变化。投影包含 runtime/session 身份、`view_version`、`view_version_cas`、`queue_revision`、工作结果，以及最多 128 项输入摘要；每项预览最多 160 个 Unicode 字符，附件只返回数量，不包含二进制或附件路径。先校验 runtime/session，再比较 `view_version`；`queue_revision` 用于持久 CAS，存储错误变化时可能保持不变。`view_version_cas: true` 表示服务端会按该版本检查视图相关操作。`restored_held: true` 表示这些输入随恢复的会话一起载入，用户继续或发送新输入之前不会开始。
-
-`input_queue` 操作须提供唯一 `operation_id`、要求绑定时的当前 `binding_id`，以及从投影取得的完整 `target`：`runtime_id`、`session_id`、`session_epoch`、`owner_task_id`、`work_dir_generation`。owner 必须为 `main`。需要确保操作只应用到当前展示的投影时，应携带非零 `expected_view_version`；视图版本过期时返回 `conflict`，操作不会执行。Chord 在 headless 收到命令时和 MainAgent 处理操作时都会检查版本；持久改动还会在保存前比较输入或队列修订号。`input_queue_result` 不受事件订阅过滤，返回 `committed`、`rejected`、`conflict` 或 `unknown`，并携带当前版本。
-
-| 操作 | 额外必需字段 |
-| --- | --- |
-| `get` | `input_id`；返回完整文本和附件数量 |
-| `update` | `input_id`、`expected_revision`；可选 `content` 和/或 `delivery_policy` |
-| `delete`、`hold_edit`、`release_edit` | `input_id`、`expected_revision` |
-| `clear` | `expected_queue_revision` |
-
-省略 `content` 保留正文和附件；提供该字段表示替换正文。含附件输入的正文编辑须使用本地 TUI。持有或编辑某项输入不会让它立即开始。`clear` 只移除未开始的后续项。后续项通过自身的 `wait_work_id` 表明在等哪个工作，`works` 里对应条目携带其结果；该工作成功收口后的第一个空闲时刻，后续项才会发出。ACP prompt 仍使用普通的下一次请求策略。
-
 ## 它是什么
 
 - 无 TUI
@@ -127,6 +106,8 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 
 可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`confirm_resolved`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`lsp_followup`、`image_result`。
 
+待处理输入的变化还可通过 `input_queue_changed` 订阅，见[持久输入队列](#持久输入队列)。
+
 ### `status`
 
 请求当前后端状态快照。
@@ -180,6 +161,8 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 
 向 agent 发送用户消息。slash 命令的行为与 TUI 一致；裸 `/models` 会被当作 `/models status`，因为 headless 没有 TUI overlay。
 
+下例使用默认的下一次请求策略。要通过 `delivery_policy: "after_completion"` 排队执行独立任务，须补充[持久输入队列](#持久输入队列)中的字段，并按该节处理操作回执。
+
 ```json
 {"type": "send", "request_id": "input-1", "content": "请总结一下项目结构。"}
 ```
@@ -198,6 +181,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 | `queued` | 输入已进入待处理队列，将在后续请求边界消费 |
 | `started` | 输入已创建回合并提交用户消息，即将准备模型请求 |
 | `rejected` | 空输入、仅支持 TUI 的命令、进程关闭或取消导致此次输入未开始工作；`message` 说明原因 |
+| `unknown` | 无法确认输入是否已保存；重发前先核对队列状态和会话历史 |
 
 每条输入只有一次消费回执，不代表模型成功、任务完成或跨断线持久投递。`queued` 不会再收到第二条 `started` 回执；请订阅 `activity` 并结合全局 `idle` 跟踪实际工作。`handled`、`queued` 和 `rejected` 不会清掉已有回合的忙碌状态。断线后的未确认输入属于结果未知，先检查会话再决定是否重发，避免重复副作用。处理新输入时，Chord 先入队，再关闭阻塞中的交互，不等待消费完成。
 
@@ -340,6 +324,68 @@ Chord 收到带 request ID 的规则意图后，会在尝试写入规则后发�
 ```json
 {"type": "cancel"}
 ```
+
+## 持久输入队列
+
+MainAgent 的 `send` 支持 `delivery_policy: "next_request"`（默认，注入下一次模型请求）和 `"after_completion"`（作为独立任务，等待当前工作正常收口后执行）。后续任务在同一会话中逐项执行。ACP prompt 使用下一次请求策略。
+
+### 读取队列状态
+
+`ready`（包括 `ready_paused` 状态）、`session_switched` 和 `status_response` 可携带 `input_queue` 队列投影。订阅 `input_queue_changed` 获取更新。投影缺失或为 null 时，队列状态尚不明确；`inputs: []` 表示已确认队列为空。
+
+投影字段的用法：
+
+| 字段 | 客户端用法 |
+| --- | --- |
+| `runtime_id`、`session_id`、`session_epoch`、`owner_task_id`、`work_dir_generation` | 将这五个字段完整复制到命令的 `target` 对象。owner 必须为 `main`；切换会话或工作目录后重新取得目标。 |
+| `view_version`、`view_version_cas` | 先核对运行实例与会话身份，再比较版本并保留最新视图。`view_version_cas: true` 表示支持 `expected_view_version` 校验。 |
+| `queue_revision`、每项输入的 `revision` | 清空队列或修改条目时携带对应修订号。存储错误变化可能只推进 `view_version`，不改变 `queue_revision`。 |
+| `inputs`、`works` | 最多 128 项输入摘要及工作结果。每项预览最多 160 个 Unicode 字符；附件仅返回数量，不含路径和二进制数据。 |
+| `restored_held`、`blocked` | 用于展示输入等待的原因。恢复的输入保持等待，直到用户继续或发送新输入。 |
+
+后续项的 `wait_work_id` 指向 `works` 中它正在等待的工作；该工作成功收口后的第一个空闲时刻，后续项才会开始。失败、取消或结果未知都会让后续任务继续等待；用户发送新任务并成功收口后，队列继续推进。
+
+### 发送后续任务
+
+取得队列状态后，发送带唯一 `operation_id` 和当前 `target` 的命令。下面的示例身份与版本须替换成投影中的实际值；通过 stdin 发送时，每条 JSON 占一行：
+
+```json
+{"type":"send","operation_id":"queue-1","request_id":"request-1","target":{"runtime_id":"runtime-1","session_id":"session-1","session_epoch":1,"owner_task_id":"main","work_dir_generation":1},"expected_view_version":7,"content":"Check the documentation","delivery_policy":"after_completion"}
+```
+
+网关管理的进程还须携带与 `--gateway-instance` 一致的 `binding_id`。带上当前非零的 `expected_view_version`，可确保操作只应用到正在展示的视图；版本过期时返回 `conflict`，操作不会执行。
+
+### 查看或修改条目
+
+发送 `type: "input_queue"`，指定 `action`、唯一 `operation_id`、同样完整的 `target`，并在需要绑定时带上 `binding_id`。`expected_view_version` 的用法同上。例如：
+
+```json
+{"type":"input_queue","action":"update","operation_id":"queue-2","target":{"runtime_id":"runtime-1","session_id":"session-1","session_epoch":1,"owner_task_id":"main","work_dir_generation":1},"expected_view_version":8,"input_id":"input-1","expected_revision":1,"delivery_policy":"next_request"}
+```
+
+| 操作 | 额外必需字段 | 说明 |
+| --- | --- | --- |
+| `get` | `input_id` | 获取该项的完整文本与附件数量 |
+| `update` | `input_id`、`expected_revision` | 更新正文（可选 `content`）或投递策略（可选 `delivery_policy`） |
+| `delete` | `input_id`、`expected_revision` | 从队列中删除该项 |
+| `hold_edit` | `input_id`、`expected_revision` | 暂停该项消费并锁定编辑状态 |
+| `release_edit` | `input_id`、`expected_revision` | 解除锁定恢复排队 |
+| `clear` | `expected_queue_revision` | 清空所有未开始的完成后执行项 |
+
+省略 `content` 会保留正文和附件；提供该字段会替换正文，空文本替换会被拒绝。含附件输入的正文须在本地 TUI 编辑。持有或编辑条目时，它仍留在队列中；已经开始的输入不能编辑或删除。
+
+### 处理回执
+
+完成后执行的发送和 `input_queue` 命令都通过 `input_queue_result` 返回操作结果，以 `operation_id` 关联，不受事件订阅过滤。结果包含目标身份及当前可用的条目、队列修订号：
+
+| `result` | 客户端动作 |
+| --- | --- |
+| `committed` | 操作成功。发送操作表示输入已持久入队，执行进度通过队列更新跟踪。 |
+| `rejected` | 展示 `reason`，修正请求后再提交。 |
+| `conflict` | 刷新队列与修订号，再判断是否重复操作。 |
+| `unknown` | 先核对队列状态和会话历史，再决定是否重试；操作可能已经保存。 |
+
+发送时提供 `request_id`，还会在 Agent 处理该输入后收到 `input_result`（此投递路径使用 `queued`、`rejected` 或 `unknown`）。入口校验失败可能只返回 `input_queue_result`，因此应以操作回执结束本次等待。`queued` 只回执一次，后续不会再发送第二条 `started`。连接在回执到达前断开时，也应先核对队列和历史再重发。
 
 ## 图片交付
 

@@ -74,7 +74,7 @@ context:
 | `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从固定压缩预算中扣除，再应用 `threshold`。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 | `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；等于或高于 threshold 的 reminder 不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本就携带上阈值通知。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
-| `model_driven` | 布尔 | `true` | 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，随后在同一 turn 的压缩上下文上继续：主 agent 在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求；SubAgent 在工具批次收口时同步应用。工具同样以 worker 变体对 SubAgent 可用——schema 收缩（去掉证据字段、跨代 carry、planned 文件），必须单独调用，`state_files` 只作路径引用，工具自身不读取也不校验存在性。主 agent 上 reset 后 runtime 会重新载入登记文件与 checkpoint 关键文件的一小段头部（且仅当当前 read 权限规则允许该路径）；SubAgent 的 checkpoint 只列出路径，由模型自己读取。低收益请求会被自动跳过。设为 `false` 可让压缩完全由运行时接管。 |
+| `model_driven` | 布尔 | `true` | 向模型提供 `compact_context` 工具，让它记录续跑所需状态后主动请求压缩，可早于用量阈值；节省空间不足的请求会跳过。压力提醒遵循 `threshold` 与 `reminder` 设置。设为 `false` 会关闭该工具及相关提醒，自动压缩仍按配置的阈值触发。 |
 | `retain_recent_tokens` | 整数 | `4096`（内置） | 每个压缩 checkpoint 内嵌的最近真实用户消息的估计 token 预算（见上文的「保留最近消息」）；`0` 或缺省使用内置默认值。没有关闭用的取值：`0` 不等于关闭，要缩小保留窗口请设置一个较小的正整数。预算只算消息正文，从上个 checkpoint 带过来的消息同样占用这份预算。需要跨压缩保住更多最近轮次就调大，想让压缩多回收上下文就调小；保留段不替代摘要，只把最新指令边界原样钉住（与当前请求完全相同的重复消息只渲染一次）。 |
 
 按模型覆盖写在**模型定义**上（`ModelConfig.compaction`，含 `threshold` 与 `reminder` 两个子字段），可经 `model_templates` 用 `<<:` 共享；**没有** `context.compaction.models` 这张表。

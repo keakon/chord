@@ -20,25 +20,30 @@ Chord is a coding agent that can read files, modify files, execute commands, and
 
 ## Permission model
 
+### Rule syntax and priority
+
 Typical permission states:
 
-- `allow`: auto-allow
-- `ask`: require confirmation before execution
-- `deny`: reject the call. A `deny` carrying the wildcard pattern — including the shorthand `tool: deny` — goes further and removes the tool from the model's tool list entirely, so the model never sees its schema. A `deny` carrying a concrete pattern only rejects the matching calls and leaves the tool visible.
+- `allow`: automatically permit the call.
+- `ask`: require confirmation before execution.
+- `deny`: reject the call. A wildcard `deny` (including the shorthand `tool: deny`) removes the tool from the model's tool list completely, hiding its schema. A concrete pattern `deny` rejects matching calls while leaving the tool visible.
 
-Rules are keyed by tool name; the full list of built-in tool names is in [Built-in tools](./tools.md).
+Rules are matched by tool name (see [Built-in tools](./tools.md)):
 
-Removing a tool is decided by the last rule matching the tool name, and that rule removes the tool only when its own argument pattern is the wildcard — the narrower rule that would match a particular call's arguments does not win. A wildcard `deny` written *after* a specific `allow` therefore disables the whole tool instead of narrowing it: put the wildcard fallback first and the specific rules after it, as the examples below do. Two control tools are exempt from wildcard-only denial (`compact_context` and `done`), and the `edit` / `apply_patch` family shares a denial between its two formats; see [Special permission semantics](#special-permission-semantics).
+- **Order and precedence**: tool removal is determined by the last matching rule for that tool name, and only when that rule's own pattern is the wildcard `*`. Therefore, broad `deny` fallbacks should be placed first, followed by specific `allow` exceptions. Two control tools are exempt from wildcard-only denial (`compact_context` and `done`), and `edit` / `apply_patch` share denial between their formats; see [Special permission semantics](#special-permission-semantics).
+- **Matching dimensions**: `shell` rules match whole command lines, whereas `delete` and `write` rules match normalized file paths. Specifying `delete: allow` for a path does not authorize running `rm` on that path in the shell. Typos in tool names silently leave rules unmatched.
 
-A rule that names a nonexistent tool matches nothing, so a typo silently leaves that tool unmatched instead of failing. Background work runs through `shell` (with `run_in_background: true`) plus the `job_output`, `job_list`, and `job_kill` tools.
+### Approving actions in the TUI
 
-In the TUI confirmation dialog, `E` opens the arguments for editing: the editor shows the full JSON, and submitting allows the call with the edited arguments.
+When a tool call triggers an `ask` rule, a confirmation dialog appears:
 
-When the request carries the rules that triggered the `ask` decision, the dialog also shows a read-only `Rules requiring approval (N)` section after the arguments summary. Each row lists the rule's tool name, quoted pattern and action, for example `shell: "rm *" → ask`. The tool name is the identifier reported by the permission layer: a patch blocked by a `delete` rule shows `delete`, and a matching wildcard tool rule keeps `*`. Rules keep the order in which the permission layer reported them, and N counts the distinct rules reported. This section is not a complete attribution of the decision — some tools and decision paths do not report matched rules, so an empty or missing section does not mean no rule matched. The `[M]` picker lists rules to save, not the rules that caused this prompt.
+- **Reviewing triggering rules**: when the request includes matched rules, the dialog lists them under `Rules requiring approval (N)` below the parameter summary (e.g., `shell: "rm *" → ask`). Some approval paths omit this list; review the tool and arguments in every case.
+- **Editing arguments (`E`)**: press `E` to open the full JSON parameter editor. Submitting executes the call with your modified arguments.
+- **Saving rules (`M`)**: press `M` to choose a rule for future calls, then `Enter` to save it and allow this call. These choices are separate from the rules that triggered the current prompt.
 
-Shell rules match command text; `delete` / `write` rules match file paths, so a path-shaped `delete` allow does not authorize a shell `rm` of that path.
+For `delete`, the picker ranks parent-directory rules by how many requested paths they cover. The global `*` option is always available; the repository-wide `**` option appears only when all requested paths are in the repository. Neither broad option is selected by default.
 
-In the TUI confirmation dialog, `M` opens the rule picker for the current tool call; press `Enter` in that picker to save the selected rule and allow the current call. For `delete`, the picker suggests reusable parent-directory rules instead of one-off exact-file rules, written in the same spelling permission matching uses, so the saved rule also applies to the same file from another checkout. Directories covering more paths that still need approval appear first, `*` (any delete path) is always available, and `**` (any path in the repository) is also available when every requested path lies inside the repository. The broad `**` and `*` choices are never selected by default. For `shell`, the picker offers the command prefix, command word, and catch-all. Flag prefixes such as `rm -rf *` are marked as broad: they allow any matching target paths, not just the paths in the current call. Rules match the entire command text: `*` includes spaces and subsequent arguments, so it does not constrain each path argument to a directory. The picker does not list the command’s exact text; press `E` to enter a pattern for just that command.
+For `shell`, the picker offers command-prefix, command-word, and global rules. A flag prefix such as `rm -rf *` is marked as broad: it allows any matching paths, including paths outside the current request. The `*` matches spaces and later arguments, so it does not limit every path argument to a directory. To enter an exact command pattern, press `E` inside the rule picker.
 
 Permissions can be defined in Agent config. Start with this recommended personal-development template, then tighten or relax it for your project's risk profile:
 
@@ -235,7 +240,7 @@ File tools act directly on the workspace; they are not a dry run. Use Git for im
 | `write` | Create a file or replace an entire existing regular file. |
 | `edit` / `apply_patch` | Change local content; patches can also add, move, and delete files. Independent file groups may succeed partially, so inspect applied changes before retrying. |
 | `delete` | Delete a file without requiring a complete read first. Deleting a symbolic link removes the link, not its target; `write` refuses to follow symbolic links. |
-| `read` / `view_image` / `grep` | Leave files unchanged, but their content can enter the conversation and model requests. Read-only does not prevent sensitive data from leaving the machine. |
+| `read` / `view_image` / `grep` | Leave files unchanged, but their content enters the conversation context and model prompts; avoid directing the model to read files containing secret keys or sensitive data. |
 
 On Unix, `write` and `edit` reject symbolic links in the final path component; `apply_patch` also rejects symbolic-link file targets. These file-target checks do not reject symbolic links in parent directories.
 

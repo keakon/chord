@@ -33,7 +33,7 @@
 
 ### 给 httpx 添加流式 JSON 迭代接口
 
-六款编程 Agent 用同一个模型分别完成同一个 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)：给 Python HTTP 客户端 `httpx` 添加流式 JSON 迭代接口，并处理解码失败、响应重复迭代等边界情况。模型均为 `deepseek-flash`（现由 DeepSeek-V4.1-Flash-1017 提供服务）。耗时包含模型交互、代码修改和测试执行，不含环境准备和最终收尾。
+六款编程 Agent 都使用 `deepseek-flash`，执行同一道 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)：给 Python HTTP 客户端 `httpx` 添加流式 JSON 迭代接口，并处理解码失败、响应重复迭代等边界情况。该模型别名现由 DeepSeek-V4.1-Flash-1017 提供服务。耗时包含模型交互、代码修改和测试执行，不含环境准备和最终收尾。
 
 | 工具 | 耗时 | 估算成本 |
 |---------|------|------|
@@ -100,15 +100,15 @@ chord
 
 ### 3. 发送第一个任务
 
-直接说明你想让它做什么，按 `Enter` 发送。比如先让它读一遍你的项目：
+说明任务并按 `Enter` 发送。先问一个项目相关的问题：
 
 ```text
 请解释这个项目的主要模块和测试入口，先不要修改文件。
 ```
 
-先看它的回答。默认配置下，Chord 会直接修改文件和执行命令，只有用 `delete` 工具删除文件时需要确认；想先审批再执行，见[权限与安全](./docs/permissions-and-safety_CN.md)。熟悉项目后，交给它一个具体改动：它负责改代码、跑测试，你在终端里检查 diff。
+接着交给 Chord 一个具体改动：它修改代码、运行测试，你在终端里检查 diff。默认权限允许直接修改文件和执行命令；受 `delete` 规则管控的删除操作需要确认。需要执行前审批时，按[权限与安全](./docs/permissions-and-safety_CN.md)配置规则。
 
-按 `Esc` 进入 Normal 模式，再按 `q` 退出。下次在同一项目目录运行 `chord --continue` 继续最近的会话。
+按 `Esc` 进入 Normal 模式，再在两秒内连按两次 `q` 退出。下次在同一项目目录运行 `chord --continue` 继续最近的会话。
 
 ## 更多功能
 

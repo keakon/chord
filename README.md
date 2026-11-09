@@ -33,7 +33,7 @@
 
 ### Adding streaming JSON iteration to httpx
 
-Six coding agents each ran the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) on the same model: add streaming JSON iteration to the Python HTTP client `httpx`, handling decoding errors and single-use responses. All runs used `deepseek-flash`, now served by DeepSeek-V4.1-Flash-1017. Time includes model interactions, code changes, and test execution, but excludes environment setup and final cleanup.
+Six coding agents used `deepseek-flash` for the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): add streaming JSON iteration to Python's `httpx` client, handling decoding errors and single-use responses. The model alias is now served by DeepSeek-V4.1-Flash-1017. Time includes model interactions, code changes, and test execution; it excludes environment setup and final cleanup.
 
 | Harness | Time | Estimated cost |
 |---------|------|------|
@@ -100,15 +100,15 @@ See [supported accounts and APIs](./docs/model-choice.md#supported-accounts-and-
 
 ### 3. Send your first task
 
-Describe what you want and press `Enter`. For example, have it read through your project first:
+Describe your task and press `Enter`. Start by asking about your project:
 
 ```text
 Explain this project's main modules and how to run its tests. Do not change any files yet.
 ```
 
-Read its answer. With the default configuration, Chord edits files and runs commands directly; only file deletions through the `delete` tool ask first. To approve actions before they run, see [Permissions & Safety](./docs/permissions-and-safety.md). Once you are comfortable, give Chord a specific change: it edits code and runs tests, and you review the diff in the terminal.
+Then give Chord a specific change: it edits code and runs tests, and you review the diff in the terminal. Default permissions allow file edits and commands to run directly; deletions governed by the `delete` rule require confirmation. Configure approval before execution in [Permissions & Safety](./docs/permissions-and-safety.md).
 
-Press `Esc` to enter Normal mode, then `q` to quit. Run `chord --continue` from the same project directory next time to resume the most recent session.
+Press `Esc` to enter Normal mode, then press `q` twice within two seconds to quit. Run `chord --continue` from the same project directory next time to resume the most recent session.
 
 ## More features
 

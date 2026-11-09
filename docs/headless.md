@@ -2,27 +2,6 @@
 
 `chord headless` is Chord's lightweight control-plane entry point, suitable for bot, gateway, or automation-script integration.
 
-## Persistent input queue
-
-`send` accepts `delivery_policy: "next_request"` (the default) or `"after_completion"` for MainAgent. Supply a `request_id` for after-completion sends. A send receives exactly one `input_result`: `handled`, `queued`, `started`, `rejected`, or `unknown`. `queued` confirms durable acceptance, not execution; it is not followed by a second `started` receipt. `unknown` means the client must reconcile queue/history before retrying.
-
-```json
-{"type":"send","request_id":"request-1","content":"Check the documentation","delivery_policy":"after_completion"}
-```
-
-`ready`, `ready_paused`, `session_switched`, and `status_response` can carry `input_queue`. A missing/null projection is unknown; an empty `inputs` array is a confirmed empty queue. Subscribe to `input_queue_changed` for updates. Its projection contains runtime/session identity, `view_version`, `view_version_cas`, `queue_revision`, work outcomes, and up to 128 input summaries with previews limited to 160 Unicode characters and attachment counts. Binary data and attachment paths are omitted. Compare runtime/session identity first, then `view_version`; `queue_revision` is for durable compare-and-swap and can remain unchanged during a storage-error update. `view_version_cas: true` advertises that the server checks view-bound operations against this version. `restored_held: true` means the inputs came back with a restored session and none of them starts until the user continues or sends a new input.
-
-Send `input_queue` operations with a unique `operation_id`, current `binding_id` where required, and the complete `target` from the projection: `runtime_id`, `session_id`, `session_epoch`, `owner_task_id`, and `work_dir_generation`. The target owner must be `main`. Include the nonzero `expected_view_version` when an operation must apply only to the displayed projection. A stale version returns `conflict` without applying the operation. Chord checks the version both when headless receives the command and when MainAgent processes it; durable mutations also compare their item or queue revision before saving. Responses use `input_queue_result` regardless of event subscriptions, with `committed`, `rejected`, `conflict`, or `unknown`, and current revisions.
-
-| Action | Required additional fields |
-| --- | --- |
-| `get` | `input_id`; returns full text and attachment count |
-| `update` | `input_id`, `expected_revision`; optional `content` and/or `delivery_policy` |
-| `delete`, `hold_edit`, `release_edit` | `input_id`, `expected_revision` |
-| `clear` | `expected_queue_revision` |
-
-Omitting `content` preserves the body and attachments. Providing it replaces the text; body edits on attachment-bearing inputs require the local TUI. Holding or editing an input does not start it. `clear` removes only unstarted after-completion inputs. An after-completion input reports the work it waits on through its `wait_work_id`; that work's entry in `works` carries the outcome, and the input fires at the first idle after that work settles successfully. ACP prompts retain ordinary next-request delivery.
-
 ## What it is
 
 - No TUI
@@ -129,6 +108,8 @@ Response:
 
 Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `confirm_resolved`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`, `lsp_followup`, `image_result`.
 
+For pending input changes, also subscribe to `input_queue_changed`; see [Persistent input queue](#persistent-input-queue).
+
 ### `status`
 
 Request a snapshot of the current backend state.
@@ -182,6 +163,8 @@ A client reconciling previously open questions should include their IDs in `ques
 
 Send a user message to the agent. Slash commands work the same as in the TUI; bare `/models` is treated as `/models status` because there is no TUI overlay.
 
+The example below uses default next-request delivery. To queue a separate task with `delivery_policy: "after_completion"`, use the additional fields and operation-result handling in [Persistent input queue](#persistent-input-queue).
+
 ```json
 {"type": "send", "request_id": "input-1", "content": "Please summarize the project structure."}
 ```
@@ -200,6 +183,7 @@ An optional `request_id` correlates one `input_result` consumption reply. Replie
 | `queued` | Input entered the pending queue for a later request boundary |
 | `started` | Input created a turn and committed the user message before model preparation |
 | `rejected` | Empty input, a TUI-only command, shutdown, or cancellation prevented this input from starting work; `message` explains why |
+| `unknown` | Saving the input could not be confirmed; inspect queue state and session history before resending |
 
 Each input has one consumption reply. It does not promise model success, task completion, or durable delivery across disconnects. A `queued` reply is not followed by another `started` reply: subscribe to `activity` and follow global `idle` to track actual work. `handled`, `queued`, and `rejected` never clear existing busy work. Disconnected unconfirmed inputs have unknown outcomes; inspect the session before resending requests with side effects. Chord admits new input before resolving any blocked interaction and never waits for consumption to resolve it.
 
@@ -344,6 +328,68 @@ Cancel the current turn (equivalent to pressing `Esc` twice in the TUI).
 ```json
 {"type": "cancel"}
 ```
+
+## Persistent input queue
+
+MainAgent's `send` accepts `delivery_policy: "next_request"` (the default, delivered with the next model request) or `"after_completion"` (a separate task that waits for the current work to finish normally). After-completion tasks run sequentially in the same session. ACP prompts use next-request delivery.
+
+### Read the queue state
+
+`ready` (including the `ready_paused` state), `session_switched`, and `status_response` can carry an `input_queue` projection. Subscribe to `input_queue_changed` for updates. A missing or null projection means the queue state is unknown; `inputs: []` confirms an empty queue.
+
+The projection contains:
+
+| Fields | Client use |
+| --- | --- |
+| `runtime_id`, `session_id`, `session_epoch`, `owner_task_id`, `work_dir_generation` | Copy all five fields into the command's `target` object. The owner must be `main`. Refresh the target after a session or working-directory change. |
+| `view_version`, `view_version_cas` | Compare versions only after checking runtime/session identity. Keep the newest view. `view_version_cas: true` advertises support for `expected_view_version`. |
+| `queue_revision`, each input's `revision` | Supply these revisions when clearing the queue or changing an item. A storage-error update can advance `view_version` without changing `queue_revision`. |
+| `inputs`, `works` | Up to 128 input summaries, plus work outcomes. Each preview is limited to 160 Unicode characters; attachments are represented by counts, without paths or binary data. |
+| `restored_held`, `blocked` | Show why inputs are waiting. Restored inputs stay held until the user continues or sends a new input. |
+
+An after-completion input's `wait_work_id` identifies the work it waits for in `works`. It starts at the first idle after that work settles successfully. Failed, cancelled, or unknown outcomes leave later tasks waiting; a new user task that finishes successfully lets them continue.
+
+### Queue a follow-up task
+
+After receiving the queue state, send a command with a unique `operation_id` and the current `target`. The example values below must be replaced with the values from that projection; send the JSON as one line over stdin:
+
+```json
+{"type":"send","operation_id":"queue-1","request_id":"request-1","target":{"runtime_id":"runtime-1","session_id":"session-1","session_epoch":1,"owner_task_id":"main","work_dir_generation":1},"expected_view_version":7,"content":"Check the documentation","delivery_policy":"after_completion"}
+```
+
+For a gateway-managed process, also include `binding_id` matching its `--gateway-instance`. Include the current nonzero `expected_view_version` to bind the operation to the displayed view; an outdated version returns `conflict` without applying the operation.
+
+### Inspect or change an item
+
+Send `type: "input_queue"` with an `action`, a unique `operation_id`, the same complete `target`, and `binding_id` when required. Use `expected_view_version` as above. For example:
+
+```json
+{"type":"input_queue","action":"update","operation_id":"queue-2","target":{"runtime_id":"runtime-1","session_id":"session-1","session_epoch":1,"owner_task_id":"main","work_dir_generation":1},"expected_view_version":8,"input_id":"input-1","expected_revision":1,"delivery_policy":"next_request"}
+```
+
+| Action | Additional required fields | Description |
+| --- | --- | --- |
+| `get` | `input_id` | Returns full body text and attachment count |
+| `update` | `input_id`, `expected_revision` | Updates body (optional `content`) or policy (optional `delivery_policy`) |
+| `delete` | `input_id`, `expected_revision` | Removes the item from the queue |
+| `hold_edit` | `input_id`, `expected_revision` | Pauses consumption while editing |
+| `release_edit` | `input_id`, `expected_revision` | Releases the editing hold back to the queue |
+| `clear` | `expected_queue_revision` | Clears all unstarted after-completion inputs |
+
+Omitting `content` preserves the body and attachments. Providing it replaces the text; an empty replacement is rejected. Use the local TUI to edit the body of an input with attachments. Holding or editing an item keeps it queued; items that have already started cannot be edited or deleted.
+
+### Handle results
+
+Both after-completion sends and `input_queue` commands return `input_queue_result`, correlated by `operation_id`, regardless of event subscriptions. Results include the target and available item/queue revisions:
+
+| `result` | Client action |
+| --- | --- |
+| `committed` | The operation succeeded. For a send, the input is durably queued; follow queue updates for execution. |
+| `rejected` | Display `reason` and correct the request before submitting again. |
+| `conflict` | Refresh the queue and revisions before deciding whether to repeat the operation. |
+| `unknown` | Check queue state and session history before retrying; the operation may already have been saved. |
+
+Providing `request_id` on a send also enables an `input_result` receipt once the Agent handles the submission (`queued`, `rejected`, or `unknown` for this delivery path). An entry-point validation failure may return only `input_queue_result`, so use that response to settle the operation. A `queued` receipt is issued once and is not followed by a second `started` receipt. If a connection closes before a response arrives, reconcile queue state and history before resending.
 
 ## Image delivery
 

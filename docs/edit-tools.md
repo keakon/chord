@@ -70,11 +70,7 @@ If a gateway changes a custom call into a JSON function call with `{"input": "..
 
 ### Format
 
-For the Responses freeform shape, the Lark grammar is sent to the server as a generation constraint with the custom tool, so it constrains the patch protocol skeleton on the server side: the complete patch has at least one file operation, added files have at least one `+` content line, and update chunks follow Codex's line and hunk structure. It cannot verify that a file anchor is unique, that the file was unchanged after reading, or that the edit is semantically correct.
-
-Chord still revalidates and executes the returned text with its client parser and transactional executor, so a missing or unenforced grammar leaves the client responsible for rejecting invalid results or applying its compatibility rules.
-
-The single `patch` argument carries the Codex patch body. Chord accepts the normal complete envelope and also repairs a missing `*** Begin Patch` and/or `*** End Patch` wrapper before parsing. Inside the body, you can include any number of file operations:
+The Codex patch format consists of wrapper markers and file operation blocks. The single `patch` argument carries the patch body; Chord automatically repairs missing `*** Begin Patch` or `*** End Patch` wrappers before parsing. Inside the body, you can include any number of file operations:
 
 ```text
 *** Begin Patch

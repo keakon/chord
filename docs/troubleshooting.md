@@ -2,18 +2,7 @@
 
 <!-- description: Fixes for common Chord problems: startup and provider errors, broken terminal rendering, lost sessions, and noisy tools. -->
 
-Start from the symptom and find the next command to run. Symptoms are grouped roughly in the order you are likely to hit them: startup and auth first, then request failures, sessions, TUI rendering, and performance.
-
-## Delivered files cannot be previewed or opened
-
-- **Declared version unavailable**: the artifact was overwritten, deleted, or omitted from an imported session. Restore the exact bytes and digest; do not substitute a same-named file.
-- **File changed / content version unverified**: workspace delivery is not a snapshot. Files over 8 MiB record size and modification time without a content digest. Reload or use an external application.
-- **Text or Markdown limit reached**: switch to source or open the complete file. Copy covers loaded content only. PDF and non-UTF-8 files do not have an internal text preview.
-- **Open with unavailable**: Linux needs `gio` to enumerate and select applications. With only `xdg-open`, default opening remains available. SSH and environments without a graphical desktop disable external opening.
-- **System request still processing**: wait for the request to finish before retrying. Closing the viewer does not terminate applications already handed to the system.
-- **Delivery outcome unknown**: session writing or synchronization failed. Check disk space and session-directory access, then restore the session to inspect persisted results. Do not assume the earlier declaration was never written and replay it blindly.
-
-External opening validates the file before dispatch; it cannot lock the bytes a third-party application subsequently reads. An HTML entry digest does not cover its associated resources.
+Start from the symptom and find the next command to run. Symptoms are grouped roughly in the order you are likely to hit them: startup and auth first, then request failures, sessions, TUI rendering, tool execution, and performance.
 
 ## Startup failures
 
@@ -433,6 +422,17 @@ If you see this:
 - when the same block repeats in the file, add nearby unchanged lines to the `@@` hunk, use an `@@ header` anchor, or pin a tail edit with `*** End of File`, so the intended occurrence is unambiguous;
 - split a broad patch into smaller envelopes or smaller hunks;
 - do not run external `apply_patch` through `shell`; use Chord's native `apply_patch` tool so permissions, stale tracking, diffs, LSP, and rollback stay connected.
+
+## Delivered files cannot be previewed or opened
+
+When files delivered via the `present` tool cannot be previewed in the TUI or opened in external applications:
+
+- **Declared version unavailable**: the session artifact is missing or its content differs from the delivered version. Restore the original bytes at the recorded path, with the declared size and SHA-256 digest. A same-named file with different content will still fail validation; importing session metadata alone does not restore the artifact.
+- **File changed / content version unverified**: workspace previews show the current file. Files larger than 8 MiB are checked by size and modification time and always carry an unverified-content notice, even when those values match. Press `r` to reload, or inspect the complete file in an external application.
+- **Text or Markdown limit reached**: Markdown rendering accepts up to 128 KiB; press `m` to view source. Text preview loads up to 1 MiB and 20,000 source lines; use an external application for the complete file. Copying with `y` includes only loaded source. PDF and non-UTF-8 files require an external application.
+- **Open with unavailable**: Linux requires `gio` to enumerate installed applications; when only `xdg-open` is installed, only the default application can be opened. In SSH or headless sessions without a graphical display, launching desktop applications is disabled; press `p` to copy the file path.
+- **System request still processing**: wait for the external-open request to finish before trying again. Closing the viewer leaves applications already handed to the system running.
+- **Delivery outcome unknown**: session writing or synchronization failed. Check disk space and session-directory access, then restore the session to inspect saved results before deciding whether another declaration is needed. Avoid repeating the declaration while its result is unknown.
 
 ## Performance issues
 

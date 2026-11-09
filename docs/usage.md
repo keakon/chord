@@ -6,34 +6,6 @@ Keep daily TUI work moving: send messages, read tool cards, recover sessions, an
 
 For image generation and explicit reference editing, configure a separate image target; see [Image generation and editing](image-generation.md).
 
-## File delivery and preview
-
-The model uses `present` to declare final reports, images, web pages, and other files. The card groups the delivered files under their shared root and lists one path per file, followed by a short description when one was given. Select the card and press Enter, or click a file row: Enter opens a single file straight to its preview and several files to the list, while clicking a file row previews that file. The file list uses one row per file and keeps the Preview / Open / Open with / Copy path actions for the selected file at the bottom. A click outside the rows selects the card's text like any other card. Declaring files does not launch applications or establish that their contents or tests have been verified. Files under `.chord/` are private working state and are not delivered by default; share task notes and plan documents through the plan summary or handoff. To receive a `.chord/` file explicitly, ask for it and allow its path in a `present` rule of your own; see [Permissions & Safety: Special permission semantics](./permissions-and-safety.md#special-permission-semantics).
-
-In the file list, use the arrow keys to select a file and Enter to open its preview. The footer names each action and its key: `o` opens with the system default association, `a` selects another associated application, and `p` copies the path. HTML offers source preview; PDF and other binary formats use external applications. Static HTML opens at its original location so relative resources remain reachable. Chord does not build a page or start a development server automatically.
-
-The text viewer supports `j/k` or arrows, PgUp/PgDn, Home/End, horizontal arrows, `w` for wrapping, `m` for Markdown/source, `/` for literal search, `n/N` for the next/previous match, `g` for a source line, `r` to reload, `l` to select local links or images in the document, and `y` to copy loaded source. Esc leaves search or line entry first, then returns to the file list when several files were delivered and otherwise closes the viewer. Preview does not send model requests or change the input draft. Source references recognize explicit Markdown local links and line fragments such as `#L12`. Relative references in older messages without a recorded working directory are unavailable.
-
-A workspace delivery stays bound to the original target and may show subsequent edits. Preview, reload, and external opening report changes detected against the delivery. Files larger than 8 MiB are checked by size and modification time only and are marked as having unverified contents. “Declared version” refers to a session artifact whose full digest and size must match before opening. Missing or overwritten versions remain unavailable; Chord does not substitute a same-named file. An HTML entry digest does not cover CSS, scripts, images, or other resources. Delivery metadata survives session restore, compaction, and forks. JSON export carries metadata only; importing it does not restore missing artifact bytes.
-
-Text preview loads at most 1 MiB and 20,000 source lines; rendered output retains at most 10,000 lines. Markdown rendering accepts at most 128 KiB. Limits produce a truncation or source-mode notice. `y` copies only loaded source; use an external application to inspect the complete file.
-
-macOS lists system associations; Windows uses the native Open with chooser; Linux prefers GIO and supports default opening only when just `xdg-open` is available. Selecting an application does not change default associations. SSH, headless desktops, and remote sessions cannot open server files on the local desktop; the original path can still be copied. Programs, scripts, and system shortcuts cannot be launched through these actions.
-
-## Choose when an input takes effect
-
-For MainAgent, **Enter** sends an input to the next model request. While tools are running, they finish their current work first; a new input does not immediately interrupt them. **Alt+Enter** queues a separate task to run after the current task ends normally. For example, send “Include the test results in the final report” with Enter, or “Check the documentation after this task” with Alt+Enter.
-
-After-completion tasks run one at a time in the same session and share its conversation history. Each task waits for whatever started most recently, including an earlier after-completion task, and starts as soon as the agent goes idle with that work settled normally — a normal final response, or an accepted Done in loop mode. This is a runtime completion signal, not a guarantee that the business objective was achieved. When a task fails, is cancelled, or ends with an unknown outcome (for example, it was still running when the session ended), later tasks wait with the reason shown in the queue, and they run after the next task you send completes successfully.
-
-Open **`/queue`** to inspect pending inputs. Select a row with the arrow keys; Enter edits, `d` deletes, `w` withdraws to the composer, `n` switches to next-request delivery, and `a` switches to after-completion delivery. `c` clears unstarted after-completion items, and `x` releases an editing hold. These controls are also available as `/queue clear`, `/queue cancel-edit`, `/queue next N`, `/queue after N`, and `/queue withdraw N`.
-
-Editing holds the original input in the queue until you save or cancel the edit. Saving uses its current revision; a conflict preserves your draft. Enter saves the edit as a next-request input; Alt+Enter saves it as an after-completion task, and an item that was already after-completion keeps waiting for the same work. Use `n` or `a` in the queue panel to switch delivery without editing. Inputs that have already started cannot be edited or deleted.
-
-Queued inputs and attachments are saved with the session. A restored session does not start them on its own: the queue marks them as restored until you continue or send a message. Ordinary queued inputs then go out with that request, and after-completion tasks fire once the continued work settles successfully. The queue holds up to 128 inputs and 4 MiB of text.
-
-After-completion delivery is available only for MainAgent. It accepts text, attachments, and expanded custom text commands. Local slash commands, `/skill`, and `!` shell commands cannot be queued this way; the composer keeps the draft. Empty Alt+Enter does nothing. Shift+Enter and Ctrl+J still insert a newline.
-
 ## How to use this page
 
 You do not need to read this page from top to bottom:
@@ -230,6 +202,32 @@ Type `@` in the composer at the start of a line or after a space to open file co
 - Injected file blocks report `covered_lines` and `total_lines`. When a byte budget cuts the body, they also carry `truncated` and, if the last returned line is incomplete, `partial_last_line`, followed by an explicit incompleteness note. Read from the reported line range to continue instead of treating a partial body as the whole file.
 - Completion is only input assistance. When you send the message, Chord reparses the final `@path` text; if you removed the mention before sending, that file is not attached.
 
+## Choose when an input takes effect (input queue)
+
+For MainAgent, **Enter** sends an input to the next model request. Running tools finish their current execution first; a new input does not immediately interrupt them. **Alt+Enter** queues a separate task to run after the current task finishes normally. For example, send “Include test results in the report” with Enter, or “Check documentation after this task” with Alt+Enter.
+
+After-completion tasks run sequentially in the same session and share conversation history. Each task waits for the most recently started work, including an earlier follow-up, to finish normally (a regular final response, or an accepted Done in loop mode) and begins once the agent becomes idle. Review the output and test results to assess whether the work meets your requirements.
+
+If a prior task fails, is cancelled, or has an unknown outcome, queued tasks wait with the reason displayed in the queue. Send a new prompt; once that work finishes successfully, pending after-completion tasks can continue.
+
+Open **`/queue`** to inspect pending inputs and use the arrow keys to select:
+
+- `Enter`: edit the input
+- `d`: delete the item
+- `w`: withdraw back into the composer draft
+- `n`: switch to next-request delivery
+- `a`: switch to after-completion delivery
+- `c`: clear unstarted after-completion items
+- `x`: release an editing hold
+
+These controls are also available via slash commands: `/queue clear`, `/queue cancel-edit`, `/queue next N`, `/queue after N`, and `/queue withdraw N`.
+
+Editing holds the original input in the queue until saved or cancelled. Press Enter to save as a next-request input, or Alt+Enter to save as an after-completion task. An item that was already after-completion keeps waiting for the same work. A version conflict preserves your draft; refresh the queue before saving again. Inputs that have already started cannot be edited or deleted.
+
+Queued inputs and attachments are saved with the session. After restoring a session, they stay held until you continue or send a message. Ordinary queued inputs go out with that request; after-completion tasks wait for the continued work to finish successfully. The queue holds up to 128 inputs and 4 MiB of text.
+
+After-completion delivery is available for MainAgent only. It accepts text, attachments, and expanded custom prompt commands. Local slash commands, `/skill`, and `!` shell commands do not support this policy; the composer preserves your draft. Empty Alt+Enter does nothing; Shift+Enter and Ctrl+J insert newlines.
+
 ## Sessions
 
 In the session picker, press `d` to open deletion confirmation. Press `y` to delete the selected session permanently, or `n` / `Esc` to cancel. `Enter` does not confirm deletion. Long confirmation content can be read with `PgUp` / `PgDown` or the mouse wheel; the decision actions remain visible.
@@ -336,6 +334,44 @@ Common flags:
 - `--dry-run`: parse and report only, no writes
 - `--json`: machine-readable output
 - `--force`: overwrite an existing `--sid`
+
+## File delivery and preview (present)
+
+The model can declare final reports, images, web pages, and other deliverables via the `present` tool. In the TUI, the tool card groups deliverables under their shared root directory:
+
+- **Single file**: focus the card and press `Enter` to preview it directly.
+- **Multiple files**: focus the card and press `Enter` to open the file list, then navigate with arrow keys and press `Enter` to preview the selected file.
+- **File actions**: the footer provides shortcuts for the selected file: `o` opens with the system default application, `a` selects another application, and `p` copies the path.
+- **Viewer shortcuts**:
+  - `j` / `k` or up/down arrows: scroll line-by-line
+  - `PgUp` / `PgDn`: page through content
+  - `Home` / `End`: go to the start/end; left/right arrows: scroll horizontally
+  - `w`: toggle line wrapping
+  - `m`: toggle between rendered Markdown and source view
+  - `/`: search text (`n` / `N` for next/previous match)
+  - `g`: jump to a source line in source mode
+  - `r`: reload the file
+  - `l`: select a local link or image in the document
+  - `y`: copy loaded source text
+  - `Esc`: leave search or line entry first, then return to the file list for multiple files or close a single-file preview
+
+Preview loads up to 1 MiB and 20,000 source lines, with up to 10,000 rendered lines. Markdown rendering accepts up to 128 KiB; `y` copies only loaded source. Preview and source links work without sending model requests or changing your draft. Source links support explicit local Markdown links and `#L12` line references; relative links need a recorded source directory.
+
+### File versions
+
+A workspace delivery points to the original file and shows its current contents, including later edits. Preview, reload, and external opening report changes since delivery. Files larger than 8 MiB are checked by size and modification time and marked as having unverified contents.
+
+A “declared version” is a session artifact. Opening it requires the full content digest and size to match; overwritten or missing versions stay unavailable until the original bytes are restored. Delivery metadata survives session restore, compaction, and forks. JSON export includes metadata only, so an imported session also needs the artifact files to open those deliveries.
+
+Files under `.chord/` are private working state and are not delivered by default. To receive one, request that file explicitly and allow its path in your own `present` rule; see [Special permission semantics](./permissions-and-safety.md#special-permission-semantics).
+
+### Open in an external application
+
+Choose `o` or `a` to launch an application; declaring or previewing a file leaves applications closed. Static HTML opens at its original path to preserve relative asset links. Build the page or start its development server separately when needed. PDF, binary, and non-UTF-8 files use external applications.
+
+macOS lists associated applications; Windows uses the native Open with chooser; Linux uses GIO, with default opening only when just `xdg-open` is available. Selecting an application leaves system defaults unchanged. SSH and sessions without a graphical desktop cannot launch a local desktop application; copy the original path with `p`. Programs, scripts, and system shortcuts cannot be launched through these actions.
+
+External opening checks the file before handing its path to the application; later edits can change what that application reads. HTML validation covers the entry file, while linked CSS, scripts, and images are separate files. For preview and opening errors, see [Troubleshooting](./troubleshooting.md#delivered-files-cannot-be-previewed-or-opened).
 
 ## Worktrees
 
@@ -651,14 +687,6 @@ Chord picks the file-editing tool per active model: gpt-5-and-later family names
 
 When a model name or gateway behaves differently from the inference, override it per provider or model with `compat.apply_patch.enabled` (tool surface) and `compat.apply_patch.freeform` (wire shape). Both keys are three-state: omitted means infer from the model name and endpoint, so you only set the knob you need to change. The authoritative field reference is in [Configuration & Auth](./configuration.md).
 
-## Related
-
-- [Configuration & Auth](./configuration.md)
-- [Permissions & Safety](./permissions-and-safety.md)
-- [Edit tools](./edit-tools.md)
-- [Customization](./customization.md)
-- [Troubleshooting](./troubleshooting.md)
-
 ## Search saved inputs
 
 In Insert mode, press **Ctrl+R** or run `/history` to search inputs submitted in the TUI, including inputs waiting in the send queue. Search defaults to prompts from the current project. Use Tab to focus the project/type filters and Space or arrow keys to switch to all projects or all input types. Up/Down and PageUp/PageDown select results; Ctrl+R selects the next result. Enter replaces the draft without sending it. Esc or Ctrl+C closes the search and preserves your draft. Ctrl+U clears the query; Ctrl+PageUp/PageDown scrolls the preview. Mouse clicks select results and mouse wheels scroll the list or preview.
@@ -668,3 +696,11 @@ History keeps the original text and folded pastes, before file references are ex
 Run `/history clear` to clear **all projects'** saved inputs, plus this process's temporary records accepted before confirmation. Cancel is selected by default. Other processes may still save queued inputs afterwards. Deleting a session does not delete input history. History is local to your user state directory and is not sent to the model automatically.
 
 Prompts, slash commands, and local shell commands are saved by default; attachment-only and generated inputs are excluded. If saving fails, sending continues and a notice explains whether the input is available only in this process or saving could not be confirmed. Failed writes are not retried automatically. See [input history configuration](configuration.md#input-history) to disable recording or change retention.
+
+## Related
+
+- [Configuration & Auth](./configuration.md)
+- [Permissions & Safety](./permissions-and-safety.md)
+- [Edit tools](./edit-tools.md)
+- [Customization](./customization.md)
+- [Troubleshooting](./troubleshooting.md)

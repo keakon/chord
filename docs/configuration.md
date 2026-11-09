@@ -9,15 +9,6 @@ Connect your models once, then reuse pools, fallback, and project overrides. Cho
 - `.chord/config.yaml`: project-level overrides
 - `~/.config/chord/agents/` and `.chord/agents/`: agent role definitions
 
-## After-completion shortcut
-
-`keymap.insert_submit_after_completion` defaults to `alt+enter`. Use an empty list to disable it, or assign another key. Help displays the effective binding. This action is MainAgent-only and leaves ordinary send and newline bindings unchanged.
-
-```yaml
-keymap:
-  insert_submit_after_completion: [alt+enter]
-```
-
 ## How to use this page
 
 You do not need to read this page from top to bottom:
@@ -1180,6 +1171,19 @@ prevent_sleep: true
   want command keys to use an English keyboard layout.
 - `prevent_sleep`: requests sleep prevention on the host running agent work in TUI, headless, and ACP; releases it after all agents are idle for one second. Defaults to `false`, and the setup wizard defaults to No. Supports macOS, Linux (local logind/GNOME services), and Windows, subject to service availability and device policy. It does not keep the display on or control remote client/WSL host power. See [platform support](platforms.md#prevent_sleep) for coverage and limits.
 
+## Keymap
+
+You can override default keybindings under the `keymap` block (actions use lower snake_case; see [Keybindings](./keybindings.md) for the full action list).
+
+For example, to customize the shortcut for submitting an after-completion task (defaults to `alt+enter`):
+
+```yaml
+keymap:
+  insert_submit_after_completion: [alt+enter]
+```
+
+Use an empty list `[]` to disable the shortcut. This action is MainAgent-only and leaves ordinary Enter send or newline bindings unchanged.
+
 ## WebFetch
 
 `web_fetch` uses a built-in browser-like `User-Agent` by default. You can override it in config when a site needs a different header:
@@ -1976,18 +1980,6 @@ compat:
 
 OpenAI reasoning items can also be returned as `reasoning.encrypted_content` when you need stateless continuation. Treat that field as opaque continuation data: it is not meant to be rendered directly in the UI. When a readable summary is available, that is the user-facing form to show.
 
-## Related
-
-- [Quickstart](./quickstart.md)
-- [CLI](./cli.md)
-- [Keybindings](./keybindings.md)
-- [Paths](./paths.md)
-- [Environment variables](./environment.md)
-- [Permissions & Safety](./permissions-and-safety.md)
-- [Customization](./customization.md)
-- [Hooks](./hooks.md)
-- [Troubleshooting](./troubleshooting.md)
-
 ## Input history
 
 `input_history` is **user-level only**; project configuration ignores the entire block.
@@ -2002,3 +1994,15 @@ input_history:
 `max_entries` accepts 1–100,000; `max_bytes` accepts 1–268,435,456 bytes. Explicit zero is invalid. The defaults retain at most 10,000 entries and 32 MiB across all projects in `StateDir/input-history.jsonl`. When either limit is exceeded, older entries are removed in a batch to approximately 90% of both limits. The newest valid entry can exceed that lower watermark. A single record cannot exceed 4 MiB of JSON, or `max_bytes`; oversized inputs still send normally but are not saved.
 
 `enabled: false` stops new persistent records and their process-local fallback copies. Existing records can still be searched or cleared, and the composer's current-process up/down navigation still works. Restart all running instances after changing retention limits: each writer uses its startup configuration, so an instance with a smaller limit can remove entries written by another instance. Saved records contain original text and paste content, project/session identifiers, and attachment counts; attachment data and paths are not saved. Use `/history clear` to remove history independently of sessions.
+
+## Related
+
+- [Quickstart](./quickstart.md)
+- [CLI](./cli.md)
+- [Keybindings](./keybindings.md)
+- [Paths](./paths.md)
+- [Environment variables](./environment.md)
+- [Permissions & Safety](./permissions-and-safety.md)
+- [Customization](./customization.md)
+- [Hooks](./hooks.md)
+- [Troubleshooting](./troubleshooting.md)

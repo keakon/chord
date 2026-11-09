@@ -9,15 +9,6 @@
 - `.chord/config.yaml`：项目级覆盖配置
 - `~/.config/chord/agents/` / `.chord/agents/`：角色配置
 
-## 完成后执行的快捷键
-
-`keymap.insert_submit_after_completion` 默认使用 `alt+enter`。设为空列表可禁用，也可重绑；帮助界面显示实际生效的键位。该操作仅支持 MainAgent，不改变普通发送和换行。
-
-```yaml
-keymap:
-  insert_submit_after_completion: [alt+enter]
-```
-
 ## 如何使用本页
 
 无需从头到尾阅读本页：
@@ -966,6 +957,19 @@ prevent_sleep: true
 - `ime_switch_target`：进入 Normal 模式时通过 `im-select`（Windows 为 `im-select.exe`）切换到指定输入法，回到 Insert 模式时恢复。常用于让快捷键在英文键盘布局下工作。
 - `prevent_sleep`：Agent 工作期间申请阻止运行主机休眠，所有 Agent 空闲一秒后释放；TUI、headless、ACP 均适用。默认 `false`，首次运行向导默认 No。支持 macOS、Linux（依赖本地 logind/GNOME 服务）和 Windows，实际覆盖受服务可用性和设备策略限制，不请求保持显示器点亮，也不控制远程客户端或 WSL 宿主机电源。详见[平台说明](platforms_CN.md#prevent_sleep)。
 
+## 快捷键映射（keymap）
+
+可通过 `keymap` 块覆盖默认键位绑定（Action 名采用 lower snake_case，完整列表见[快捷键速查与自定义](./keybindings_CN.md)）。
+
+例如自定义“完成后执行”的提交快捷键（默认使用 `alt+enter`）：
+
+```yaml
+keymap:
+  insert_submit_after_completion: [alt+enter]
+```
+
+设为空列表 `[]` 可禁用该快捷键。该操作仅支持 MainAgent，不影响普通的 Enter 发送或换行操作。
+
 ## WebFetch
 
 `web_fetch` 默认使用类似浏览器的 `User-Agent`。某些站点需要不同请求头时，可在配置中覆盖：
@@ -1706,18 +1710,6 @@ compat:
 
 OpenAI 的 reasoning item 还可能通过 `reasoning.encrypted_content` 返回，用于无状态续传。这个字段是加密后的续传载荷，不适合直接在 UI 里展示；如果有可读摘要，应优先展示摘要而不是 encrypted payload。
 
-## 相关文档
-
-- [快速开始](./quickstart_CN.md)
-- [CLI](./cli_CN.md)
-- [快捷键](./keybindings_CN.md)
-- [目录与路径](./paths_CN.md)
-- [环境变量](./environment_CN.md)
-- [权限与安全](./permissions-and-safety_CN.md)
-- [扩展与定制](./customization_CN.md)
-- [Hooks](./hooks_CN.md)
-- [常见问题排查](./troubleshooting_CN.md)
-
 ## 输入历史
 
 `input_history` **仅支持用户级配置**；项目配置会忽略整个配置块。
@@ -1732,3 +1724,15 @@ input_history:
 `max_entries` 范围为 1～100,000，`max_bytes` 范围为 1～268,435,456 字节，显式设置为 0 无效。默认在 `StateDir/input-history.jsonl` 中为全部项目合计保留最多 10,000 条、32 MiB。超过任一上限时，批量删除较旧记录至两个上限的约 90%；最新一条合法记录允许超过该低水位。单条 JSON 不能超过 4 MiB 或 `max_bytes`；过长输入仍正常发送，但不保存到历史。
 
 `enabled: false` 停止新增持久记录及其本进程临时副本，仍允许搜索和清空已有记录，输入框原有的上下键导航也仍可使用。修改保留量后请重启所有实例：每个写入进程使用启动时的配置，较小的上限可能删除其他实例写入的记录。历史保存原文、粘贴内容、项目及会话标识和附件数量，不保存附件数据或路径。可用 `/history clear` 独立于会话清空历史。
+
+## 相关文档
+
+- [快速开始](./quickstart_CN.md)
+- [CLI](./cli_CN.md)
+- [快捷键](./keybindings_CN.md)
+- [目录与路径](./paths_CN.md)
+- [环境变量](./environment_CN.md)
+- [权限与安全](./permissions-and-safety_CN.md)
+- [扩展与定制](./customization_CN.md)
+- [Hooks](./hooks_CN.md)
+- [常见问题排查](./troubleshooting_CN.md)
