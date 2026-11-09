@@ -32,6 +32,7 @@
 
 ### 修复
 
+- Gemini 工具声明现在收敛到 Schema proto 支持的子集：丢弃不支持的 JSON Schema 关键字、`required` 只保留同一节点 `properties` 中定义的字段、`enum` 值统一转为字符串、`type` 数组归一化为单个类型、`oneOf` 分支降级为 `anyOf`。此前只要有一个工具携带「仅含 required」的 `anyOf` 分支（包括 `question` 工具），严格的 Gemini 后端就会拒绝整个请求；这类 schema 校验 400 现在直接终止请求，不再逐个冷却轮换所有 API key。
 - 写入文件后的等待结束时，尚未到达的 TypeScript 语义诊断可在后续模型请求中补发，仍须通过现有的新鲜度与投递时间窗口检查。
 - 终端界面的 Markdown 支持中日韩文字及标点旁的强调写法，例如 `**说明：**正文`。纯 ASCII 上下文和代码中的字面定界符保持原有行为。
 - 流式响应和 HTTP MCP 支持多行 SSE 数据、UTF-8 BOM 及单独 CR 换行。Anthropic 事件允许 `event:` 出现在 `data:` 之后；Responses 数据中的 JSON 前导空白不再导致事件丢失或工具参数混入回复正文。

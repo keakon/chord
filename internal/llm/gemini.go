@@ -693,64 +693,256 @@ func convertToolsToGemini(tools []message.ToolDefinition) []geminiTool {
 	return []geminiTool{{FunctionDeclarations: decls}}
 }
 
-// convertSchemaToGemini rewrites a JSON Schema into the subset Gemini's Schema
-// message accepts. Keywords it has no field for are dropped rather than passed
-// through: the API parses the schema as proto-JSON, where an unknown field
-// fails the whole request — not just the tool that carried it — so one tool
-// using an unrepresentable keyword would take every request with it.
+// geminiSchemaFields is the field set of the Gemini Schema proto message
+// (google.ai.generativelanguage.v1beta.Schema), in the spellings proto-JSON
+// accepts. Gemini parses every tool declaration as proto-JSON: a field the
+// message does not have fails the whole request, not just the tool that
+// carried it. Keywords outside this set are dropped rather than forwarded, so
+// a new JSON Schema keyword coming from an MCP server cannot take every Gemini
+// request down with it. Keep this in sync with content.proto's Schema message.
+var geminiSchemaFields = map[string]bool{
+	"type": true, "format": true, "title": true, "description": true,
+	"nullable": true, "enum": true, "items": true,
+	"maxItems": true, "minItems": true, "max_items": true, "min_items": true,
+	"properties": true, "required": true,
+	"minProperties": true, "maxProperties": true, "min_properties": true, "max_properties": true,
+	"minimum": true, "maximum": true,
+	"minLength": true, "maxLength": true, "min_length": true, "max_length": true,
+	"pattern": true, "example": true,
+	"anyOf": true, "any_of": true,
+	"propertyOrdering": true, "property_ordering": true, "default": true,
+}
+
+// geminiSchemaTranslatedKeywords are input-only combinators. The Schema proto
+// has no field for them, but the converter must see them: oneOf is lowered to
+// anyOf and allOf is dropped explicitly instead of being mistaken for an
+// unknown field.
+var geminiSchemaTranslatedKeywords = map[string]bool{
+	"oneOf": true, "one_of": true, "allOf": true, "all_of": true,
+}
+
+// geminiSilentlyDroppedKeywords are the keywords built-in tool schemas have
+// always carried without a Gemini counterpart. They are dropped without a
+// diagnostic so every request does not repeat the same debug line.
+var geminiSilentlyDroppedKeywords = map[string]bool{
+	"$schema": true, "additionalProperties": true,
+	"coerceFromString": true, "coerceFromObject": true, "not": true,
+}
+
+// convertSchemaToGemini rewrites a JSON Schema into the Gemini Schema proto
+// subset. Three invariants are enforced by the API rather than by proto-JSON
+// parsing alone, and all three are checked by the wire tests:
+//   - Every field must exist on the Schema message; an unknown field fails the
+//     whole request. Hence the allowlist above.
+//   - Schema.type is a single enum value and every anyOf branch is itself a
+//     complete Schema. A branch carrying only "required" is valid JSON Schema
+//     but not a valid Gemini Schema.
+//   - "required" is validated against the SAME node's "properties": a name
+//     with no matching property fails with "property is not defined", and
+//     "required" outside an OBJECT fails with "only allowed for OBJECT type".
+//
+// Constraints we cannot express are dropped; built-in tools state them in
+// their descriptions and enforce them at execution time.
 func convertSchemaToGemini(schema map[string]any) map[string]any {
 	if schema == nil {
 		return nil
 	}
+	if len(schema) == 0 {
+		// An empty schema is a legal "any value" JSON Schema, but Gemini's
+		// Schema requires a type and the parameters root is always an object.
+		// The guess is made only for schemas empty from the start: a branch
+		// emptied later by pruning must stay empty so the combinator
+		// conversion drops it instead of leaving a wildcard alternative.
+		return map[string]any{"type": "OBJECT"}
+	}
 	out := make(map[string]any, len(schema))
+	var oneOfBranches []map[string]any
 	for k, v := range schema {
+		if !geminiSchemaFields[k] && !geminiSchemaTranslatedKeywords[k] {
+			if !geminiSilentlyDroppedKeywords[k] {
+				log.Debugf("dropping JSON Schema keyword Gemini cannot represent keyword=%v", k)
+			}
+			continue
+		}
 		switch k {
-		case "nullable", "default", "$schema", "additionalProperties", "coerceFromString", "coerceFromObject":
+		case "nullable", "default":
+			// Both have Schema fields, but built-in tools have never sent them
+			// and their constraints are enforced in descriptions / handlers.
 			continue
-		case "not":
-			// "not" has no Schema field at all. Dropping it costs the
-			// structural hint; a built-in tool states the same constraint in
-			// its descriptions and enforces it at execution time.
-			log.Debugf("dropping JSON Schema keyword Gemini cannot represent keyword=%v", k)
+		case "allOf", "all_of":
+			// The proto has only any_of. Forwarding the keyword would be an
+			// unknown field; merging allOf branches is not semantics-preserving.
 			continue
-		case "anyOf", "allOf", "oneOf":
-			// Gemini accepts these, but each element is a schema in its own
-			// right: an unconverted branch carries the dropped keywords —
-			// including a nested "not" — straight onto the wire.
+		case "anyOf", "any_of":
+			if converted, ok := convertSchemaListToGemini(v); ok && len(converted) > 0 {
+				out["anyOf"] = append(geminiBranchList(out["anyOf"]), converted...)
+			}
+			continue
+		case "oneOf", "one_of":
+			// Lowered to anyOf so the alternatives survive. Collected separately
+			// so branch order does not depend on Go map iteration order.
 			if converted, ok := convertSchemaListToGemini(v); ok {
-				if len(converted) == 0 {
-					continue
-				}
-				out[k] = converted
-				continue
+				oneOfBranches = append(oneOfBranches, converted...)
 			}
+			continue
 		case "type":
-			if s, ok := v.(string); ok {
-				out[k] = strings.ToUpper(s)
-				continue
+			if normalized := normalizeGeminiSchemaType(v); normalized != "" {
+				out[k] = normalized
 			}
+			continue
+		case "enum":
+			if normalized := normalizeGeminiSchemaEnum(v); len(normalized) > 0 {
+				out[k] = normalized
+			}
+			continue
 		case "properties":
+			// A non-object "properties" (a boolean schema or an array) has no
+			// proto-JSON representation either: drop the whole keyword.
 			if props, ok := v.(map[string]any); ok {
 				converted := make(map[string]any, len(props))
 				for name, raw := range props {
-					if child, ok := raw.(map[string]any); ok {
-						converted[name] = convertSchemaToGemini(child)
-					} else {
-						converted[name] = raw
+					child, ok := raw.(map[string]any)
+					if !ok {
+						// Boolean schemas have no proto-JSON representation.
+						log.Debugf("dropping non-schema property child=%v", name)
+						continue
+					}
+					if normalized := convertSchemaToGemini(child); len(normalized) > 0 {
+						converted[name] = normalized
 					}
 				}
 				out[k] = converted
-				continue
 			}
+			continue
 		case "items":
+			// The proto's items is a single Schema message: a tuple array or a
+			// boolean schema has no representation. Drop the keyword instead of
+			// handing proto-JSON a shape it cannot parse; the type inference
+			// below still marks the node as an array.
 			if child, ok := v.(map[string]any); ok {
-				out[k] = convertSchemaToGemini(child)
-				continue
+				if normalized := convertSchemaToGemini(child); len(normalized) > 0 {
+					out[k] = normalized
+				}
 			}
+			continue
 		}
 		out[k] = v
 	}
+	if len(oneOfBranches) > 0 {
+		out["anyOf"] = append(geminiBranchList(out["anyOf"]), oneOfBranches...)
+	}
+	pruneGeminiRequired(out)
+	// A node with properties/items but no type fails strict backends. Infer only
+	// these shapes: doing the same for a bare union would turn optional scalar
+	// arguments into objects (googleapis/python-genai#3060). The inference reads
+	// the source schema, so a keyword that was dropped still shapes the guess: a
+	// tuple or boolean "items" marks an array, and non-object "properties" mark
+	// an object. A node emptied by dropping or pruning stays type-less so the
+	// combinator conversion discards it as a wildcard branch.
+	_, sawProps := schema["properties"]
+	_, sawItems := schema["items"]
+	if _, ok := out["type"]; !ok {
+		switch {
+		case sawProps:
+			out["type"] = "OBJECT"
+		case sawItems:
+			out["type"] = "ARRAY"
+		}
+	}
+	if out["type"] == nil && len(geminiBranchList(out["anyOf"])) == 0 {
+		// An annotation cannot make a pruned constraint into a valid Schema.
+		return nil
+	}
 	return out
+}
+
+func geminiBranchList(value any) []map[string]any {
+	if list, ok := value.([]map[string]any); ok {
+		return list
+	}
+	return nil
+}
+
+// normalizeGeminiSchemaType accepts a single type or a type array (as emitted
+// by Pydantic/Zod for nullable fields) and returns one proto enum value.
+func normalizeGeminiSchemaType(value any) string {
+	first := func(items []any) string {
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok {
+				continue
+			}
+			if t := strings.ToUpper(strings.TrimSpace(s)); t != "" && t != "NULL" {
+				return t
+			}
+		}
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return strings.ToUpper(strings.TrimSpace(v))
+	case []string:
+		items := make([]any, 0, len(v))
+		for _, s := range v {
+			items = append(items, s)
+		}
+		return first(items)
+	case []any:
+		return first(v)
+	}
+	return ""
+}
+
+// normalizeGeminiSchemaEnum converts enum values to strings: the proto field is
+// repeated string even when the parent type is numeric or boolean.
+func normalizeGeminiSchemaEnum(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			switch e := item.(type) {
+			case string:
+				out = append(out, e)
+			case bool:
+				out = append(out, strconv.FormatBool(e))
+			case float64:
+				out = append(out, strconv.FormatFloat(e, 'f', -1, 64))
+			case int:
+				out = append(out, strconv.Itoa(e))
+			case int64:
+				out = append(out, strconv.FormatInt(e, 10))
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// pruneGeminiRequired drops required names the same node does not define, and
+// drops the keyword entirely when nothing survives. This is the shape MCP
+// servers and combinator branches commonly emit; on Gemini it fails the entire
+// request with "property is not defined". A branch emptied here is then removed
+// by convertSchemaListToGemini.
+func pruneGeminiRequired(schema map[string]any) {
+	_, ok := schema["required"]
+	if !ok {
+		return
+	}
+	names := RequiredFields(schema)
+	props, _ := schema["properties"].(map[string]any)
+	kept := make([]string, 0, len(names))
+	for _, name := range names {
+		if _, ok := props[name]; ok {
+			kept = append(kept, name)
+		}
+	}
+	if len(kept) == 0 {
+		delete(schema, "required")
+		return
+	}
+	schema["required"] = kept
 }
 
 // convertSchemaListToGemini converts the subschemas of a combinator keyword.

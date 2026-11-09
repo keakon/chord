@@ -32,6 +32,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Gemini tool declarations now conform to the Schema proto subset: unsupported JSON Schema keywords are dropped, `required` entries are limited to properties on the same node, `enum` values are stringified and `type` arrays are normalized to a single type, and `oneOf` alternatives are lowered to `anyOf`. Strict Gemini backends rejected the entire request when a tool carried a required-only `anyOf` branch (including the `question` tool); such schema-validation 400s now stop the request instead of rotating through every API key.
 - TypeScript semantic diagnostics that arrive after the file-write wait are now delivered on a later model request, subject to the existing freshness and delivery window checks.
 - TUI Markdown now recognizes emphasis next to Chinese, Japanese and Korean text and punctuation, including `**说明：**正文`. Pure-ASCII contexts and literal delimiters in code keep their existing behavior.
 - Streaming responses and HTTP MCP now handle multiline SSE data, UTF-8 BOMs, and CR-only line endings. Anthropic events also accept `event:` after `data:`. Responses payloads with leading JSON whitespace retain their event type, preventing dropped events or tool arguments appearing as reply text.

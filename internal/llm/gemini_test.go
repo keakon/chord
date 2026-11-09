@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestConvertMessagesToGemini(t *testing.T) {
@@ -737,12 +739,82 @@ func TestGeminiActiveLoopSignatureContract(t *testing.T) {
 	}
 }
 
-// TestGeminiRequestDropsUnrepresentableSchemaKeywords covers the whole path a
-// tool schema takes onto the wire. Gemini parses the request as proto-JSON,
-// where a field its Schema message does not have fails the entire request, so
-// a "not" nested inside an anyOf branch, which an MCP server schema can carry,
-// must not survive conversion, and the branches around it must.
-func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
+var geminiSchemaTypes = map[string]bool{
+	"STRING": true, "NUMBER": true, "INTEGER": true, "BOOLEAN": true,
+	"ARRAY": true, "OBJECT": true, "NULL": true,
+}
+
+// assertGeminiSchemaValid walks a converted declaration and checks the
+// constraints Gemini enforces beyond proto-JSON parsing. A keyword
+// disappearing is not proof that what remains is a legal Schema: the previous
+// regression test pinned anyOf branches carrying only "required", which strict
+// backends reject. Every wire assertion should go through here.
+func assertGeminiSchemaValid(t *testing.T, node map[string]any, path string) {
+	t.Helper()
+	for key := range node {
+		if !geminiSchemaFields[key] {
+			t.Errorf("%s: field %q is not on the Gemini Schema proto message", path, key)
+		}
+	}
+	if typ, ok := node["type"]; ok {
+		s, ok := typ.(string)
+		if !ok || !geminiSchemaTypes[s] {
+			t.Errorf("%s: type = %#v, want one proto enum value", path, typ)
+		}
+	} else if _, hasProps := node["properties"]; hasProps {
+		t.Errorf("%s: node has properties but no type", path)
+	} else if _, hasRequired := node["required"]; hasRequired {
+		t.Errorf("%s: node has required but no type", path)
+	} else if branches, _ := node["anyOf"].([]any); len(branches) == 0 {
+		t.Errorf("%s: node has neither type nor a non-empty anyOf", path)
+	}
+	if _, ok := node["required"]; ok {
+		if node["type"] != "OBJECT" {
+			t.Errorf("%s: required on a non-OBJECT node (type=%v)", path, node["type"])
+		}
+		props, _ := node["properties"].(map[string]any)
+		for _, name := range RequiredFields(node) {
+			if _, ok := props[name]; !ok {
+				t.Errorf("%s: required %q has no property on this node", path, name)
+			}
+		}
+	}
+	if enum, ok := node["enum"].([]any); ok {
+		for i, item := range enum {
+			if _, ok := item.(string); !ok {
+				t.Errorf("%s: enum[%d] = %#v, want a string", path, i, item)
+			}
+		}
+	}
+	if props, ok := node["properties"].(map[string]any); ok {
+		for name, raw := range props {
+			child, ok := raw.(map[string]any)
+			if !ok {
+				t.Errorf("%s/properties/%s: property is not a schema", path, name)
+				continue
+			}
+			assertGeminiSchemaValid(t, child, path+"/properties/"+name)
+		}
+	}
+	if items, ok := node["items"].(map[string]any); ok {
+		assertGeminiSchemaValid(t, items, path+"/items")
+	}
+	if branches, ok := node["anyOf"].([]any); ok {
+		for i, raw := range branches {
+			child, ok := raw.(map[string]any)
+			if !ok {
+				t.Errorf("%s/anyOf[%d]: branch is not a schema", path, i)
+				continue
+			}
+			assertGeminiSchemaValid(t, child, fmt.Sprintf("%s/anyOf[%d]", path, i))
+		}
+	}
+}
+
+// captureGeminiToolParameters sends one tool declaration to a local server and
+// returns the parameters that reached the wire.
+func captureGeminiToolParameters(t *testing.T, schema map[string]any) map[string]any {
+	t.Helper()
 	var rawBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -753,46 +825,16 @@ func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"summary":     map[string]any{"type": "string"},
-			"result_type": map[string]any{"type": "string"},
-			"result":      map[string]any{"type": "object"},
-		},
-		"required": []string{"summary"},
-		"not": map[string]any{
-			"required": []string{"result", "result_type"},
-		},
-		"anyOf": []map[string]any{
-			{
-				"required": []string{"summary"},
-				"not": map[string]any{
-					"anyOf": []map[string]any{
-						{"required": []string{"result_type"}},
-						{"required": []string{"result"}},
-					},
-				},
-			},
-			{"required": []string{"summary", "result_type"}},
-		},
-	}
-
 	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/v1beta/"}, []string{"test-key"})
 	geminiProvider, err := NewGeminiProvider(provider, "")
 	if err != nil {
 		t.Fatalf("NewGeminiProvider: %v", err)
 	}
 	_, err = geminiProvider.CompleteStream(
-		context.Background(),
-		"test-key",
-		"gemini-test",
-		"",
+		context.Background(), "test-key", "gemini-test", "",
 		[]message.Message{{Role: "user", Content: "hello"}},
 		[]message.ToolDefinition{{Name: "sample_tool", Description: "finish", InputSchema: schema}},
-		128,
-		RequestTuning{},
-		func(message.StreamDelta) {},
+		128, RequestTuning{}, func(message.StreamDelta) {},
 	)
 	if err == nil {
 		t.Fatal("expected forced server error")
@@ -800,11 +842,6 @@ func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
 	if len(rawBody) == 0 {
 		t.Fatal("server captured no request body")
 	}
-	if bytes.Contains(rawBody, []byte(`"not"`)) {
-		t.Fatalf("request body still carries a \"not\" keyword: %s", rawBody)
-	}
-	// The surviving alternatives must still be there: dropping the keyword must
-	// not take the branch that carried it with it.
 	var body struct {
 		Tools []struct {
 			FunctionDeclarations []struct {
@@ -818,7 +855,54 @@ func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
 	if len(body.Tools) != 1 || len(body.Tools[0].FunctionDeclarations) != 1 {
 		t.Fatalf("tools = %#v", body.Tools)
 	}
-	params := body.Tools[0].FunctionDeclarations[0].Parameters
+	return body.Tools[0].FunctionDeclarations[0].Parameters
+}
+
+// TestGeminiRequestDropsUnrepresentableSchemaKeywords covers the whole path a
+// tool schema takes onto the wire. A "not" nested inside an anyOf branch must
+// not survive conversion, and the branches around it must. The branches are
+// complete Schemas here: pinning a required-only branch would make the test
+// assert an invalid wire shape.
+func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"summary":     map[string]any{"type": "string"},
+			"result_type": map[string]any{"type": "string"},
+			"result":      map[string]any{"type": "object"},
+		},
+		"required": []string{"summary"},
+		"not": map[string]any{
+			"required": []string{"result", "result_type"},
+		},
+		"anyOf": []map[string]any{
+			{
+				"type":       "object",
+				"properties": map[string]any{"summary": map[string]any{"type": "string"}},
+				"required":   []string{"summary"},
+				"not": map[string]any{
+					"anyOf": []map[string]any{
+						{"required": []string{"result_type"}},
+						{"required": []string{"result"}},
+					},
+				},
+			},
+			{
+				"type": "object",
+				"properties": map[string]any{
+					"summary":     map[string]any{"type": "string"},
+					"result_type": map[string]any{"type": "string"},
+				},
+				"required": []string{"summary", "result_type"},
+			},
+		},
+	}
+
+	params := captureGeminiToolParameters(t, schema)
+	if _, ok := params["not"]; ok {
+		t.Fatalf("request body still carries a \"not\" keyword: %#v", params)
+	}
+	assertGeminiSchemaValid(t, params, "parameters")
 	branches, ok := params["anyOf"].([]any)
 	if !ok || len(branches) != 2 {
 		t.Fatalf("anyOf = %#v, want two surviving branches", params["anyOf"])
@@ -828,4 +912,221 @@ func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
 			t.Fatalf("anyOf[%d] lost its required clause: %#v", i, branch)
 		}
 	}
+}
+
+// TestGeminiRequestNormalizesUnsupportedToolSchemas pins the shapes that
+// strict Gemini backends reject: required-only combinator branches, orphan
+// required names, keywords the Schema proto does not have, numeric enums,
+// nullable type arrays, non-object properties, and tuple or boolean items
+// (the proto's items is a single Schema message). MCP servers and hosted
+// tools supply these verbatim.
+func TestGeminiRequestNormalizesUnsupportedToolSchemas(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"questions": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"question": map[string]any{"type": "string"},
+						"header":   map[string]any{"type": "string"},
+					},
+					"anyOf": []map[string]any{
+						{"required": []string{"question", "header"}},
+						{"required": []string{"wait_for"}},
+					},
+					"additionalProperties": false,
+				},
+			},
+			"mode": map[string]any{
+				"type": []any{"string", "null"},
+				"enum": []any{1, true, "auto"},
+			},
+			"flag": true, // boolean schema, no proto-JSON representation
+			"payload": map[string]any{
+				"$ref": "#/$defs/Payload",
+				"oneOf": []any{
+					map[string]any{"type": "object", "properties": map[string]any{"a": map[string]any{"type": "string"}}, "required": []string{"a"}},
+					map[string]any{"type": "object", "properties": map[string]any{"b": map[string]any{"type": "string"}}, "required": []string{"b"}},
+				},
+				"allOf":         []any{map[string]any{"type": "object"}},
+				"discriminator": map[string]any{"propertyName": "kind"},
+			},
+			"tuple_items": map[string]any{
+				"items": []any{map[string]any{"type": "string"}},
+			},
+			"bool_items": map[string]any{"items": true},
+			"bool_props": map[string]any{"properties": true},
+			"empty":      map[string]any{},
+		},
+		"$defs":    map[string]any{"Payload": map[string]any{"type": "object"}},
+		"required": []string{"questions", "missing_one"},
+	}
+
+	params := captureGeminiToolParameters(t, schema)
+	assertGeminiSchemaValid(t, params, "parameters")
+	if got := RequiredFields(params); len(got) != 1 || got[0] != "questions" {
+		t.Fatalf("required = %#v, want only the defined property", params["required"])
+	}
+	props := params["properties"].(map[string]any)
+	if _, ok := props["flag"]; ok {
+		t.Fatal("boolean property schema survived conversion")
+	}
+	items := props["questions"].(map[string]any)["items"].(map[string]any)
+	if _, ok := items["anyOf"]; ok {
+		t.Fatalf("required-only anyOf branches survived: %#v", items["anyOf"])
+	}
+	mode := props["mode"].(map[string]any)
+	if mode["type"] != "STRING" {
+		t.Fatalf("mode.type = %#v, want STRING", mode["type"])
+	}
+	if enum, ok := mode["enum"].([]any); !ok || len(enum) != 3 {
+		t.Fatalf("mode.enum = %#v, want three string values", mode["enum"])
+	}
+	payload := props["payload"].(map[string]any)
+	if branches, ok := payload["anyOf"].([]any); !ok || len(branches) != 2 {
+		t.Fatalf("payload.anyOf = %#v, want the lowered oneOf alternatives", payload["anyOf"])
+	}
+	// Tuple and boolean items are dropped, but the node still reads as an
+	// array; a dropped or non-object properties keyword still reads as an
+	// object; a wholly empty schema becomes an object rather than a type-less
+	// node that fails the whole request.
+	tupleItems := props["tuple_items"].(map[string]any)
+	if tupleItems["type"] != "ARRAY" {
+		t.Fatalf("tuple_items.type = %#v, want inferred ARRAY", tupleItems["type"])
+	}
+	if _, ok := tupleItems["items"]; ok {
+		t.Fatalf("tuple items survived conversion: %#v", tupleItems["items"])
+	}
+	if got := props["bool_items"].(map[string]any)["type"]; got != "ARRAY" {
+		t.Fatalf("bool_items.type = %#v, want inferred ARRAY", got)
+	}
+	if _, ok := props["bool_items"].(map[string]any)["items"]; ok {
+		t.Fatal("boolean items survived conversion")
+	}
+	boolProps := props["bool_props"].(map[string]any)
+	if boolProps["type"] != "OBJECT" {
+		t.Fatalf("bool_props.type = %#v, want inferred OBJECT", boolProps["type"])
+	}
+	if _, ok := boolProps["properties"]; ok {
+		t.Fatal("non-object properties survived conversion")
+	}
+	if got := props["empty"].(map[string]any)["type"]; got != "OBJECT" {
+		t.Fatalf("empty schema type = %#v, want OBJECT", got)
+	}
+	for _, forbidden := range []string{"$ref", "$defs", "oneOf", "allOf", "discriminator", "additionalProperties"} {
+		if bytes.Contains(mustMarshalGeminiSchema(t, params), []byte(`"`+forbidden+`"`)) {
+			t.Errorf("wire still carries an unsupported keyword %q", forbidden)
+		}
+	}
+}
+
+func mustMarshalGeminiSchema(t *testing.T, schema map[string]any) []byte {
+	t.Helper()
+	data, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatalf("marshal schema: %v", err)
+	}
+	return data
+}
+
+// TestBuiltInQuestionSchemasProduceValidGeminiWire guards both question tool
+// variants: the synchronous copy used by workers keeps only one required-only
+// anyOf branch, which is just as invalid as the main agent's two branches.
+func TestBuiltInQuestionSchemasProduceValidGeminiWire(t *testing.T) {
+	async := tools.NewQuestionTool(nil)
+	for _, tc := range []struct {
+		name   string
+		schema map[string]any
+	}{
+		{"async", async.Parameters()},
+		{"synchronous", async.Synchronous().Parameters()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wire := mustDecodeGeminiSchema(t, convertSchemaToGemini(tc.schema))
+			assertGeminiSchemaValid(t, wire, "parameters")
+			items := wire["properties"].(map[string]any)["questions"].(map[string]any)["items"].(map[string]any)
+			if _, ok := items["anyOf"]; ok {
+				t.Fatalf("required-only anyOf branches survived: %#v", items["anyOf"])
+			}
+		})
+	}
+}
+
+// stubSubAgentCreatorForGeminiWire satisfies DelegateTool's schema build,
+// which lists the available agent types in the agent_type description.
+type stubSubAgentCreatorForGeminiWire struct{}
+
+func (stubSubAgentCreatorForGeminiWire) CreateSubAgent(context.Context, tools.SubAgentRequest) (tools.TaskHandle, error) {
+	return tools.TaskHandle{}, nil
+}
+
+func (stubSubAgentCreatorForGeminiWire) AvailableSubAgents() []tools.AgentInfo { return nil }
+
+// TestAllBuiltInToolSchemasProduceValidGeminiWire converts every built-in
+// declaration — the local tools plus the built-in hosted catalog — and asserts
+// the wire stays inside the Schema proto subset. Adding or reshaping a tool
+// schema is covered here automatically: run the llm package tests instead of
+// guessing which shapes a strict backend accepts. A schema that fails needs
+// its lost constraints restated in descriptions and runtime validation, the
+// way question.go restates its required pair.
+func TestAllBuiltInToolSchemasProduceValidGeminiWire(t *testing.T) {
+	schemas := map[string]map[string]any{}
+	add := func(tool tools.Tool) {
+		schemas[tools.NormalizeName(tool.Name())] = tool.Parameters()
+	}
+	add(tools.ApplyPatchTool{})
+	add(tools.NewCancelTool(nil))
+	add(tools.CompleteTool{})
+	// compact_context ships two schema surfaces: the main-agent variant and the
+	// reduced worker variant selected by the validator surface.
+	main := tools.NewCompactContextTool(tools.CompactContextValidator{})
+	add(main)
+	worker := tools.NewCompactContextTool(tools.CompactContextValidator{WorkerSurface: true})
+	schemas[tools.NormalizeName(worker.Name())+"/worker"] = worker.Parameters()
+	add(tools.NewDelegateTool(&stubSubAgentCreatorForGeminiWire{}))
+	add(tools.DeleteTool{})
+	add(tools.DoneTool{})
+	add(tools.NewEscalateTool(nil))
+	add(&tools.GenerateImageTool{})
+	add(tools.GlobTool{})
+	add(tools.GrepTool{})
+	add(tools.HandoffTool{})
+	add(tools.JobKillTool{})
+	add(tools.JobListTool{})
+	add(tools.JobOutputTool{})
+	add(tools.NewNotifyTool(nil, nil, true, true))
+	add(tools.NewQuestionTool(nil))
+	add(tools.PresentTool{})
+	add(tools.ReadArtifactTool{})
+	add(tools.ReadTool{})
+	add(tools.NewShellTool(""))
+	add(tools.NewSkillTool(nil))
+	add(tools.NewTodoWriteTool(nil))
+	add(tools.NewToolSearchTool(nil))
+	add(tools.NewViewImageTool(nil))
+	add(tools.NewWebFetchTool(config.WebFetchConfig{}, ""))
+	add(tools.WriteTool{})
+	add(tools.EditTool{})
+	// Hosted declarations reach the same wire through their spec schemas.
+	for name, spec := range tools.ResolveHostedToolCatalog(nil) {
+		schemas[name] = tools.NewHostedTool(spec, nil).Parameters()
+	}
+
+	for name, schema := range schemas {
+		t.Run(name, func(t *testing.T) {
+			wire := mustDecodeGeminiSchema(t, convertSchemaToGemini(schema))
+			assertGeminiSchemaValid(t, wire, name)
+		})
+	}
+}
+
+func mustDecodeGeminiSchema(t *testing.T, schema map[string]any) map[string]any {
+	t.Helper()
+	var wire map[string]any
+	if err := json.Unmarshal(mustMarshalGeminiSchema(t, schema), &wire); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	return wire
 }

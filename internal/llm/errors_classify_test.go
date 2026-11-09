@@ -530,3 +530,30 @@ func TestTerminalModelPoolFailureForProvider422Follows400Discipline(t *testing.T
 		t.Fatal("422 with an explicit request/param signal should stop after model pool exhaustion")
 	}
 }
+
+// Schema-validation 400s describe the tool declarations we built, not a key or
+// an upstream blip. Without these markers the compatible-gateway path rotated
+// through every key and cooled them all down before giving up.
+func TestGeminiSchemaValidation400IsTerminalRequestShapeError(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		message string
+	}{
+		{"required-only branch", "API error 400: * ***.tools[0].function_declarations[9].properties[questions].items.any_of[0].required: only allowed for OBJECT type"},
+		{"undefined property", "API error 400: * ***.tools[0].function_declarations[9].parameters.required[0]: property is not defined"},
+		{"missing type", "Unable to submit request because functionDeclaration parameters schema didn't specify the schema type field."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := &APIError{StatusCode: 400, Code: "400", Type: "upstream_error", Message: tc.message}
+			if !isRequestOrParamError(err) {
+				t.Fatalf("schema 400 should be a terminal request-shape error: %q", tc.message)
+			}
+		})
+	}
+	// Keep the markers narrow: gateways also wrap transient provider failures
+	// as HTTP 400, and those must stay retryable.
+	if isRequestOrParamError(&APIError{StatusCode: 400, Type: "upstream_error", Message: "upstream temporarily unavailable"}) {
+		t.Fatal("generic upstream 400 should not become terminal")
+	}
+}

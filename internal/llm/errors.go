@@ -940,6 +940,11 @@ func hasExplicitRequestOrParamSignal(apiErr *APIError) bool {
 		"unknown field",
 		"invalid parameter",
 		"invalid argument",
+		// Strict Gemini backends reject a tool declaration before generation.
+		// The declaration is ours, so rotating keys cannot change the verdict.
+		"property is not defined",
+		"only allowed for object type",
+		"schema didn't specify the schema type field",
 	)
 }
 

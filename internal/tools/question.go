@@ -102,6 +102,8 @@ func (t *QuestionTool) Description() string {
 // accepts that spelling and hoists the IDs, so the item schema has to admit it —
 // the validator strips an undeclared field silently, and the call that follows
 // then reads as "create", which is how one pending question becomes two.
+// The provider-specific Gemini converter normalizes these branches on the wire;
+// do not assume every backend accepts a branch carrying only "required".
 func questionItemSchema(allowWaitFor bool) map[string]any {
 	props := map[string]any{
 		"question": map[string]any{"type": "string"}, "header": map[string]any{"type": "string", "description": "Short display label"},

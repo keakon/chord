@@ -22,6 +22,13 @@ type Tool interface {
 	// Description returns a human-readable description of what the tool does.
 	Description() string
 	// Parameters returns a JSON Schema object describing the tool's input.
+	// Each provider adapts this to its own dialect: Gemini drops everything
+	// outside its Schema proto subset and normalizes the rest, and strict
+	// Anthropic endpoints reject top-level combinators, so a schema must stay
+	// correct when its constraints disappear — restate required pairs and
+	// forbidden combinations in descriptions and enforce them at execution
+	// time, the way question.go does for its question/header pair. The wire
+	// test in internal/llm asserts every built-in schema survives conversion.
 	Parameters() map[string]any
 	// Execute runs the tool with the given JSON arguments and returns output or an error.
 	Execute(ctx context.Context, args json.RawMessage) (string, error)
