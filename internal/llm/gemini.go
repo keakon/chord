@@ -119,6 +119,13 @@ func normalizeGeminiThinking(t GeminiTuning) GeminiTuning {
 	return t
 }
 
+// geminiThinkingActive reports whether the request lets the model think. Gemini
+// models think by default, so anything short of an explicit zero budget counts
+// as active; include_thoughts only controls whether the summary is visible.
+func geminiThinkingActive(t GeminiTuning) bool {
+	return t.ThinkingBudget == nil || *t.ThinkingBudget != 0
+}
+
 // geminiIncludeThoughts resolves the include_thoughts default for an already
 // normalized thinking shape. Thought signatures are bound to the producing
 // model, so the visible thought summary is the only reasoning text that
@@ -278,8 +285,19 @@ func (g *GeminiProvider) CompleteStream(
 			Contents: contents,
 			Tools:    apiTools,
 		}
-		if len(apiTools) > 0 && tuning.Gemini.ToolChoice != "" && !forcedToolChoiceDowngraded(g.provider, model, tuning.Gemini.ToolChoice) {
-			reqBody.ToolConfig = geminiToolConfigFromTuning(tuning.Gemini.ToolChoice)
+		// Gemini rejects a request carrying both thinkingBudget and thinkingLevel,
+		// so normalize first; the tool-config downgrade below reads the same
+		// normalized shape the wire will carry.
+		geminiThinking := normalizeGeminiThinking(tuning.Gemini)
+		// suppress_in_thinking targets reject a forced call while thinking.
+		// "none" is a deliberate prohibition rather than a force and ships
+		// as-is; downgrading it would silently allow calls.
+		choice := tuning.Gemini.ToolChoice
+		if choice == "required" && forcedToolChoiceSuppressedInThinking(g.provider, model) && geminiThinkingActive(geminiThinking) {
+			choice = ""
+		}
+		if len(apiTools) > 0 && choice != "" && !forcedToolChoiceDowngraded(g.provider, model, choice) {
+			reqBody.ToolConfig = geminiToolConfigFromTuning(choice)
 		}
 		if systemPrompt != "" {
 			reqBody.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: systemPrompt}}}
@@ -289,10 +307,6 @@ func (g *GeminiProvider) CompleteStream(
 		if maxTokens > 0 {
 			genCfg.MaxOutputTokens = maxTokens
 		}
-		// Gemini rejects a request carrying both thinkingBudget and thinkingLevel,
-		// so normalize first and let the resolved shape drive the include_thoughts
-		// default too (a dropped budget must not imply active thinking).
-		geminiThinking := normalizeGeminiThinking(tuning.Gemini)
 		if geminiThinking.ThinkingBudget != nil || geminiThinking.ThinkingLevel != "" || geminiThinking.IncludeThoughts != nil {
 			// Gemini thinkingLevel values are documented as lowercase strings in the
 			// public Gemini API docs (e.g. "minimal"|"low"|"medium"|"high"). Keep the

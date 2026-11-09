@@ -346,6 +346,88 @@ func TestGeminiCompleteStreamOmitsForcedToolChoiceWhenAutoOnly(t *testing.T) {
 	}
 }
 
+func TestGeminiCompleteStreamSuppressesForcedToolChoiceInThinking(t *testing.T) {
+	cases := []struct {
+		name        string
+		compat      *config.ForcedToolChoiceCompatConfig
+		tuning      GeminiTuning
+		wantToolCfg bool
+	}{
+		{
+			name:        "thinking active without compat keeps ANY",
+			tuning:      GeminiTuning{ToolChoice: "required", ThinkingLevel: "high"},
+			wantToolCfg: true,
+		},
+		{
+			name:        "suppress_in_thinking drops ANY while thinking",
+			compat:      &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)},
+			tuning:      GeminiTuning{ToolChoice: "required", ThinkingLevel: "high"},
+			wantToolCfg: false,
+		},
+		{
+			name:        "suppress_in_thinking keeps ANY when budget zero",
+			compat:      &config.ForcedToolChoiceCompatConfig{SuppressInThinking: new(true)},
+			tuning:      GeminiTuning{ToolChoice: "required", ThinkingBudget: new(0)},
+			wantToolCfg: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured geminiRequest
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Fatalf("decode request body: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"code":400,"message":"forced","status":"INVALID_ARGUMENT"}}`))
+			}))
+			defer srv.Close()
+
+			provider := NewProviderConfig("gemini", config.ProviderConfig{
+				Type:   config.ProviderTypeGenerateContent,
+				APIURL: srv.URL + "/v1beta/",
+				Models: map[string]config.ModelConfig{
+					"gemini-test": {
+						Compat: &config.ModelCompatConfig{ForcedToolChoice: tc.compat},
+					},
+				},
+			}, []string{"test-key"})
+			geminiProvider, err := NewGeminiProvider(provider, "")
+			if err != nil {
+				t.Fatalf("NewGeminiProvider: %v", err)
+			}
+			_, err = geminiProvider.CompleteStream(
+				context.Background(),
+				"test-key",
+				"gemini-test",
+				"",
+				[]message.Message{{Role: "user", Content: "hello"}},
+				[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
+				128,
+				RequestTuning{Gemini: tc.tuning},
+				func(message.StreamDelta) {},
+			)
+			if err == nil {
+				t.Fatal("expected forced server error")
+			}
+			if !tc.wantToolCfg {
+				if captured.ToolConfig != nil {
+					t.Fatalf("toolConfig = %#v, want omitted while thinking is active", captured.ToolConfig)
+				}
+				return
+			}
+			if captured.ToolConfig == nil || captured.ToolConfig.FunctionCallingConfig == nil {
+				t.Fatalf("toolConfig = %#v, want functionCallingConfig", captured.ToolConfig)
+			}
+			if got := captured.ToolConfig.FunctionCallingConfig.Mode; got != "ANY" {
+				t.Fatalf("functionCallingConfig.mode = %q, want ANY", got)
+			}
+		})
+	}
+}
+
 func TestGeminiCompleteStreamAppliesRequestOverrides(t *testing.T) {
 	var gotBody map[string]any
 	var gotHeaders http.Header
