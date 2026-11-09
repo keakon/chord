@@ -333,6 +333,7 @@ func (g *GeminiProvider) CompleteStream(
 	if err := validateGeminiContinuationBody(bodyBytes, maxTokens, automaticGeminiContinuation(compat)); err != nil {
 		return nil, err
 	}
+	recordToolChoiceRequest(ctx, bodyBytes)
 	if automaticGeminiContinuation(compat) {
 		return g.completeStreamWithContinuation(ctx, freezeGeminiRequest(g, model, apiKey, bodyBytes), cb)
 	}

@@ -33,6 +33,8 @@
 ### 修复
 
 - Gemini 工具声明现在收敛到 Schema proto 支持的子集：丢弃不支持的 JSON Schema 关键字、`required` 只保留同一节点 `properties` 中定义的字段、`enum` 值统一转为字符串、`type` 数组归一化为单个类型、`oneOf` 分支降级为 `anyOf`。此前只要有一个工具携带「仅含 required」的 `anyOf` 分支（包括 `question` 工具），严格的 Gemini 后端就会拒绝整个请求；这类 schema 校验 400 现在直接终止请求，不再逐个冷却轮换所有 API key。
+- `compat.forced_tool_choice.suppress_in_thinking` 现在同样作用于 Gemini 模型：模型可以思考时，强制工具选择降级为默认调用模式；思考被 budget 0 关闭时仍会发送。此前该旋钮只对 OpenAI 兼容与 Responses 模型生效。
+- 兼容网关拒绝强制工具选择（loop 模式与子代理派发用它要求模型必须调用工具）并返回 invalid argument 400 时，不再导致每次请求都失败：Chord 会摘掉该选择重试一次，成功后对该模型保持不发，直到进程重启。接受强制选择的官方后端不受影响。
 - 写入文件后的等待结束时，尚未到达的 TypeScript 语义诊断可在后续模型请求中补发，仍须通过现有的新鲜度与投递时间窗口检查。
 - 终端界面的 Markdown 支持中日韩文字及标点旁的强调写法，例如 `**说明：**正文`。纯 ASCII 上下文和代码中的字面定界符保持原有行为。
 - 流式响应和 HTTP MCP 支持多行 SSE 数据、UTF-8 BOM 及单独 CR 换行。Anthropic 事件允许 `event:` 出现在 `data:` 之后；Responses 数据中的 JSON 前导空白不再导致事件丢失或工具参数混入回复正文。

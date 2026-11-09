@@ -288,7 +288,12 @@ type ProviderConfig struct {
 	keylessCooldownCount int
 	// pendingCauses queues recorded cooldown causes until a request with a
 	// stream callback drains them (see drainPendingKeyReports).
-	pendingCauses              []*keyCooldownCause
+	pendingCauses []*keyCooldownCause
+	// forcedChoiceRefusedModels memoizes the models whose endpoint refused a
+	// request carrying a forced tool choice (the adaptive downgrade; see
+	// forcedToolChoiceDowngraded). Process-scoped: a restart gives the target
+	// one failed request to re-prove the refusal.
+	forcedChoiceRefusedModels  map[string]bool
 	limiter                    *rate.Limiter // optional rate limiter (nil = no rate limiting)
 	models                     map[string]config.ModelConfig
 	responsesCompat            map[string]*config.ResponsesCompatConfig
@@ -783,12 +788,38 @@ func forcedToolChoiceAutoOnly(provider *ProviderConfig, modelID string) bool {
 	return cfg != nil && cfg.AutoOnly != nil && *cfg.AutoOnly
 }
 
+// markForcedChoiceRefused records that the endpoint refused a request carrying
+// a forced tool choice for the model, so later requests stop sending one (see
+// forcedToolChoiceDowngraded). The adaptive retry in the client sets this when
+// the same request succeeds without the choice.
+func (p *ProviderConfig) markForcedChoiceRefused(modelID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.forcedChoiceRefusedModels == nil {
+		p.forcedChoiceRefusedModels = make(map[string]bool)
+	}
+	p.forcedChoiceRefusedModels[modelID] = true
+}
+
+// forcedChoiceRefused reports whether the adaptive downgrade memo holds the
+// model as having refused a forced tool choice.
+func (p *ProviderConfig) forcedChoiceRefused(modelID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.forcedChoiceRefusedModels[modelID]
+}
+
 // forcedToolChoiceDowngraded reports whether the requested tool_choice has to
-// be dropped to the backend default because the target only supports "auto".
-// An empty or explicit "auto" choice is left alone so callers stay free to send
-// it as-is; every other choice is downgraded for auto-only targets.
+// be dropped to the backend default. Two sources trigger the downgrade: the
+// target is configured as supporting only "auto", or the target's endpoint
+// refused a forced choice earlier and the adaptive retry proved the request
+// succeeds without it. An empty or explicit "auto" choice is left alone so
+// callers stay free to send it as-is.
 func forcedToolChoiceDowngraded(provider *ProviderConfig, modelID, toolChoice string) bool {
-	return toolChoice != "" && toolChoice != "auto" && forcedToolChoiceAutoOnly(provider, modelID)
+	if toolChoice == "" || toolChoice == "auto" {
+		return false
+	}
+	return forcedToolChoiceAutoOnly(provider, modelID) || provider.forcedChoiceRefused(modelID)
 }
 
 // ReasoningContinuityCompat resolves reasoning-continuity compatibility config

@@ -364,6 +364,8 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 			msgs:    sliceID(targetMessages),
 			msgsLen: len(targetMessages),
 		})
+		choiceRequest := &toolChoiceRequest{}
+		attemptCtx = context.WithValue(attemptCtx, toolChoiceRequestKey{}, choiceRequest)
 		resp, err = completeWithNativeTools(
 			attemptCtx,
 			t.impl,
@@ -592,6 +594,30 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 					retriable = true
 				}
 				if apiErrPtr.StatusCode == 400 {
+					// A forced tool choice is the one request feature whose refusal
+					// is hard to distinguish from other invalid-argument 400s on
+					// compatible gateways: probe once without it before giving up.
+					// Success marks the target so later requests stop sending the
+					// choice; ordinary failure keeps the original error while
+					// terminal/control results stop the retry walk.
+					if !apiErrPtr.isStreamEvent() && isRequestOrParamError(apiErrPtr) && choiceRequest.forced(t.provider, t.modelID, requestTuning) {
+						probe := a
+						probe.target.tuning = requestTuning
+						probe.pendingRollback = pendingRollback
+						probeResult, probeTokens, probeErr := c.probeWithoutForcedToolChoice(probe)
+						bodyCachePins = append(bodyCachePins, probeResult.bodyCachePins...)
+						pendingRollback = probeResult.pendingRollbackReason
+						if probeErr != nil {
+							// Only a plain request rejection belongs to this probe.
+							// Wrapped terminal/control errors must keep their identity.
+							rejection, plain := probeErr.(*APIError)
+							if !plain || rejection.isStreamEvent() || rejection.StatusCode != 400 || !isRequestOrParamError(rejection) {
+								return probeResult, probeTokens, probeErr
+							}
+						} else if probeResult.resp != nil || probeResult.continuationExhausted {
+							return probeResult, probeTokens, nil
+						}
+					}
 					// Check for protocol/model incompatibility errors first.
 					// These should trigger immediate fallback, not key rotation.
 					if hasTerminalNonRetriable400Signal(apiErrPtr) {

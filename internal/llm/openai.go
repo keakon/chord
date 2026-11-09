@@ -514,6 +514,7 @@ func (o *OpenAIProvider) CompleteStream(
 		return nil, err
 	}
 	var dumpRequestBody []byte
+	recordToolChoiceRequest(ctx, bodyBytes)
 	if dumpWriter != nil {
 		dumpRequestBody = append([]byte(nil), bodyBytes...)
 	}

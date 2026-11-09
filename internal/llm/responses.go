@@ -698,6 +698,7 @@ func (r *ResponsesProvider) CompleteStream(
 
 	// Copy the body only when a dump will actually read it.
 	var dumpRequestBody []byte
+	recordToolChoiceRequest(ctx, bodyBytes)
 	if dumpWriter != nil {
 		dumpRequestBody = append([]byte(nil), bodyBytes...)
 	}
