@@ -40,7 +40,7 @@ chord config refresh-catalog   # 或者只刷新、不添加
 chord config add mygw/claude-gw --keep-current
 ```
 
-依赖某个模型之前先做一次端到端验证：
+依赖某个模型之前先做端到端验证：
 
 ```bash
 chord doctor models --model mygw/claude-gw

@@ -469,7 +469,7 @@ Chord 可选的跨会话项目记忆（稳定的偏好、项目事实与可复�
 
 按 `Ctrl+O` 打开 MCP server 选择器。它会列出已配置的 MCP server、连接状态，以及手动 server 当前是否启用/禁用。可用 `j` / `k` 移动，`Enter` 切换当前手动 server，`e` 启用，`d` 禁用，`Esc` 关闭。
 
-Agent 运行中也可以打开选择器查看 MCP 状态，不需要等待当前 turn 结束。启用 / 禁用操作在运行中也允许执行，但会延迟生效：当前正在进行的请求继续使用它启动时的 MCP 工具表面和 prompt，变化后的 MCP 状态会在下一次 LLM 请求中体现。只有配置了 `manual: true` 的 server 才能切换启用状态；自动启动的服务也可以在详情中执行认证和重连操作。
+Agent 运行中也可以打开选择器查看 MCP 状态，不需要等待当前 turn 结束。启用 / 禁用操作在运行中也允许执行，但会延迟生效：当前在途的请求继续使用它启动时的 MCP 工具表面和 prompt，变化后的 MCP 状态会在下一次 LLM 请求中体现。只有配置了 `manual: true` 的 server 才能切换启用状态；自动启动的服务也可以在详情中执行认证和重连操作。
 
 询问代理能用哪些 MCP 工具时，回答范围是当前角色可见的工具，不代表所有已连接服务器。查看连接状态请用选择器或 `/mcp status`。
 
@@ -621,7 +621,7 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 
 恢复会话后，所有还原的 agent 都处于 idle，不会假装旧进程里的执行仍然存活。SubAgent 在恢复前的任意状态（包括 waiting、completed、failed、cancelled）都可手动继续：先聚焦该 SubAgent，提交空输入可沿现有上下文继续，提交文字则会创建 follow-up turn。Chord 会先重新获取 SubAgent 并发槽并将其切回 running；空输入不会追加虚构的用户消息。从会话恢复的待处理 mailbox 在 idle 时继续排队，只会在这次明确的手动继续或输入操作中投递；正常运行期间实时产生的 mailbox 事件会立即投递给所属 agent。
 
-启用 `todo_write` 后，当 agent 确实在多个独立且活跃的工作流之间交错推进时，todo 列表可以同时存在多个 `in_progress`。每一项都必须使用唯一的 `active_form`；委派任务也应分别对应独立且仍然活跃的工作流。不要把尚未开始、仅计划中、受前置条件阻塞或只是等待条件的事项标成 `in_progress`。
+启用 `todo_write` 后，若 agent 确实在多个独立活跃的工作流之间交错推进，todo 列表可以同时存在多个 `in_progress`。每一项都必须使用唯一的 `active_form`；委派任务也应分别对应独立且仍然活跃的工作流。不要把尚未开始、仅计划中、受前置条件阻塞或只是等待条件的事项标成 `in_progress`。
 
 ## 图片与 PDF 输入
 
@@ -631,7 +631,7 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 - 当前模型支持对应输入类型时，把图片或 PDF 文件作为附件发送给当前聚焦的 Agent
 - 在支持的终端里直接查看图片；PDF 会发送给模型，并在转录区显示为文件 chip，但不会 inline 预览
 - 编辑含图片或 PDF 的历史用户消息；如果这条消息已经在转录尾部，就直接在当前会话里回填编辑，否则会 fork 新会话；按路径恢复的附件会在重新发送该消息时再次加载
-- 当工具被权限规则允许、有效模型池的第一个模型支持图片输入时，模型可以调用内置 `view_image` 工具把本地 PNG/JPEG/WebP/GIF/BMP/TIFF 图片载入上下文（统一归一化为 PNG 或 JPEG，长边超过 2000px 时缩小，动画 WebP/GIF/TIFF 取首帧）。该工具使用与 `read` 相同的本地路径权限处理。
+- 工具被权限规则允许且有效模型池首个模型支持图片输入时，模型可以调用内置 `view_image` 工具把本地 PNG/JPEG/WebP/GIF/BMP/TIFF 图片载入上下文（统一归一化为 PNG 或 JPEG，长边超过 2000px 时缩小，动画 WebP/GIF/TIFF 取首帧）。该工具使用与 `read` 相同的本地路径权限处理。
 
 `view_image` 能否使用取决于有效模型池中的第一个模型是否支持图片输入。Chat Completions 和 Responses API 都支持把工具返回的图片发送给支持图片输入的模型。会话中出现图片或 PDF 工具结果后，Chord 会跳过不支持对应输入类型的备用模型。
 

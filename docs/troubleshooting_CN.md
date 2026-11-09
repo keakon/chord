@@ -121,7 +121,7 @@ assistant `reasoning_content`，并把其他 wire family 的可移植可见 reas
 重定向到 DeepSeek 官方 `/beta` endpoint，也不会假设网关实现了 Chat Prefix
 Completion。若模型在输出可见正文前耗尽预算，且已启用
 `openai_visible`、model 没有变化，Chord 会在同一 endpoint 上用累计的
-`reasoning_content` 做一次有上限的 request-only 回放。网关拒绝这种消息形状
+`reasoning_content` 执行有上限的 request-only 回放。网关拒绝这种消息形状
 时，Chord 会移除临时回放，继续使用普通恢复提示。这只是尽力而为；网关不
 消费 reasoning 回放时，应提高模型输出上限，或把任务拆成更小的请求。
 
@@ -495,7 +495,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 1. job 可能已经结束了。`job_list` 默认只列正在运行和正在停止的 job，要看保留的终态 job 得传 `include_finished: true`，或者直接看这个 job 的完成卡片。
 2. 进程可能已经脱离了这个 job 的进程组。job 管的是命令启动的整个进程组，留在组里的子进程会让 job 保持活跃；而调用 `setsid`、`setpgid` 的进程（会自我 daemon 化的工具，或包装层主动 detach）已经在 job 之外，不再受这个 job 的截止时间、`job_kill` 或会话清理约束，需要你自己停掉。
 3. 直接写 `命令 &` 或 `nohup 命令 &` 不会脱组，因此不会自行逃逸；只有显式脱离进程组才会。Chord 不会为逃逸的进程扫描进程树。
-4. 停止这个 job 时可能没能向进程组发信号。命令退出之后，只有当命令退出那一刻记录到的某个成员仍在这个组里时，Chord 才会向该进程组发信号；主动离组的成员不算数。没有这份依据时，停止会按「未能确认」报告，命令留下的进程则继续运行。可在日志里搜 `no member witness` 或 `no recorded member is still in the group`，并自己停掉这些进程。
+4. 停止这个 job 时可能没能向进程组发信号。命令退出之后，只有命令退出那一刻记录到的某个成员仍在这个组里，Chord 才会向该进程组发信号；主动离组的成员不算数。没有这份依据时，停止会按「未能确认」报告，命令留下的进程则继续运行。可在日志里搜 `no member witness` 或 `no recorded member is still in the group`，并自己停掉这些进程。
 
 ## 何时检查日志
 

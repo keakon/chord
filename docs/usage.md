@@ -537,7 +537,7 @@ The export includes every conversation message plus the current session usage st
 Opens an overlay to browse usage data along two axes:
 
 - **Scope**: `Session` (current session) or `Project` (aggregate project stats). Press `s` to toggle.
-- **View**: `Overview`, `Models` (per-model breakdown), `Agents` (per-agent breakdown), and `Tasks` (session scope only, direct usage by delegated task). Project scope additionally supports `Dates` (per-day breakdown). Press `Tab` / `Shift+Tab` to switch views.
+- **View**: `Overview`, `Models` (per-model breakdown), `Agents` (per-agent breakdown), and `Tasks` (session scope only, direct usage by delegated task). Project scope also supports `Dates` (per-day breakdown). Press `Tab` / `Shift+Tab` to switch views.
 
 Session Overview shows: LLM calls, input/output tokens, cache read/write tokens, reasoning tokens, estimated cost, and, once any context compaction has run, its lifecycle counts (for example `applied`, `skipped/model_driven`). Models and Agents views display detailed per-dimension tables.
 
@@ -683,7 +683,7 @@ See [Headless](./headless.md) for details.
 
 ## Model editing tools
 
-Chord picks the file-editing tool per active model: gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and later majors like gpt-6-astra) and `codex-auto-review` use `apply_patch`, everything else defaults to `edit`; see [Edit tools](./edit-tools.md) for the full matrix and the rationale. On compatible Responses endpoints, patch-native models additionally receive `apply_patch` as a freeform custom tool instead of a JSON function tool.
+Chord picks the file-editing tool per active model: gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and later majors like gpt-6-astra) and `codex-auto-review` use `apply_patch`, everything else defaults to `edit`; see [Edit tools](./edit-tools.md) for the full matrix and the rationale. On compatible Responses endpoints, patch-native models also receive `apply_patch` as a freeform custom tool instead of a JSON function tool.
 
 When a model name or gateway behaves differently from the inference, override it per provider or model with `compat.apply_patch.enabled` (tool surface) and `compat.apply_patch.freeform` (wire shape). Both keys are three-state: omitted means infer from the model name and endpoint, so you only set the knob you need to change. The authoritative field reference is in [Configuration & Auth](./configuration.md).
 

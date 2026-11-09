@@ -746,7 +746,7 @@ Model field semantics:
   receives that cap on transports that emit the output-limit field.
 - `reasoning.effort`: reasoning depth. Chord keeps no local whitelist: whatever
   level the provider supports reaches the upstream unchanged, and the Responses
-  wire additionally normalizes whitespace and casing before sending.
+  wire also normalizes whitespace and casing before sending.
   - Chat Completions sends top-level `reasoning_effort`.
   - Responses sends `reasoning.effort` and optional `reasoning.summary`.
 - `reasoning.effort_map`: maps the canonical effort value to the wire value the
@@ -804,7 +804,7 @@ Compatibility fields:
 
   Set `all` when the target's contract requires the complete assistant history (Kimi K3 and `keep: all` models, Qwen `preserve_thinking`, GLM `clear_thinking: false`, Xiaomi MiMo; DeepSeek Chat/Messages already keep it without this setting); historical reasoning is then replayed unchanged and billed on every request. Set `none` only for an endpoint you verified accepts a request without the current turn's reasoning. Current-turn reasoning — everything after the last user message, including its tool loop — is otherwise replayed unchanged.
 
-  Anthropic additionally binds each thinking block to the conversation prefix that produced it: when a history rewrite invalidates that binding and the API rejects the replay with an invalid-signature error, Chord retries once with the thinking blocks dropped and keeps the turn's text and completed tool facts.
+  Anthropic also binds each thinking block to the conversation prefix that produced it: when a history rewrite invalidates that binding and the API rejects the replay with an invalid-signature error, Chord retries once with the thinking blocks dropped and keeps the turn's text and completed tool facts.
 
   Request-scoped turn overlays (per-turn `<system-reminder>` hints) are not counted as user turns, so an overlay appended at the tail cannot shift the completed-turn boundary past the current turn and strip the reasoning the backend consumes in this turn's tool chain.
 - `compat.forced_tool_choice.suppress_in_thinking`: downgrades loop-forced

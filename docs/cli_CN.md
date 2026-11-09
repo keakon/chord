@@ -508,7 +508,7 @@ sessions: 42 across 7 projects
 
 | 类别        | 清理内容                                                                                                                   |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `sessions`  | `<state-dir>/sessions/<project-key>/` 下的旧会话目录；当项目会话目录在会话删除后只剩 `project.json` 时，也会一并移除        |
+| `sessions`  | `<state-dir>/sessions/<project-key>/` 下的旧会话目录；项目会话目录在会话删除后若只剩 `project.json`，也会一并移除        |
 | `cache`     | `<cache-dir>/runtime/` 下的可重建缓存                                                                                     |
 | `logs`      | `<state-dir>/logs/` 下的轮转日志                                                                                          |
 | `project`   | 孤立的项目元数据（项目目录已不存在的注册项）                                                                               |

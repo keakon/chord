@@ -709,7 +709,7 @@ providers:
   - `openai_visible`：在 Chat Completions 工具循环中原样回放 assistant 的
     `reasoning_content`，并把其他 wire family 的可移植可见 reasoning 转成 `reasoning_content`。它不注入请求字段；字段差异由 `request_overrides.body` 配置。首次尝试时，Chord 仍会把 chat 原生 reasoning 乐观回放给任何 Chat Completions 目标（包括跨 provider），因此 Kimi K2.6/K2.7→K3 这类官方支持的同 provider 升级和同模型跨 provider fallback 都能保留连续性。
 
-    目标拒绝该请求后，Chord 会对该 target 降级，但在严格级别之前仍尽量保留结构化工具事实。在 `openai_visible` 的 Responses 目标上，如果 thinking 模式要求回放的函数调用回合携带 reasoning，Chord 会先回放可用的原生明文 `reasoning_text`；跨 provider 切换模型导致原生 reasoning 丢失时，后端拒绝后 Chord 会把对应工具轨迹降级为文本历史记录，续跑不再依赖缺失的 reasoning。对第三方 OpenAI 兼容网关，Chord 始终使用配置中的 endpoint，不会重定向到 DeepSeek 官方 `/beta` endpoint。reasoning-only 输出截断时，Chord 可能在同一 endpoint 上做一次有上限的 request-only reasoning 回放；网关拒绝后会退回普通恢复提示。
+    目标拒绝该请求后，Chord 会对该 target 降级，但在严格级别之前仍尽量保留结构化工具事实。在 `openai_visible` 的 Responses 目标上，如果 thinking 模式要求回放的函数调用回合携带 reasoning，Chord 会先回放可用的原生明文 `reasoning_text`；跨 provider 切换模型导致原生 reasoning 丢失时，后端拒绝后 Chord 会把对应工具轨迹降级为文本历史记录，续跑不再依赖缺失的 reasoning。对第三方 OpenAI 兼容网关，Chord 始终使用配置中的 endpoint，不会重定向到 DeepSeek 官方 `/beta` endpoint。reasoning-only 输出截断时，Chord 可能在同一 endpoint 上执行有上限的 request-only reasoning 回放；网关拒绝后会退回普通恢复提示。
   - `anthropic_unsigned`：仅用于已验证的 Messages 兼容模型，例如返回无
     Claude signature 的可见 `thinking` 的 DeepSeek/GLM endpoint。无签名
     thinking 首次只对同 provider/model 原生回放；对兼容 target，其他
@@ -1326,7 +1326,7 @@ mcp:
   - `/mcp enable <server>`
   - `/mcp disable <server>`
   - `/mcp status`
-- Agent 运行中也可以执行 `/mcp enable|disable`。当前正在进行的请求继续使用启动时的工具表面；下一次 LLM 请求（包括自动重试 / 恢复请求）才会应用新的执行状态。
+- Agent 运行中也可以执行 `/mcp enable|disable`。当前在途的请求继续使用启动时的工具表面；下一次 LLM 请求（包括自动重试 / 恢复请求）才会应用新的执行状态。
 - 默认情况下，下一次请求会重建顶层 MCP 工具表面，因此已有提示词缓存可能无法命中。模型显式开启 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 后，Chord 会把工具声明挂在固定的对话位置，并在后续请求里原位回放。禁用 server 只会拦截执行，不删除已经发出的声明，因此前缀保持稳定。所有改写对话前缀或更换选中模型的边界——上下文压缩、会话恢复、fork、切换模型——都会重置声明锚点：重建后的工具表面把当前已启用的全部 manual MCP 工具放进顶层 `tools` 数组（此时提示词缓存本来就是冷的），边界之后的新启用继续走动态声明。某个工具在历史里已有调用、但当前运行里还没声明过时，请求同样会退回顶层工具，免得它的声明落到自己的调用之后；在边界时被禁用、之后又重新启用的 server 就属于这种情况。重建本身不发提示；之后改写顶层表面的 `/mcp enable|disable` 要等新工具表面被某个请求装载过一次，才会提示缓存可能未命中。
 - manual server 的启用 / 禁用意图会随会话保存：`/mcp enable` 写入该意图，`/mcp disable` 清除它；之后 resume 该会话（包括重启后 resume）时会重新连接上次处于启用状态的 manual server。连接失败不会清除意图，server 会保持「enabled (unavailable)」状态，方便之后重试，而不是悄悄退回禁用。
 

@@ -44,7 +44,7 @@ Chord 自主连续执行任务的模式。loop 模式下 agent 会持续处理�
 
 ## Session
 
-持久化会话记录，默认保存在 `<state-dir>/sessions/<project-key>/` 下。它包含消息历史、turn 元数据和上下文压缩归档，并会跨重启保留。会话按项目归属——对 git 仓库来说，就是该仓库的所有 checkout 共用。
+持久化会话记录，默认保存在 `<state-dir>/sessions/<project-key>/` 下。它包含消息历史、turn 元数据和上下文压缩归档，并会跨重启保留。会话按项目归属——git 仓库则是该仓库的所有 checkout 共用。
 
 ## OAuth
 
@@ -72,7 +72,7 @@ Codex preset provider 使用的认证流程。Chord 将稳定 OAuth 字段保存
 
 ## 分离限制（split limits）
 
-provider 文档里有时会用这个词表示「一个模型公布了不止一种限制」，通常是总上下文窗口外，另外还有单独的输入上限。一些 GPT 模型属于这种情况。如果 provider 文档同时列出这两个数字，就同时配置 `limit.context` 和 `limit.input`，这样 Chord 才能在输入过大前进行压缩。
+provider 文档里有时会用这个词表示「一个模型公布了不止一种限制」，通常是总上下文窗口外，另外还有单独的输入上限。一些 GPT 模型属于这种情况。如果 provider 文档同时列出这两个数字，就同时配置 `limit.context` 和 `limit.input`，这样 Chord 才能在输入过大前完成压缩。
 
 ## 请求输出上限（`max_output_tokens`）
 
