@@ -202,10 +202,11 @@ type geminiFunctionDeclaration struct {
 	Parameters  toolSchema `json:"parameters,omitempty"`
 }
 
+// geminiToolConfigFromTuning maps a non-auto tool choice to the wire shape.
+// "auto" never reaches this: callers omit toolConfig for it (the API defaults
+// to AUTO when tools are present).
 func geminiToolConfigFromTuning(choice string) *geminiToolConfig {
 	switch choice {
-	case "auto":
-		return &geminiToolConfig{FunctionCallingConfig: &geminiFunctionCallingConfig{Mode: "AUTO"}}
 	case "required":
 		return &geminiToolConfig{FunctionCallingConfig: &geminiFunctionCallingConfig{Mode: "ANY"}}
 	case "none":
@@ -296,7 +297,12 @@ func (g *GeminiProvider) CompleteStream(
 		if choice == "required" && forcedToolChoiceSuppressedInThinking(g.provider, model) && geminiThinkingActive(geminiThinking) {
 			choice = ""
 		}
-		if len(apiTools) > 0 && choice != "" && !forcedToolChoiceDowngraded(g.provider, model, choice) {
+		// "auto" is omitted rather than sent explicitly: with tools present the
+		// API defaults to AUTO anyway, and an explicit AUTO toolConfig has been
+		// reported to trip a Gemini 3 upstream bug that leaks planning JSON into
+		// the reply. "none" must stay explicit because omission means AUTO.
+		auto := choice == "auto"
+		if len(apiTools) > 0 && choice != "" && !auto && !forcedToolChoiceDowngraded(g.provider, model, choice) {
 			reqBody.ToolConfig = geminiToolConfigFromTuning(choice)
 		}
 		if systemPrompt != "" {

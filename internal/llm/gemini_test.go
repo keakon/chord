@@ -299,6 +299,43 @@ func TestGeminiCompleteStreamEncodesToolChoice(t *testing.T) {
 	}
 }
 
+func TestGeminiCompleteStreamOmitsToolConfigForAutoChoice(t *testing.T) {
+	var captured geminiRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"forced","status":"INVALID_ARGUMENT"}}`))
+	}))
+	defer srv.Close()
+
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/v1beta/"}, []string{"test-key"})
+	geminiProvider, err := NewGeminiProvider(provider, "")
+	if err != nil {
+		t.Fatalf("NewGeminiProvider: %v", err)
+	}
+	_, err = geminiProvider.CompleteStream(
+		context.Background(),
+		"test-key",
+		"gemini-test",
+		"",
+		[]message.Message{{Role: "user", Content: "hello"}},
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
+		128,
+		RequestTuning{Gemini: GeminiTuning{ToolChoice: "auto"}},
+		func(message.StreamDelta) {},
+	)
+	if err == nil {
+		t.Fatal("expected forced server error")
+	}
+	if captured.ToolConfig != nil {
+		t.Fatalf("toolConfig = %#v, want omitted for auto choice (omission is the documented AUTO default)", captured.ToolConfig)
+	}
+}
+
 func TestGeminiCompleteStreamOmitsForcedToolChoiceWhenAutoOnly(t *testing.T) {
 	var captured geminiRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
