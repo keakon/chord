@@ -29,6 +29,7 @@ type Result struct {
 	After      int64
 	Removed    int
 	Users      int
+	Reaped     int // stale ownership records removed before scanning
 	OverBudget bool
 }
 

@@ -3,9 +3,11 @@
 package buildcache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -48,7 +50,7 @@ func newCache(t *testing.T) *Cache {
 func TestTrimProtectsEveryRegisteredUser(t *testing.T) {
 	c := newCache(t)
 	now := time.Now()
-	big := fixture(t, c, 1, 9<<30, now.Add(-8*time.Hour))
+	big := fixture(t, c, 1, 25<<30, now.Add(-8*time.Hour))
 	ids := []string{strings.Repeat("a", 32), strings.Repeat("b", 32)}
 	for _, id := range ids {
 		if err := c.Begin(id); err != nil {
@@ -57,7 +59,7 @@ func TestTrimProtectsEveryRegisteredUser(t *testing.T) {
 	}
 	for i, id := range ids {
 		result, err := c.Trim()
-		if err != nil || result.Scanned || result.Users != len(ids)-i {
+		if err != nil || result.Scanned || result.Users != len(ids)-i || result.Removed != 0 {
 			t.Fatalf("trim while in use: %+v, %v", result, err)
 		}
 		if _, err := os.Stat(big); err != nil {
@@ -94,6 +96,46 @@ func TestUnknownUsageSurvivesReopen(t *testing.T) {
 	result, err := reopened.Trim()
 	if err != nil || result.Users != 1 || result.Scanned {
 		t.Fatalf("lost durable protection: %+v, %v", result, err)
+	}
+}
+
+func TestTrimPreservesSelectedExecutableWhileInUse(t *testing.T) {
+	c := newCache(t)
+	now := time.Now()
+	id := strings.Repeat("a", 32)
+	if err := c.Begin(id); err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf("%064x-d", 1)
+	dir := filepath.Join(c.Dir(), name[:2], name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "sample")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(dir, now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	// Go resolves a cache hit before later opening or executing its path.
+	selected := exec.CommandContext(ctx, path)
+	fixture(t, c, 2, 25<<30, now)
+	result, err := c.Trim()
+	if err != nil || result.Users != 1 || result.Scanned || result.Removed != 0 {
+		t.Fatalf("active trim: %+v, %v", result, err)
+	}
+	if err = selected.Run(); err != nil {
+		t.Fatalf("selected executable was not preserved: %v", err)
+	}
+	if err = c.End(id); err != nil {
+		t.Fatal(err)
+	}
+	result, err = c.Trim()
+	if err != nil || !result.Scanned || result.Users != 0 || result.Removed != 2 || result.After != 0 {
+		t.Fatalf("idle trim: %+v, %v", result, err)
 	}
 }
 
@@ -309,5 +351,8 @@ func TestRefusesUnsafeRootAndUserNames(t *testing.T) {
 	}
 	if err := c.Begin(id); !errors.Is(err, syscall.EEXIST) {
 		t.Fatalf("duplicate registration: %v", err)
+	}
+	if result, err := c.Trim(); err != nil || result.Users != 1 || result.Scanned {
+		t.Fatalf("duplicate registration lost existing protection: %+v, %v", result, err)
 	}
 }

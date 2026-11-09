@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"github.com/keakon/chord/internal/jsonx"
 )
 
 // Cache keeps build data separate from persistent usage records.
@@ -39,8 +41,9 @@ func Open(root string) (*Cache, error) {
 
 func (c *Cache) Dir() string { return filepath.Join(c.root, "go-build") }
 
-// Begin records use before starting any process that can access Dir.
-// A crashed owner leaves its record until its supervisor proves completion.
+// Begin records use before starting any process that can access Dir. The
+// record carries the boot identity so Trim can reap it after a restart even
+// if the supervisor died before End proved command completion.
 func (c *Cache) Begin(id string) error {
 	if !validID(id) {
 		return fmt.Errorf("invalid build cache user: %q", id)
@@ -50,11 +53,23 @@ func (c *Cache) Begin(id string) error {
 		return err
 	}
 	defer lock.Close()
-	file, err := os.OpenFile(filepath.Join(c.root, "users", id), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	data, err := jsonx.Marshal(userRecord{BootID: systemBootID()})
+	if err != nil {
+		return fmt.Errorf("encode build cache user: %w", err)
+	}
+	path := filepath.Join(c.root, "users", id)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("register build cache user: %w", err)
 	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		// No command can own this record before Begin succeeds.
+		_ = os.Remove(path)
+		return fmt.Errorf("register build cache user: %w", err)
+	}
 	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
 		return fmt.Errorf("close build cache user: %w", err)
 	}
 	return nil
@@ -106,8 +121,9 @@ func (c *Cache) lock(nonblocking bool) (*os.File, error) {
 	return file, nil
 }
 
-// Trim enforces the idle cache budget. Usage records survive process death:
-// acquiring the lock alone is never proof that the cache is idle.
+// Trim enforces the idle cache budget. Records from a different boot can be
+// reaped, but current or unknown owners prevent eviction: Go may reopen a
+// cached path any time before the command exits.
 func (c *Cache) Trim() (Result, error) {
 	lock, err := c.lock(true)
 	if errors.Is(err, syscall.EWOULDBLOCK) {
@@ -117,12 +133,14 @@ func (c *Cache) Trim() (Result, error) {
 		return Result{}, err
 	}
 	defer lock.Close()
-	users, err := os.ReadDir(filepath.Join(c.root, "users"))
+	live, reaped, err := c.reapUsers(systemBootID())
 	if err != nil {
-		return Result{}, fmt.Errorf("read build cache users: %w", err)
+		return Result{}, err
 	}
-	if len(users) > 0 {
-		return Result{Users: len(users)}, nil
+	if live > 0 {
+		return Result{Users: live, Reaped: reaped}, nil
 	}
-	return c.trim(defaultPolicy)
+	result, err := c.trim(defaultPolicy)
+	result.Reaped = reaped
+	return result, err
 }

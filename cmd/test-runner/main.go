@@ -97,7 +97,7 @@ func runCommand(base, cacheRoot, executable string, args []string, signals <-cha
 	defer func() {
 		record := filepath.Join(cacheRoot, "users", run.id)
 		if _, err := os.Lstat(record); err == nil {
-			fmt.Fprintf(stderr, "test-runner: retained cache usage record %s; automatic eviction remains blocked; verify command cleanup before removing the record\n", record)
+			fmt.Fprintf(stderr, "test-runner: retained cache usage record %s; automatic eviction remains blocked until cleanup is proven or a different boot is identified; verify command cleanup before removing the record\n", record)
 		}
 		if trimOnReturn {
 			trimBuildCache(cache, stderr)
@@ -256,6 +256,9 @@ func trimBuildCache(cache *buildcache.Cache, diagnostics io.Writer) {
 	case result.Removed > 0:
 		fmt.Fprintf(diagnostics, "test-runner: cache reclaimed %.2f GiB (%d files), %.2f GiB retained\n",
 			float64(result.Before-result.After)/(1<<30), result.Removed, float64(result.After)/(1<<30))
+	}
+	if result.Reaped > 0 {
+		fmt.Fprintf(diagnostics, "test-runner: reaped %d stale cache user record(s)\n", result.Reaped)
 	}
 	if result.OverBudget {
 		fmt.Fprintln(diagnostics, "test-runner: cache remains over budget after cleanup")

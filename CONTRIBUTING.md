@@ -194,6 +194,10 @@ has exited. An unproven cleanup retains its record under
 `chord/build-cache/users`, blocks automatic cache eviction, and leaves later
 builds usable. The runner reports its retained record's path when it exits.
 A skipped trim can also mean another command is still running.
+On macOS and Linux, usage records include the system boot identifier. Cleanup
+removes records from a different boot before checking whether the cache is idle.
+Records with a missing or unreadable boot identifier remain protected regardless
+of their age.
 Investigate the retained run before removing its usage record; an exited runner
 alone does not prove its descendants have stopped.
 Do not point unrelated commands at this managed cache: they would bypass the
