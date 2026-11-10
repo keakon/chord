@@ -154,8 +154,9 @@ func constraintEvidenceInTimeOrder(items []evidenceItem) []evidenceItem {
 // replace the real first request with whatever the summary happens to say.
 func buildCompactionAnchors(previous compactionAnchors, originalRequest string, evidenceItems []evidenceItem) compactionAnchors {
 	next := compactionAnchors{
-		OriginalRequest: previous.OriginalRequest,
-		Constraints:     slices.Clone(previous.Constraints),
+		OriginalRequest:       previous.OriginalRequest,
+		Constraints:           slices.Clone(previous.Constraints),
+		SupersededConstraints: slices.Clone(previous.SupersededConstraints),
 	}
 	if next.OriginalRequest == "" {
 		next.OriginalRequest = message.CompactionAnchorLine(originalRequest, compactAnchorsRequestChars)
@@ -194,19 +195,17 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 	if virtualOriginal != "" {
 		seen[originalKey] = struct{}{}
 	}
-	for _, item := range constraintEvidenceInTimeOrder(evidenceItems) {
-		line := message.CompactionAnchorLine(item.Excerpt, compactAnchorsConstraintChars)
+	// appendConstraintLine runs the shared append path for one candidate
+	// constraint line: dedup against everything already active (including the
+	// virtual original-request copy), then the supersede fold. An empty line
+	// or a duplicate is dropped without appending.
+	appendConstraintLine := func(line string) {
 		if line == "" {
-			continue
-		}
-		if originalSource != "" && item.RequestSource == originalSource {
-			// The original request itself: already carried as the Original
-			// request line, kept only for supersession matching.
-			continue
+			return
 		}
 		key := anchorDedupKey(line)
 		if _, ok := seen[key]; ok {
-			continue
+			return
 		}
 		// A contradictory new instruction supersedes the matching old constraint
 		// instead of co-existing with it (e.g. "修改 X" supersedes "不要修改 X"). The
@@ -214,6 +213,7 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 		// sees the direction change.
 		if superseded := supersededConstraintMatch(line, next.Constraints); superseded >= 0 {
 			next.SupersededConstraints = append(next.SupersededConstraints, next.Constraints[superseded])
+			delete(seen, anchorDedupKey(next.Constraints[superseded]))
 			next.Constraints = slices.Delete(next.Constraints, superseded, superseded+1)
 		}
 		if virtualOriginal != "" && supersededConstraintMatch(line, []string{virtualOriginal}) >= 0 {
@@ -221,12 +221,28 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 			virtualOriginal = ""
 			delete(seen, originalKey)
 		}
+		// A new user instruction may restore an earlier direction. It cannot
+		// remain labeled both active and superseded in the resulting checkpoint.
+		next.SupersededConstraints = slices.DeleteFunc(next.SupersededConstraints, func(old string) bool {
+			return anchorDedupKey(old) == key
+		})
 		seen[key] = struct{}{}
+		if key == originalKey {
+			virtualOriginal = line
+			return
+		}
 		next.Constraints = append(next.Constraints, line)
+	}
+	for _, item := range constraintEvidenceInTimeOrder(evidenceItems) {
+		if originalSource != "" && item.RequestSource == originalSource && virtualOriginal != "" {
+			// An active original already has its own line. After supersession,
+			// a later user restatement must pass through the reactivation fold.
+			continue
+		}
+		appendConstraintLine(message.CompactionAnchorLine(item.Excerpt, compactAnchorsConstraintChars))
 	}
 	// Carry the previous superseded history forward, bounded so recursive
 	// compaction cannot grow it without limit.
-	next.SupersededConstraints = append(append([]string(nil), previous.SupersededConstraints...), next.SupersededConstraints...)
 	if len(next.SupersededConstraints) > supersededConstraintMaxStored {
 
 		next.SupersededConstraints = next.SupersededConstraints[len(next.SupersededConstraints)-supersededConstraintMaxStored:]

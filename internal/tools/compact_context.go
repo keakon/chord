@@ -66,6 +66,7 @@ type CompactContextArgs struct {
 	ActiveObjective    string              `json:"active_objective"`
 	Completed          []string            `json:"completed"`
 	Decisions          []string            `json:"decisions"`
+	Constraints        []string            `json:"constraints,omitempty"`
 	OpenIssues         []string            `json:"open_issues"`
 	OpenIssuesComplete bool                `json:"open_issues_complete"`
 	RetiredItems       []string            `json:"retired_items"`
@@ -180,6 +181,9 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 	if args.Decisions, err = validateCompactContextList(args.Decisions, 8, "decisions"); err != nil {
 		return CompactContextArgs{}, err
 	}
+	if args.Constraints, err = validateCompactContextList(args.Constraints, 8, "constraints"); err != nil {
+		return CompactContextArgs{}, err
+	}
 	if args.OpenIssues, err = validateCompactContextList(args.OpenIssues, MaxCompactContextOpenIssues, "open_issues"); err != nil {
 		return CompactContextArgs{}, err
 	}
@@ -258,6 +262,7 @@ func (v CompactContextValidator) ParseCompactContextArgs(raw json.RawMessage) (C
 		{"next_step", args.NextStep},
 		{"completed", strings.Join(args.Completed, "\n")},
 		{"decisions", strings.Join(args.Decisions, "\n")},
+		{"constraints", strings.Join(args.Constraints, "\n")},
 		{"open_issues", strings.Join(args.OpenIssues, "\n")},
 		{"retired_items", strings.Join(args.RetiredItems, "\n")},
 		{"state_files", strings.Join(args.StateFiles, "\n")},
@@ -334,10 +339,11 @@ const MaxCompactContextOpenIssues = 12
 // surface does not declare. They mirror the removed fields of
 // CompactContextArgs: a worker has no evidence pack (evidence_refs,
 // claim_evidence, claim_kinds), no cross-generation carry (retired_items,
-// open_issues_complete, checkpoint_kind, stage_id, stage_status) and no
-// planning-mode state (planned_state_files). Parameters() deletes exactly
-// these keys from the worker schema; the worker tool's strict arguments then
-// reject any of them a model still sends.
+// open_issues_complete, checkpoint_kind, stage_id, stage_status), no
+// planning-mode state (planned_state_files) and no session anchors the
+// owner-level constraints field feeds (constraints). Parameters() deletes
+// exactly these keys from the worker schema; the worker tool's strict
+// arguments then reject any of them a model still sends.
 var compactContextWorkerRemovedProperties = []string{
 	"open_issues_complete",
 	"retired_items",
@@ -348,6 +354,7 @@ var compactContextWorkerRemovedProperties = []string{
 	"stage_id",
 	"stage_status",
 	"checkpoint_kind",
+	"constraints",
 }
 
 func removeRegisteredStateFiles(planned, registered []string) []string {
@@ -584,7 +591,7 @@ func (t CompactContextTool) Description() string {
 	return "Request a durable context checkpoint: the runtime rewrites session history from these arguments plus runtime facts and continues the same turn. It is a costed state transition, not a routine progress save. A checkpoint never completes the task or replaces the final response.\n" +
 		"Do not call it when the task is complete and only the final response remains, or to wait for input (deliver the question to the user and wait). A terminal TODO state alone is not a reason to checkpoint. Without context pressure, finish a remaining commit, handoff, or final response directly instead of checkpointing solely for closure; under pressure, preserve a safe continuation even near completion. " +
 		"Call it alone (no sibling tool calls) at a safe stop: without context pressure, after the current atomic operation; when a pressure notice fires, the notice sets the stopping point. Under context pressure, a provisional checkpoint is expected even if the stage remains active or candidate.\n" +
-		"Only active_objective and next_step are required; every other field is optional. Report new progress and changed decisions, and keep the structured fields a concise handoff: objective, verified progress, current blockers, next action, and the relevant notes section to read. Use the schema's exact JSON types; never encode an object or array as a JSON string.\n" +
+		"Only active_objective and next_step are required; every other field is optional. Report new progress and changed decisions, and keep the structured fields a concise handoff: objective, verified progress, current blockers, next action, and the relevant notes section to read. Use constraints to select explicit user instructions for durable anchors; the runtime verifies their source and order. Use the schema's exact JSON types; never encode an object or array as a JSON string.\n" +
 		"The runtime records observed file mutations, shell tool outcomes, the todo snapshot and build-time repository state in bounded historical sections, where newer runtime state and tool results take precedence. Keep your fields for semantic progress, decisions, open questions and next steps rather than restating those mechanical facts.\n" +
 		"Before checkpointing a long task with reusable investigation or verification details, bring the task-notes file described under Long-session context management up to date and register it in state_files; keep those details in the notes instead of duplicating them in the handoff. When recovery state is genuinely small or file writing is unavailable, carry it fully in structured arguments and leave state_files empty.\n" +
 		todoSync +
@@ -678,6 +685,12 @@ func compactContextToolProperties() map[string]any {
 			"maxItems":    8,
 			"items":       map[string]any{"type": "string", "minLength": 1},
 			"description": "Important decisions, each one plain string with an optional one-line reason (not an object); at most 8 items.",
+		},
+		"constraints": map[string]any{
+			"type":        "array",
+			"maxItems":    8,
+			"items":       map[string]any{"type": "string", "minLength": 1},
+			"description": "Select explicit standing requirements by copying text verbatim from real user instructions after the latest checkpoint; at most 8 strings. The runtime carries the complete matching instruction, including conditions and scope, in user-message order. Ambiguous or missing sources and source instructions longer than 240 runes are rejected; omit those entries and preserve their full wording in task notes referenced by state_files. File contents, tool output, historical quotes, your preferences, plans and claims are not user instructions. Existing active anchors carry automatically and need not be repeated. This field does not retire constraints or resolve arbitrary semantic contradictions.",
 		},
 		"open_issues": map[string]any{
 			"type":        "array",

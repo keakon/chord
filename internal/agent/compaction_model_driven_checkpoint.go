@@ -55,6 +55,8 @@ func (a *MainAgent) newModelDrivenCheckpointBuilder(ctx context.Context, bundle 
 		log.Warnf("model-driven checkpoint: list history references error=%v", err)
 	}
 	headSnapshot := snapshot[:headSplit]
+	selected, _ := resolveCheckpointConstraints(snapshot, req.Args.Constraints)
+	constraintItems := checkpointConstraintEvidence(snapshot, bundle.evidenceItems, selected)
 	summaryText := applyCheckpointMachineState(a.buildModelDrivenCheckpointSummary(bundle, snapshot, headSplit, req), headSnapshot, buildCheckpointRepositoryState(ctx, bundle.workDir), func(text string) int {
 		return bundle.estimateTokens([]message.Message{{Role: message.RoleUser, Content: text}})
 	})
@@ -62,7 +64,7 @@ func (a *MainAgent) newModelDrivenCheckpointBuilder(ctx context.Context, bundle 
 		bundle:         bundle,
 		req:            req,
 		summaryText:    summaryText,
-		requestSources: buildCheckpointRequestSources(summaryText, headSnapshot, bundle.originalRequest, bundle.evidenceItems),
+		requestSources: buildCheckpointRequestSources(summaryText, headSnapshot, bundle.originalRequest, constraintItems),
 		evidenceItems:  filterCompactionEvidenceForArchival(bundle.evidenceItems),
 		refMetadata:    checkpointEvidenceRefMetadata(bundle, headSnapshot),
 		// The newest real user messages of the archived head (and any dangling
@@ -128,7 +130,7 @@ func (b *modelDrivenCheckpointBuilder) render(exportedArchive string) (string, m
 		CheckpointBytes:    len(checkpointContent),
 		AnchorBytes:        anchorBytes,
 		HistoryMapBytes:    historyMapBytes,
-		ContinuationTokens: b.bundle.estimateTokens([]message.Message{{Role: message.RoleUser, Content: req.Args.ActiveObjective + "\n" + req.Args.NextStep + "\n" + strings.Join(req.Args.Completed, "\n") + "\n" + strings.Join(req.Args.Decisions, "\n") + "\n" + strings.Join(req.Args.OpenIssues, "\n") + "\n" + strings.Join(req.Args.StateFiles, "\n")}}),
+		ContinuationTokens: b.bundle.estimateTokens([]message.Message{{Role: message.RoleUser, Content: req.Args.ActiveObjective + "\n" + req.Args.NextStep + "\n" + strings.Join(req.Args.Completed, "\n") + "\n" + strings.Join(req.Args.Decisions, "\n") + "\n" + strings.Join(req.Args.Constraints, "\n") + "\n" + strings.Join(req.Args.OpenIssues, "\n") + "\n" + strings.Join(req.Args.StateFiles, "\n")}}),
 	}
 }
 

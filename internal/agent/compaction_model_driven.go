@@ -131,6 +131,9 @@ func (a *MainAgent) validateCompactContextResult(callID string, rawArgs string) 
 	if err != nil {
 		return "", tools.CompactContextArgs{}, err
 	}
+	if _, err := resolveCheckpointConstraints(a.ctxMgr.Snapshot(), args.Constraints); err != nil {
+		return "", tools.CompactContextArgs{}, err
+	}
 	return requestAcceptedToolResult, args, nil
 }
 

@@ -168,7 +168,9 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// consecutive model-driven resets cannot erase prior verified decisions,
 	// and everything else the model did not restate exists in the archived
 	// history files rather than as a growing verbatim appendix.
-	anchors := buildCompactionAnchors(latestCompactionAnchors(headSnapshot), bundle.originalRequest, bundle.evidenceItems)
+	selected, _ := resolveCheckpointConstraints(snapshot, req.Args.Constraints)
+	items := checkpointConstraintEvidence(snapshot, bundle.evidenceItems, selected)
+	anchors := buildCompactionAnchors(latestCompactionAnchors(headSnapshot), bundle.originalRequest, items)
 	return withCompactionAnchors(summary, anchors)
 }
 

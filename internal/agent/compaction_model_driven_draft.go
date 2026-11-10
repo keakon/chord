@@ -101,6 +101,9 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		return nil, ctx.Err()
 	}
 	snapshot := bundle.snapshot
+	if _, err := resolveCheckpointConstraints(snapshot, req.Args.Constraints); err != nil {
+		return nil, fmt.Errorf("resolve checkpoint constraints: %w", err)
+	}
 	if len(snapshot) < 4 {
 		return &compactionDraft{
 			Skip:        true,
