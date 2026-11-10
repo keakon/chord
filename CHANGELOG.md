@@ -36,6 +36,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Confirmation requests settled while queued behind another dialog are removed from the queue, so they cannot appear after that dialog closes.
 - Gemini tool declarations now conform to the Schema proto subset: unsupported JSON Schema keywords are dropped, `required` entries are limited to properties on the same node, `enum` values are stringified and `type` arrays are normalized to a single type, and `oneOf` alternatives are lowered to `anyOf`. Strict Gemini backends rejected the entire request when a tool carried a required-only `anyOf` branch (including the `question` tool); such schema-validation 400s now stop the request instead of rotating through every API key.
 - `compat.forced_tool_choice.suppress_in_thinking` now also applies to Gemini models: while the model can think, a forced tool choice is downgraded to the default calling mode; with thinking disabled by a zero budget the choice is still sent. The knob previously affected only OpenAI-compatible and Responses models.
 - Gateways that reject a forced tool choice — used by loop mode and subagent dispatch to require a tool call — with an invalid-argument 400 no longer fail every request: Chord retries the request once without the choice and, if that succeeds, keeps omitting the choice for that model until restart. Official backends that accept forced choices are unaffected.

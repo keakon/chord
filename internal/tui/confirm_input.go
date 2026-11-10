@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"image"
+	"slices"
 	"strings"
 
 	"github.com/keakon/bubbles/v2/textarea"
@@ -463,11 +464,14 @@ func (m *Model) handleConfirmEditKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-// dismissResolvedConfirm closes a dialog whose wait already ended on the agent
-// side (auto-deny timeout or cancellation raced ahead of the local countdown).
+// dismissResolvedConfirm removes queued requests and closes a dialog whose wait
+// already ended on the agent side.
 // It must not answer again: the broker has no waiter for that request id, and
 // a resolve would run the rule-intent path for a request nobody is waiting on.
 func (m *Model) dismissResolvedConfirm(requestID string) tea.Cmd {
+	m.pendingDialogs = slices.DeleteFunc(m.pendingDialogs, func(d pendingDialog) bool {
+		return d.confirm != nil && d.confirm.request.RequestID == requestID
+	})
 	if m.confirm.request == nil || m.confirm.requestID != requestID {
 		return nil
 	}
