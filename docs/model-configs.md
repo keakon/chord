@@ -79,7 +79,7 @@ chord doctor models --model mygw/claude-gw
 
 ## Gemini 4 Argon
 
-The embedded catalog snapshot, [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2), includes `google/gemini-4-argon`. Existing installations can refresh the catalog before connecting to the official API with `GEMINI_API_KEY`:
+The embedded catalog snapshot, [v2026-11-11.1](https://github.com/keakon/chord-models/tree/v2026-11-11.1), includes `google/gemini-4-argon`. Existing installations can refresh the catalog before connecting to the official API with `GEMINI_API_KEY`:
 
 ```bash
 chord config refresh-catalog
@@ -119,6 +119,20 @@ Each compat field inherits independently: model configuration > provider configu
 The global default remains 64,000 tokens. Increasing `max_output_tokens` grants a larger total thinking/output budget, still constrained by model limits and remaining context. A final `MAX_TOKENS` never increases that budget automatically. Multiple requests incur repeated input charges; the Context reading is separate from cumulative billing input. Local tools wait for the final response to be confirmed and persisted. Checkpoints exist only during the current in-process request; restarting cannot resume native thinking.
 
 Argon requires a paid API account with available quota. A free-tier quota of zero returns HTTP 429; Google AI Pro / Ultra subscriptions do not replace API credentials and quota. Use `doctor models` above to check your own connection; catalog inclusion does not establish account access.
+
+## Gemini 4 Carbon
+
+The embedded catalog snapshot, [v2026-11-11.1](https://github.com/keakon/chord-models/tree/v2026-11-11.1), includes `google/gemini-4-carbon` as well. Carbon is Google's strongest model for complex, multi-step coding and long-horizon agentic work, while Argon remains the everyday choice for most software engineering. The connection shares the Argon route and `GEMINI_API_KEY`:
+
+```bash
+chord config refresh-catalog
+chord config add google/gemini-4-carbon --api-key-env GEMINI_API_KEY
+chord doctor models --model google/gemini-4-carbon
+```
+
+Carbon matches the Argon capacity profile: input, thinking, and output share a 1,048,576-token window with no separate input cap, the official `gemini` binding caps the streaming request at 65,536 tokens, and thinking variants are `low`, `medium` (default) and `high`. Input accepts text, image, video, audio and PDF. The same `compat.generate_content.automatic_continuation` setup from the Argon section above applies unchanged, with `gemini-4-carbon` in place of `gemini-4-argon`.
+
+Carbon launched at Argon's introductory rates: $2/$10 per million input/output tokens through November 30, 2026, then $4/$20. A free-tier quota of zero returns HTTP 429 exactly as on Argon; the 2026-11-11 smoke check reached the API and was quota-blocked, so verify your own connection with `doctor models`.
 
 ## Custom endpoints: borrowing catalog facts
 
@@ -246,3 +260,39 @@ an existing explicit compression setting.
 Documented model reasoning options may exceed the variants verified on a
 managed route. The Opus 5.5 profile uses its official `medium` effort default;
 explicit user settings take priority.
+
+Default thinking settings and named variants are configured separately. For
+example, the Claude Fable 5.2 Messages profile defaults to
+`thinking.type: adaptive` and `thinking.effort: high`; referencing the base model
+uses those defaults. A `model@high` reference requires a `variants.high` entry.
+The model's current Anthropic binding has no named variants, so define the entry
+explicitly.
+
+Keep reusable model settings in `model_templates` and reference them with YAML
+anchors. A template can contain `catalog`, `variants` and `cost` for usage
+accounting. This example defines `@high` explicitly and uses a single template
+reference under the provider:
+
+```yaml
+model_templates:
+  claude-fable-5-2: &claude-fable-5-2
+    catalog: anthropic/claude-fable-5-2
+    variants:
+      high:
+        thinking:
+          effort: high
+providers:
+  mygw:
+    type: messages
+    api_url: https://gateway.example.com/v1/messages
+    models:
+      claude-fable-5-2: *claude-fable-5-2
+model_pools:
+  fable:
+    - mygw/claude-fable-5-2@high
+```
+
+To use the default effort without named variants, omit `variants` and reference
+`mygw/claude-fable-5-2` in the pool. Run `chord doctor config` to check catalog
+references and variants, then
+`chord doctor models --model mygw/claude-fable-5-2` to verify the connection.

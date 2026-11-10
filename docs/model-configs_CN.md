@@ -48,7 +48,7 @@ chord doctor models --model mygw/claude-gw
 
 ## Gemini 4 Argon
 
-内嵌目录快照 [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2) 包含 `google/gemini-4-argon`。已有安装可先刷新目录，再使用 `GEMINI_API_KEY` 接入官方 API：
+内嵌目录快照 [v2026-11-11.1](https://github.com/keakon/chord-models/tree/v2026-11-11.1) 包含 `google/gemini-4-argon`。已有安装可先刷新目录，再使用 `GEMINI_API_KEY` 接入官方 API：
 
 ```bash
 chord config refresh-catalog
@@ -88,6 +88,20 @@ providers:
 全局默认预算仍为 64,000；只有提高 `max_output_tokens` 才会增加总思考与输出预算，实际值仍受模型上限和剩余窗口限制。最终达到 `MAX_TOKENS` 后不会自动增加预算。多跳会重复计费输入，Context 显示的窗口大小与累计计费输入分开计算。本地工具等待最终响应确认并保存后执行。checkpoint 只在当前进程的请求期间有效，重启后不能续传原生思考。
 
 Argon 需要有可用额度的付费 API 账号。免费层额度为 0 时会返回 HTTP 429；Google AI Pro / Ultra 订阅不替代 API 凭据与额度。用上面的 `doctor models` 检查你自己的接入；目录收录不表示账号已获准调用。
+
+## Gemini 4 Carbon
+
+内嵌目录快照 [v2026-11-11.1](https://github.com/keakon/chord-models/tree/v2026-11-11.1) 同样包含 `google/gemini-4-carbon`。Carbon 是 Google 最强的模型，面向复杂多步编码与长程智能体任务；大多数日常软件工程仍以 Argon 为宜。接入与 Argon 同一路由和 `GEMINI_API_KEY`：
+
+```bash
+chord config refresh-catalog
+chord config add google/gemini-4-carbon --api-key-env GEMINI_API_KEY
+chord doctor models --model google/gemini-4-carbon
+```
+
+Carbon 的容量规格与 Argon 一致：输入、思考和输出共享 1,048,576 token 窗口，没有单独的输入上限；官方 `gemini` 绑定将流式请求限制在 65,536 token；思考档位为 `low`、`medium`（默认）和 `high`；输入支持文本、图片、视频、音频和 PDF。上一节 Argon 的 `compat.generate_content.automatic_continuation` 配置原样适用，把模型名换成 `gemini-4-carbon` 即可。
+
+Carbon 以 Argon 的首发价上线：2026 年 11 月 30 日前每百万输入/输出 token 2/10 美元，此后为 4/20 美元。免费层额度为 0 时与 Argon 一样返回 HTTP 429；2026-11-11 的冒烟检查已到达 API 但被配额拦截，请用 `doctor models` 自行验证接入。
 
 ## 自定义端点：借用目录事实
 
@@ -138,3 +152,28 @@ compat 按字段继承，显式模型值及 provider 值优先于目录默认值
 请求体压缩和上下文 compaction 是两件事。自动添加的 provider 默认按原文发送请求体，只有 `preset: codex` 例外——它像 Codex 客户端一样发送 `zstd` 压缩的请求体。目录中记录的 Codex `zstd`、Anthropic `gzip` 支持信息仅供参考。要覆盖 preset 默认值，把 provider 的 `compress` 设为 `gzip`、`zstd` 或 `off`；添加模型会保留已有的显式压缩设置。
 
 模型文档中的推理档位可能多于某个托管端点已验证的变体。Opus 5.5 配方采用官方默认的 `medium` effort；用户的显式配置仍然优先。
+
+默认思考参数和命名变体分别配置。例如，Claude Fable 5.2 的 Messages 配方默认使用 `thinking.type: adaptive` 和 `thinking.effort: high`，直接引用模型名即可采用这些默认值。写成 `模型名@high` 时，配置中必须存在 `variants.high`；当前该模型的 Anthropic 绑定没有命名变体，需要显式定义。
+
+模型配置可以集中在 `model_templates` 中，通过 YAML 锚点复用；`catalog`、`variants` 和费用统计用的 `cost` 都可以放在模板内。下面的示例显式定义 `@high`，provider 下只引用模板：
+
+```yaml
+model_templates:
+  claude-fable-5-2: &claude-fable-5-2
+    catalog: anthropic/claude-fable-5-2
+    variants:
+      high:
+        thinking:
+          effort: high
+providers:
+  mygw:
+    type: messages
+    api_url: https://gateway.example.com/v1/messages
+    models:
+      claude-fable-5-2: *claude-fable-5-2
+model_pools:
+  fable:
+    - mygw/claude-fable-5-2@high
+```
+
+不需要切换档位时，可以省略 `variants`，池中使用 `mygw/claude-fable-5-2`。用 `chord doctor config` 检查目录引用和变体是否有效，再用 `chord doctor models --model mygw/claude-fable-5-2` 验证实际接入。

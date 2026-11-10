@@ -1,8 +1,8 @@
 {
-  "version": "2026-11-05.1",
+  "version": "2026-11-11.1",
   "source": {
     "repository": "https://github.com/keakon/chord-models",
-    "revision": "v2026-11-05.1"
+    "revision": "v2026-11-11.1"
   },
   "endpoints": [
     {
@@ -220,6 +220,86 @@
           {
             "url": "https://platform.claude.com/docs/en/models/overview",
             "checked": "2026-10-05"
+          }
+        ]
+      }
+    },
+    {
+      "id": "anthropic/claude-fable-5-2",
+      "coding_sources": [
+        {
+          "url": "https://www.anthropic.com/claude/fable",
+          "checked": "2026-11-10"
+        }
+      ],
+      "context": 1000000,
+      "output": 128000,
+      "input_modalities": [
+        "text",
+        "image",
+        "pdf"
+      ],
+      "reasoning_options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "cost": {
+        "input_per_million": 8,
+        "output_per_million": 40,
+        "currency": "USD",
+        "checked": "2026-11-10",
+        "source": {
+          "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "checked": "2026-11-10"
+        },
+        "notes": "Standard USD API rates. Cache reads are $0.20/MTok (0.025x base input); cache writes are $10/MTok (5m) and $16/MTok (1h). Fast mode (`speed: \"fast\"`) is $16/$80 per MTok; US-only inference is 1.1x on input and output; Batch API is 50% off input and output."
+      },
+      "sources": [
+        {
+          "url": "https://platform.claude.com/docs/en/models/fable-5-2/overview",
+          "checked": "2026-11-10"
+        },
+        {
+          "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "checked": "2026-11-10"
+        },
+        {
+          "url": "https://platform.claude.com/docs/en/build-with-claude/pdf-support",
+          "checked": "2026-11-10"
+        },
+        {
+          "url": "https://platform.claude.com/docs/en/build-with-claude/effort",
+          "checked": "2026-11-10"
+        }
+      ],
+      "config_profile": {
+        "model": {
+          "prompt_cache": {
+            "cache_tools": true,
+            "mode": "explicit",
+            "ttl": "5m"
+          },
+          "thinking": {
+            "effort": "high",
+            "type": "adaptive"
+          }
+        },
+        "compaction": {
+          "threshold": 0.7,
+          "reminder": 0.6,
+          "notes": "Starting hint inherited from Fable 5.1's family profile: same 1M window and long-horizon agentic positioning, and official guidance for the Fable family prefers server-side compaction over client context editing because rewriting an earlier tool result invalidates every thinking block. No Fable-5.2-specific reliability window or pricing-tier boundary is documented (the full 1M window bills at standard pricing), so this is a family-continuity hint, not a measured optimum."
+        },
+        "sources": [
+          {
+            "url": "https://platform.claude.com/docs/en/models/fable-5-2/overview",
+            "checked": "2026-11-10"
+          },
+          {
+            "url": "https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence",
+            "checked": "2026-11-10"
           }
         ]
       }
@@ -1099,6 +1179,87 @@
       }
     },
     {
+      "id": "google/gemini-4-carbon",
+      "released": "2026-11-10",
+      "coding_sources": [
+        {
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-carbon/",
+          "checked": "2026-11-11"
+        },
+        {
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-carbon-now-available/",
+          "checked": "2026-11-11"
+        }
+      ],
+      "connection": {
+        "request_url": "https://generativelanguage.googleapis.com/v1beta/",
+        "wire_model_id": "gemini-4-carbon",
+        "env_var": "GEMINI_API_KEY",
+        "sources": [
+          {
+            "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon",
+            "checked": "2026-11-11"
+          }
+        ]
+      },
+      "context": 1048576,
+      "output": 1048576,
+      "input_modalities": [
+        "text",
+        "image",
+        "video",
+        "audio",
+        "pdf"
+      ],
+      "reasoning_options": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "cost": {
+        "input_per_million": 4,
+        "output_per_million": 20,
+        "currency": "USD",
+        "checked": "2026-11-11",
+        "source": {
+          "url": "https://ai.google.dev/gemini-api/docs/pricing",
+          "checked": "2026-11-11"
+        },
+        "notes": "Standard paid-tier USD API rates for uncached input and output (including thinking), effective December 1, 2026. Introductory rates through November 30, 2026 are $2 input and $10 output per million tokens, and implicit cache hits are $0.10/MTok through that date and $0.20/MTok after. Explicit caching and the Free tier are not supported. Batch, Flex and Priority rates differ."
+      },
+      "sources": [
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon",
+          "checked": "2026-11-11"
+        },
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/generate-content/latest-model",
+          "checked": "2026-11-11"
+        },
+        {
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-carbon/",
+          "checked": "2026-11-11"
+        },
+        {
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-carbon-now-available/",
+          "checked": "2026-11-11"
+        }
+      ],
+      "config_profile": {
+        "model": {
+          "thinking": {
+            "level": "medium"
+          }
+        },
+        "sources": [
+          {
+            "url": "https://ai.google.dev/gemini-api/docs/generate-content/latest-model",
+            "checked": "2026-11-11"
+          }
+        ]
+      }
+    },
+    {
       "id": "inception/mercury-2.5",
       "coding_sources": [
         {
@@ -1403,12 +1564,12 @@
         "input_per_million": 2,
         "output_per_million": 10,
         "currency": "USD",
-        "checked": "2026-10-24",
+        "checked": "2026-11-05",
         "source": {
           "url": "https://platform.kimi.ai/docs/pricing/chat",
-          "checked": "2026-10-24"
+          "checked": "2026-11-05"
         },
-        "notes": "Standard USD API rates for uncached input and output. Cached input is $0.20/MTok; cache writes are $2.00/MTok (5m) and $4.00/MTok (1h). Access requires a minimum $1 top-up; promotions and account-tier rate limits are separate."
+        "notes": "Standard USD API rates for uncached input and output. Cached input is $0.20/MTok; cache writes are $2.00/MTok (5m) and $4.00/MTok (1h). Batch inference is billed at 60% of the standard price. Access requires a minimum $1 top-up; promotions and account-tier rate limits are separate."
       },
       "sources": [
         {
@@ -1421,7 +1582,11 @@
         },
         {
           "url": "https://platform.kimi.ai/docs/pricing/chat",
-          "checked": "2026-10-24"
+          "checked": "2026-11-05"
+        },
+        {
+          "url": "https://huggingface.co/moonshotai/Kimi-K3.1-Pro",
+          "checked": "2026-11-05"
         }
       ],
       "config_profile": {
@@ -1486,12 +1651,12 @@
         "input_per_million": 4,
         "output_per_million": 20,
         "currency": "USD",
-        "checked": "2026-10-24",
+        "checked": "2026-11-05",
         "source": {
           "url": "https://platform.kimi.ai/docs/pricing/chat",
-          "checked": "2026-10-24"
+          "checked": "2026-11-05"
         },
-        "notes": "Standard USD API rates for uncached input and output on the 2-3x faster serving variant. Cached input is $0.20/MTok; cache writes are $4.00/MTok (5m) and $8.00/MTok (1h). Access requires a minimum $1 top-up; promotions and account-tier rate limits are separate."
+        "notes": "Standard USD API rates for uncached input and output on the 2-3x faster serving variant. Cached input is $0.20/MTok; cache writes are $4.00/MTok (5m) and $8.00/MTok (1h). Batch inference is documented only for kimi-k3.1-pro and kimi-k3, not for this variant. Access requires a minimum $1 top-up; promotions and account-tier rate limits are separate."
       },
       "sources": [
         {
@@ -1504,7 +1669,7 @@
         },
         {
           "url": "https://platform.kimi.ai/docs/pricing/chat",
-          "checked": "2026-10-24"
+          "checked": "2026-11-05"
         }
       ],
       "config_profile": {
@@ -2198,6 +2363,88 @@
       }
     },
     {
+      "id": "tencent/hy4",
+      "released": "2026-11-04",
+      "coding_sources": [
+        {
+          "url": "https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/",
+          "checked": "2026-11-11"
+        },
+        {
+          "url": "https://hy.tencent.ai/research/hy4",
+          "checked": "2026-11-11"
+        }
+      ],
+      "connection": {
+        "request_url": "https://tokenhub-intl.tencentcloudmaas.com/v1/chat/completions",
+        "wire_model_id": "hy4",
+        "env_var": "TENCENT_API_KEY",
+        "sources": [
+          {
+            "url": "https://intl.cloud.tencent.com/document/product/1300/80695?lang=en",
+            "checked": "2026-11-11"
+          }
+        ]
+      },
+      "context": 1048576,
+      "input": 983040,
+      "output": 65536,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_options": [
+        "high",
+        "no_think"
+      ],
+      "cost": {
+        "input_per_million": 0.834,
+        "output_per_million": 2.501,
+        "currency": "USD",
+        "checked": "2026-11-11",
+        "source": {
+          "url": "https://www.tencentcloud.com/act/pro/tokenhub",
+          "checked": "2026-11-11"
+        },
+        "notes": "Standard Singapore-region TokenHub USD rates for uncached input and output; cache hits are $0.042/MTok and no cache-write fee is documented. The Guangzhou region bills the same list prices in CNY (input ¥6, output ¥18, cache hits ¥0.3 per million tokens). TokenHub applies a 50% promotional discount to Hy4 through December 31, 2026 (Beijing time); the recorded figures are the standard list rates."
+      },
+      "sources": [
+        {
+          "url": "https://intl.cloud.tencent.com/document/product/1300/80695?lang=en",
+          "checked": "2026-11-11"
+        },
+        {
+          "url": "https://cloud.tencent.com/document/product/1823/130055",
+          "checked": "2026-11-11"
+        },
+        {
+          "url": "https://www.tencentcloud.com/act/pro/tokenhub",
+          "checked": "2026-11-11"
+        },
+        {
+          "url": "https://hy.tencent.ai/research/hy4",
+          "checked": "2026-11-11"
+        },
+        {
+          "url": "https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/",
+          "checked": "2026-11-11"
+        }
+      ],
+      "config_profile": {
+        "compat": {
+          "chat_completions": {
+            "native_thinking": "thinking"
+          }
+        },
+        "sources": [
+          {
+            "url": "https://cloud.tencent.com/document/product/1823/131208",
+            "checked": "2026-11-11"
+          }
+        ]
+      }
+    },
+    {
       "id": "xai/grok-4.6",
       "coding_sources": [
         {
@@ -2599,6 +2846,11 @@
     },
     {
       "endpoint": "anthropic",
+      "wire_model_id": "claude-fable-5-2",
+      "model_id": "anthropic/claude-fable-5-2"
+    },
+    {
+      "endpoint": "anthropic",
       "wire_model_id": "claude-haiku-5-5",
       "model_id": "anthropic/claude-haiku-5-5"
     },
@@ -2852,6 +3104,22 @@
           {
             "url": "https://ai.google.dev/gemini-api/docs/generate-content/long-decode",
             "checked": "2026-10-14"
+          }
+        ]
+      }
+    },
+    {
+      "endpoint": "gemini",
+      "wire_model_id": "gemini-4-carbon",
+      "model_id": "google/gemini-4-carbon",
+      "limit": {
+        "output": 65536
+      },
+      "config_profile": {
+        "sources": [
+          {
+            "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon",
+            "checked": "2026-11-11"
           }
         ]
       }

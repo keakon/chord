@@ -133,6 +133,10 @@ bindings:
     model_id: anthropic/claude-fable-5-1
 
   - endpoint: anthropic
+    wire_model_id: claude-fable-5-2
+    model_id: anthropic/claude-fable-5-2
+
+  - endpoint: anthropic
     wire_model_id: claude-opus-5
     model_id: anthropic/claude-opus-5
 
@@ -153,6 +157,16 @@ bindings:
       sources:
         - url: https://ai.google.dev/gemini-api/docs/generate-content/long-decode
           checked: "2026-10-14"
+
+  - endpoint: gemini
+    wire_model_id: gemini-4-carbon
+    model_id: google/gemini-4-carbon
+    limit:
+      output: 65536
+    config_profile:
+      sources:
+        - url: https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon
+          checked: "2026-11-11"
 
   - endpoint: gemini
     wire_model_id: gemini-3.8-flash
