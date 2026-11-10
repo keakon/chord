@@ -188,6 +188,10 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleLLMFallbackBoundary(evt)
 	case EventLLMRetryBoundary:
 		a.handleLLMRetryBoundary(evt)
+	case eventProgressNoticeDispatch:
+		if payload, ok := evt.Payload.(progressNoticeDispatchEvent); ok && payload.sessionEpoch == a.sessionEpoch {
+			a.confirmProgressNotice(payload.turn)
+		}
 	case EventRefreshReductionStats:
 		a.handleRefreshReductionStats()
 	case EventToolResult:
@@ -712,7 +716,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"status", e.Status,
 		}, true
-	case SubAgentDisplayChangedEvent, QuestionWaitStateEvent, QuestionStateEvent, QuestionTranscriptEvent, ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, WorkDirChangedEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, ContextNoticeEvent, ContextNoticeClearedEvent, LSPFollowupEvent, AgentTranscriptRebuiltEvent, HandoffEvent, HandoffCancelledEvent, StreamSegmentEndedEvent, StreamTextCommitEvent, SubAgentInputDeliveryEvent, ConfirmResolvedEvent:
+	case SubAgentDisplayChangedEvent, QuestionWaitStateEvent, QuestionStateEvent, QuestionTranscriptEvent, ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, WorkDirChangedEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, ContextNoticeEvent, ContextNoticeClearedEvent, ProgressNoticeEvent, LSPFollowupEvent, AgentTranscriptRebuiltEvent, HandoffEvent, HandoffCancelledEvent, StreamSegmentEndedEvent, StreamTextCommitEvent, SubAgentInputDeliveryEvent, ConfirmResolvedEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true

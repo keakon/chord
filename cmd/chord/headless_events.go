@@ -546,6 +546,15 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"message_index": e.MessageIndex,
 			}})
 		}
+	case agent.ProgressNoticeEvent:
+		touch()
+		if state.isSubscribed(message.KindProgressNotice) {
+			out = append(out, &headlessEnvelope{Type: message.KindProgressNotice, Payload: map[string]any{
+				"session_id":    state.sessionID,
+				"message":       e.Message,
+				"message_index": e.MessageIndex,
+			}})
+		}
 	}
 	if len(out) == 0 {
 		if mutated {

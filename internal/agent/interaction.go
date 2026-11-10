@@ -59,6 +59,8 @@ func (a *MainAgent) AwaitConfirmWithRuleContext(ctx context.Context, toolName, a
 }
 
 func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string, timeout time.Duration, needsApproval []string, alreadyAllowed []string, needsApprovalRules []permission.Rule, alreadyAllowedRules []permission.Rule, forceDenyReason bool, summary ...string) (ConfirmResponse, error) {
+	resumeProgress := pauseProgressNarration(ctx)
+	defer resumeProgress()
 	if err := a.interaction.beginConfirmFlow(ctx); err != nil {
 		return ConfirmResponse{}, err
 	}

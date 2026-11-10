@@ -737,6 +737,8 @@ shell: allow
 		"Skip preambles for trivial single-file reads",
 		"discover a root cause",
 		"complete a key implementation or verification step",
+		"give a brief progress update about every 10 tool-call rounds (a batch of parallel calls counts as one round)",
+		"what is known or still unresolved and what comes next; thinking output does not replace this update",
 		"Default to concise, direct, professional user-facing language",
 		"Remove pleasantries, repeated phrasing, and long background setup that do not add information",
 		"For simple tasks, prefer short paragraphs; expand only for complex tradeoffs or higher-risk changes",

@@ -104,7 +104,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`confirm_resolved`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`lsp_followup`、`image_result`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`confirm_resolved`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`lsp_followup`、`progress_notice`、`image_result`。
 
 待处理输入的变化还可通过 `input_queue_changed` 订阅，见[持久输入队列](#持久输入队列)。
 
@@ -451,6 +451,7 @@ MainAgent 的 `send` 支持 `delivery_policy: "next_request"`（默认，注入�
 | `background_result`  | 后台任务结束后的持久结果；JOB RESULT 卡片唯一的推送通道——它通常在回合 `idle` 之后才落盘，后面不会再有 `assistant_message` 总结它 | `session_id`（Chord 发出该事件时活动会话）、`target_agent_id`、`message_index`、`content` |
 | `context_notice`     | 持久的上下文压力提醒，headless 没有别的通道能收到它 | `session_id`（Chord 发出该事件时活动会话）、`target_agent_id`（发出该提醒的 SubAgent；主会话为 `main`）、`level`、`message`、`message_index` |
 | `lsp_followup`       | 持久的 LSP 晚到诊断：最近写过的文件在工具结果返回之后，语言服务器又报出的诊断（例如 gopls 的 analyzer 结果），有新的 error 或 warning 时才发出；模型会在下一次请求里收到同样的文字，可能发生在后续回合 | `session_id`（Chord 发出该事件时活动会话）、`message`、`message_index` |
+| `progress_notice`    | 持久的进度提醒，请主代理在长工具链中汇报进展；代理的实际汇报通过 `assistant_message` 发送 | `session_id`、`message`、`message_index` |
 | `error`              | 运行时错误                                   | `agent_id`、`message`，可选 `code` |
 
 如果 stdin 上的单行输入超过协议行长度限制，Chord 会输出带 `code: "stdin_line_too_long"` 的 `error` envelope，并继续读取后续行。集成方应在存在 `code` 时用它做错误分类，把 `message` 作为面向人的诊断信息。

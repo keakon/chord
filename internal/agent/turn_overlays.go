@@ -222,6 +222,9 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	if followup, ok := a.buildLSPFollowupOverlay(); ok {
 		overlays = append(overlays, followup)
 	}
+	if reminder, ok := a.buildProgressNoticeOverlay(); ok {
+		overlays = append(overlays, reminder)
+	}
 
 	if block := strings.TrimSpace(a.takePendingLSPDiagnosticOverlay()); block != "" {
 		overlays = append(overlays, message.Message{
@@ -712,6 +715,8 @@ func (a *MainAgent) flushPendingOverlayAppends() {
 				}
 			case message.KindLSPFollowup:
 				a.emitToTUI(LSPFollowupEvent{Message: message.StripSystemReminderOverlay(msg.Content), MessageIndex: index})
+			case message.KindProgressNotice:
+				a.emitToTUI(ProgressNoticeEvent{Message: message.StripSystemReminderOverlay(msg.Content), MessageIndex: index})
 			case message.KindContextNotice:
 				if msg.NoticeLevel != "" {
 					a.emitToTUI(ContextNoticeEvent{Level: msg.NoticeLevel, Message: message.StripSystemReminderOverlay(msg.Content), MessageIndex: index})
@@ -732,6 +737,8 @@ func (a *MainAgent) flushPendingOverlayAppends() {
 			a.emitToTUI(MailboxTranscriptAppendedEvent{Message: p.msg, TargetAgentID: p.targetAgent, MessageIndex: p.messageIndex})
 		case message.KindLSPFollowup:
 			a.emitToTUI(LSPFollowupEvent{Message: message.StripSystemReminderOverlay(p.msg.Content), MessageIndex: p.messageIndex})
+		case message.KindProgressNotice:
+			a.emitToTUI(ProgressNoticeEvent{Message: message.StripSystemReminderOverlay(p.msg.Content), MessageIndex: p.messageIndex})
 		}
 	}
 }

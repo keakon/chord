@@ -258,6 +258,9 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)
 		return true, effects
+	case agent.ProgressNoticeEvent:
+		m.appendProgressNotice(evt.MessageIndex, evt.Message)
+		return true, effects
 	case agent.BackgroundResultAppendedEvent:
 		// The result is durable now: drop its pending-area entry and build the
 		// JOB RESULT card from the exact persisted text, using the same parser

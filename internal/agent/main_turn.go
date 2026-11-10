@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/recovery"
@@ -625,6 +626,7 @@ func (a *MainAgent) newTurn(workID string) {
 	a.applyPatchRetry.reset()
 	ctx, cancel := context.WithCancel(a.parentCtx)
 	a.turn = &Turn{
+		progress:              &progressNarration{since: time.Now()},
 		DeliveryWorkID:        workID,
 		ID:                    a.nextTurnID,
 		Epoch:                 a.turnEpoch,

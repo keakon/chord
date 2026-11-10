@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/mcp"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -260,6 +261,7 @@ var headlessEventTypes = map[string]bool{
 	"background_result":          true,
 	"context_notice":             true,
 	"lsp_followup":               true,
+	message.KindProgressNotice:   true,
 	headlessMCPStatusChanged:     true,
 	"input_queue_changed":        true,
 }

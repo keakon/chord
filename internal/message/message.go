@@ -278,6 +278,10 @@ const KindStreamContinue = "stream_continue"
 // (latest-request anchor, terminal title, input statistics).
 const KindContextNotice = "context_notice"
 
+// KindProgressNotice identifies a durable runtime reminder to report progress;
+// it is not a user request or a new turn boundary.
+const KindProgressNotice = "progress_notice"
+
 // KindLSPFollowup identifies a durable synthetic user-role message carrying
 // LSP diagnostics that a language server published for files written in the
 // current turn after their tool results were already returned (gopls reports
@@ -430,7 +434,7 @@ func IsUserAuthored(msg Message) bool {
 		return false
 	}
 	switch msg.Kind {
-	case KindDirectoryInstructions, KindDirectoryInstructionProjection, KindSkillDiscovery, KindQuestionState, KindQuestionResult, KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice, KindLSPFollowup, KindLSPReview:
+	case KindDirectoryInstructions, KindDirectoryInstructionProjection, KindSkillDiscovery, KindQuestionState, KindQuestionResult, KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice, KindProgressNotice, KindLSPFollowup, KindLSPReview:
 		return false
 	case KindTurnOverlay:
 		// Request-scoped runtime hints ride the request tail as user-role

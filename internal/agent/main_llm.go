@@ -411,6 +411,7 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		appendPartialText: func(text string) {
 			if turn != nil {
 				turn.appendPartialText(text)
+				turn.progress.text(text, time.Now())
 			}
 		},
 		appendPartialResponsesOutput: func(item message.ResponsesOutputItem) {
@@ -598,11 +599,17 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	if err := a.ensureSessionBuilt(preparationCtx); err != nil {
 		return nil, a.preparationError(err)
 	}
-	requestBatch := a.requestBatches.reserve(a.sessionEpoch, maxRequestBatch(messages))
+	var requestSessionEpoch uint64
+	if input.hasSessionEpoch {
+		requestSessionEpoch = input.sessionEpoch
+	} else {
+		requestSessionEpoch = a.sessionEpoch
+	}
+	requestBatch := a.requestBatches.reserve(requestSessionEpoch, maxRequestBatch(messages))
 	var requestStarted atomic.Bool
 	defer func() {
 		if !requestStarted.Load() {
-			a.requestBatches.rollback(a.sessionEpoch, requestBatch)
+			a.requestBatches.rollback(requestSessionEpoch, requestBatch)
 		}
 	}()
 	messages = projectSkillDiscoveryMessages(messages, a.skillActivationView())
@@ -742,11 +749,13 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	streamState := &mainLLMStreamState{}
 	streamReducer := a.newMainLLMStreamReducer(llmClient, selectedRef, prevRunningRef, turn, scrubThinkingMarkers, streamState, requestSeq)
 	var confirmDispatch sync.Once
+	var confirmProgressDispatch sync.Once
 	confirmClaims := func() {
 		if requestStarted.Load() {
 			confirmDispatch.Do(func() {
 				a.markOverlayClaimsDelivered()
 				a.emitStagedLSPFollowup()
+				a.confirmProgressNotice(turn)
 				a.rememberPressureNoticeRequest(noticeRequestMessages, modelRef)
 			})
 		}
@@ -804,7 +813,20 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	defer releaseLLM()
 	// Transport evidence confirms dispatch. A rejected request keeps its
 	// pressure claims available; governor admission alone sends no request.
-	requestCtx := llm.WithRequestStarted(ctx, func() { requestStarted.Store(true) })
+	requestCtx := llm.WithRequestStarted(ctx, func() {
+		requestStarted.Store(true)
+		if turn != nil && turn.progress.stagedForDispatch() {
+			confirmProgressDispatch.Do(func() {
+				a.sendEvent(Event{
+					Type:   eventProgressNoticeDispatch,
+					TurnID: turnID,
+					Payload: progressNoticeDispatchEvent{
+						turn: turn, sessionEpoch: requestSessionEpoch,
+					},
+				})
+			})
+		}
+	})
 	// Model/cooldown wall-clock segmentation for the TIME section: the segment
 	// spans acquireLLM success through CompleteStream return (success or
 	// error), so hook-blocked / governor-rejected / zero-delta requests still

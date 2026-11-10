@@ -250,6 +250,10 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	streamedText := message.NormalizeInvisibleText(a.turn.drainPartialText())
 	a.turn.drainPartialResponsesOutput()
 	payload.Content = message.NormalizeInvisibleText(payload.Content)
+	if strings.TrimSpace(streamedText) == "" {
+		a.turn.progress.text(payload.Content, handledAt)
+	}
+	a.turn.progress.toolRoundStarted(strings.TrimSpace(streamedText) != "" || strings.TrimSpace(payload.Content) != "")
 	if strings.TrimSpace(streamedText) != "" || strings.TrimSpace(payload.Content) != "" {
 		log.Debugf("main finalize assistant payload turn_id=%v final_content_len=%v streamed_text_len=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", evt.TurnID, len(payload.Content), len(streamedText), len(payload.ToolCalls), len(payload.ThinkingBlocks), payload.StopReason)
 	}

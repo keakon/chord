@@ -230,6 +230,10 @@ func (a *MainAgent) ExecuteQuestion(ctx context.Context, args tools.QuestionArgs
 }
 
 func (a *MainAgent) requestQuestion(ctx context.Context, c *questionCommand) (QuestionReceipt, error) {
+	if c.operation.Operation == questionOpWait {
+		resumeProgress := pauseProgressNarration(ctx)
+		defer resumeProgress()
+	}
 	if !a.sendEventUntil(Event{Type: EventQuestionCommand, Payload: c}, ctx.Done()) {
 		if err := ctx.Err(); err != nil {
 			return QuestionReceipt{}, err

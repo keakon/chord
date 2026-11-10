@@ -16,6 +16,7 @@ import (
 // starts a new turn; starting a new turn cancels any in-flight work from the
 // previous one.
 type Turn struct {
+	progress                  *progressNarration
 	deliveryCommitCallID      string // guarded by pendingToolMu; owned by the persistence queue until acknowledgment
 	deliveryPending           atomic.Bool
 	deliveryCancel            *Event

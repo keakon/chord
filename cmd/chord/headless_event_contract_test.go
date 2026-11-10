@@ -754,6 +754,23 @@ func TestHeadlessLSPFollowupPush(t *testing.T) {
 	}
 }
 
+func TestHeadlessProgressNoticePush(t *testing.T) {
+	evt := agent.ProgressNoticeEvent{Message: "Report progress before continuing.", MessageIndex: 7}
+	state := &headlessState{subscriptions: map[string]bool{}, sessionID: "sess-1"}
+	if env := findHeadlessEnvelope(filterHeadlessEvent(evt, state), message.KindProgressNotice); env != nil {
+		t.Fatal("unsubscribed client received progress notice")
+	}
+	state.subscriptions[message.KindProgressNotice] = true
+	env := findHeadlessEnvelope(filterHeadlessEvent(evt, state), message.KindProgressNotice)
+	if env == nil {
+		t.Fatal("progress notice was not pushed")
+	}
+	payload := headlessPayloadMap(t, env.Payload)
+	if payload["session_id"] != "sess-1" || payload["message"] != evt.Message || payload["message_index"] != float64(7) {
+		t.Fatalf("unexpected progress notice: %v", payload)
+	}
+}
+
 // Context-pressure warnings are durable user-facing alerts with no other
 // headless channel, so they must be pushed explicitly. target_agent_id
 // attributes the notice to the emitting SubAgent; the main session uses "main".

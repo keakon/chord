@@ -882,6 +882,11 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				*nextID++
 				continue
 			}
+			if msg.Kind == message.KindProgressNotice {
+				blocks = append(blocks, newProgressNoticeBlock(*nextID, msgIdx, contentOrPartsText(msg)))
+				*nextID++
+				continue
+			}
 			var userBlock *Block
 			imgCount := 0
 			for _, p := range msg.Parts {

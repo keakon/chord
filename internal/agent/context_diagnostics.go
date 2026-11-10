@@ -14,6 +14,8 @@ import (
 type llmRequestInput struct {
 	Messages          []message.Message
 	HistoryGeneration uint64
+	sessionEpoch      uint64
+	hasSessionEpoch   bool
 	stageBoundary     stageBoundaryRequest
 }
 

@@ -76,6 +76,19 @@ func TestDiagnosticDirectoryRulesAndSkillNotices(t *testing.T) {
 	}
 }
 
+func TestDiagnosticProgressNoticeIsRuntimeSource(t *testing.T) {
+	messages := []message.Message{
+		{Role: message.RoleUser, Kind: message.KindProgressNotice, Content: "Before continuing with more tools, briefly tell the user what is known."},
+	}
+	categories, limitations, _ := estimateDiagnosticInput(newDiagnosticBudget(context.Background()), "", messages, nil, Options{})
+	if slices.Contains(limitations, "source_unspecified") {
+		t.Fatal("durable progress reminder was not classified", limitations)
+	}
+	if c := diagnosticCategory(t, categories, contextdiag.Runtime); c.Estimate.Tokens == 0 {
+		t.Fatalf("progress reminder missing runtime tokens: %+v", c)
+	}
+}
+
 func TestDiagnosticEstimateLimitsAndSchemas(t *testing.T) {
 	schema := map[string]any{"enum": []any{"a", "b", "c"}}
 	if _, ok := boundedDiagnosticJSON(schema); !ok {

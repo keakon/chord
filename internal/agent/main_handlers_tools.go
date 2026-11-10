@@ -779,6 +779,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			a.startNextToolBatch(a.turn)
 			return
 		}
+		// Scheduler batches can split one response; only its final batch
+		// completes a tool round for progress narration.
+		a.turn.progress.toolRoundSettled()
 		if a.turn.questionCompletionBlocked && a.parkForRequiredQuestions() {
 			return
 		}
