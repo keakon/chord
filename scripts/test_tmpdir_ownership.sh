@@ -11,6 +11,13 @@ cat >"$tmp/bin/diskutil" <<'EOF'
 set -euo pipefail
 case "$1" in
 	info)
+		# Models the macOS one-shot spawn/query hiccup that retry_capture must
+		# absorb: a persistent failure and a fail-exactly-once failure.
+		[[ "${MOCK_INFO_FAIL:-0}" == 1 ]] && exit 1
+		if [[ "${MOCK_INFO_FAIL_ONCE:-0}" == 1 && -n "${MOCK_INFO_FAIL_MARK:-}" && ! -e "${MOCK_INFO_FAIL_MARK}" ]]; then
+			: >"${MOCK_INFO_FAIL_MARK}"
+			exit 1
+		fi
 		printf 'mock plist\n'
 		;;
 	erasevolume)
@@ -33,9 +40,14 @@ EOF
 cat >"$tmp/bin/plutil" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-# Consume the producer's output even though the fixture supplies the fields.
-# Closing stdin early makes pipefail observe an intermittent SIGPIPE.
-cat >/dev/null
+# Require stdin so a retry cannot pass using fixture-only output.
+input="$(cat)"
+[[ "$input" == "mock plist" ]] || { echo "plutil received incomplete input" >&2; exit 2; }
+if [[ "${MOCK_FAIL_FIELD_ONCE:-}" == "$2" && ! -e "$MOCK_FAIL_FIELD_MARK" ]]; then
+	: >"$MOCK_FAIL_FIELD_MARK"
+	echo "transient plist failure" >&2
+	exit 1
+fi
 [[ "${MOCK_FAIL_FIELD:-}" != "$2" ]] || exit 1
 case "$2" in
 	DeviceNode) sed -n '1p' "$MOCK_DEVICE_FILE" ;;
@@ -58,6 +70,8 @@ export MOCK_MOUNT="$tmp/volumes/ChordTestRam"
 export MOCK_DEVICE_FILE="$tmp/device"
 export MOCK_EJECT_LOG="$tmp/eject.log"
 export MOCK_HDIUTIL_LOG="$tmp/hdiutil.log"
+export MOCK_INFO_FAIL_MARK="$tmp/info-fail-mark"
+export MOCK_FAIL_FIELD_MARK="$tmp/plutil-fail-mark"
 export MOCK_DEVICE="/dev/disk43s1"
 export MOCK_UUID="00000000-0000-4000-8000-000000000042"
 export MOCK_PARENT="disk43"
@@ -70,6 +84,38 @@ source "$repo_root/scripts/test_tmpdir.sh"
 mount_point="$MOCK_MOUNT"
 [[ "$owner_file" == "$HOME/Library/Caches/chord-test-tmpdir/test-tmpdir-owner" ]] || {
 	echo "Chord does not use the shared owner record path: $owner_file" >&2
+	exit 1
+}
+
+# retry_capture must absorb a one-shot failure of a short-lived command — the
+# macOS spawn hiccup class that used to fail the whole release — and surface
+# stderr only when every attempt has failed.
+fail_once_state="$tmp/retry-fail-once"
+rm -f "$fail_once_state"
+flaky() {
+	if [[ ! -e "$fail_once_state" ]]; then
+		printf 'transient\n' >&2
+		: >"$fail_once_state"
+		return 7
+	fi
+	printf 'recovered %s\n' "$1"
+}
+if ! retried="$(retry_capture flaky arg 2>"$tmp/retry-transient.err")" || [[ "$retried" != "recovered arg" ]]; then
+	echo "retry gave up on a one-shot failure" >&2
+	exit 1
+fi
+[[ ! -s "$tmp/retry-transient.err" ]] || { echo "retry leaked a transient failure's stderr" >&2; exit 1; }
+always_fails() {
+	printf 'persistent\n' >&2
+	return 3
+}
+if retried="$(retry_capture always_fails 2>"$tmp/retry-persistent.err")"; then
+	echo "retry reported success for a persistent failure" >&2
+	exit 1
+fi
+grep -qF 'persistent' "$tmp/retry-persistent.err" || {
+	echo "retry hid the persistent failure's stderr" >&2
+	cat "$tmp/retry-persistent.err" >&2
 	exit 1
 }
 
@@ -217,6 +263,58 @@ release_private_ram_disk "$output" || { echo "private RAM disk was not released"
 [[ "$(wc -l <"$MOCK_EJECT_LOG" | tr -d ' ')" == "$((before_eject + 1))" ]] || { echo "release did not eject the private RAM disk" >&2; exit 1; }
 [[ "$(tail -n 1 "$MOCK_EJECT_LOG")" == "/dev/${MOCK_PHYSICAL_STORE}" ]] || { echo "release ejected something other than the private disk's physical store" >&2; exit 1; }
 [[ -d "$mount_point" ]] || { echo "releasing the private disk took down the shared mount" >&2; exit 1; }
+
+# A one-shot disk tool failure must not fail the release: the identity and
+# physical-store queries are retried, so the eject still happens.
+rm -f "$MOCK_INFO_FAIL_MARK"
+MOCK_INFO_FAIL_ONCE=1
+export MOCK_INFO_FAIL_ONCE
+before_eject="$(wc -l <"$MOCK_EJECT_LOG" | tr -d ' ')"
+release_private_ram_disk "$output" || { echo "a one-shot disk tool failure failed the release" >&2; exit 1; }
+[[ "$(wc -l <"$MOCK_EJECT_LOG" | tr -d ' ')" == "$((before_eject + 1))" ]] || { echo "release did not eject after absorbing a one-shot failure" >&2; exit 1; }
+[[ "$(tail -n 1 "$MOCK_EJECT_LOG")" == "/dev/${MOCK_PHYSICAL_STORE}" ]] || { echo "retry path ejected the wrong disk" >&2; exit 1; }
+
+MOCK_INFO_FAIL=1
+export MOCK_INFO_FAIL
+if release_private_ram_disk "$output" 2>"$tmp/info-fail.err"; then
+	echo "release survived a persistent disk tool failure" >&2
+	exit 1
+fi
+grep -qF "could not release the private RAM disk at ${output}" "$tmp/info-fail.err" || {
+	echo "persistent disk tool failure did not produce the release warning" >&2
+	cat "$tmp/info-fail.err" >&2
+	exit 1
+}
+MOCK_INFO_FAIL=0
+MOCK_INFO_FAIL_ONCE=0
+export MOCK_INFO_FAIL MOCK_INFO_FAIL_ONCE
+
+for field in DeviceNode VolumeUUID ParentWholeDisk APFSPhysicalStores; do
+	rm -f "$MOCK_FAIL_FIELD_MARK"
+	before_eject="$(wc -l <"$MOCK_EJECT_LOG" | tr -d ' ')"
+	if ! MOCK_FAIL_FIELD_ONCE="$field" release_private_ram_disk "$output" 2>"$tmp/plutil-transient.err"; then
+		echo "a one-shot $field plist failure failed the release" >&2
+		cat "$tmp/plutil-transient.err" >&2
+		exit 1
+	fi
+	[[ -e "$MOCK_FAIL_FIELD_MARK" ]] || { echo "$field failure was not injected" >&2; exit 1; }
+	[[ ! -s "$tmp/plutil-transient.err" ]] || { echo "release leaked a transient plist failure" >&2; cat "$tmp/plutil-transient.err" >&2; exit 1; }
+	[[ "$(wc -l <"$MOCK_EJECT_LOG" | tr -d ' ')" == "$((before_eject + 1))" ]] || { echo "release did not eject after retrying $field" >&2; exit 1; }
+	[[ "$(tail -n 1 "$MOCK_EJECT_LOG")" == "/dev/${MOCK_PHYSICAL_STORE}" ]] || { echo "plist retry ejected the wrong disk" >&2; exit 1; }
+
+	before_eject="$(wc -l <"$MOCK_EJECT_LOG" | tr -d ' ')"
+	if MOCK_FAIL_FIELD="$field" release_private_ram_disk "$output" 2>"$tmp/plutil-persistent.err"; then
+		echo "release survived a persistent $field plist failure" >&2
+		exit 1
+	fi
+	grep -qF "could not release the private RAM disk at ${output}" "$tmp/plutil-persistent.err" || {
+		echo "persistent plist failure did not produce the release warning" >&2
+		cat "$tmp/plutil-persistent.err" >&2
+		exit 1
+	}
+	[[ "$(wc -l <"$MOCK_EJECT_LOG" | tr -d ' ')" == "$before_eject" ]] || { echo "persistent plist failure ejected a disk" >&2; exit 1; }
+done
+
 if MOCK_EJECT_FAIL=1 release_private_ram_disk "$output" 2>"$tmp/release.err"; then
 	echo "a failed release reported success" >&2
 	exit 1

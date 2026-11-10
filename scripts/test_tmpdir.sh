@@ -50,18 +50,62 @@ usable() {
 	return "${ok}"
 }
 
+# retry_capture runs "$@" until it exits zero and prints only that run's
+# stdout. macOS disk tools round-trip through system daemons, and even their
+# spawn can fail once while the machine is under load — the same one-shot
+# flake class GitHub documents for hdiutil (actions/runner-images#7522). A
+# single hiccup must not flip a decision, so failed attempts are retried
+# briefly; each attempt's stderr is set aside and printed only when every
+# attempt has failed, keeping expected probe noise out of callers that capture
+# stderr while leaving real breakage diagnosable.
+retry_capture() {
+	local attempt out err rc=1
+	err="$(mktemp)" || return 1
+	for attempt in 1 2 3; do
+		if out="$("$@" 2>"${err}")"; then
+			rm -f "${err}"
+			printf '%s\n' "${out}"
+			return 0
+		else
+			# $? must be read inside the else branch: after a bare if/fi whose
+			# condition failed, the compound command's own status resets to 0.
+			rc=$?
+		fi
+		[[ "${attempt}" -lt 3 ]] && sleep 0.25
+	done
+	cat "${err}" >&2
+	rm -f "${err}"
+	return "${rc}"
+}
+
+# Open stdin inside each retry; a failed plutil call may have consumed it.
+extract_plist_field() {
+	local info="$1" field="$2" format="$3"
+	plutil -extract "${field}" "${format}" -o - - <<<"${info}"
+}
+
 mounted_identity() {
 	local dir="${1:-${mount_point}}"
 	[[ -d "${dir}" ]] || return 1
 	local info device uuid parent
-	info="$(diskutil info -plist "${dir}" 2>/dev/null)" || return 1
-	device="$(printf '%s' "${info}" | plutil -extract DeviceNode raw -o - - 2>/dev/null)" || return 1
-	uuid="$(printf '%s' "${info}" | plutil -extract VolumeUUID raw -o - - 2>/dev/null)" || return 1
-	parent="$(printf '%s' "${info}" | plutil -extract ParentWholeDisk raw -o - - 2>/dev/null)" || return 1
+	info="$(retry_capture diskutil info -plist "${dir}")" || return 1
+	device="$(retry_capture extract_plist_field "${info}" DeviceNode raw)" || return 1
+	uuid="$(retry_capture extract_plist_field "${info}" VolumeUUID raw)" || return 1
+	parent="$(retry_capture extract_plist_field "${info}" ParentWholeDisk raw)" || return 1
 	[[ "${device}" =~ ^/dev/disk[0-9]+s?[0-9]*$ ]] || return 1
 	[[ ${#uuid} -eq 36 && "${uuid}" =~ ^[[:xdigit:]-]+$ ]] || return 1
 	[[ "${parent}" =~ ^disk[0-9]+$ ]] || return 1
 	printf '%s\n%s\n%s\n' "${device}" "${uuid}" "${parent}"
+}
+
+# physical_stores_of prints the APFS physical store list of a whole-disk
+# container. Both the disk query and the plist extraction go through
+# retry_capture: a one-shot failure here used to read as "the mount is not
+# backed by this run's disk" and silently derailed creation or destruction.
+physical_stores_of() {
+	local parent="${1:-}" info
+	info="$(retry_capture diskutil info -plist "/dev/${parent}")" || return 1
+	retry_capture extract_plist_field "${info}" APFSPhysicalStores json
 }
 
 # APFS puts a formatted RAM disk's volume in a synthesized container: the
@@ -69,10 +113,9 @@ mounted_identity() {
 # volume reports diskN+1 as its parent. Verify that relationship instead of
 # requiring the two identifiers to match.
 parent_has_physical_store() {
-	local parent="${1:-}" device="${2:-}" info stores
+	local parent="${1:-}" device="${2:-}" stores
 	[[ "${parent}" =~ ^disk[0-9]+$ && "${device}" =~ ^disk[0-9]+$ ]] || return 1
-	info="$(diskutil info -plist "/dev/${parent}" 2>/dev/null)" || return 1
-	stores="$(printf '%s' "${info}" | plutil -extract APFSPhysicalStores json -o - - 2>/dev/null)" || return 1
+	stores="$(physical_stores_of "${parent}")" || return 1
 	printf '%s' "${stores}" | grep -Eq "\"APFSPhysicalStore\"[[:space:]]*:[[:space:]]*\"${device}\""
 }
 
@@ -124,7 +167,7 @@ destroy_owned_ram_disk() {
 		echo "error: refusing to eject ${mount_point}; its device identity changed" >&2
 		return 1
 	}
-	if ! diskutil eject "/dev/${store}" >/dev/null; then
+	if ! retry_capture diskutil eject "/dev/${store}" >/dev/null; then
 		echo "error: failed to eject the owned RAM disk at ${mount_point}" >&2
 		return 1
 	fi
@@ -134,7 +177,7 @@ destroy_owned_ram_disk() {
 eject_created_device() {
 	local device="$1"
 	[[ "${device}" =~ ^/dev/disk[0-9]+$ ]] || return 1
-	diskutil eject "${device}" >/dev/null
+	retry_capture diskutil eject "${device}" >/dev/null
 }
 
 # abandon_attached_disk reports the disk this run attached for the shared mount
@@ -162,9 +205,9 @@ use_unique_ram_disk() {
 		if [[ -e "${target}" ]]; then
 			continue
 		fi
-		dev="$(hdiutil attach -nomount "ram://${size_sectors}" 2>/dev/null | awk '{print $1; exit}' || true)"
+		dev="$(retry_capture hdiutil attach -nomount "ram://${size_sectors}" | awk '{print $1; exit}' || true)"
 		[[ "${dev}" =~ ^/dev/disk[0-9]+$ ]] || return 1
-		if ! diskutil erasevolume APFS "${name}" "${dev}" >/dev/null 2>&1 || ! usable "${target}"; then
+		if ! retry_capture diskutil erasevolume APFS "${name}" "${dev}" >/dev/null || ! usable "${target}"; then
 			eject_created_device "${dev}" >/dev/null 2>&1 || true
 			return 1
 		fi
@@ -184,9 +227,9 @@ release_private_ram_disk() {
 	[[ -d "${dir}" ]] || return 0
 	if identity="$(mounted_identity "${dir}")"; then
 		parent="$(sed -n '3p' <<<"${identity}")"
-		stores="$(diskutil info -plist "/dev/${parent}" 2>/dev/null | plutil -extract APFSPhysicalStores json -o - - 2>/dev/null)" || stores=""
+		stores="$(physical_stores_of "${parent}")" || stores=""
 		store="$(grep -oE '"APFSPhysicalStore"[[:space:]]*:[[:space:]]*"disk[0-9]+"' <<<"${stores}" | grep -oE 'disk[0-9]+' || true)"
-		if [[ "${store}" =~ ^disk[0-9]+$ ]] && diskutil eject "/dev/${store}" >/dev/null; then
+		if [[ "${store}" =~ ^disk[0-9]+$ ]] && retry_capture diskutil eject "/dev/${store}" >/dev/null; then
 			return 0
 		fi
 	fi
@@ -202,13 +245,13 @@ resolve_darwin_tmpdir() {
 		echo "${mount_point}"
 		return 0
 	fi
-	dev="$(hdiutil attach -nomount "ram://${size_sectors}" 2>/dev/null | awk '{print $1; exit}' || true)"
+	dev="$(retry_capture hdiutil attach -nomount "ram://${size_sectors}" | awk '{print $1; exit}' || true)"
 	if [[ ! "${dev}" =~ ^/dev/disk[0-9]+$ ]]; then
 		echo "warning: could not create an APFS RAM disk; falling back to the default temp dir" >&2
 		return 0
 	fi
 	dev_name="${dev##*/}"
-	if ! diskutil erasevolume APFS "${volume_name}" "${dev}" >/dev/null 2>&1 || ! usable "${mount_point}"; then
+	if ! retry_capture diskutil erasevolume APFS "${volume_name}" "${dev}" >/dev/null || ! usable "${mount_point}"; then
 		eject_created_device "${dev}" >/dev/null 2>&1 || true
 		echo "warning: could not create an APFS RAM disk; falling back to the default temp dir" >&2
 		return 0
