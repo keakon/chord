@@ -654,6 +654,7 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 	requestSeq := a.mainRequestSeq
 	turnEpoch := a.currentTurnEpoch()
 	sessionEpoch := a.sessionEpoch
+	input.stageBoundary = a.snapshotStageBoundaryRequest()
 	a.outputWg.Go(func() {
 		// Report the segment end last: callLLM below emits this request's final
 		// text flush before returning, and the TUI settles the streaming card on

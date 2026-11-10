@@ -697,7 +697,9 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 		messages = append(messages, *prefix)
 		tailOverlayCount++
 	}
-	if overlays := a.buildTurnOverlayMessages(); len(overlays) > 0 {
+	overlays := a.buildTurnOverlayMessages()
+	overlays = a.appendStageBoundaryReminder(input, messages, overlays, modelRef)
+	if len(overlays) > 0 {
 		applied, overlayCount := applyTurnOverlayMessages(messages, overlays)
 		messages = applied
 		tailOverlayCount += overlayCount

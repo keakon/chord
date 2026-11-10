@@ -76,7 +76,7 @@ func (a *MainAgent) settleMainLLMResponse(payload *LLMResponsePayload, validCall
 		Usage: payload.Usage,
 	}
 	a.attachQuestionConsumption(&assistantMsg, payload.QuestionResults)
-	a.ctxMgr.Append(assistantMsg)
+	a.ctxMgr.AppendResponse(assistantMsg)
 
 	// Emit finalized assistant message event for control-plane consumers.
 	a.emitToTUI(AssistantMessageEvent{FileLinkBaseDir: a.effectiveToolBaseDir(),

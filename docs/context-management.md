@@ -127,8 +127,7 @@ reminder, orange/yellow from the reminder up to the threshold, red at the
 threshold. The request-side reminder and warning overlays, by contrast, are
 only injected while `model_driven` is enabled (see below).
 
-The context size behind both decisions is measured, never precomputed from the
-request surface. It comes only from provider-reported usage: the latest
+The context size behind these threshold decisions comes from provider-reported usage: the latest
 response's usage when it carries one; otherwise the single frozen estimate
 calibrated from the most recent usage sample (a model switch or a restored
 session reuses that reading as an estimate against the new budget). A session
@@ -138,6 +137,16 @@ triggers neither a reminder nor an automatic compaction, no matter how large
 the pasted or assembled request is. The one exception is a real
 context-length error from the provider, which forces compaction regardless of
 any local measurement.
+
+With model-driven compaction enabled, Chord can also remind the main agent at
+a candidate stage boundary: a newly delivered task-completion report or a
+terminal todo list. When the latest reading is below the reminder line but
+estimated growth since that reading reaches it, the next request can carry a
+one-time checkpoint reminder. This estimate does not trigger automatic
+compaction or change the displayed usage. It respects disabled reminders,
+existing pressure notices, and checkpoint retry limits. The agent must still
+verify what remains; when the whole request is done and only the final reply
+remains, it replies directly.
 
 Set the global lines under `context.compaction` and tune per model on the model
 definition itself (`ModelConfig.compaction`). Model templates make this

@@ -14,11 +14,12 @@ import (
 type llmRequestInput struct {
 	Messages          []message.Message
 	HistoryGeneration uint64
+	stageBoundary     stageBoundaryRequest
 }
 
 func snapshotLLMRequest(m *ctxmgr.Manager) llmRequestInput {
 	messages, generation := m.SnapshotWithGeneration()
-	return llmRequestInput{messages, generation}
+	return llmRequestInput{Messages: messages, HistoryGeneration: generation}
 }
 
 var diagnosticsEpoch atomic.Uint64

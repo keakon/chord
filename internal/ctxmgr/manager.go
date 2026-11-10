@@ -48,6 +48,7 @@ type Manager struct {
 	frozenEstimateTokens int
 	observedValid        bool
 	frozenValid          bool
+	projection           usageProjection
 	// observationStale marks that the current reading was measured against a
 	// different model window (a model/window change retired its trigger frame).
 	// The gauge keeps showing the reading — the conversation content it measured
@@ -260,6 +261,10 @@ func (m *Manager) Threshold() float64 {
 func (m *Manager) Append(msg message.Message) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.appendLocked(msg)
+}
+
+func (m *Manager) appendLocked(msg message.Message) {
 	m.trackToolCallIDsLocked(msg)
 	m.messages = append(m.messages, msg)
 	m.payloadBytes += MessagePayloadBytes([]message.Message{msg})
@@ -579,6 +584,11 @@ func (m *Manager) computeFrozenEstimateLocked() int {
 // an explicit invalidation changes it.
 func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.mu.Lock()
+	m.projection = usageProjection{
+		bytes:      m.estimatorContextBytesLocked(),
+		images:     m.imageEstimateTokens,
+		generation: m.historyGeneration,
+	}
 	m.stats.InputTokens += usage.InputTokens
 	m.stats.OutputTokens += usage.OutputTokens
 	m.stats.CacheReadTokens += usage.CacheReadTokens
@@ -734,6 +744,7 @@ func (m *Manager) ClearLastTokenUsage() {
 }
 
 func (m *Manager) clearLastTokenUsageLocked() {
+	m.projection = usageProjection{}
 	m.lastInputTokens = 0
 	m.lastTotalContextTokens = 0
 	m.observedValid = false
@@ -837,6 +848,7 @@ func messageEstimateBytesAndImages(messages []message.Message) (bytes, imageToke
 type AutoCompactDecision struct {
 	LastInputTokens        int
 	EstimatedInputTokens   int // planning-only live growth estimate, never a trigger input
+	ProjectedContextTokens int // latest reading plus unobserved growth; advisory only
 	EffectiveInputTokens   int // observed baseline or frozen estimate: the only trigger/display input
 	UsageState             ContextUsageState
 	InputBudget            int
@@ -931,6 +943,7 @@ func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 	return AutoCompactDecision{
 		LastInputTokens:        m.lastInputTokens,
 		EstimatedInputTokens:   estimatedInputTokens,
+		ProjectedContextTokens: m.projectedContextTokensLocked(),
 		EffectiveInputTokens:   effectiveInputTokens,
 		UsageState:             state,
 		InputBudget:            budget,
