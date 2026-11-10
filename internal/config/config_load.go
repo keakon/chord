@@ -81,6 +81,7 @@ func collectSemanticIssues(cfg *Config) []string {
 	resetInvalidDiagnosticsFields(&cfg.Diagnostics)
 	issues = append(issues, collectCompactionConfigIssues(cfg)...)
 	issues = append(issues, collectModelCompactionIssues(cfg)...)
+	issues = append(issues, collectConfirmConfigIssues(cfg)...)
 	if cfg.QuestionAutoSelectTimeout < 0 {
 		issues = append(issues, "question_auto_select_timeout must be non-negative; using 0")
 		cfg.QuestionAutoSelectTimeout = 0

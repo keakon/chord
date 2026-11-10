@@ -283,6 +283,9 @@ func classifyToolError(err error) string {
 	if errors.Is(err, errToolRejectedByUser) {
 		return "rejected_by_user"
 	}
+	if errors.Is(err, errToolAskPolicyDenied) {
+		return "ask_policy_denied"
+	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
 	case strings.Contains(msg, "denied by permission policy"):

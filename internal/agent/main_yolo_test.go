@@ -145,8 +145,8 @@ func TestYoloAskDowngradeScope(t *testing.T) {
 		tools.NameDone:           false,
 		tools.NameCompactContext: false,
 	} {
-		if got := yoloAskDowngradeTool(name); got != want {
-			t.Fatalf("yoloAskDowngradeTool(%q) = %v, want %v", name, got, want)
+		if got := toolAskPolicyApplies(name); got != want {
+			t.Fatalf("toolAskPolicyApplies(%q) = %v, want %v", name, got, want)
 		}
 	}
 }

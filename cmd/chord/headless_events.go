@@ -284,6 +284,11 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"agent_id": e.AgentID,
 			}})
 		}
+	case agent.ToolAskPolicyDeniedEvent:
+		touch()
+		if state.isSubscribed(headlessToolAskPolicyDenied) {
+			out = append(out, &headlessEnvelope{Type: headlessToolAskPolicyDenied, Payload: e})
+		}
 	case agent.ConfirmRequestEvent:
 		touch()
 		doneReason, doneReport := parseHeadlessDoneArgs(e.ArgsJSON)

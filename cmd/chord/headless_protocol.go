@@ -231,6 +231,7 @@ type headlessCommand struct {
 
 // All available push event types that can be subscribed to.
 var headlessEventTypes = map[string]bool{
+	headlessToolAskPolicyDenied:  true,
 	headlessImageResult:          true,
 	"activity":                   true,
 	"assistant_message":          true,

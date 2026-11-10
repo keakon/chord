@@ -43,24 +43,6 @@ func yoloProtectedPermissionTool(toolName string) bool {
 	return slices.Contains(yoloProtectedTools, toolname.Normalize(toolName))
 }
 
-// yoloAskDowngradeTool reports whether an ask decision for toolName relaxes to
-// an implicit allow while YOLO is on. All ordinary tools relax (on the main
-// agent they are bypassed outright; on a SubAgent inheriting the mode their
-// asks stop prompting), and so do delegate, handoff and cancel — the mechanism
-// tools keep their user rules, but their ask no longer raises the shared
-// confirmation dialog. done never reaches the ask branch (the pipeline lets it
-// through before confirming), and compact_context keeps its dedicated action
-// semantics, so an explicit ask rule on it still confirms under YOLO exactly
-// as without it.
-func yoloAskDowngradeTool(toolName string) bool {
-	switch tools.NormalizeName(toolName) {
-	case tools.NameDone, tools.NameCompactContext:
-		return false
-	default:
-		return true
-	}
-}
-
 // yoloProtectedPermissionRule reports whether a rule must survive the YOLO
 // filter: its tool pattern names one of the protected tools. Matching goes
 // through the shared normalization + glob helper, so a narrow glob such as

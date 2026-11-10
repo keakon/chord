@@ -104,7 +104,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`confirm_resolved`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`lsp_followup`、`progress_notice`、`image_result`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`confirm_resolved`、`tool_ask_policy_denied`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`lsp_followup`、`progress_notice`、`image_result`。
 
 待处理输入的变化还可通过 `input_queue_changed` 订阅，见[持久输入队列](#持久输入队列)。
 
@@ -265,6 +265,8 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 Chord 收到带 request ID 的规则意图后，会在尝试写入规则后发送 `confirm_rule_intent_result`。该 envelope 始终发送，不受订阅过滤，内容包含 `request_id` 和 `results`；每条结果包含 `tool`、`pattern`，保存失败时还带 `error`。此回执单独报告规则保存结果，不改变确认决定；规则写入失败不会撤销已批准的调用。
 
 只要 headless 会话和事件流仍处于活动状态，每条送达客户端的 `confirm_request` 都会进入终态，并以 `confirm_resolved` 事件推送：`approved` / `denied` 是客户端作答的回执；`timeout` 表示到期后无人作答、已自动拒绝；`cancelled` 表示等待提前结束。收到该事件就收起提示，不要再回答——对已终结的请求发 `confirm`，运行时只会忽略。服务端关闭时可能在终态事件发送前停止事件投递；事件流或会话关闭后，客户端应清除本地未决确认。
+
+设置 [`confirm_ask_policy: deny`](./configuration_CN.md#无人值守权限处理) 后，适用工具的权限确认会直接拒绝，不打开确认请求。订阅 `tool_ask_policy_denied` 可收到已完成的决定，字段为 `call_id`、`tool_name`、`agent_id`、`policy`（`deny`）、`reason`。该事件没有配套的 `confirm_request` 或 `confirm_resolved`，无需回答；其他待确认请求仍可正常操作。
 
 ### `question`
 
@@ -431,6 +433,7 @@ MainAgent 的 `send` 支持 `delivery_policy: "next_request"`（默认，注入�
 | `done_completion`   | Done 工具完成并给出最终报告。只在 loop 运行期间产生——`done` 仅在此时挂载；`mode` 字段目前恒为 `normal` | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
 | `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`agent_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`needs_approval_rule_items`、`already_allowed_rule_items`、`timeout_ms` |
 | `confirm_resolved`   | 确认进入终态，`request_id` 不再可操作，应直接关闭而不是再回答；`approved` / `denied` 是客户端作答回执，`timeout` 是到期自动拒绝，`cancelled` 是提前结束 | `request_id`、`agent_id`、`tool_name`、`outcome`（`approved` / `denied` / `timeout` / `cancelled`） |
+| `tool_ask_policy_denied` | 权限确认已按配置拒绝，未打开交互确认 | `call_id`、`tool_name`、`agent_id`、`policy`（`deny`）、`reason` |
 | `question_request` | 题目可供回答 | `request_id`、`binding_id`、`task_id`、`request_scope_id`、`version`、`header`、`question`、`options`、`option_ids`、`option_details`、`multiple`、`response_policy`、`default_option_id`、`timer`、`duration_seconds`，可选 `deadline` |
 | `question_updated` | 计时、介入、要求处置或历史补答发生变化 | 完整题目快照；历史补答附带含独立 `result_id` 的 `revision_result` |
 | `question_resolved` | 题目进入终态 | 完整快照；`reason` 为 `answered`、`defaulted`、`no_response`、`superseded`、`cancelled` 或 `error` |

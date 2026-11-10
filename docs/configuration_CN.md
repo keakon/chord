@@ -1577,6 +1577,7 @@ chord doctor models --pool thinking
 | `diagnostics`           | object                | 启用（Python LSP + Ruff 回退）  | global                   | `edit`、`apply_patch` 或 `write` 完成后追加的诊断信息。`diagnostics.python.semantic_backend` 是主 LSP 服务（默认 `pyright`）；`diagnostics.python.quick_backend` 是一次性回退命令（默认 `ruff check`）。`diagnostics.python.large_file.{line_threshold, byte_threshold, strategy}` 决定大文件何时走 quick backend；`run_semantic_when_quick_unavailable: true` 在 quick backend 不可用时仍强制跑语义诊断。`diagnostics.python.output.{max_near_diagnostics, max_outside_diagnostics, max_total_diagnostics, near_range_before_lines, near_range_after_lines}` 控制追加文本的长度和剪裁窗口。`diagnostics.lsp.wait_timeout_ms`（默认 `3000`）限制非 Python 文件在已运行语言服务上的诊断等待；冷启动用更短的固定总预算，没等到的诊断随下一次请求补送。诊断按严重级别优先展示（错误/警告优先，仍有名额时再显示 info/hint）。设 `diagnostics.enabled: false` 可整体关闭。 |
 | `skills`                | object                | 空                              | global / project         | `paths: [...]` —— 在默认目录外追加 skill 目录。                                                                     |
 | `confirm_timeout`       | int（秒）             | `0`（不超时）                   | global / project         | TUI 确认浮层超时；`0` 表示永远等。                                                                                    |
+| `confirm_ask_policy` | string | `wait` | 全局 / 项目 | `wait` 请求批准；`deny` 立即拒绝适用工具的权限确认。见[无人值守权限处理](#无人值守权限处理)。 |
 | `question_timeout` | int（秒） | `0`（无限等待） | 全局 / 项目 | 仅 optional 问题获得入口后无回答关闭为 `no_response`；介入后永久停用。必要确认不受影响。 |
 | `question_auto_select_timeout` | int（秒） | `0`（关闭） | 全局 / 项目 | 对明确允许默认方案的单选题启用自动采用；`60` 为一分钟。获得入口后开始，介入后永久停用。默认决策不表示用户授权。 |
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
@@ -1597,6 +1598,14 @@ chord doctor models --pool thinking
 | `proxy`                 | string                | 空（用环境变量或直连）          | global / project         | 全局代理 URL。可通过 `web_fetch.proxy` 单独覆盖。                                                                    |
 | `web_fetch`             | object                | 空                              | global / project         | `user_agent`、`proxy`（nil 继承全局；空字符串 = 显式直连）。见 [WebFetch](#webfetch)。                                |
 | `worktree`              | object                | 空                              | global / project         | `branch_prefix` 决定 worktree 分支名前缀，`root` 决定 checkout 建在哪里（相对路径以仓库根为基准；默认仍在仓库之外的 state 目录下）。见 [Worktree 用法](./usage_CN.md#worktree)。 |
+
+### 无人值守权限处理
+
+设置 `confirm_ask_policy: deny` 后，TUI、ACP 和 headless 会话会立即拒绝适用工具的权限确认。主代理和 Chord 子代理收到说明策略决定的工具错误后，可以换用其他方式继续任务。被拒绝的调用不会弹出确认。headless 客户端可订阅 `tool_ask_policy_denied` 事件。
+
+策略覆盖普通工具及 `delegate`、`handoff`、`cancel`。`compact_context` 的显式确认、`done` 与循环干预确认、问题、外部工作进程的权限请求仍按各自规则处理，会话仍可能在这些位置等待。需要无人值守执行的适用工具应配置为 `allow`。
+
+默认值为 `wait`，空值也选择 `wait`。有效的项目级配置覆盖用户级配置；无效项目值会产生配置诊断，并保留继承值。`confirm_timeout` 控制交互确认等待多久，`deny` 则跳过适用权限确认的等待。YOLO 权限处理优先，已经由 YOLO 放行的确认不会被此策略拒绝。
 
 ### Provider 字段参考
 

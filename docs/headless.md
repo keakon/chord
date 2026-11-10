@@ -106,7 +106,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `confirm_resolved`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`, `lsp_followup`, `progress_notice`, `image_result`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `confirm_resolved`, `tool_ask_policy_denied`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`, `lsp_followup`, `progress_notice`, `image_result`.
 
 For pending input changes, also subscribe to `input_queue_changed`; see [Persistent input queue](#persistent-input-queue).
 
@@ -269,6 +269,8 @@ Resolve a pending `confirm_request`. Use the `request_id` from the request.
 When Chord receives a rule intent with a request ID, it emits a `confirm_rule_intent_result` after attempting the rule writes. The envelope is always emitted, independent of subscriptions, and contains `request_id` plus `results`; each result has `tool` and `pattern`, with `error` when that rule could not be saved. This receipt reports rule persistence separately from the confirmation decision: a failed rule write does not undo an approved call.
 
 While the headless session and event stream remain active, every delivered `confirm_request` reaches a terminal outcome pushed as a `confirm_resolved` event: `approved` / `denied` echo a client answer, while `timeout` (the deadline auto-denied with no answer) and `cancelled` mean the request stopped being actionable without one. Retire the prompt when that event arrives instead of answering it; a late `confirm` for a resolved request is a no-op on the runtime side. Shutdown may stop event delivery before a terminal event is sent. When the event stream or session closes, discard any locally pending confirmation.
+
+With [`confirm_ask_policy: deny`](./configuration.md#unattended-permission-handling), eligible permission asks are refused without opening a confirmation. Subscribe to `tool_ask_policy_denied` to receive the completed decision, with `call_id`, `tool_name`, `agent_id`, `policy` (`deny`), and `reason`. No `confirm_request` or `confirm_resolved` accompanies this event, and there is no request to answer. Other pending confirmations remain actionable.
 
 ### `question`
 
@@ -435,6 +437,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `done_completion`      | Done tool completed with a final report. Emitted only while a loop is running, since that is the only time `done` is mounted; the `mode` field is currently always `normal` | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `agent_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `needs_approval_rules`, `already_allowed_rules`, `needs_approval_rule_items`, `already_allowed_rule_items`, `timeout_ms` |
 | `confirm_resolved`      | A confirmation reached a terminal outcome and its `request_id` is no longer actionable; close it instead of answering (`approved` and `denied` are echoes of a client answer, `timeout` is the auto-deny deadline, `cancelled` ended early) | `request_id`, `agent_id`, `tool_name`, `outcome` (`approved` / `denied` / `timeout` / `cancelled`) |
+| `tool_ask_policy_denied` | A permission ask was refused by configuration without opening a confirmation | `call_id`, `tool_name`, `agent_id`, `policy` (`deny`), `reason` |
 | `question_request` | A question becomes available | `request_id`, `binding_id`, `task_id`, `request_scope_id`, `version`, `header`, `question`, `options`, `option_ids`, `option_details`, `multiple`, `response_policy`, `default_option_id`, `timer`, `duration_seconds`, optional `deadline` |
 | `question_updated` | Timing, interaction, requirement disposition, or historical revision changes | Full question snapshot; historical replies add `revision_result` with a distinct `result_id` |
 | `question_resolved` | A question reaches a terminal outcome | Full snapshot; `reason` is `answered`, `defaulted`, `no_response`, `superseded`, `cancelled`, or `error` |

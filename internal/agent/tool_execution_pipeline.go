@@ -14,6 +14,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
 	"github.com/keakon/chord/internal/agent/requesttrim"
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
@@ -71,6 +72,7 @@ type toolExecutionPipeline struct {
 	refreshRulesetAfterRuleIntent func(toolName string, intent *ConfirmRuleIntent) (permission.Ruleset, []ConfirmRuleIntentResult)
 	isInternalTool                func(string) bool
 	confirm                       ConfirmFunc
+	denyToolAsks                  bool
 	currentTurnID                 func() uint64
 	fireHook                      func(context.Context, string, uint64, string, map[string]any) (*hook.Result, error)
 	updatePending                 func(PendingToolCall)
@@ -1267,6 +1269,19 @@ func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message
 			// before it and an explicit compact_context ask reports false, so
 			// those stay as they are.
 			return nil
+		}
+		if p.denyToolAsks && toolAskPolicyApplies(tc.Name) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			log.Infof("%s tool auto-denied by ask policy agent=%v tool=%v", p.logPrefix, p.agentID, tc.Name)
+			if p.emit != nil {
+				p.emit(ToolAskPolicyDeniedEvent{
+					CallID: tc.ID, ToolName: tc.Name, AgentID: p.toolActivityAgentID(),
+					Policy: config.ConfirmAskPolicyDeny, Reason: askPolicyDenyReason,
+				})
+			}
+			return wrapToolAskPolicyDenied(tc.Name)
 		}
 		if p.confirm == nil {
 			return wrapToolRequiresConfirmation(tc.Name)

@@ -18,6 +18,7 @@ type Config struct {
 	Context                   ContextConfig        `json:"context" yaml:"context"`                       // context compression settings
 	Skills                    SkillsConfig         `json:"skills" yaml:"skills"`                         // additional skill paths
 	ConfirmTimeout            int                  `json:"confirm_timeout" yaml:"confirm_timeout"`       // confirmation timeout in seconds (0 = infinite, default)
+	ConfirmAskPolicy          *string              `json:"confirm_ask_policy,omitzero" yaml:"confirm_ask_policy,omitempty"`
 	QuestionAutoSelectTimeout int                  `json:"question_auto_select_timeout" yaml:"question_auto_select_timeout"`
 	QuestionTimeout           int                  `json:"question_timeout" yaml:"question_timeout"` // optional-question timeout in seconds (0 = wait indefinitely)
 	Diff                      DiffConfig           `json:"diff" yaml:"diff"`                         // TUI diff rendering options

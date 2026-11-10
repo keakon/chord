@@ -158,6 +158,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		},
 		isInternalTool:        isInternalControlTool,
 		confirm:               a.confirmFn,
+		denyToolAsks:          a.denyToolAsks(),
 		currentTurnID:         a.currentTurnID,
 		captureWalltimeTarget: a.captureMainWalltimeTarget,
 		syncHookGate:          a.syncToolHooksConfigured,
@@ -188,8 +189,8 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 			// the shared confirmation dialog while their deny rules still
 			// reject; ordinary tools are already skipped by bypassPermission
 			// above, and done/compact_context report false through
-			// yoloAskDowngradeTool.
-			return a.YoloEnabled() && yoloAskDowngradeTool(name)
+			// toolAskPolicyApplies.
+			return a.YoloEnabled() && toolAskPolicyApplies(name)
 		},
 		loopExitAuthorized: a.loopExitAuthorized,
 		preapprovedPermission: func(callID, name string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {

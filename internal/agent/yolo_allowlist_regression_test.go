@@ -21,7 +21,7 @@ func yoloPipelineForRuleset(base permission.Ruleset, loopEnabled bool) toolExecu
 		registry:           tools.NewRegistry(),
 		currentRuleset:     func() permission.Ruleset { return filtered },
 		bypassPermission:   func(name string) bool { return !yoloProtectedPermissionTool(name) },
-		yoloDowngradeAsk:   func(name string) bool { return yoloAskDowngradeTool(name) },
+		yoloDowngradeAsk:   toolAskPolicyApplies,
 		loopExitAuthorized: func() bool { return loopEnabled },
 	}
 }

@@ -75,6 +75,7 @@ var projectScopedTopLevelKeys = map[string]bool{
 	"thinking_translation":            true,
 	"skills":                          true,
 	"confirm_timeout":                 true,
+	"confirm_ask_policy":              true,
 	"question_timeout":                true,
 	"question_auto_select_timeout":    true,
 	"diff":                            true,
@@ -203,6 +204,9 @@ func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
 		return nil, err
 	}
 	var paths [][]string
+	if cfg.ConfirmAskPolicy != nil && !validConfirmAskPolicy(*cfg.ConfirmAskPolicy) {
+		paths = append(paths, []string{"confirm_ask_policy"})
+	}
 	for name, p := range cfg.Providers {
 		base := []string{"providers", name}
 		v := strings.TrimSpace(p.RetryBackoff)
