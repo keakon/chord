@@ -237,8 +237,9 @@ func confirmConfigAdd(t *setupTerminal, providerName, wireModel string, provider
 	}
 	fmt.Fprintf(t.out, "Configuration to save:\n  model: %s/%s\n  API URL: %s\n  pool: %s -> %s\n  request compression: %s\n", providerName, wireModel, redactConfigURL(apiURL), edit.poolName, edit.poolRef, compression)
 	if edit.borrowID != "" {
-		fmt.Fprintf(t.out, "  catalog recipe: %s (explicit settings take priority over catalog defaults)\n", edit.borrowID)
+		fmt.Fprintf(t.out, "  source recipe: %s (existing explicit settings are preserved)\n", edit.borrowID)
 	}
+	fmt.Fprintln(t.out, "  model settings: saved explicitly with catalog: false")
 	if envVar != "" {
 		fmt.Fprintf(t.out, "  credential: $%s\n", envVar)
 	}

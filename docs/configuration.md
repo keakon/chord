@@ -83,11 +83,20 @@ providers:
     api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     models:
       glm-5.3: &bigmodel-glm-5-3
+        catalog: false
         limit:
           context: 1000000
           output: 128000
-        reasoning:
-          effort: max
+        variants:
+          low:
+            reasoning:
+              effort: low
+          high:
+            reasoning:
+              effort: high
+          max:
+            reasoning:
+              effort: max
         compat:
           request_overrides:
             rename_body_fields:
@@ -121,16 +130,22 @@ providers:
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6-sol:
+        catalog: false
         limit:
           context: 1050000
           output: 128000
         reasoning:
-          effort: medium
           summary: auto
         variants:
+          none:
+            reasoning:
+              effort: none
           low:
             reasoning:
               effort: low
+          medium:
+            reasoning:
+              effort: medium
           high:
             reasoning:
               effort: high
@@ -288,7 +303,7 @@ providers:
 
 For Gemini, set `api_url` to the native API version root, such as `https://generativelanguage.googleapis.com/v1beta/`, shared by chat and image models. Chord detects `type: generate-content` from `/v1beta`, `/v1alpha`, or Google's official `/v1` root; proxies using `/v1` need an explicit type. Do not append `models`, a model name or an operation. Chord appends `/models/{model}:streamGenerateContent?alt=sse` for chat and `/models/{model}:generateContent` for images. The model map key, such as `gemini-3.8-flash`, is the model ID sent to Gemini.
 
-For Gemini 4 Argon, start with `thinking.level: medium`; `low` and `high` are also supported, but `minimal` is not. Do not set both `thinking.budget` and `thinking.level`. Input, thinking, and output share a 1,048,576-token window, while the official `gemini` binding caps `limit.output` at 65,536 for current streaming requests. Enable `compat.generate_content.automatic_continuation: true` for continuation across requests, and configure both the total output budget and model output limit. See [Gemini 4 Argon](./model-configs.md#gemini-4-argon) for setup commands and the catalog tag.
+Gemini 4 Argon supports `low`, `medium` and `high` thinking levels, but not `minimal`. Define them in `variants` and select one with a model reference such as `gemini/gemini-4-argon@high`; omit the variant to use the endpoint default. Do not set both `thinking.budget` and `thinking.level`. Input, thinking, and output share a 1,048,576-token window, while the official `gemini` binding caps `limit.output` at 65,536 for current streaming requests. Enable `compat.generate_content.automatic_continuation: true` for continuation across requests, and configure both the total output budget and model output limit. See [Gemini 4 Argon](./model-configs.md#gemini-4-argon) for setup commands and the catalog tag.
 
 Gemini thinking options use the same unified `thinking` object as other providers (no separate `gemini_thinking` key):
 
@@ -319,15 +334,23 @@ providers:
         thinking:
           budget: -1
           include_thoughts: true
-      gemini-3-pro:
+      gemini-3.1-pro-preview:
+        catalog: false
         limit:
           context: 1048576
           output: 65536
         modalities:
           input: [text, image, pdf]
-        thinking:
-          budget: -1
-          level: high
+        variants:
+          low:
+            thinking:
+              level: low
+          medium:
+            thinking:
+              level: medium
+          high:
+            thinking:
+              level: high
 ```
 
 If `type` is omitted, Chord auto-detects it from provider config:
@@ -359,6 +382,12 @@ export; API secrets are never copied from the catalog. Existing providers keep
 their endpoint and credentials. OAuth models also require the printed
 `chord auth <provider>` login command.
 
+`add` writes the resolved model settings into `config.yaml` with
+`catalog: false`. Limits, modalities, behavior, variants and catalog field-send
+rules are saved explicitly, while existing values remain authoritative.
+Catalog refreshes do not change these saved settings. Add endpoint-specific
+prices in `cost`; the command preserves any existing cost settings.
+
 Documented connections are setup recipes. They do not imply a successful live
 request or contribute endpoint-specific reasoning variants or send rules.
 Models requiring a workspace-specific or self-hosted URL need an explicit
@@ -371,7 +400,8 @@ offline.
 
 A managed preset stands for a verified endpoint contract. When a provider uses one, Chord fills `type`, `api_url`, and `auth_scheme` only where you left them empty — an explicit value of yours always wins, and a value that contradicts the contract (for example an `auth_scheme` the preset does not use, or a `token_url` on a preset that is not OAuth) is a config error. To point a provider at a different endpoint, remove the `preset` and configure the endpoint explicitly.
 
-For providers with a managed preset, the catalog also supplies model facts you did not declare:
+Handwritten configurations can use runtime catalog filling. For providers with
+a managed preset, models without `catalog: false` receive facts you did not declare:
 
 - `limit.context`, `limit.input`, `limit.output`, and reasoning `variants` are filled only when no config layer declared them. A block you cleared with an explicit null stays cleared.
 - A model referenced from a `model_pools` entry but never defined is created from the catalog, so pool references to catalog models work without hand-copied limits.
@@ -663,8 +693,6 @@ model_templates:
     limit:
       context: 200000
       output: 64000
-    reasoning:
-      effort: high
     compat:
       # DeepSeek and GLM Chat APIs document max_tokens, not the OpenAI
       # reasoning-model default max_completion_tokens.
@@ -688,7 +716,6 @@ model_templates:
       context: 200000
       output: 64000
     reasoning:
-      effort: high
       summary: auto
 
   messages-thinking: &messages-thinking
@@ -697,7 +724,6 @@ model_templates:
       output: 64000
     thinking:
       type: adaptive
-      effort: high
     compat:
       # Compatible endpoints should not receive Anthropic beta headers unless
       # their own documentation opts into them.

@@ -258,12 +258,12 @@ chord config advise --keep-current
 
 ## `chord config add`
 
-向 `config.yaml` 添加模型引用并追加到模型池，以模型目录为已验证事实来源。命令默认离线；写入之前会对候选配置执行完整解析，只有解析无错误时才会替换文件。
+向 `config.yaml` 写入显式模型参数并追加到模型池，以模型目录为已验证事实来源。命令会写入 `catalog: false`，保存后的模型不再依赖运行时目录补齐。命令默认离线；写入之前会对候选配置执行完整解析，只有解析无错误时才会替换文件。
 
 模型的解析方式：
 
-- **wire 名已绑定 provider 的 preset**（例如 `preset: openai` 下的 `gpt-6.1-sol`）：只写入一条池引用；上下文、模态、推理档位与字段发送规则在加载时自动填充。
-- **自定义端点**：传 `--catalog <id>`，用自己的 wire 名继承目录模型的限额、模态和上下文压缩建议；同协议还会继承模型行为、compat、reasoning 变体和字段发送规则。地址、凭据和请求体压缩保持用户自己的设置。请求体压缩默认跟随 provider preset：`preset: codex` 发送 `zstd`，其他 preset 按原文发送；用 provider 的 `compress: gzip` / `compress: zstd` / `compress: off` 覆盖这个选择。
+- **请求模型名已绑定 `provider` 的 `preset`**（例如 `preset: openai` 下的 `gpt-6.1-sol`）：保存解析后的模型参数，包括上下文、模态、推理档位与字段发送规则，并写入池引用。
+- **自定义端点**：传 `--catalog <id>`，用自己的请求模型名复制目录配方。限额、模态和上下文压缩建议可以复制；协议相同时，还会复制模型行为、`compat`、推理变体和字段发送规则。地址、凭据和请求体压缩保持用户自己的设置。请求体压缩默认跟随 `provider` 的 `preset`：`preset: codex` 发送 `zstd`，其他 `preset` 按原文发送；用 `provider` 的 `compress: gzip` / `compress: zstd` / `compress: off` 覆盖这个选择。
 - **未命中**：列出最接近的已验证模型及其目录 ID。交互终端中可按数字键立即选择目录模型，无需回车；按 `m` 可输入完整目录 ID，按 Esc 或 `0` 取消；模型的请求名称保持不变。非交互模式还会列出刷新得到的候选条目（标注 provider 作用域与来源），然后返回错误，不会自动采纳。
 
 不带参数运行时先进入目录浏览：列出托管 preset 以及这些 preset 下已配置的 provider，选定后再列出该 preset 已验证服务的 wire 模型，随后继续常规引导。非交互终端下必须显式传入 `<provider>/<model>`。
@@ -275,6 +275,10 @@ chord config advise --keep-current
 脚本使用 `--no-interactive` 跳过引导与确认。stdin 或 stdout 被重定向时同样不会询问；此时必须显式传入 `<provider>/<model>`，否则命令报错。
 
 既有池条目保持原顺序，新引用只追加。未涉及的 YAML 锚点和别名会保留。编辑共享值时，命令会生成独立配置，保持其他引用的有效值不变；`<<` 合并同样支持。
+
+已有显式模型参数会保留，包括 `cost` 和用 `null` 清空的配置块。重复添加或刷新目录都不会覆盖已保存的值；调整参数需编辑 `config.yaml`。未知参数和端点价格需自行补齐。
+
+思考与推理档位保存在 `variants` 中，不会自动设置基础 `reasoning.effort`、`thinking.effort` 或 `thinking.level`。命令优先使用端点已验证的变体列表；没有该列表时，只在协议一致的情况下转换模型文档列出的档位。已有显式选择会保留。通过 `--variant high` 或以 `@high` 结尾的模型引用选择档位；未选择时使用端点默认值。
 
 ### Flags
 
@@ -296,7 +300,7 @@ chord config advise --keep-current
 # 浏览已验证的 provider 与模型，然后继续常规引导
 chord config add
 
-# 官方端点上的已验证模型：一条池引用，其余免填
+# 保存官方模型的显式参数和池引用
 chord config add openai/gpt-6-sol
 
 # 引导添加网关模型：选择目录条目，再填写接入信息
@@ -318,6 +322,8 @@ chord config add mygw2/gpt-6-sol-gw --keep-current
 ## `chord config refresh-catalog`
 
 从上游模型目录仓库（[chord-models](https://github.com/keakon/chord-models)）拉取最新版本 tag 到本地缓存。刷新快照按目录版本整体取代内置目录——绝不按条目合并——并在下一次 chord 命令启动时生效。刷新是显式联网操作：绝不在后台运行，任何失败都会保留原缓存和内置目录。`--repo <url>` 可换镜像源。用 `chord doctor config` 查看当前生效的快照。
+
+刷新后的数据用于后续 `config add` 操作，以及仍在运行时引用目录的模型。保存为 `catalog: false` 的模型保留原有显式参数。
 
 ## `chord doctor config`
 

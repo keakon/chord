@@ -35,9 +35,9 @@ func TestConfigAddReplacesExistingCatalogChoice(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			binding := resolved.Config.Providers["codex"].Models["gpt-6.1-sol"].Catalog
-			if binding == nil || binding.Disabled || binding.ID != "openai/gpt-6-sol" {
-				t.Fatalf("saved choice = %+v", binding)
+			model := resolved.Config.Providers["codex"].Models["gpt-6.1-sol"]
+			if model.Catalog == nil || !model.Catalog.Disabled || model.Limit.Context != 1050000 {
+				t.Fatalf("saved model = %+v", model)
 			}
 		})
 	}

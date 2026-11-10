@@ -11,7 +11,7 @@
 
 这一页的全局 `config.yaml` 也提供可直接复制的文件：[`team-ready.yaml`](./team-ready.yaml)。
 
-本例采用[按工作选模型](../model-choice_CN.md)中的可靠性优先配方。`deep` 中的 Opus 5.5 负责协调、专家任务和审查，`coding` 中的 Sonnet 5.5 负责实现，`fast` 中的 GPT-6 Luna 负责探索。压缩使用 `coding`，保留任务状态的要求高于定位文件。托管 preset 从模型目录补齐限额，两个 Anthropic 模型显式使用 `high` effort。
+本例采用[按工作选模型](../model-choice_CN.md)中的可靠性优先配方。`deep` 中的 Opus 5.5 负责协调、专家任务和审查，`coding` 中的 Sonnet 5.5 负责实现，`fast` 中的 GPT-6 Luna 负责探索。压缩使用 `coding`，保留任务状态的要求高于定位文件。模型限额和变体均显式配置，基础模型引用使用端点默认值；在引用后添加 `@high` 等已列出的变体即可选择思考档位。
 
 日常开发可将 `deep` 中的模型引用改为 `openai/gpt-6.1-sol`。只使用 Anthropic 时，保留 `deep` 和 `coding` 中的 Anthropic 模型，将 `fast` 指向 `anthropic/claude-sonnet-5-5`，并移除不用的 OpenAI provider 和凭据。池名不强制能力档位，也不会自动升级模型。
 
@@ -23,17 +23,33 @@
 providers:
   openai:
     preset: openai
+    models:
+      gpt-6-luna:
+        catalog: false
+        limit: {context: 1050000, output: 128000}
+        modalities: {input: [text, image, pdf]}
+        variants:
+          low: {reasoning: {effort: low}}
+          medium: {reasoning: {effort: medium}}
+          high: {reasoning: {effort: high}}
+          xhigh: {reasoning: {effort: xhigh}}
+          max: {reasoning: {effort: max}}
   anthropic:
     preset: anthropic
     models:
-      claude-opus-5-5:
+      claude-opus-5-5: &claude
+        catalog: false
+        limit: {context: 1000000, output: 128000}
+        modalities: {input: [text, image, pdf]}
         thinking:
           type: adaptive
-          effort: high
-      claude-sonnet-5-5:
-        thinking:
-          type: adaptive
-          effort: high
+        variants:
+          low: {thinking: {effort: low}}
+          medium: {thinking: {effort: medium}}
+          high: {thinking: {effort: high}}
+          xhigh: {thinking: {effort: xhigh}}
+          max: {thinking: {effort: max}}
+      claude-sonnet-5-5: *claude
 
 model_pools:
   deep:

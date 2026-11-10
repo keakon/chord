@@ -258,14 +258,14 @@ chord config advise --keep-current
 
 ## `chord config add`
 
-Add a model reference to `config.yaml` and append it to a model pool, using the model catalog as the source of verified facts. The command is offline by default, and the candidate config is resolved in full before anything is written — the file is only replaced when that resolution reports no errors.
+Save explicit model settings in `config.yaml` and append the model to a pool, using the model catalog as the source of verified facts. The command writes `catalog: false` so the saved model does not depend on runtime catalog filling. It is offline by default, and the candidate config is resolved in full before anything is written — the file is only replaced when that resolution reports no errors.
 
 Run the command without arguments to browse the catalog interactively: pick a managed provider (or one of your configured providers on that preset), then one of the wire models the preset is verified to serve, and the guided setup continues from there. Outside an interactive terminal, pass `<provider>/<model>` explicitly.
 
 How the model resolves:
 
-- **Wire name bound to the provider's preset** (for example `gpt-6.1-sol` under `preset: openai`): only a pool reference is written; context, modalities, reasoning variants and field send rules fill in at load.
-- **Custom endpoint**: pass `--catalog <id>` to inherit a catalog model under your own wire name. Limits, modalities and compaction hints transfer; the same protocol also inherits model behavior, compat, reasoning variants and field send rules. Your URL, credentials and compression settings stay explicit. Request-body compression follows the provider preset unless you set it: `preset: codex` sends `zstd`, other presets send uncompressed bodies, and provider `compress: gzip` / `compress: zstd` / `compress: off` overrides that choice.
+- **Wire name bound to the provider's preset** (for example `gpt-6.1-sol` under `preset: openai`): the resolved model settings are saved, including context, modalities, reasoning variants and field send rules, along with the pool reference.
+- **Custom endpoint**: pass `--catalog <id>` to copy a catalog recipe under your own wire name. Limits, modalities and compaction hints transfer; the same protocol also copies model behavior, compat, reasoning variants and field send rules. Your URL, credentials and compression settings stay explicit. Request-body compression follows the provider preset unless you set it: `preset: codex` sends `zstd`, other presets send uncompressed bodies, and provider `compress: gzip` / `compress: zstd` / `compress: off` overrides that choice.
 - **No match**: the closest verified models are listed with their catalog IDs. In an interactive terminal, press a number to select immediately without Enter, press `m` to enter a verified catalog ID, or press Esc/`0` to cancel; the request model name stays unchanged. Non-interactive mode also shows refreshed candidates with their provider scope and sources, then returns an error; it never adopts one automatically.
 
 In an interactive terminal, the command guides you through catalog selection and any missing provider URL or API-key environment variable. You can then choose an existing pool or create a new one, and configure the reasoning variant and request-body compression. It previews resolved limits and the settings to save, and writes only after confirmation. Numbered menus and `y/n` confirmations respond immediately; Enter accepts a displayed default. Press Esc, `q` or `0` in menus, enter `q` / `cancel` in text prompts, or decline saving to cancel. URLs, environment variable names and new pool names still require Enter. End of input also cancels, leaving configuration and credential files unchanged. Existing provider URLs and credentials are reused; accepting the compression default preserves the current setting, while changing it affects every model on that provider.
@@ -275,6 +275,10 @@ If another command changes the selected provider's endpoint or protocol while yo
 Use `--no-interactive` to skip prompts and confirmation in scripts. Redirecting stdin or stdout also disables prompts; pass `<provider>/<model>` explicitly in that case, or the command fails.
 
 Existing pool entries keep their order — new references are appended. Untouched YAML anchors and aliases are preserved. Editing a shared value creates independent settings without changing other references; `<<` merges are supported too.
+
+Existing explicit model values, including `cost` and blocks cleared with `null`, are preserved. Repeating `add` or refreshing the catalog does not overwrite saved values; edit `config.yaml` to change them. Fill in unknown settings and endpoint prices yourself.
+
+Reasoning levels are saved in `variants`, without setting a base `reasoning.effort`, `thinking.effort` or `thinking.level`. The command uses the endpoint's verified variant list when available; otherwise it converts documented model levels only for a matching protocol. Existing explicit choices are preserved. Select a level with `--variant high` or a model reference ending in `@high`; without a selection, the endpoint default applies.
 
 ### Flags
 
@@ -296,7 +300,7 @@ Existing pool entries keep their order — new references are appended. Untouche
 # Browse verified providers and models, then finish the guided setup
 chord config add
 
-# A verified model on an official endpoint: one pool reference, nothing else
+# Save explicit settings and a pool reference for an official model
 chord config add openai/gpt-6-sol
 
 # Guided gateway setup: select a catalog entry and fill connection details
@@ -318,6 +322,8 @@ chord config add mygw2/gpt-6-sol-gw --keep-current
 ## `chord config refresh-catalog`
 
 Pull the newest version tag of the upstream model catalog repository ([chord-models](https://github.com/keakon/chord-models)) into a local cache. A refreshed snapshot supersedes the built-in catalog as a whole — by catalog version, never merged entry by entry — and takes effect on the next start of every chord command. Refresh is an explicit network operation: it never runs in the background, and any failure leaves the previous cache and the built-in catalog untouched. Pass `--repo <url>` to pull from a different mirror. `chord doctor config` prints which snapshot is in effect.
+
+The refreshed data supplies future `config add` operations and models using runtime catalog filling. Models saved with `catalog: false` retain their explicit settings.
 
 ## `chord doctor config`
 

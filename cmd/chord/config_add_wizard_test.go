@@ -36,7 +36,7 @@ func TestGuidedConfigAddNewGateway(t *testing.T) {
 	}
 	provider := rc.Config.Providers["sample"]
 	model := provider.Models["gpt-6-sol"]
-	if provider.Type != config.ProviderTypeResponses || provider.APIURL != "https://example.invalid/v1/responses" || provider.Compress != "" || model.Catalog.ID != "openai/gpt-6-sol" {
+	if provider.Type != config.ProviderTypeResponses || provider.APIURL != "https://example.invalid/v1/responses" || provider.Compress != "" || model.Catalog == nil || !model.Catalog.Disabled {
 		t.Fatalf("unexpected gateway: %+v", provider)
 	}
 	if model.Compat == nil || model.Compat.Responses == nil || len(model.Variants) == 0 || model.Limit.Context != 1050000 {

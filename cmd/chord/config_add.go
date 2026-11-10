@@ -20,9 +20,9 @@ import (
 
 const configAddEndpointHint = "Use an http(s) endpoint ending in /responses, /messages or /chat/completions, or a Gemini version root ending in /v1beta or /v1alpha (the official Gemini endpoint also accepts /v1). Remove a trailing /models from Gemini URLs."
 
-// configAddOptions controls offline model onboarding. Preset-bound models
-// write pool references; other connections inherit same-protocol recipes
-// through catalog references. Request compression remains an explicit choice.
+// configAddOptions controls offline model onboarding. Catalog recipes are
+// resolved once and saved as explicit model settings. Request compression
+// remains an explicit choice.
 // Interactive terminals can complete missing choices before any file is written.
 type configAddOptions struct {
 	url            string
@@ -42,8 +42,8 @@ func newConfigAddCmd() *cobra.Command {
 	opts := &configAddOptions{}
 	cmd := &cobra.Command{
 		Use:   "add [<provider>/<model>]",
-		Short: "Add a model reference to config.yaml from the model catalog",
-		Long: `Add a model reference to config.yaml and append it to a model pool.
+		Short: "Add explicit model settings to config.yaml from the model catalog",
+		Long: `Add explicit model settings to config.yaml and append the model to a pool.
 
 Run without arguments to browse the verified providers and models and pick
 one interactively, or add a known catalog ID directly:
@@ -54,12 +54,19 @@ key environment variable. This also creates your first config.yaml. Export
 the API key before starting Chord. Existing providers keep their URL and
 credentials. Models without a documented connection still require --url.
 
-The model resolves against the verified model catalog. A wire name bound to
-the provider's preset needs nothing else: context, modalities, reasoning
-variants and field send rules fill in at load. For custom endpoints, pass
---catalog <id> to inherit the same-protocol recipe of a catalog model
-under your own wire name. An explicit --catalog selection takes priority over
-the preset binding and any saved catalog choice.
+The command resolves the selected catalog recipe, preserves your explicit
+settings, and writes limits, modalities, model behavior, named variants and
+field send rules into config.yaml with catalog: false. The saved model no
+longer depends on the catalog at runtime. For custom endpoints, pass
+--catalog <id> to copy a same-protocol recipe under your own wire name.
+An explicit --catalog selection takes priority over the preset binding and
+any saved catalog choice. Existing settings remain authoritative on repeated
+adds; catalog refreshes do not overwrite them.
+
+Reasoning levels are saved as named variants without selecting a base effort
+or level. Verified endpoint variants take precedence; otherwise, documented
+levels are used only for a matching protocol. Existing explicit choices stay
+unchanged. Use --variant to select a level in the pool reference.
 
 In an interactive terminal, choose a suggested catalog model, fill missing
 connection details and optionally configure the pool, reasoning variant and
@@ -266,7 +273,24 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 		if err != nil {
 			return nil, err
 		}
-		if err := validateCandidateConfig(out, edited, edit, showPreview); err != nil {
+		candidate, err := loadConfigAddCandidate(edited)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateCandidateConfig(out, candidate, edit, false); err != nil {
+			return nil, err
+		}
+		edited, err = materializeConfigAdd(edited, candidate, edit)
+		if err != nil {
+			return nil, err
+		}
+		candidate, err = loadConfigAddCandidate(edited)
+		if err != nil {
+			return nil, err
+		}
+		savedEdit := edit
+		savedEdit.borrowID = ""
+		if err := validateCandidateConfig(out, candidate, savedEdit, showPreview); err != nil {
 			return nil, err
 		}
 		return edited, nil
@@ -505,11 +529,7 @@ func loadConfigAddCandidate(edited []byte) (*config.ResolvedConfig, error) {
 	return candidate, nil
 }
 
-func validateCandidateConfig(out io.Writer, edited []byte, edit configAddEdit, showPreview bool) error {
-	candidate, err := loadConfigAddCandidate(edited)
-	if err != nil {
-		return err
-	}
+func validateCandidateConfig(out io.Writer, candidate *config.ResolvedConfig, edit configAddEdit, showPreview bool) error {
 	if hasConfigErrors(candidate.Diagnostics) {
 		fmt.Fprintln(out, "The candidate config has errors; nothing was written:")
 		for _, diagnostic := range candidate.Diagnostics {
@@ -533,12 +553,12 @@ func validateCandidateConfig(out io.Writer, edited []byte, edit configAddEdit, s
 	if !slices.Contains(candidate.Config.ModelPools[edit.poolName], edit.poolRef) {
 		return fmt.Errorf("candidate config discarded pool reference %q", edit.poolRef)
 	}
-	for _, diagnostic := range candidate.Diagnostics {
-		if diagnostic.Severity == config.DiagnosticSeverityWarning {
-			fmt.Fprintf(out, "Warning: %s\n", redactConfigDiagnostic(diagnostic).String())
-		}
-	}
 	if showPreview {
+		for _, diagnostic := range candidate.Diagnostics {
+			if diagnostic.Severity == config.DiagnosticSeverityWarning {
+				fmt.Fprintf(out, "Warning: %s\n", redactConfigDiagnostic(diagnostic).String())
+			}
+		}
 		printConfigAddPreview(out, candidate, edit.providerName, edit.wireModel)
 	}
 	return nil
@@ -571,10 +591,11 @@ func printConfigAddSummary(out io.Writer, edit configAddEdit, mode configAddMode
 	}
 	switch mode {
 	case configAddExact:
-		fmt.Fprintf(out, "  %s: verified preset binding; facts fill in at load, no model entry written\n", poolRef)
+		fmt.Fprintf(out, "  providers.%s.models.%s: explicit settings from the verified preset binding\n", edit.providerName, edit.wireModel)
 	case configAddBorrow:
-		fmt.Fprintf(out, "  providers.%s.models.%s.catalog: %s (inherits model recipe for the same protocol)\n", edit.providerName, edit.wireModel, edit.borrowID)
+		fmt.Fprintf(out, "  providers.%s.models.%s: explicit settings from %s\n", edit.providerName, edit.wireModel, edit.borrowID)
 	}
+	fmt.Fprintln(out, "  catalog: false (saved model settings are independent of catalog refreshes)")
 	fmt.Fprintf(out, "  model_pools.%s: append %s\n", poolName, poolRef)
 }
 
@@ -649,6 +670,9 @@ func editConfigYAMLForAdd(current []byte, e configAddEdit) ([]byte, error) {
 		if err := editor.scalar(modelNode, "catalog", e.borrowID); err != nil {
 			return nil, err
 		}
+	}
+	if err := editor.addReasoningVariants(providerNode, e.wireModel); err != nil {
+		return nil, err
 	}
 	poolsNode, err := editor.child(root, "model_pools", yaml.MappingNode, "!!map")
 	if err != nil {

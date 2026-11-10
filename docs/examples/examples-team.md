@@ -11,7 +11,7 @@ This page shows a shared project layout under `.chord/`:
 
 The global `config.yaml` from this page is available as a ready-to-copy file: [`team-ready.yaml`](./team-ready.yaml).
 
-This example uses the reliability-first recipe from [Choosing models](../model-choice.md). Opus 5.5 handles coordination, expert work, and review in `deep`; Sonnet 5.5 handles implementation in `coding`; GPT-6 Luna handles discovery in `fast`. Compaction uses `coding` because preserving task state needs more than path discovery. The managed presets supply model limits from the catalog; the two Anthropic models explicitly use `high` effort.
+This example uses the reliability-first recipe from [Choosing models](../model-choice.md). Opus 5.5 handles coordination, expert work, and review in `deep`; Sonnet 5.5 handles implementation in `coding`; GPT-6 Luna handles discovery in `fast`. Compaction uses `coding` because preserving task state needs more than path discovery. Model limits and variants are explicit. Base references use endpoint defaults; append `@high` or another listed variant to select an effort.
 
 For everyday work, replace the model reference in `deep` with `openai/gpt-6.1-sol`. For an Anthropic-only setup, keep `deep` and `coding` on the Anthropic models, point `fast` at `anthropic/claude-sonnet-5-5`, and remove the unused OpenAI provider and credential. Pool names do not impose capability levels or automatic escalation.
 
@@ -23,17 +23,33 @@ Get the model configuration working first, then add only the roles you need. Sup
 providers:
   openai:
     preset: openai
+    models:
+      gpt-6-luna:
+        catalog: false
+        limit: {context: 1050000, output: 128000}
+        modalities: {input: [text, image, pdf]}
+        variants:
+          low: {reasoning: {effort: low}}
+          medium: {reasoning: {effort: medium}}
+          high: {reasoning: {effort: high}}
+          xhigh: {reasoning: {effort: xhigh}}
+          max: {reasoning: {effort: max}}
   anthropic:
     preset: anthropic
     models:
-      claude-opus-5-5:
+      claude-opus-5-5: &claude
+        catalog: false
+        limit: {context: 1000000, output: 128000}
+        modalities: {input: [text, image, pdf]}
         thinking:
           type: adaptive
-          effort: high
-      claude-sonnet-5-5:
-        thinking:
-          type: adaptive
-          effort: high
+        variants:
+          low: {thinking: {effort: low}}
+          medium: {thinking: {effort: medium}}
+          high: {thinking: {effort: high}}
+          xhigh: {thinking: {effort: xhigh}}
+          max: {thinking: {effort: max}}
+      claude-sonnet-5-5: *claude
 
 model_pools:
   deep:

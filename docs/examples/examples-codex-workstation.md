@@ -20,10 +20,10 @@ providers:
     preset: codex
     type: responses
     models:
-      gpt-5.5:
+      gpt-6.1-sol:
+        catalog: false
         limit:
-          context: 400000
-          input: 272000
+          context: 1050000
           output: 128000
         reasoning:
           # Recommended example when you want readable reasoning summaries from
@@ -36,14 +36,23 @@ providers:
         # text:
         #   verbosity: low
         variants:
+          low:
+            reasoning:
+              effort: low
+          medium:
+            reasoning:
+              effort: medium
           high:
             reasoning:
               effort: high
           xhigh:
             reasoning:
               effort: xhigh
+          max:
+            reasoning:
+              effort: max
         modalities:
-          input: [text, image]
+          input: [text, image, pdf]
 
   fast:
     type: chat-completions
@@ -57,8 +66,7 @@ providers:
 
 model_pools:
   deep:
-    - codex/gpt-5.5@high
-    - codex/gpt-5.5
+    - codex/gpt-6.1-sol
   fast:
     - fast/gpt-5.4-mini
 

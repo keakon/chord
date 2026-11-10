@@ -22,6 +22,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- `chord config add` now saves resolved model settings explicitly with `catalog: false`, including applicable request-field rules and named reasoning variants. It leaves the base reasoning level unset unless explicitly configured. The saved model no longer depends on a catalog entry at runtime, and catalog refreshes leave its settings unchanged. Existing overrides and prices are preserved.
 - The main agent can receive an earlier checkpoint reminder when a task-completion report arrives or all todos reach a terminal state and newly added content is estimated to cross the reminder line. Automatic compaction continues to use the existing usage thresholds.
 - Injected `@path` and post-compaction file blocks now state the file's total line count and the returned line range, and flag budget truncation and an incomplete last line. A cut body ends with an explicit incompleteness note instead of resembling a full file.
 - Reduced context usage after compaction by omitting file-operation lists, folding successful shell-call logs, and removing empty summary sections from model requests. Saved summaries and archives retain the full records.

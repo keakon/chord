@@ -21,20 +21,26 @@ providers:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
     models:
-      claude-opus-5:
+      claude-opus-5-5:
+        catalog: false
         limit:
           context: 1000000
           output: 128000
         thinking:
           type: adaptive
-          effort: medium
           display: summarized
+        variants:
+          low: {thinking: {effort: low}}
+          medium: {thinking: {effort: medium}}
+          high: {thinking: {effort: high}}
+          xhigh: {thinking: {effort: xhigh}}
+          max: {thinking: {effort: max}}
         modalities:
           input: [text, image, pdf]
 
 model_pools:
   default:
-    - anthropic/claude-opus-5
+    - anthropic/claude-opus-5-5
 
 context:
   compaction:
@@ -45,6 +51,8 @@ log_level: info
 
 适合先确认：provider 能连通、凭据没问题、基本对话和自动压缩都正常。
 
+基础模型使用端点默认思考档位。需要指定档位时，将池引用改成 `anthropic/claude-opus-5-5@high` 等形式。
+
 ## 需要准备的凭据
 
 在 shell 中设置 `ANTHROPIC_API_KEY`，或把 `auth.yaml` 里的环境变量引用替换为真实 key；不要把真实 key 提交到仓库。
@@ -52,7 +60,7 @@ log_level: info
 ## 验证命令
 
 ```bash
-chord doctor models --model anthropic/claude-opus-5
+chord doctor models --model anthropic/claude-opus-5-5
 ```
 
 ## 常见失败原因

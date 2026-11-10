@@ -81,11 +81,20 @@ providers:
     api_url: https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
     models:
       glm-5.3: &bigmodel-glm-5-3
+        catalog: false
         limit:
           context: 1000000
           output: 128000
-        reasoning:
-          effort: max
+        variants:
+          low:
+            reasoning:
+              effort: low
+          high:
+            reasoning:
+              effort: high
+          max:
+            reasoning:
+              effort: max
         compat:
           request_overrides:
             rename_body_fields:
@@ -116,16 +125,22 @@ providers:
     api_url: https://api.openai.com/v1/responses
     models:
       gpt-5.6-sol:
+        catalog: false
         limit:
           context: 1050000
           output: 128000
         reasoning:
-          effort: medium
           summary: auto
         variants:
+          none:
+            reasoning:
+              effort: none
           low:
             reasoning:
               effort: low
+          medium:
+            reasoning:
+              effort: medium
           high:
             reasoning:
               effort: high
@@ -277,7 +292,7 @@ providers:
 
 Gemini 的 `api_url` 配置为原生 API 版本根，如 `https://generativelanguage.googleapis.com/v1beta/`，供对话和生图共用。Chord 从 `/v1beta`、`/v1alpha` 或 Google 官方 `/v1` 地址识别 `type: generate-content`，可省略 `type`；代理使用 `/v1` 时需显式设置类型。不要附加 `models`、模型名或操作名，Chord 会为对话追加 `/models/{model}:streamGenerateContent?alt=sse`，为生图追加 `/models/{model}:generateContent`。`models` 下的 key（如 `gemini-3.8-flash`）即为发送给 Gemini 的模型 ID。
 
-Gemini 4 Argon 推荐使用 `thinking.level: medium`，也支持 `low`、`high`，不支持 `minimal`；不要同时设置 `thinking.budget` 和 `thinking.level`。它的输入、思考和输出共享 1,048,576 token 窗口，官方 `gemini` 绑定将当前流式请求的 `limit.output` 限制为 65,536。启用 `compat.generate_content.automatic_continuation: true` 后可跨请求续传；需要同时设置总输出预算和模型输出上限。接入命令与目录 tag 见[Gemini 4 Argon](./model-configs_CN.md#gemini-4-argon)。
+Gemini 4 Argon 支持 `low`、`medium` 和 `high` 思考档位，不支持 `minimal`。将档位定义在 `variants` 中，通过 `gemini/gemini-4-argon@high` 等模型引用选择；不带变体时使用端点默认值。不要同时设置 `thinking.budget` 和 `thinking.level`。它的输入、思考和输出共享 1,048,576 token 窗口，官方 `gemini` 绑定将当前流式请求的 `limit.output` 限制为 65,536。启用 `compat.generate_content.automatic_continuation: true` 后可跨请求续传；需要同时设置总输出预算和模型输出上限。接入命令与目录 tag 见[Gemini 4 Argon](./model-configs_CN.md#gemini-4-argon)。
 
 Gemini 的 thinking 参数与其他 provider 一样统一放在 `thinking` 下（不使用 `gemini_thinking` 之类的专有键）：
 
@@ -308,15 +323,23 @@ providers:
         thinking:
           budget: -1
           include_thoughts: true
-      gemini-3-pro:
+      gemini-3.1-pro-preview:
+        catalog: false
         limit:
           context: 1048576
           output: 65536
         modalities:
           input: [text, image, pdf]
-        thinking:
-          budget: -1
-          level: high
+        variants:
+          low:
+            thinking:
+              level: low
+          medium:
+            thinking:
+              level: medium
+          high:
+            thinking:
+              level: high
 ```
 
 省略 `type` 时，Chord 按以下规则自动推断：
@@ -341,11 +364,13 @@ chord config add
 
 不带参数时，先列出托管 preset 和这些 preset 下已配置的 provider，再列出该 preset 已验证服务的 wire 模型，随后进入常规引导。已知目录 ID 可直接执行 `chord config add openai/gpt-6.1-sol`。`add` 可以直接创建首次配置，按官方文档填写 API 地址、请求模型名和密钥环境变量，并提示你设置哪个变量。目录不会保存或复制 API 密钥。已有 provider 会继续使用原地址和凭据。OAuth 模型还需执行提示中的 `chord auth <provider>` 登录。
 
+`add` 会把解析后的模型参数写入 `config.yaml`，并设置 `catalog: false`。限额、模态、模型行为、命名变体和目录中的字段发送规则均显式保存，已有配置值仍然优先。后续刷新目录不会改变这些参数。端点价格需在 `cost` 中填写；命令会保留已有费用配置。
+
 官方接入信息只用于生成配置，不表示已完成真实请求验证，也不提供端点专用的推理档位或字段发送规则。需要业务空间地址、自部署地址的模型仍需显式传入 `--url`；自定义请求模型名可用 `--catalog <vendor/model>` 借用事实。完整来源、发布日期、价格适用范围和刷新得到的候选发布在 [chord-models](https://github.com/keakon/chord-models) 仓库；候选不会填充运行默认值。获取目录更新请执行 `chord config refresh-catalog`，普通添加操作都可离线完成。
 
 托管 preset 代表一份已核验的端点契约。provider 使用托管 preset 时，Chord 只在字段留空处填充 `type`、`api_url` 和 `auth_scheme`——你显式写的值始终优先；与契约冲突的取值（例如 preset 不使用的 `auth_scheme`，或非 OAuth preset 上的 `token_url`）会被判为配置错误。如果要把 provider 指向其他端点，删除 `preset` 并显式配置端点即可。
 
-对使用托管 preset 的 provider，目录还会补充你未声明的模型事实：
+手写配置可以在运行时使用目录补齐。`provider` 使用托管 `preset` 时，未设置 `catalog: false` 的模型会获得尚未声明的事实：
 
 - `limit.context`、`limit.input`、`limit.output` 和 reasoning `variants` 只在所有配置层都未声明时填充。用显式 null 清空的块保持清空，不会被目录重新填上。
 - 被 `model_pools` 引用但从未定义的模型会按目录整体创建，引用目录里的模型无需手工抄写限额。
@@ -599,8 +624,6 @@ model_templates:
     limit:
       context: 200000
       output: 64000
-    reasoning:
-      effort: high
     compat:
       # DeepSeek 与 GLM Chat API 使用 max_tokens，而不是 OpenAI reasoning
       # 模型默认使用的 max_completion_tokens。
@@ -623,7 +646,6 @@ model_templates:
       context: 200000
       output: 64000
     reasoning:
-      effort: high
       summary: auto
 
   messages-thinking: &messages-thinking
@@ -632,7 +654,6 @@ model_templates:
       output: 64000
     thinking:
       type: adaptive
-      effort: high
     compat:
       # 除非兼容接口自己的文档明确要求，否则不要发送 Anthropic beta header。
       request_overrides:

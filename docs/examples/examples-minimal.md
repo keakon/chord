@@ -21,20 +21,26 @@ providers:
     type: messages
     api_url: https://api.anthropic.com/v1/messages
     models:
-      claude-opus-5:
+      claude-opus-5-5:
+        catalog: false
         limit:
           context: 1000000
           output: 128000
         thinking:
           type: adaptive
-          effort: medium
           display: summarized
+        variants:
+          low: {thinking: {effort: low}}
+          medium: {thinking: {effort: medium}}
+          high: {thinking: {effort: high}}
+          xhigh: {thinking: {effort: xhigh}}
+          max: {thinking: {effort: max}}
         modalities:
           input: [text, image, pdf]
 
 model_pools:
   default:
-    - anthropic/claude-opus-5
+    - anthropic/claude-opus-5-5
 
 context:
   compaction:
@@ -45,6 +51,8 @@ log_level: info
 
 Use this when you want to verify provider connectivity, credentials, basic chat flow, and conversation compaction with the smallest working config.
 
+The base model uses the endpoint's default effort. To choose a level, use a pool reference such as `anthropic/claude-opus-5-5@high`.
+
 ## Credentials to prepare
 
 Set `ANTHROPIC_API_KEY` in your shell or replace the environment-variable reference in `auth.yaml` with a real key stored outside the repository.
@@ -52,7 +60,7 @@ Set `ANTHROPIC_API_KEY` in your shell or replace the environment-variable refere
 ## Verify
 
 ```bash
-chord doctor models --model anthropic/claude-opus-5
+chord doctor models --model anthropic/claude-opus-5-5
 ```
 
 ## Common failures

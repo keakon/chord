@@ -2,9 +2,11 @@
 
 <!-- description: Connect models through the built-in catalog: chord config add, catalog refresh, custom-endpoint borrowing, and gateway behavior notes. -->
 
-Chord fills in what a model can do from its built-in model catalog: context,
+`chord config add` saves explicit model settings in `config.yaml`, using the
+built-in model catalog for context,
 input, and output limits, input modalities, reasoning variants, and — for
-verified endpoint bindings — the Responses fields a route accepts. The
+verified endpoint bindings — the Responses fields a route accepts. It writes
+`catalog: false` so the saved model does not depend on the catalog at runtime. The
 catalog's data lives in the public
 [chord-models](https://github.com/keakon/chord-models) repository; each chord
 release embeds a verified snapshot of it, and a catalog refresh brings newer
@@ -30,11 +32,18 @@ needs one command:
 chord config add openai/gpt-6.1-sol
 ```
 
-A preset-bound wire name resolves against the catalog: no model entry is
-written, the pool reference is, and limits, modalities, and reasoning variants
-fill in at load from the verified binding. Flags cover the rest of the wiring
+A preset-bound wire name resolves against the catalog once. The command writes
+the resolved model settings and a pool reference, preserving any explicit
+settings you already have. Flags cover the rest of the wiring
 (`--pool` for the target pool, `--api-key-env` to store a credential
 reference) — see [`chord config add`](./cli.md#chord-config-add).
+
+Thinking levels are saved as named `variants`, leaving the base effort or level
+unset unless you already configured one. The endpoint's verified variants take
+precedence; without that list, the command uses documented model levels only
+when the protocol matches. Select a level with `--variant high` or a model
+reference such as `openai/gpt-6.1-sol@high`. With no explicit selection, the
+endpoint default applies.
 
 A custom gateway that serves a catalog model under its own name borrows the
 facts explicitly:
@@ -62,10 +71,14 @@ An identical release from the same source can also deliver candidates when
 refreshing the embedded version; conflicting data under the same version is
 rejected.
 
-After a catalog update, references whose verified model a newer same-family
-entry likely supersedes are reported as advisories at startup and by
-`chord doctor config`. Re-run `chord config add` to rebind, or acknowledge for
-the current catalog version:
+Refreshing affects future additions and models that use runtime catalog
+filling. Models saved with `catalog: false` keep their settings. Repeating
+`chord config add`, even with `--catalog`, preserves existing explicit values;
+edit those values in `config.yaml` to change them.
+
+Handwritten catalog references can receive freshness advisories at startup and
+from `chord doctor config`. Acknowledge a reference for the current catalog
+version with:
 
 ```bash
 chord config add mygw/claude-gw --keep-current
@@ -87,7 +100,7 @@ chord config add google/gemini-4-argon --api-key-env GEMINI_API_KEY
 chord doctor models --model google/gemini-4-argon
 ```
 
-Input, thinking, and output share a 1,048,576-token window, with no separately documented input cap. The catalog defaults to `thinking.level: medium`; `low` and `high` are also supported, but `minimal` is not. Model facts retain the long-output capacity, while the official `gemini` binding sets `limit.output` to 65,536 for thinking and output combined in the current streaming request. The actual request budget also respects global `max_output_tokens` (64,000 by default) and the remaining context window.
+Input, thinking, and output share a 1,048,576-token window, with no separately documented input cap. The available thinking variants are `low`, `medium` and `high`; `minimal` is not supported. Select a variant with a reference such as `google/gemini-4-argon@high`, or leave it unset to use the endpoint default. Model facts retain the long-output capacity, while the official `gemini` binding sets `limit.output` to 65,536 for thinking and output combined in the current streaming request. The actual request budget also respects global `max_output_tokens` (64,000 by default) and the remaining context window.
 
 With `compat.generate_content.automatic_continuation: true`, Chord resumes the same generation using the server checkpoint, including recovery from interrupted connections with the same model, endpoint, and credentials. If recovery fails, a fallback model starts again from the reliable history preceding the generation; it cannot inherit the original thinking. This setting applies only to native `generate-content`, not OpenAI-compatible endpoints or Code Assist. Ordinary multi-turn tool use is distinct from continuing one generation across HTTP requests.
 
@@ -103,6 +116,7 @@ providers:
     stream_idle_timeout: 1200
     models:
       gemini-4-argon:
+        catalog: false
         compat:
           generate_content:
             automatic_continuation: true
@@ -110,8 +124,16 @@ providers:
         limit:
           context: 1048576
           output: 1048576
-        thinking:
-          level: medium
+        variants:
+          low:
+            thinking:
+              level: low
+          medium:
+            thinking:
+              level: medium
+          high:
+            thinking:
+              level: high
 ```
 
 Each compat field inherits independently: model configuration > provider configuration > catalog defaults. Explicit `false` disables continuation; `single_request_output_limit` then caps the request budget. `null` or an empty object does not disable inherited settings. The default is off, with no model-name inference. A gateway must forward continuation tokens to support this feature; Chat Completions `native_thinking` does not enable it.
@@ -136,14 +158,16 @@ Carbon launched at Argon's introductory rates: $2/$10 per million input/output t
 
 ## Custom endpoints: borrowing catalog facts
 
-`chord config add ... --catalog <id>` writes a `catalog:` reference under the
-model. The explicit selection takes priority over the preset binding and any
+`chord config add ... --catalog <id>` copies the selected recipe into the model
+and writes `catalog: false`. The selection takes priority over the preset binding and any
 saved catalog choice; it must be valid for the selected preset. A custom
-endpoint (no preset) inherits limits, modalities and compaction
-hints. When its protocol matches the official connection, it also inherits
+endpoint (no preset) copies limits, modalities and compaction
+hints. When its protocol matches the official connection, it also copies
 the model behavior, `compat`, reasoning variants and Responses field-send rules.
 The provider keeps its URL, credentials and transport settings.
-Turn a borrow off per model with `catalog: false`:
+
+For runtime catalog filling, you can instead write a catalog reference by hand.
+That model depends on the selected catalog entry at every load:
 
 ```yaml
 providers:
@@ -155,8 +179,9 @@ providers:
         catalog: anthropic/claude-opus-5-5
 ```
 
-Facts the catalog does not have stay unset and are reported as diagnostics —
-fill them in manually instead of copying a neighbor's numbers. Explicitly
+Unknown facts stay unset; fill them in from your endpoint's documentation.
+Set `cost` explicitly for usage accounting, including that endpoint's cache
+prices. Adding a model preserves an existing `cost` block. Explicitly
 configured values always win over catalog facts; `chord config advise` only
 compares values you declared yourself.
 
@@ -229,12 +254,11 @@ pricing can differ from the listed base rate.
 ## What a catalog recipe contains
 
 The catalog contains token limits and modalities, reasoning or thinking
-variants, model `compat` fields and documented compaction hints. Preset bindings
-and custom endpoints using the same protocol inherit the model recipe at load.
-`chord config add` writes the official URL for a new provider, or preserves your
-custom URL and records a `catalog` reference. This also works for an alias such
-as `sample/model` with `--catalog moonshotai/kimi-k3`: full reasoning replay is
-inherited without having to copy its compat settings.
+variants, model `compat` fields and documented compaction hints.
+`chord config add` resolves this recipe and saves its model fields explicitly.
+It writes the official URL for a new provider or preserves your custom URL.
+For an alias such as `sample/model` with `--catalog moonshotai/kimi-k3`, it
+copies the full reasoning replay setting into `compat`.
 Every field and its sources are published in the [chord-models](https://github.com/keakon/chord-models) repository.
 
 When a gateway exposes a different protocol, limits, modalities and compaction
@@ -257,42 +281,66 @@ reference information. To override the preset default, set provider
 `compress: gzip`, `compress: zstd` or `compress: off`. Adding a model preserves
 an existing explicit compression setting.
 
-Documented model reasoning options may exceed the variants verified on a
-managed route. The Opus 5.5 profile uses its official `medium` effort default;
-explicit user settings take priority.
-
-Default thinking settings and named variants are configured separately. For
-example, the Claude Fable 5.2 Messages profile defaults to
-`thinking.type: adaptive` and `thinking.effort: high`; referencing the base model
-uses those defaults. A `model@high` reference requires a `variants.high` entry.
-The model's current Anthropic binding has no named variants, so define the entry
-explicitly.
-
 Keep reusable model settings in `model_templates` and reference them with YAML
-anchors. A template can contain `catalog`, `variants` and `cost` for usage
-accounting. This example defines `@high` explicitly and uses a single template
-reference under the provider:
+anchors. Use `variants` to select a thinking effort through a `model@variant`
+reference. Documented model reasoning options may exceed the variants verified
+on a managed route; check which options your endpoint accepts.
+
+The Messages configuration below shares settings across Claude models and
+defines their supported effort levels: `low`, `medium`, `high`, `xhigh` and
+`max`. It leaves the base model's effort unset, so a reference without a variant
+uses the endpoint's default. Add a separate `cost` block to each model using
+your endpoint's prices:
 
 ```yaml
 model_templates:
-  claude-fable-5-2: &claude-fable-5-2
-    catalog: anthropic/claude-fable-5-2
+  claude-5: &claude-5
+    catalog: false
+    limit:
+      context: 1000000
+      output: 128000
+    modalities:
+      input: [text, image, pdf]
+    thinking:
+      type: adaptive
+      display: summarized
+    prompt_cache:
+      mode: explicit
+      ttl: 5m
+      cache_tools: true
+    compaction:
+      threshold: 0.7
+      reminder: 0.6
     variants:
+      low:
+        thinking:
+          effort: low
+      medium:
+        thinking:
+          effort: medium
       high:
         thinking:
           effort: high
+      xhigh:
+        thinking:
+          effort: xhigh
+      max:
+        thinking:
+          effort: max
 providers:
   mygw:
     type: messages
     api_url: https://gateway.example.com/v1/messages
     models:
-      claude-fable-5-2: *claude-fable-5-2
+      claude-fable-5-2: *claude-5
+      claude-opus-5-5: *claude-5
+      claude-sonnet-5-5: *claude-5
 model_pools:
   fable:
-    - mygw/claude-fable-5-2@high
+    - mygw/claude-fable-5-2
 ```
 
-To use the default effort without named variants, omit `variants` and reference
-`mygw/claude-fable-5-2` in the pool. Run `chord doctor config` to check catalog
-references and variants, then
+To select an effort, use a reference such as `mygw/claude-fable-5-2@high`
+in the pool; the corresponding `variants.high` entry must exist.
+Run `chord doctor config` to check the configuration and variants, then
 `chord doctor models --model mygw/claude-fable-5-2` to verify the connection.

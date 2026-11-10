@@ -61,7 +61,7 @@ func TestCatalogAddDocumentedConnectionAndUsableInputBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "https://api.moonshot.ai/v1/chat/completions") || !strings.Contains(string(raw), "catalog: moonshotai/kimi-k3") {
+	if !strings.Contains(string(raw), "https://api.moonshot.ai/v1/chat/completions") || !strings.Contains(string(raw), "catalog: false") {
 		t.Fatalf("missing connection or explicit facts: %s", raw)
 	}
 	auth, err := os.ReadFile(filepath.Join(dir, "auth.yaml"))
@@ -148,8 +148,8 @@ func TestCatalogAddGatewayRecipeAndExplicitCompression(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Count(string(raw), "catalog: moonshotai/kimi-k3") != 1 || strings.Contains(string(raw), "reasoning_replay:") {
-				t.Fatalf("recipe should remain a catalog reference: %s", raw)
+			if strings.Count(string(raw), "catalog: false") != 1 || !strings.Contains(string(raw), "reasoning_replay: all") {
+				t.Fatalf("recipe should be saved explicitly: %s", raw)
 			}
 			resolved, err := config.LoadResolvedConfig(path, "")
 			if err != nil {

@@ -224,21 +224,7 @@ func customCatalogProfile(provider ProviderConfig, facts modelcatalog.ModelFacts
 	if protocol == "" {
 		protocol = InferProviderTypeFromAPIURL(provider.APIURL)
 	}
-	vendor, _, _ := strings.Cut(facts.ID, "/")
-	var selected *modelcatalog.Binding
-	for _, endpoint := range modelcatalog.EndpointContracts() {
-		if endpoint.Protocol != protocol {
-			continue
-		}
-		if binding, ok := modelcatalog.LookupBindingByModelID(endpoint.PresetID, facts.ID); ok {
-			if selected == nil || endpoint.PresetID == vendor {
-				selected = &binding
-			}
-			if endpoint.PresetID == vendor {
-				break
-			}
-		}
-	}
+	selected := customCatalogBinding(protocol, facts.ID)
 	if selected != nil {
 		profile := modelcatalog.MergeConfigProfiles(facts.Profile, selected.Profile)
 		if selected.Responses != nil {
@@ -261,6 +247,25 @@ func customCatalogProfile(provider ProviderConfig, facts modelcatalog.ModelFacts
 		return nil, &modelcatalog.ConfigProfile{Compaction: facts.Profile.Compaction, Sources: facts.Profile.Sources}, nil
 	}
 	return nil, nil, nil
+}
+
+func customCatalogBinding(protocol, modelID string) *modelcatalog.Binding {
+	vendor, _, _ := strings.Cut(modelID, "/")
+	var selected *modelcatalog.Binding
+	for _, endpoint := range modelcatalog.EndpointContracts() {
+		if endpoint.Protocol != protocol {
+			continue
+		}
+		if binding, ok := modelcatalog.LookupBindingByModelID(endpoint.PresetID, modelID); ok {
+			if selected == nil || endpoint.PresetID == vendor {
+				selected = &binding
+			}
+			if endpoint.PresetID == vendor {
+				break
+			}
+		}
+	}
+	return selected
 }
 
 // Catalog compat is below explicit provider settings, even though it is
