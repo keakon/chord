@@ -23,7 +23,7 @@ printf '%s\n' "$@" > "$CHORD_GOPLS_TEST_ARGS"
 case "${CHORD_GOPLS_TEST_MODE:-}" in
   diagnostic) echo 'sample.go:1:1: sample diagnostic' ;;
   stderr) echo 'sample failure' >&2 ;;
-  failure) exit 7 ;;
+  failure) echo 'sample failure' >&2; exit 7 ;;
 esac
 SH
 cat > "$CHORD_GO" <<'SH'
@@ -67,6 +67,7 @@ printf 'package sample_test\n' > external_test.go
 printf '//go:build ignored\n\npackage sample\n' > excluded.go
 
 "$gate" > "$fixture/output" 2>&1
+grep -Fqx 'gopls check passed for linux/amd64' "$fixture/output"
 for file in sample.go sample_linux.go sample_test.go external_test.go; do
   grep -Fqx "$PWD/$file" "$CHORD_GOPLS_TEST_ARGS"
 done
@@ -91,6 +92,22 @@ for mode in diagnostic stderr failure load-failure invalid-json empty; do
     exit 1
   fi
   case "$mode" in
+    diagnostic)
+      grep -Fqx 'sample.go:1:1: sample diagnostic' "$fixture/output"
+      grep -Fqx 'gopls diagnostics found for linux/amd64' "$fixture/output"
+      ;;
+    stderr)
+      grep -Fqx 'sample failure' "$fixture/output"
+      grep -Fqx 'gopls diagnostics found for linux/amd64' "$fixture/output"
+      ;;
+    failure)
+      if ! grep -Fqx 'sample failure' "$fixture/output"; then
+        echo 'gate discarded the failed gopls process output' >&2
+        cat "$fixture/output" >&2
+        exit 1
+      fi
+      grep -Fqx 'gopls check failed for linux/amd64' "$fixture/output"
+      ;;
     load-failure|invalid-json|empty) [[ ! -e "$CHORD_GOPLS_TEST_ARGS" ]] ;;
   esac
 done
