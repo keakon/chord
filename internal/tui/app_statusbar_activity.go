@@ -317,6 +317,12 @@ func (m *Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now 
 	case agent.ActivityStreaming:
 		display.Icon = "↓"
 		display.Text = elapsedText
+	default:
+		display.Icon = "▸"
+		display.Text = elapsedText
+	}
+	switch a.Type {
+	case agent.ActivityWaitingHeaders, agent.ActivityWaitingToken, agent.ActivityStreaming:
 		if progress, ok := m.requestProgress[agentID]; ok {
 			bytes := max(progress.VisibleBytes-progress.BaseBytes, 0)
 			events := max(progress.VisibleEvents-progress.BaseEvents, 0)
@@ -330,9 +336,6 @@ func (m *Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now 
 				}
 			}
 		}
-	default:
-		display.Icon = "▸"
-		display.Text = elapsedText
 	}
 	return display
 }

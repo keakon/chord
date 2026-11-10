@@ -15,6 +15,7 @@ type statusBarActivitySampleKey struct {
 	StartedAt  time.Time
 	BaseBytes  int64
 	BaseEvents int64
+	Progress   bool
 	Done       bool
 }
 
@@ -44,10 +45,10 @@ func (m *Model) statusBarSampledActivityAt(a agent.AgentActivityEvent, now time.
 	if startedAt.IsZero() {
 		startedAt, _ = m.latestStatusStartWall(a.AgentID)
 	}
-	progress := m.requestProgress[a.AgentID]
+	progress, hasProgress := m.requestProgress[a.AgentID]
 	key := statusBarActivitySampleKey{
 		Activity: a, StartedAt: startedAt,
-		BaseBytes: progress.BaseBytes, BaseEvents: progress.BaseEvents, Done: progress.Done,
+		BaseBytes: progress.BaseBytes, BaseEvents: progress.BaseEvents, Progress: hasProgress, Done: progress.Done,
 	}
 	sample := &m.statusBarCadence
 	if !sample.activityValid || sample.activityKey != key || sample.activitySecond != now.Unix() {

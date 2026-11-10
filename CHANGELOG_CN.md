@@ -37,6 +37,7 @@
 
 ### 修复
 
+- 等待模型输出时，状态栏也会显示已接收的字节数和事件数，不再等到出现可见输出才显示。
 - 在其他对话框后排队的确认请求结束时，会立即从队列移除，避免关闭当前对话框后又弹出已失效的确认。
 - Gemini 工具声明现在收敛到 Schema proto 支持的子集：丢弃不支持的 JSON Schema 关键字、`required` 只保留同一节点 `properties` 中定义的字段、`enum` 值统一转为字符串、`type` 数组归一化为单个类型、`oneOf` 分支降级为 `anyOf`。此前只要有一个工具携带「仅含 required」的 `anyOf` 分支（包括 `question` 工具），严格的 Gemini 后端就会拒绝整个请求；这类 schema 校验 400 现在直接终止请求，不再逐个冷却轮换所有 API key。
 - `compat.forced_tool_choice.suppress_in_thinking` 现在同样作用于 Gemini 模型：模型可以思考时，强制工具选择降级为默认调用模式；思考被 budget 0 关闭时仍会发送。此前该旋钮只对 OpenAI 兼容与 Responses 模型生效。

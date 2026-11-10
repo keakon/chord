@@ -122,6 +122,38 @@ func TestRenderStatusBarNamesWaitingStates(t *testing.T) {
 	}
 }
 
+func TestRenderStatusBarRequestShowsReceivedProgress(t *testing.T) {
+	for _, activity := range []agent.ActivityType{agent.ActivityWaitingHeaders, agent.ActivityWaitingToken, agent.ActivityStreaming} {
+		for _, tc := range []struct {
+			name   string
+			bytes  int64
+			events int64
+			want   string
+		}{
+			{name: "headers", bytes: 2048, want: "2.0 KB"},
+			{name: "data", bytes: 4096, events: 3, want: "4.0 KB · 3 events"},
+			{name: "events", events: 1, want: "0 B · 1 event"},
+		} {
+			t.Run(string(activity)+"/"+tc.name, func(t *testing.T) {
+				m := NewModelWithSize(nil, 180, 24)
+				_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: activity, AgentID: "main"}})
+				_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: tc.bytes, Events: tc.events}})
+				plain := terminaltext.StripANSI(m.renderStatusBar())
+				if !strings.Contains(plain, tc.want) {
+					t.Fatalf("request status = %q, want progress %q", plain, tc.want)
+				}
+				if tc.events == 0 && strings.Contains(plain, "event") {
+					t.Fatalf("header-only progress should not show events: %q", plain)
+				}
+				_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Done: true}})
+				if plain := terminaltext.StripANSI(m.renderStatusBar()); strings.Contains(plain, tc.want) {
+					t.Fatalf("finished request progress remains visible: %q", plain)
+				}
+			})
+		}
+	}
+}
+
 func TestRequestProgressKeepsMainPrefixedSubAgentSeparate(t *testing.T) {
 	m := NewModelWithSize(nil, 180, 24)
 	m.mode = ModeNormal
@@ -157,26 +189,37 @@ func TestRenderStatusBarNamesStreamingActivity(t *testing.T) {
 	}
 }
 
-func TestStreamingActivityRetainsNumericProgressWhenWidthIsTight(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 24)
-	now := time.Unix(100, 0)
-	activity := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
-	m.activities["main"] = activity
-	m.activityStartTime["main"] = now.Add(-12 * time.Second)
-	m.requestProgress["main"] = requestProgressState{VisibleBytes: 128 * 1024, BaseBytes: 64 * 1024, VisibleEvents: 50, BaseEvents: 8}
-	for _, tc := range []struct {
-		width int
-		want  string
+func TestRequestActivityRetainsNumericProgressWhenWidthIsTight(t *testing.T) {
+	for _, state := range []struct {
+		activity agent.ActivityType
+		icon     string
 	}{
-		{50, "↓ 64 KB · 42 events · 12s"},
-		{16, "↓ 64 KB · 12s"},
-		{7, "↓ 64 KB"},
-		{1, "↓"},
+		{agent.ActivityWaitingHeaders, "◷"},
+		{agent.ActivityWaitingToken, "◌"},
+		{agent.ActivityStreaming, "↓"},
 	} {
-		got := terminaltext.StripANSI(m.renderActivityAt(activity, tc.width, now))
-		if got != tc.want {
-			t.Fatalf("activity at width %d = %q, want %q", tc.width, got, tc.want)
-		}
+		t.Run(string(state.activity), func(t *testing.T) {
+			m := NewModelWithSize(nil, 80, 24)
+			now := time.Unix(100, 0)
+			activity := agent.AgentActivityEvent{Type: state.activity, AgentID: "main"}
+			m.activities["main"] = activity
+			m.activityStartTime["main"] = now.Add(-12 * time.Second)
+			m.requestProgress["main"] = requestProgressState{VisibleBytes: 128 * 1024, BaseBytes: 64 * 1024, VisibleEvents: 50, BaseEvents: 8}
+			for _, tc := range []struct {
+				width int
+				text  string
+			}{
+				{50, " 64 KB · 42 events · 12s"},
+				{16, " 64 KB · 12s"},
+				{7, " 64 KB"},
+				{1, ""},
+			} {
+				got := terminaltext.StripANSI(m.renderActivityAt(activity, tc.width, now))
+				if want := state.icon + tc.text; got != want {
+					t.Fatalf("activity at width %d = %q, want %q", tc.width, got, want)
+				}
+			}
+		})
 	}
 }
 
