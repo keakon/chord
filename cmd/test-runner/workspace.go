@@ -16,6 +16,7 @@ import (
 
 const (
 	runsDirectory = "chord-test-runs"
+	workDirectory = "work"
 	registryLock  = ".lock"
 	activeLock    = "active.lock"
 	readyFile     = "reclaimable"
@@ -32,7 +33,12 @@ type testRun struct {
 	lock *os.File
 }
 
-func (r *testRun) work() string { return filepath.Join(r.dir, "work") }
+// work is the temporary root shared by every run: Go test result caching keys
+// on environment variables the test process reads, including the TMPDIR value
+// that t.TempDir and os.TempDir resolve, so a per-run directory value would
+// force uncached reruns of unchanged packages. The root is stable per boot;
+// its contents are reclaimed by sweepWorkRoot, never by run cleanup.
+func (r *testRun) work() string { return filepath.Join(filepath.Dir(r.dir), workDirectory) }
 
 func newRun(base string, diagnostics io.Writer) (*testRun, error) {
 	root, err := filepath.Abs(filepath.Join(base, runsDirectory))
@@ -53,6 +59,9 @@ func newRun(base string, diagnostics io.Writer) (*testRun, error) {
 	if err = reapRuns(root, diagnostics); err != nil {
 		return nil, err
 	}
+	if err = sweepWorkRoot(root); err != nil {
+		return nil, err
+	}
 	id, err := externalsupervisor.NewRunID()
 	if err != nil {
 		return nil, err
@@ -67,12 +76,33 @@ func newRun(base string, diagnostics io.Writer) (*testRun, error) {
 		return nil, err
 	}
 	run := &testRun{dir: dir, id: id, lock: lock}
-	if err := os.Mkdir(run.work(), 0o700); err != nil {
+	if err := os.Mkdir(run.work(), 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 		_ = lock.Close()
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("create test work directory: %w", err)
 	}
 	return run, nil
+}
+
+// sweepWorkRoot reclaims the shared work root when no run directory survives:
+// run directories cover both live commands (held active locks) and unproven
+// cleanups, whose processes may still write into the root. A skipped sweep
+// only delays space reclaim; correctness never depends on it.
+func sweepWorkRoot(root string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("read test runs: %w", err)
+	}
+	for _, entry := range entries {
+		id := strings.TrimPrefix(entry.Name(), "run-")
+		if strings.HasPrefix(entry.Name(), "run-") && externalsupervisor.ValidRunID(id) {
+			return nil
+		}
+	}
+	if err := os.RemoveAll(filepath.Join(root, workDirectory)); err != nil {
+		return fmt.Errorf("sweep test work root: %w", err)
+	}
+	return nil
 }
 
 func reapRuns(root string, diagnostics io.Writer) error {
@@ -142,11 +172,10 @@ func (r *testRun) remove() error {
 }
 
 func (r *testRun) removeFiles() error {
-	// Keep ownership and cleanup evidence if removing test payloads fails,
-	// so a later run can retry without guessing whether processes exited.
-	if err := os.RemoveAll(r.work()); err != nil {
-		return fmt.Errorf("remove test work directory: %w", err)
-	}
+	// Keep ownership and cleanup evidence if removal fails, so a later run
+	// can retry without guessing whether processes exited. The shared work
+	// root is intentionally left in place: concurrent runs write into it,
+	// and sweepWorkRoot reclaims its contents once no run directory remains.
 	if err := os.RemoveAll(r.dir); err != nil {
 		return fmt.Errorf("remove test run: %w", err)
 	}

@@ -154,11 +154,19 @@ return that memory to the system. Repeated writes and deletes can therefore
 leave `diskimages-helper` using much more memory than the remaining files.
 A small disk fails with `no space left on device` while building.
 
-On Unix, `make test-fast` and `make race-fast` create a separate
-`chord-test-runs/run-<id>/work` directory for each command. The runner sets
-`TMPDIR`, `TMP`, `TEMP`, and `GOTMPDIR` to that directory for the command and its
-children; the Go build cache stays separate. Concurrent runs keep their own
-directories. The runner executable is built for the host and cached under
+On Unix, `make test-fast` and `make race-fast` create a `chord-test-runs/run-<id>`
+directory for each command; it holds only that run's supervision receipts and
+locks. The runner sets `TMPDIR`, `TMP`, `TEMP`, and `GOTMPDIR` to the shared work
+root `chord-test-runs/work` for the command and its children; the Go build cache
+stays separate. The work root is stable for the current boot; concurrent runs
+share it while keeping their own run directories, and a reboot clears the RAM
+disk together with anything the work root still holds. A new run wipes and
+recreates the work root only when no run directory remains — every earlier run
+has been recycled or has proven its cleanup — and skips the sweep otherwise.
+Run cleanup never removes the work root. Files left behind by a killed run are
+reclaimed by that exclusive sweep or by the next reboot.
+
+The runner executable is built for the host and cached under
 `GOCACHE/chord-test-runner` before the test workspace is created.
 Each build ID has its own executable path, so concurrent worktrees keep using
 the supervisor from the same build. A file lock protects each build while a
@@ -186,7 +194,7 @@ entries until at most 6 GiB remains. Go updates use timestamps at most once an
 hour, so the ordering is approximate. Active commands can temporarily exceed
 the budget. Fuzz corpora, tool installations, and the separate module download
 cache (`GOMODCACHE`) are left alone. The cache is on disk; the RAM disk holds only
-per-command scratch files.
+the shared work root and the run directories.
 
 Usage records survive a killed runner. Its supervisor releases them only after
 proving command cleanup and then attempts cache eviction, even if the runner
@@ -204,15 +212,14 @@ Do not point unrelated commands at this managed cache: they would bypass the
 usage registry. The wrapper overrides `GOCACHE` and disables `GOCACHEPROG` for
 its command tree. Existing default-cache data is left untouched.
 
-The runner removes the directory after the supervised process group exits and
-its inherited output pipes close. This also covers test failures, panics,
-timeouts, and cancellation with Ctrl-C or SIGTERM. A separate supervisor
-continues teardown if the runner is killed. The next run using the same base
-directory recovers leftovers only when their locks are available and their
-matching cleanup records prove completion. Missing evidence, open output
-pipes, and deletion failures leave the directory in place with a diagnostic.
-Failure to remove an old run leaves the new command free to run. A failure to
-clean up the current command makes an otherwise successful command fail.
+The runner removes the run directory after the supervised process group exits
+and its inherited output pipes close; the work root stays in place. This also
+covers test failures, panics, timeouts, and cancellation with Ctrl-C or
+SIGTERM. A separate supervisor continues teardown if the runner is killed.
+Missing evidence, open output pipes, and deletion failures leave the run
+directory in place with a diagnostic; the next run then skips the work-root
+sweep but is otherwise free to run. A failure to clean up the current command
+makes an otherwise successful command fail.
 
 Tests must still use `t.TempDir()` and close resources through `t.Cleanup()`.
 Processes that detach into another session must have their own shutdown
@@ -331,6 +338,25 @@ another path. A missing or unrelated checkout is ignored. The check only sees
 tags already fetched in that checkout, so fetch tags in chord-models to
 discover newer releases. Run `make model-catalog-check` at any time, or set
 `CHORD_SKIP_MODEL_CATALOG_CHECK=1` to silence the reminder.
+
+#### Caching test results
+
+`make test-fast` does not pass `-count=1`: `go test` caches each package's
+result keyed by content, covering the sources of the package's dependency
+graph, the environment variables the test reads through `os.Getenv`, and the
+files it reads. Because the runner points `TMPDIR` at the same work root on
+every run, unchanged packages report `(cached)` and changed packages are
+invalidated and re-run automatically; on an unchanged tree, `internal/agent`
+drops from ~67s to ~3s.
+
+To force every selected package to run again, use `make test`, which keeps
+`-count=1`, or pass `-count=1` to an explicit `go test` command. A flaky test
+stays pinned to its cached result while its inputs are unchanged; CI always
+runs cold and catches it there.
+
+Tests that bypass `t.TempDir()` and call `os.TempDir()` directly must not use
+fixed file names in the shared work root, which concurrent and consecutive
+runs share.
 
 ## Performance-sensitive changes
 

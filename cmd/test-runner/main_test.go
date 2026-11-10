@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -65,11 +66,6 @@ func childFixture(args []string) int {
 		return 0
 	case "failure":
 		return 7
-	case "uncleanable":
-		if err := os.Chmod(work, 0o500); err != nil {
-			panic(err)
-		}
-		return 0
 	case "panic":
 		panic("sample panic")
 	case "hold":
@@ -139,78 +135,55 @@ func TestLaunchFailureCleansDirectory(t *testing.T) {
 	assertNoRuns(t, base)
 }
 
-func TestCleanupFailurePreservesEvidenceForRetry(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root bypasses directory write permissions")
-	}
-	base := t.TempDir()
-	cmd := runnerCommand(t, base, os.Args[0], "child-fixture", "uncleanable")
-	output, err := cmd.CombinedOutput()
-	if commandCode(err) != 1 || !bytes.Contains(output, []byte("permission denied")) {
-		t.Fatalf("cleanup failure hidden: %v: %s", err, output)
-	}
-	entries, err := os.ReadDir(filepath.Join(base, runsDirectory))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), "run-") {
-			continue
-		}
-		dir := filepath.Join(base, runsDirectory, entry.Name())
-		t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, "work"), 0o700) })
-		run := testRun{dir: dir, id: strings.TrimPrefix(entry.Name(), "run-")}
-		if err := run.ready(); err != nil {
-			t.Fatalf("failed cleanup lost its evidence: %v", err)
-		}
-		if err := os.Chmod(run.work(), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	next := runnerCommand(t, base, os.Args[0], "child-fixture", "success")
-	if output, err := next.CombinedOutput(); err != nil {
-		t.Fatalf("retry failed: %v: %s", err, output)
-	}
-	assertNoRuns(t, base)
-}
-
 func TestReapDeletionFailureKeepsDirectoryAndRunsCommand(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root bypasses directory write permissions")
 	}
 	base := t.TempDir()
-	cmd := runnerCommand(t, base, os.Args[0], "child-fixture", "uncleanable")
-	output, err := cmd.CombinedOutput()
-	if commandCode(err) != 1 || !bytes.Contains(output, []byte("permission denied")) {
-		t.Fatalf("cleanup failure hidden: %v: %s", err, output)
-	}
-	var dir string
-	entries, err := os.ReadDir(filepath.Join(base, runsDirectory))
+	id, err := externalsupervisor.NewRunID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "run-") {
-			dir = filepath.Join(base, runsDirectory, entry.Name())
-		}
+	dir := filepath.Join(base, runsDirectory, "run-"+id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
 	}
-	if dir == "" {
-		t.Fatal("no retained run found")
+	// Proven cleanup evidence plus an unremovable directory: recovery must
+	// report the stale run without failing the new command, and the next run
+	// retries once the directory is writable again. While the stale directory
+	// remains, the shared work root sweep stays skipped.
+	receipt := externalsupervisor.Receipt{Version: 2, RunID: id, Cleanup: externalsupervisor.Cleanup{Proven: true}}
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
 	}
-	work := filepath.Join(dir, "work")
-	t.Cleanup(func() { _ = os.Chmod(work, 0o700) })
-	// Recovery must report the undeletable stale run without failing the new
-	// command; the next run retries once the work directory is writable again.
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, readyFile), []byte(id), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, activeLock), os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	blocked := runnerCommand(t, base, os.Args[0], "child-fixture", "success")
 	blockedOutput, err := blocked.CombinedOutput()
 	if err != nil {
 		t.Fatalf("reap deletion failure blocked the run: %v: %s", err, blockedOutput)
 	}
-	assertRetainedPreviousRun(t, string(blockedOutput), dir, "remove test work directory")
+	assertRetainedPreviousRun(t, string(blockedOutput), dir, "remove test run")
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("stale run disappeared: %v", err)
 	}
-	if err := os.Chmod(work, 0o700); err != nil {
+	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	last := runnerCommand(t, base, os.Args[0], "child-fixture", "success")
@@ -247,8 +220,10 @@ func TestKilledRunnerRecoveredWithoutTouchingActiveRun(t *testing.T) {
 	markers := t.TempDir()
 	first := runnerCommand(t, base, os.Args[0], "child-fixture", "hold", filepath.Join(markers, "first"))
 	startCommand(t, first)
-	work := string(awaitFile(t, filepath.Join(markers, "first")))
-	runDir := filepath.Dir(work)
+	_ = string(awaitFile(t, filepath.Join(markers, "first")))
+	// The work root is shared, so the child's marker no longer identifies the
+	// run directory: capture it while first's run is the only one in the root.
+	runDir := onlyRunDir(t, base)
 	second := runnerCommand(t, base, os.Args[0], "child-fixture", "hold", filepath.Join(markers, "second"))
 	startCommand(t, second)
 	secondWork := string(awaitFile(t, filepath.Join(markers, "second")))
@@ -411,10 +386,34 @@ func assertNoRuns(t *testing.T, base string) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if e.Name() != registryLock {
-			t.Errorf("leftover: %s", e.Name())
+		if e.Name() == registryLock || e.Name() == workDirectory {
+			continue
 		}
+		t.Errorf("leftover: %s", e.Name())
 	}
+}
+
+// onlyRunDir returns the single run directory in the test run root.
+func onlyRunDir(t *testing.T, base string) string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(base, runsDirectory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dir string
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "run-") {
+			continue
+		}
+		if dir != "" {
+			t.Fatalf("multiple run directories: %s, %s", dir, e.Name())
+		}
+		dir = filepath.Join(base, runsDirectory, e.Name())
+	}
+	if dir == "" {
+		t.Fatal("no run directory found")
+	}
+	return dir
 }
 
 // assertRetainedPreviousRun requires the stale-directory diagnostic for one
@@ -498,16 +497,18 @@ func TestMissingReceiptRunRetainedAcrossCommandResults(t *testing.T) {
 				t.Fatalf("missing-receipt run removed: %v", err)
 			}
 			// The current command kept its own cleanup rules: only the stale
-			// run directory remains beside the registry lock.
+			// run directory and the shared work root remain beside the
+			// registry lock.
 			assertCacheUsers(t, base, 0)
 			entries, err := os.ReadDir(filepath.Join(base, runsDirectory))
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, entry := range entries {
-				if entry.Name() != registryLock && entry.Name() != filepath.Base(stale.dir) {
-					t.Errorf("leftover: %s", entry.Name())
+				if entry.Name() == registryLock || entry.Name() == workDirectory || entry.Name() == filepath.Base(stale.dir) {
+					continue
 				}
+				t.Errorf("leftover: %s", entry.Name())
 			}
 		})
 	}

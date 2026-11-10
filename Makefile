@@ -55,10 +55,11 @@ test:
 
 # Opt-in speed-up: run the tests with a memory-backed temp dir when one is
 # available, otherwise fall back to the default temp dir. See
-# scripts/test_tmpdir.sh and CONTRIBUTING.md. Each Unix run owns a temporary
-# directory; shared mounts are never swept or ejected.
+# scripts/test_tmpdir.sh and CONTRIBUTING.md. Unix runs share a per-boot work
+# root so go test result caching skips unchanged packages; `make test` keeps
+# -count=1 for a fresh full run.
 test-fast:
-	@CHORD_GO='$(GO)' bash scripts/run_tests.sh $(GO) test -count=1 $(PKGS)
+	@CHORD_GO='$(GO)' bash scripts/run_tests.sh $(GO) test $(PKGS)
 
 test-cover:
 	CHORD_GO='$(GO)' CHORD_TEST_COUNT=1 ./scripts/check_ci_local.sh $(PKGS)

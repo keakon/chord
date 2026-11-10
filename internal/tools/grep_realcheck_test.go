@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,9 +16,12 @@ import (
 // exact include for the probe filename. The fast path should read the file
 // directly instead of walking the (potentially huge) temp dir, so the call must
 // return well under the deadline rather than hanging like the pre-fix behavior.
+// The probe name is process-unique because the runner's shared work root can
+// host concurrent runs.
 func TestGrepRealTempDirFastPath(t *testing.T) {
 	tmp := os.TempDir()
-	target := filepath.Join(tmp, "chord-fastpath-probe.html")
+	probe := fmt.Sprintf("chord-fastpath-probe-%d.html", os.Getpid())
+	target := filepath.Join(tmp, probe)
 	if err := os.WriteFile(target, []byte("probe-needle-xyz\n"), 0o644); err != nil {
 		t.Skipf("cannot write probe file: %v", err)
 	}
@@ -26,7 +30,7 @@ func TestGrepRealTempDirFastPath(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{
 		"pattern":  "probe-needle-xyz",
 		"paths":    []string{tmp},
-		"includes": []string{"chord-fastpath-probe.html"},
+		"includes": []string{probe},
 	})
 	deadline := 5 * time.Second
 	done := make(chan struct{})

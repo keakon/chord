@@ -88,13 +88,13 @@ func TestKilledRunnerReclaimsCacheWithoutNextCommand(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "started")
 	cmd := runnerCommand(t, base, os.Args[0], "child-fixture", "hold", marker)
 	startCommand(t, cmd)
-	work := string(awaitFile(t, marker))
+	_ = string(awaitFile(t, marker))
 	entry := largeCacheEntry(t, base)
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
 	_ = waitCommand(t, cmd)
-	awaitFile(t, filepath.Join(filepath.Dir(work), readyFile))
+	awaitFile(t, filepath.Join(onlyRunDir(t, base), readyFile))
 	timeout := time.NewTimer(10 * time.Second)
 	defer timeout.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
