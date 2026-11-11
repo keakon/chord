@@ -1023,6 +1023,7 @@ func (b *Block) renderAssistant(width int) []string {
 			b.renderSoftWrapContinuations = append(b.renderSoftWrapContinuations, false)
 		}
 		b.renderSyntheticPrefixWidthsW = width
+		b.renderSyntheticPrefixWidthsStart = 0
 	}
 
 	return out

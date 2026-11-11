@@ -200,6 +200,7 @@ func (b *Block) ensureMaterialized() error {
 	loaded.spillLineCounts = b.spillLineCounts
 	loaded.spillRecover = b.spillRecover
 	loaded.spillCold = false
+	loaded.renderLineCountChanged = b.renderLineCountChanged
 	loaded.lastAccess = b.lastAccess
 	*b = *loaded
 	return nil
@@ -335,6 +336,9 @@ func (b *Block) estimatedHotBytes() int64 {
 	}
 	for _, line := range b.viewportCache {
 		total += len(line)
+	}
+	if b.virtualAssistant != nil {
+		total += int(b.virtualAssistant.hotBytes())
 	}
 	total += b.codeHL.RenderCacheBytes()
 	total += b.previewHL.RenderCacheBytes()
@@ -523,6 +527,8 @@ func spillBlockPayload(block *Block, store *ViewportSpillStore, width int, measu
 	block.toolHeaderCacheCollapsedMain = ""
 	block.toolHeaderCacheCollapsedGray = ""
 	block.toolHeaderCacheParamLines = nil
+	block.virtualAssistant = nil
+	block.renderSyntheticPrefixWidthsStart = 0
 	block.mdCache = nil
 	block.mdCacheWidth = 0
 	block.mdCacheContent = ""

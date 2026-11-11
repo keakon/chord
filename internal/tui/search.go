@@ -452,7 +452,6 @@ func findMatchesInBlockAtWidth(block *Block, index int, lineOffset int, query st
 	if inspect == nil {
 		return nil, 0
 	}
-	blockLineCount := inspect.LineCount(width)
 	lowerQuery := strings.ToLower(query)
 	searchableTextLower := inspect.searchableTextLower()
 	candidate := strings.Contains(searchableTextLower, lowerQuery)
@@ -472,6 +471,7 @@ func findMatchesInBlockAtWidth(block *Block, index int, lineOffset int, query st
 			})
 		}
 	}
+	blockLineCount := inspect.LineCount(width)
 	if temporary {
 		inspect.InvalidateCache()
 	}

@@ -15,6 +15,8 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 		v.UpdateLastBlock()
 	}
 
+renderWindow:
+	version := v.renderVersion
 	emptyLine := strings.Repeat(" ", v.width)
 
 	blocks := v.visibleBlocks()
@@ -108,6 +110,12 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 			finalLines = fullCached[lo:hi]
 		} else {
 			blockLines := block.RenderRange(v.width, sFrame, lo, hi)
+			if version != v.renderVersion {
+				// A virtual layout can fail validation while drawing. Its
+				// fallback updates positions and may move the sticky window.
+				// Each retry retires one virtual layout permanently.
+				goto renderWindow
+			}
 			finalLines = make([]string, len(blockLines))
 			for i, l := range blockLines {
 				line := terminaltext.ExpandTabsANSI(l, terminaltext.TabWidth)

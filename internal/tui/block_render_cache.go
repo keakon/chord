@@ -164,9 +164,15 @@ func (c *packedRenderCache) bytes() int {
 
 func (b *Block) renderedLineRange(width, start, end int) iter.Seq2[int, string] {
 	return func(yield func(int, string) bool) {
-		end = min(end, b.LineCount(width))
+		count := b.LineCount(width)
+		throughEnd := end >= count
+		end = min(end, count)
 		for first := max(0, start); first < end; first += renderCacheChunkLines {
 			lines := b.RenderRange(width, "", first, min(first+renderCacheChunkLines, end))
+			if throughEnd && b.LineCount(width) != end {
+				end = b.LineCount(width)
+				lines = b.RenderRange(width, "", first, min(first+renderCacheChunkLines, end))
+			}
 			for i, line := range lines {
 				if !yield(first+i, line) {
 					return

@@ -373,25 +373,28 @@ type Block struct {
 	// the settled portion of in-flight content so each flush only scans the
 	// unsettled tail. Settled frontiers sit on paragraph boundaries outside
 	// code fences, so scanning regions independently matches a full scan.
-	streamTableCheckedLen        int
-	streamTableFound             bool
-	streamContentBuilder         *strings.Builder
-	lineCache                    []string
-	packedRender                 *packedRenderCache
-	lineCacheWidth               int
-	lineCountCache               int
-	viewportCache                []string
-	viewportCacheWidth           int
-	renderSyntheticPrefixWidths  []int
-	renderSoftWrapContinuations  []bool
-	renderSyntheticPrefixWidthsW int
-	searchTextLower              string
-	searchTextReady              bool
-	searchMatchQueryLower        string
-	searchMatchWidth             int
-	searchMatchOffset            int
-	searchMatchFound             bool
-	searchMatchReady             bool
+	streamTableCheckedLen            int
+	streamTableFound                 bool
+	streamContentBuilder             *strings.Builder
+	lineCache                        []string
+	packedRender                     *packedRenderCache
+	lineCacheWidth                   int
+	lineCountCache                   int
+	viewportCache                    []string
+	viewportCacheWidth               int
+	renderSyntheticPrefixWidths      []int
+	renderSoftWrapContinuations      []bool
+	renderSyntheticPrefixWidthsW     int
+	renderSyntheticPrefixWidthsStart int
+	virtualAssistant                 *assistantVirtualLayout
+	renderLineCountChanged           func(width int)
+	searchTextLower                  string
+	searchTextReady                  bool
+	searchMatchQueryLower            string
+	searchMatchWidth                 int
+	searchMatchOffset                int
+	searchMatchFound                 bool
+	searchMatchReady                 bool
 	// bodyVisibility* memoizes the visible-text / placeholder check for the
 	// streaming body it was computed from. The check strips ANSI and scans the
 	// whole body, and renders with unchanged content (idle ticks, theme

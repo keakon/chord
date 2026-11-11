@@ -64,6 +64,9 @@ func (v *Viewport) GetLinePlain(blockID, lineInBlock int) (plain string, width i
 			return "", 0
 		}
 		lines := b.RenderRange(v.width, "", lineInBlock, lineInBlock+1)
+		if len(lines) == 0 {
+			return "", 0
+		}
 		plain = terminaltext.StripANSI(lines[0])
 		width = selectionPlainTextWidth(plain)
 		return plain, width
@@ -142,9 +145,12 @@ func (v *Viewport) selectionLinePrefixWidth(block *Block, lineIdx int, plain str
 	}
 	prefix := selectionRailPrefixWidth(plain)
 	baseInset := v.selectionCardInsetWidth(block)
-	if block.renderSyntheticPrefixWidthsW == v.width && lineIdx >= 0 && lineIdx < len(block.renderSyntheticPrefixWidths) {
-		if synthetic := block.renderSyntheticPrefixWidths[lineIdx]; synthetic > baseInset {
-			baseInset = synthetic
+	if block.renderSyntheticPrefixWidthsW == v.width {
+		index := lineIdx - block.renderSyntheticPrefixWidthsStart
+		if index >= 0 && index < len(block.renderSyntheticPrefixWidths) {
+			if synthetic := block.renderSyntheticPrefixWidths[index]; synthetic > baseInset {
+				baseInset = synthetic
+			}
 		}
 	}
 	return prefix + max(0, baseInset)

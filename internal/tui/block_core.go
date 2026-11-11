@@ -59,6 +59,9 @@ func cloneBlockForDeferredSource(src *Block) *Block {
 	clone.viewportCache = nil
 	clone.renderSyntheticPrefixWidths = nil
 	clone.renderSoftWrapContinuations = nil
+	clone.renderSyntheticPrefixWidthsStart = 0
+	clone.virtualAssistant = nil
+	clone.renderLineCountChanged = nil
 	clone.spillRef = nil
 	clone.spillStore = nil
 	clone.spillSummary = ""
@@ -181,6 +184,14 @@ func (b *Block) Render(width int, spinnerFrame string) (lines []string) {
 	if cache := b.packedRenderAt(width); cache != nil {
 		return cache.lines(0, cache.count)
 	}
+	if b.Type == BlockAssistant {
+		if layout, ok := b.assistantVirtualLayout(width); ok {
+			if lines := b.renderVirtualAssistantRange(layout, width, 0, layout.totalCard); lines != nil {
+				return lines
+			}
+			return b.renderAssistantVirtualFallback(width)
+		}
+	}
 	switch b.Type {
 	case BlockUser:
 		return b.renderUser(width, spinnerFrame)
@@ -232,6 +243,19 @@ func (b *Block) LineCount(width int) int {
 	if cache := b.packedRenderAt(width); cache != nil {
 		return cache.count
 	}
+	if b.Type == BlockAssistant {
+		virtualWidth := width
+		if virtualWidth <= 0 {
+			virtualWidth = 80
+		}
+		if count, ok := b.virtualAssistantLineCount(virtualWidth); ok {
+			b.lineCache = nil
+			b.lineCacheWidth = width
+			b.lineCountCache = count
+			b.hotBytesMemoValid = false
+			return count
+		}
+	}
 	if b.streamingApplyPatchRangeEligible() {
 		if width <= 0 {
 			width = 80
@@ -261,11 +285,28 @@ func (b *Block) RenderRange(width int, spinnerFrame string, start, end int) []st
 	if start < 0 {
 		start = 0
 	}
-	if end < start {
-		end = start
+	if end <= start {
+		return nil
 	}
 	if cache := b.packedRenderAt(width); cache != nil {
 		return cache.lines(start, end)
+	}
+	if b.Type == BlockAssistant && spinnerFrame == "" {
+		virtualWidth := width
+		if virtualWidth <= 0 {
+			virtualWidth = 80
+		}
+		if layout, ok := b.assistantVirtualLayout(virtualWidth); ok {
+			if start >= layout.totalCard {
+				return nil
+			}
+			if lines := b.renderVirtualAssistantRange(layout, virtualWidth, start, end); lines != nil {
+				return lines
+			}
+			lines := b.renderAssistantVirtualFallback(virtualWidth)
+			start = min(start, len(lines))
+			return lines[start:min(end, len(lines))]
+		}
 	}
 	if cached := b.GetViewportCache(width, spinnerFrame); cached != nil {
 		if start >= len(cached) {
@@ -389,6 +430,8 @@ func (b *Block) InvalidateCache() {
 	b.renderSyntheticPrefixWidths = nil
 	b.renderSoftWrapContinuations = nil
 	b.renderSyntheticPrefixWidthsW = 0
+	b.renderSyntheticPrefixWidthsStart = 0
+	b.virtualAssistant = nil
 	b.searchTextLower = ""
 	b.searchTextReady = false
 	b.searchMatchQueryLower = ""
@@ -420,6 +463,7 @@ func (b *Block) ReleaseDerivedRenderCaches() {
 	b.lineCacheWidth = lineWidth
 	b.bodyVisibilityKey = ""
 	b.bodyVisibilityValid = false
+	b.virtualAssistant = nil
 	b.mdCache = nil
 	b.mdCacheWidth = 0
 	b.mdCacheContent = ""

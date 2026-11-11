@@ -8,6 +8,7 @@ func (v *Viewport) prepareBlock(block *Block) {
 	block.errorHint = v.errorHint
 	block.spillStore = v.spill
 	block.spillRecover = v.recoverSpilledBlock
+	block.renderLineCountChanged = v.correctRenderedLineCount
 	if block.spillLineCounts == nil {
 		block.spillLineCounts = make(map[int]int)
 	}
@@ -15,6 +16,20 @@ func (v *Viewport) prepareBlock(block *Block) {
 	block.lastAccess = v.accessSeq
 	if !block.spillCold {
 		v.hotBytes += block.estimatedHotBytes()
+	}
+}
+
+func (v *Viewport) correctRenderedLineCount(width int) {
+	if width != v.width {
+		return
+	}
+	v.bumpRenderVersion()
+	v.markHotBudgetDirty()
+	v.recalcTotalLines()
+	if v.sticky {
+		v.scrollToEnd()
+	} else {
+		v.clampOffset()
 	}
 }
 
