@@ -175,6 +175,49 @@ func (v *Viewport) measureSpanLines(block *Block) int {
 	return block.LineCount(v.width)
 }
 
+// appendToPositionCaches extends the visible-block and block-position caches
+// for blocks already appended to v.blocks. Appending used to rebuild every
+// start/span and re-filter the whole transcript, which made building a long
+// transcript quadratic; the fast path is limited to the ordinary case where
+// both caches already describe the pre-append state. A filter, width or line
+// count change invalidates one of them and falls back to a full recalc.
+func (v *Viewport) appendToPositionCaches(added ...*Block) {
+	positionsValid := !v.visibleBlocksDirty && v.visibleBlocksCache != nil && v.blockPositionCacheValid(v.visibleBlocksCache)
+	if !positionsValid {
+		v.invalidateVisibleBlocksCache()
+		v.bumpRenderVersion()
+		v.recalcTotalLines()
+		return
+	}
+
+	visibleAdded := filterBlocksByAgent(added, v.filterAgentID)
+	v.bumpRenderVersion()
+	if len(visibleAdded) == 0 {
+		v.blockPositionCacheVersion = v.renderVersion
+		return
+	}
+
+	if v.filterAgentID == "" {
+		v.visibleBlocksCache = v.blocks
+	} else {
+		v.visibleBlocksCache = append(v.visibleBlocksCache, visibleAdded...)
+	}
+	starts := v.blockStartsCache
+	spans := v.blockSpansCache
+	total := v.totalLines
+	for _, block := range visibleAdded {
+		starts = append(starts, total)
+		span := v.blockSpanLines(block)
+		spans = append(spans, span)
+		total += span
+	}
+	v.totalLines = total
+	v.blockStartsCache = starts
+	v.blockSpansCache = spans
+	v.lastBlockSpan = spans[len(spans)-1]
+	v.blockPositionCacheVersion = v.renderVersion
+}
+
 func (v *Viewport) recalcTotalLines() {
 	total := 0
 	blocks := v.visibleBlocks()

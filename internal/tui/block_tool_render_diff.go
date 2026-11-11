@@ -735,6 +735,9 @@ func (b *Block) cachedApplyPatchStreamingArgs(argsJSON string, freeform bool) st
 		}
 	}
 	b.patchPreviewLen = len(argsJSON)
+	if display != b.patchPreviewText {
+		b.patchPreviewVersion++
+	}
 	b.patchPreviewText = display
 	if display != "" {
 		return display
@@ -753,6 +756,7 @@ func (b *Block) cachedApplyPatchStreamingArgs(argsJSON string, freeform bool) st
 func (b *Block) clearApplyPatchPreviewMemo() {
 	b.patchPreviewLen = 0
 	b.patchPreviewText = ""
+	b.patchPreviewVersion++
 	b.previewRenderedPatch = ""
 	b.previewRenderedWidth = 0
 	b.previewRenderedHL = nil

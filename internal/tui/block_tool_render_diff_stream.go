@@ -40,7 +40,9 @@ func (b *Block) streamingApplyPatchRangeEligible() bool {
 }
 
 func (b *Block) clearStreamingApplyPatchRangeMemo() {
+	b.streamingPatchPreviewVersion = 0
 	b.streamingPatchArgsLen = 0
+	b.streamingPatchFromPreview = false
 	b.streamingPatchMemoValid = false
 	b.streamingPatchText = ""
 	b.streamingPatchLineStarts = nil
@@ -48,15 +50,20 @@ func (b *Block) clearStreamingApplyPatchRangeMemo() {
 
 func (b *Block) streamingApplyPatchPreviewData() (string, []int) {
 	argsJSON := b.editPatchArgsJSON()
-	if b.streamingPatchMemoValid && b.streamingPatchArgsLen == len(argsJSON) {
+	fromPreview := strings.HasPrefix(strings.TrimSpace(b.patchPreviewText), "*** ")
+	if b.streamingPatchMemoValid && b.streamingPatchPreviewVersion == b.patchPreviewVersion &&
+		(b.streamingPatchFromPreview || b.streamingPatchArgsLen == len(argsJSON)) {
 		return b.streamingPatchText, b.streamingPatchLineStarts
 	}
 
 	patch := ""
-	if strings.HasPrefix(strings.TrimSpace(b.patchPreviewText), "*** ") {
-		patch = sanitizeToolDisplayText(b.patchPreviewText)
+	if fromPreview {
+		// cachedApplyPatchStreamingArgs already runs the extractor, which
+		// sanitizes the preview. Re-sanitizing the whole growing patch here
+		// made every coalesced refresh linear in the full patch again.
+		patch = b.patchPreviewText
 	}
-	if patch == "" {
+	if patch == "" && !b.toolArgumentsAreReceiving() {
 		patch = sanitizeToolDisplayText(editPatchFromArgs(argsJSON))
 	}
 	if patch == "" {
@@ -82,7 +89,9 @@ func (b *Block) streamingApplyPatchPreviewData() (string, []int) {
 			}
 		}
 	}
+	b.streamingPatchPreviewVersion = b.patchPreviewVersion
 	b.streamingPatchArgsLen = len(argsJSON)
+	b.streamingPatchFromPreview = fromPreview
 	b.streamingPatchMemoValid = true
 	b.streamingPatchText = patch
 	b.streamingPatchLineStarts = lineStarts

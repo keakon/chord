@@ -159,12 +159,13 @@ type Block struct {
 	// samples of the same block during streaming.
 	previewHL *syntax.Highlighter
 
-	// patchPreview caches the live apply_patch streaming preview keyed by the
-	// streamed args length (see cachedApplyPatchStreamingArgs): extracting the
-	// preview is linear in the args, so refreshing it per streamed fragment
-	// would be quadratic.
-	patchPreviewLen  int
-	patchPreviewText string
+	// patchPreview caches the live apply_patch streaming preview: patchPreviewLen
+	// gates extraction by growth (see cachedApplyPatchStreamingArgs), and
+	// patchPreviewVersion identifies each distinct displayed preview so the
+	// range renderer can reuse the sanitized text and line starts.
+	patchPreviewLen     int
+	patchPreviewText    string
+	patchPreviewVersion uint64
 
 	// previewRendered memoizes the rendered lines of the live apply_patch
 	// preview so a growing patch only re-renders its tail. Keyed by
@@ -186,11 +187,14 @@ type Block struct {
 
 	// streamingPatchMemo caches the normalized patch and byte offsets for the
 	// live apply_patch range renderer. It avoids splitting the complete patch
-	// again when LineCount and RenderRange serve the same frame.
-	streamingPatchArgsLen    int
-	streamingPatchMemoValid  bool
-	streamingPatchText       string
-	streamingPatchLineStarts []int
+	// again when LineCount and RenderRange serve the same frame; the key is the
+	// preview version, or the args length while no preview text is available.
+	streamingPatchPreviewVersion uint64
+	streamingPatchArgsLen        int
+	streamingPatchFromPreview    bool
+	streamingPatchMemoValid      bool
+	streamingPatchText           string
+	streamingPatchLineStarts     []int
 
 	// toolArgsCache memoizes parsed JSON arguments for tool-call rendering.
 	// It must be invalidated whenever ToolName or Content changes.

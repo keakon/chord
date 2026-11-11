@@ -81,6 +81,58 @@ func benchmarkLargeViewport(blocks int) *Viewport {
 	return v
 }
 
+// BenchmarkViewportAppendBlockLargeTranscript measures the live transcript
+// append path. The setup (viewport + block construction) is outside the timed
+// section so the result tracks start/span maintenance rather than fixture
+// allocation.
+func BenchmarkViewportAppendBlockCachedLines(b *testing.B) {
+	const blockCount = 2000
+	b.ReportAllocs()
+	for b.Loop() {
+		b.StopTimer()
+		v := NewViewport(100, 24)
+		blocks := make([]*Block, blockCount)
+		for i := range blocks {
+			block := &Block{ID: i + 1, Type: BlockAssistant, Content: "cached line"}
+			block.lineCache = []string{"cached line"}
+			block.lineCacheWidth = 100
+			block.lineCountCache = 1
+			blocks[i] = block
+		}
+		b.StartTimer()
+		for _, block := range blocks {
+			v.AppendBlock(block)
+		}
+		b.StopTimer()
+		if v.totalLines != blockCount {
+			b.Fatalf("total lines = %d, want %d", v.totalLines, blockCount)
+		}
+		_ = v.Close()
+		b.StartTimer()
+	}
+}
+
+func BenchmarkViewportAppendBlockLargeTranscript(b *testing.B) {
+	const blockCount = 2000
+	content := strings.Repeat("long transcript block ", 40)
+	b.ReportAllocs()
+	for b.Loop() {
+		b.StopTimer()
+		v := NewViewport(100, 24)
+		blocks := make([]*Block, blockCount)
+		for i := range blocks {
+			blocks[i] = &Block{ID: i + 1, Type: BlockAssistant, Content: content}
+		}
+		b.StartTimer()
+		for _, block := range blocks {
+			v.AppendBlock(block)
+		}
+		b.StopTimer()
+		_ = v.Close()
+		b.StartTimer()
+	}
+}
+
 // benchmarkModelForView returns a model that the caller must close.
 // Iteration-scoped callers must release it before constructing the next model.
 func benchmarkModelForView(tb testing.TB) Model {

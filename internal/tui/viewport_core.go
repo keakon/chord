@@ -53,6 +53,14 @@ type Viewport struct {
 	lastStartedWallCache        time.Time
 	lastStartedWallCacheValid   bool
 	lastStartedWallCacheVersion uint64
+
+	pendingToolWorkCache        bool
+	pendingToolWorkCacheValid   bool
+	pendingToolWorkCacheVersion uint64
+
+	latestPendingShellStartCache        time.Time
+	latestPendingShellStartCacheValid   bool
+	latestPendingShellStartCacheVersion uint64
 }
 
 func NewViewport(width, height int) *Viewport {
@@ -150,12 +158,18 @@ func (v *Viewport) LatestVisiblePendingUserLocalShellStartedAt() (time.Time, boo
 	if v == nil {
 		return time.Time{}, false
 	}
+	if v.latestPendingShellStartCacheValid && v.latestPendingShellStartCacheVersion == v.renderVersion {
+		return v.latestPendingShellStartCache, !v.latestPendingShellStartCache.IsZero()
+	}
 	var latest time.Time
 	for _, b := range v.visibleBlocks() {
 		if b != nil && b.Type == BlockUser && b.UserLocalShellCmd != "" && b.UserLocalShellPending && !b.StartedAt.IsZero() && b.StartedAt.After(latest) {
 			latest = b.StartedAt
 		}
 	}
+	v.latestPendingShellStartCache = latest
+	v.latestPendingShellStartCacheValid = true
+	v.latestPendingShellStartCacheVersion = v.renderVersion
 	if latest.IsZero() {
 		return time.Time{}, false
 	}
@@ -163,21 +177,30 @@ func (v *Viewport) LatestVisiblePendingUserLocalShellStartedAt() (time.Time, boo
 }
 
 func (v *Viewport) HasPendingToolWork() bool {
+	if v == nil {
+		return false
+	}
+	if v.pendingToolWorkCacheValid && v.pendingToolWorkCacheVersion == v.renderVersion {
+		return v.pendingToolWorkCache
+	}
+	pending := false
 	for _, b := range v.visibleBlocks() {
 		if b != nil && b.Type == BlockToolCall && !b.ResultDone {
-			return true
+			pending = true
+			break
 		}
 	}
-	return false
+	v.pendingToolWorkCache = pending
+	v.pendingToolWorkCacheValid = true
+	v.pendingToolWorkCacheVersion = v.renderVersion
+	return pending
 }
 
 func (v *Viewport) AppendBlock(block *Block) {
 	v.prepareBlock(block)
 	v.blocks = append(v.blocks, block)
-	v.invalidateVisibleBlocksCache()
 	v.markHotBudgetDirty()
-	v.bumpRenderVersion()
-	v.recalcTotalLines()
+	v.appendToPositionCaches(block)
 	if v.sticky {
 		v.scrollToEnd()
 	}
@@ -189,10 +212,8 @@ func (v *Viewport) AppendBlocks(blocks []*Block) {
 		v.prepareBlock(b)
 	}
 	v.blocks = append(v.blocks, blocks...)
-	v.invalidateVisibleBlocksCache()
 	v.markHotBudgetDirty()
-	v.bumpRenderVersion()
-	v.recalcTotalLines()
+	v.appendToPositionCaches(blocks...)
 	if v.sticky {
 		v.scrollToEnd()
 	}

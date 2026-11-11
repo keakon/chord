@@ -491,9 +491,13 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if argsStreamingDone {
 			displayArgs = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 		} else if evt.InputText != "" {
-			// Bare freeform text needs no decoding. JSON envelopes use the
-			// function preview's growth cache and incremental decoder.
-			if strings.HasPrefix(strings.TrimSpace(evt.InputText), "{") {
+			// Custom-tool input is bare freeform text or a JSON envelope. Both
+			// grow with every delta, so the apply_patch card uses the same
+			// coalesced preview cache as function-call arguments; re-sanitizing
+			// the whole text per delta is quadratic in the patch size.
+			if livePatchPreview {
+				displayArgs = block.cachedApplyPatchStreamingArgs(evt.InputText, true)
+			} else if strings.HasPrefix(strings.TrimSpace(evt.InputText), "{") {
 				displayArgs = block.cachedApplyPatchStreamingArgs(evt.InputText, true)
 			} else {
 				displayArgs = sanitizeToolDisplayText(evt.InputText)

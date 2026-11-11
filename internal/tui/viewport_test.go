@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/x/ansi"
 
@@ -416,6 +418,100 @@ func TestVisibleBlocksCacheInvalidatesOnMutationAndFilterChange(t *testing.T) {
 	if len(afterAppend) != 2 || afterAppend[0].ID != 1 || afterAppend[1].ID != 3 {
 		t.Fatalf("visible blocks after append = %#v, want [1 3]", afterAppend)
 	}
+}
+
+func TestViewportStatusScanCachesInvalidateOnRenderVersion(t *testing.T) {
+	v := NewViewport(60, 4)
+	t.Cleanup(func() { _ = v.Close() })
+	startedAt := time.Now().Add(-time.Second)
+	v.AppendBlocks([]*Block{
+		{ID: 1, Type: BlockUser, UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt},
+		{ID: 2, Type: BlockToolCall, ToolName: "shell"},
+	})
+	if got, ok := v.LatestVisiblePendingUserLocalShellStartedAt(); !ok || !got.Equal(startedAt) {
+		t.Fatalf("pending shell start = %v ok=%t, want %v true", got, ok, startedAt)
+	}
+	if !v.HasPendingToolWork() {
+		t.Fatal("pending tool work should be true")
+	}
+
+	v.visibleBlocks()[1].ResultDone = true
+	v.InvalidateBlock(2)
+	if v.HasPendingToolWork() {
+		t.Fatal("pending tool work cache did not invalidate")
+	}
+	v.visibleBlocks()[0].UserLocalShellPending = false
+	v.InvalidateBlock(1)
+	if _, ok := v.LatestVisiblePendingUserLocalShellStartedAt(); ok {
+		t.Fatal("pending shell start cache did not invalidate")
+	}
+}
+
+func TestViewportAppendBlockIncrementalMatchesFullRecalc(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	v := NewViewport(60, 4)
+	t.Cleanup(func() { _ = v.Close() })
+
+	assertMatchesRecalc := func(label string) {
+		t.Helper()
+		gotVisible := append([]*Block(nil), v.visibleBlocks()...)
+		gotStarts := append([]int(nil), v.blockStartsCache...)
+		gotSpans := append([]int(nil), v.blockSpansCache...)
+		gotTotal := v.totalLines
+		gotLastSpan := v.lastBlockSpan
+
+		v.recalcTotalLines()
+		if v.totalLines != gotTotal {
+			t.Fatalf("%s: incremental total = %d, full recalc = %d", label, gotTotal, v.totalLines)
+		}
+		if !slices.Equal(v.blockStartsCache, gotStarts) {
+			t.Fatalf("%s: incremental starts = %v, full recalc = %v", label, gotStarts, v.blockStartsCache)
+		}
+		if !slices.Equal(v.blockSpansCache, gotSpans) {
+			t.Fatalf("%s: incremental spans = %v, full recalc = %v", label, gotSpans, v.blockSpansCache)
+		}
+		if v.lastBlockSpan != gotLastSpan {
+			t.Fatalf("%s: incremental last span = %d, full recalc = %d", label, gotLastSpan, v.lastBlockSpan)
+		}
+		visible := v.visibleBlocks()
+		if len(visible) != len(gotVisible) {
+			t.Fatalf("%s: incremental visible = %d blocks, full recalc = %d", label, len(gotVisible), len(visible))
+		}
+		for i := range gotVisible {
+			if gotVisible[i].ID != visible[i].ID {
+				t.Fatalf("%s: incremental visible[%d] = %d, full recalc = %d", label, i, gotVisible[i].ID, visible[i].ID)
+			}
+		}
+		if v.sticky {
+			wantOffset := max(v.totalLines-v.height, 0)
+			if v.offset != wantOffset {
+				t.Fatalf("%s: sticky offset = %d, want %d", label, v.offset, wantOffset)
+			}
+		}
+	}
+
+	v.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 20)})
+	assertMatchesRecalc("initial append")
+	v.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: strings.Repeat("beta ", 20), AgentID: "agent-1"})
+	assertMatchesRecalc("unfiltered append")
+
+	v.SetFilter("main")
+	// SetFilter intentionally invalidates the position table; materialize it so
+	// the following append exercises the incremental path.
+	_ = v.blockStarts()
+	v.AppendBlock(&Block{ID: 3, Type: BlockAssistant, Content: strings.Repeat("gamma ", 20)})
+	assertMatchesRecalc("filtered visible append")
+	v.AppendBlock(&Block{ID: 4, Type: BlockAssistant, Content: "hidden", AgentID: "agent-1"})
+	assertMatchesRecalc("filtered hidden append")
+	v.AppendBlocks([]*Block{
+		{ID: 5, Type: BlockAssistant, Content: strings.Repeat("delta ", 20)},
+		{ID: 6, Type: BlockAssistant, Content: "hidden batch", AgentID: "agent-1"},
+	})
+	assertMatchesRecalc("filtered batch append")
+
+	v.SetFilter("")
+	_ = v.blockStarts()
+	assertMatchesRecalc("show all")
 }
 
 func TestRenderRangeUsesLineCacheSlice(t *testing.T) {

@@ -442,3 +442,32 @@ func TestReceivingPatchDefersOperationTotalsUntilComplete(t *testing.T) {
 		t.Fatal("settled card retained transient input preview")
 	}
 }
+
+func TestStreamingApplyPatchPreviewMemoTracksPreviewVersion(t *testing.T) {
+	patch := "*** Begin Patch\n*** Add File: sample.txt\n+first\n*** End Patch"
+	b := &Block{
+		Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		ToolExecutionState: agent.ToolCallExecutionStateReceiving,
+		patchPreviewText:   patch, patchPreviewVersion: 1, patchPreviewLen: len(patch),
+		RawArgs: strings.Repeat("x", 4096),
+	}
+	text, starts := b.streamingApplyPatchPreviewData()
+	if text != patch || len(starts) != 4 {
+		t.Fatalf("preview = %q with %d starts, want patch with 4 starts", text, len(starts))
+	}
+
+	// Growing raw args without a preview refresh must reuse the sanitized text
+	// and line starts instead of parsing the whole accumulated payload again.
+	b.RawArgs += strings.Repeat("y", 4096)
+	text, starts = b.streamingApplyPatchPreviewData()
+	if text != patch || len(starts) != 4 {
+		t.Fatalf("cached preview = %q with %d starts, want patch with 4 starts", text, len(starts))
+	}
+
+	b.patchPreviewText = patch + "\n+second\n*** End Patch"
+	b.patchPreviewVersion++
+	text, starts = b.streamingApplyPatchPreviewData()
+	if text != b.patchPreviewText || len(starts) != 6 {
+		t.Fatalf("refreshed preview = %q with %d starts, want updated patch with 6 starts", text, len(starts))
+	}
+}
