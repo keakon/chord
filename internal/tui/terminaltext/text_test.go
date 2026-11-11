@@ -210,6 +210,20 @@ func preserveBackgroundReference(line, bgColor string) string {
 	return line
 }
 
+func TestPreserveBackgroundWithoutResetDoesNotAllocate(t *testing.T) {
+	line := "\x1b[38;5;120mstyled text\x1b[K"
+	allocations := testing.AllocsPerRun(1000, func() {
+		if got := PreserveBackground(line, "236"); got != line {
+			t.Fatalf("PreserveBackground changed a line without resets: %q", got)
+		}
+	})
+	// BackgroundSequence itself makes one allocation; the old path also grew a
+	// strings.Builder before discovering that there was nothing to insert.
+	if allocations > 1 {
+		t.Fatalf("PreserveBackground allocated %.1f times for a line without resets", allocations)
+	}
+}
+
 func TestPreserveBackgroundMatchesReference(t *testing.T) {
 	bgColors := []string{"", "236", "52", "#1f2430"}
 	pieces := []string{

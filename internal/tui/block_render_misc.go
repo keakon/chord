@@ -39,7 +39,6 @@ func (b *Block) renderError(width int) []string {
 	}
 
 	cardBg := currentStyles.Palette.ErrorCardBg
-	lines = preserveCardBg(lines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("error", b.Focused))
 }
 
@@ -93,8 +92,7 @@ func (b *Block) renderStatus(width int) []string {
 		// notice (CONTEXT PRESSURE, LOOP CONTINUE #3, REPLY RESUMED) says what it
 		// is at a glance, and the body stays one keystroke away.
 		line := label + currentStyles.DimStyle.Render(" "+toolDisclosureCollapsed)
-		lines := preserveCardBg([]string{line}, cardBg)
-		return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("thinking", b.Focused))
+		return renderPrewrappedCard(style, innerWidth, []string{line}, cardBg, cardRailPrefix("thinking", b.Focused))
 	}
 	if foldable {
 		// The expanded card marks what Space does next.
@@ -110,7 +108,6 @@ func (b *Block) renderStatus(width int) []string {
 		lines = append(lines, bodyIndent+line)
 	}
 
-	lines = preserveCardBg(lines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("thinking", b.Focused))
 }
 
@@ -288,6 +285,5 @@ func (b *Block) renderCompactionSummary(width int) []string {
 		}
 	}
 	cardBg := currentStyles.Palette.CompactionSummaryBg
-	lines = preserveCardBg(lines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("assistant", b.Focused))
 }

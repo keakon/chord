@@ -364,7 +364,6 @@ func renderPrewrappedToolCard(style lipgloss.Style, cardWidth int, title string,
 	final := make([]string, 0, len(body)+2)
 	final = append(final, title, "")
 	final = append(final, body...)
-	final = preserveCardBg(final, bgColorNum)
 	return renderPrewrappedCard(style, cardWidth, final, bgColorNum, railPrefix)
 }
 

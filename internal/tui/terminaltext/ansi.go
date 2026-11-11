@@ -96,19 +96,32 @@ func PreserveBackground(line, bgColor string) string {
 	if bgSeq == "" {
 		return line
 	}
-	// One pass replaces the four ReplaceAll rounds it used to take. Every target
-	// is a reset sequence, so a single scan over the escape sequences can emit
-	// the background sequence in place. Card rendering calls this for every body
-	// line of every frame, and the four passes each rescanned and reallocated
-	// the whole line — the dominant cost of a large streaming apply_patch card.
-	//
+	// Card rendering calls this for every body line of every frame. Count the
+	// reset sequences first so a line with ANSI styling but no reset allocates
+	// nothing, and a line with many resets reserves the exact output size.
 	// A sequence that is not one of the four resets resumes the scan one byte in
 	// rather than past the sequence: a reset can start inside what looks like an
 	// unterminated escape (`ESC [ ESC [ 0 m`), and skipping the outer run whole
-	// would swallow it. That keeps this byte-identical to the plain substring
-	// replacement it replaced.
+	// would swallow it.
+	resetCount := 0
+	for i := 0; i < len(line); {
+		if line[i] != '\x1b' {
+			i++
+			continue
+		}
+		end := SkipANSI(line, i)
+		if isTerminalResetSequence(line[i:end]) {
+			resetCount++
+			i = end
+			continue
+		}
+		i++
+	}
+	if resetCount == 0 {
+		return line
+	}
 	var b strings.Builder
-	b.Grow(len(line) + 4*len(bgSeq))
+	b.Grow(len(line) + resetCount*len(bgSeq))
 	last := 0
 	for i := 0; i < len(line); {
 		if line[i] != '\x1b' {
@@ -116,7 +129,7 @@ func PreserveBackground(line, bgColor string) string {
 			continue
 		}
 		end := SkipANSI(line, i)
-		if seq := line[i:end]; seq == "\x1b[0m" || seq == "\x1b[m" || seq == "\x1b[49m" || seq == "\x1b[39m" {
+		if isTerminalResetSequence(line[i:end]) {
 			b.WriteString(line[last:end])
 			b.WriteString(bgSeq)
 			last = end
@@ -130,6 +143,10 @@ func PreserveBackground(line, bgColor string) string {
 	}
 	b.WriteString(line[last:])
 	return b.String()
+}
+
+func isTerminalResetSequence(seq string) bool {
+	return seq == "\x1b[0m" || seq == "\x1b[m" || seq == "\x1b[49m" || seq == "\x1b[39m"
 }
 
 func StripANSI(s string) string {

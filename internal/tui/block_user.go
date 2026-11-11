@@ -110,7 +110,6 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	finalLines = append(finalLines, bashLines...)
 
 	cardBg := currentStyles.Palette.UserCardBg
-	finalLines = preserveCardBg(finalLines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, finalLines, cardBg, cardRailPrefix("user", b.Focused))
 }
 
@@ -175,6 +174,5 @@ func (b *Block) renderUserPlain(width int) []string {
 	}
 
 	cardBg := currentStyles.Palette.UserCardBg
-	finalLines = preserveCardBg(finalLines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, finalLines, cardBg, cardRailPrefix("user", b.Focused))
 }

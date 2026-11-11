@@ -5,7 +5,6 @@ import (
 
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/syntax"
-	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // streamingApplyPatchCardLayout describes the small fixed part of a live
@@ -227,8 +226,5 @@ func (b *Block) renderStreamingApplyPatchRange(width int, spinnerFrame string, s
 }
 
 func (layout streamingApplyPatchCardLayout) renderBodyLine(raw string) string {
-	// renderPrewrappedToolCard preserves the card background before handing
-	// lines to the frame. Mirror that ordering so a range slice is byte-for-byte
-	// identical to the existing cold full render.
-	return layout.frame.renderBodyLine(terminaltext.PreserveBackground(raw, layout.frame.bgColorNum))
+	return layout.frame.renderBodyLine(raw)
 }

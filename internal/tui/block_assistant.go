@@ -216,25 +216,22 @@ func (b *Block) renderStreamingCardLines(kind uint8, style lipgloss.Style, inner
 			slices.Equal(bodyLines[:old.headCount], b.streamCardHeadBody)
 		if incremental {
 			// Only the newly settled lines need card wrapping; the existing
-			// head lines stay untouched. streamCardHeadBody keeps the raw
-			// (pre-background-preservation) lines so the next prefix check
-			// compares like for like.
+			// head lines stay untouched. streamCardHeadBody keeps the raw lines
+			// so the next prefix check compares like for like; appendBodyLines
+			// owns the final background preservation.
 			b.streamCardHeadBody = append(b.streamCardHeadBody, bodyLines[old.headCount:headCount]...)
-			newHead := preserveCardBg(bodyLines[old.headCount:headCount], bgColorNum)
-			b.streamCardHeadLines = append(b.streamCardHeadLines, frame.appendBodyLines(nil, newHead)...)
+			b.streamCardHeadLines = append(b.streamCardHeadLines, frame.appendBodyLines(nil, bodyLines[old.headCount:headCount])...)
 		} else {
-			// bodyLines is rebuilt by the caller on every render, so mutating
-			// it in place via preserveCardBg matches the previous non-cached
-			// path. Capture the raw head lines before that mutation for the
-			// prefix check.
+			// bodyLines is rebuilt by the caller on every render; keep the raw
+			// head for the prefix check and let appendBodyLines apply the card
+			// background once.
 			b.streamCardHeadBody = append([]string(nil), bodyLines[:headCount]...)
-			head := preserveCardBg(bodyLines[:headCount], bgColorNum)
-			b.streamCardHeadLines = frame.appendBodyLines(make([]string, 0, headCount), head)
+			b.streamCardHeadLines = frame.appendBodyLines(make([]string, 0, headCount), bodyLines[:headCount])
 		}
 		b.streamCardHeadKey = key
 		b.hotBytesMemoValid = false
 	}
-	tail := preserveCardBg(bodyLines[headCount:], bgColorNum)
+	tail := bodyLines[headCount:]
 	out := make([]string, 0, frame.marginTop+frame.padTop+len(b.streamCardHeadLines)+len(tail)+frame.padBottom+frame.marginBottom)
 	out = frame.appendTop(out)
 	out = append(out, b.streamCardHeadLines...)
@@ -779,9 +776,7 @@ func (b *Block) renderAssistant(width int) []string {
 		thinkingInnerWidth := max(innerWidth-tStyle.GetHorizontalPadding()+style.GetHorizontalPadding(), 10)
 		tLines := b.renderThinkingParts(thinkingInnerWidth)
 		if len(tLines) > 0 {
-			// Re-insert card background after inner ANSI resets.
 			thinkBg := currentStyles.Palette.ThinkingCardBg
-			tLines = preserveCardBg(tLines, thinkBg)
 			out = append(out, renderPrewrappedCard(tStyle, thinkingInnerWidth, tLines, thinkBg, cardRailPrefix("thinking", b.Focused))...)
 			out = append(out, "") // margin between blocks
 		}
@@ -978,7 +973,6 @@ func (b *Block) renderAssistant(width int) []string {
 		if b.Streaming {
 			cardLines = b.renderStreamingCardLines(streamCardKindAssistant, style, innerWidth, assBg, railPrefix, assistantLines, len(b.streamTailLines))
 		} else {
-			assistantLines = preserveCardBg(assistantLines, assBg)
 			cardLines = renderPrewrappedCard(style, innerWidth, assistantLines, assBg, railPrefix)
 		}
 		// Body lines start after any preceding thinking card plus the card's own
@@ -1370,12 +1364,10 @@ func (b *Block) renderThinking(width int) []string {
 		rawLines = append(rawLines, renderThinkingTranslationSections(b.ThinkingTranslations, contentWidth)...)
 	}
 
-	// Re-insert card background after inner ANSI resets.
 	thinkBg2 := currentStyles.Palette.ThinkingCardBg
 	railPrefix := cardRailPrefix("thinking", b.Focused)
 	if b.Streaming {
 		return b.renderStreamingCardLines(streamCardKindThinking, style, innerWidth, thinkBg2, railPrefix, rawLines, len(tail))
 	}
-	rawLines = preserveCardBg(rawLines, thinkBg2)
 	return renderPrewrappedCard(style, innerWidth, rawLines, thinkBg2, railPrefix)
 }
