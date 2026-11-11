@@ -41,6 +41,19 @@ func (m *Model) statusBarSampledActivityAt(a agent.AgentActivityEvent, now time.
 	if a.AgentID == "" {
 		a.AgentID = "main"
 	}
+	// Inside a connect/retry cycle, a bare connecting event is the same request
+	// re-entering the wire, not a new phase. Show the cycle's retry state
+	// instead of flip-flopping between the retry and connecting glyphs — under
+	// a fast failure loop the two alternate far faster than the lane can read.
+	// Once the promised wait has run out the raw connecting state shows again
+	// (the attempt is genuinely dialing past its deadline), and any non-cycle
+	// event drops the held state, so waiting-for-headers, streaming and
+	// terminal updates stay immediate.
+	if a.Type == agent.ActivityConnecting {
+		if retryEvt, ok := m.retryCycleDisplay[a.AgentID]; ok && (retryEvt.Deadline.IsZero() || retryEvt.Deadline.After(now)) {
+			a = retryEvt
+		}
+	}
 	startedAt := m.activityStartTime[a.AgentID]
 	if startedAt.IsZero() {
 		startedAt, _ = m.latestStatusStartWall(a.AgentID)

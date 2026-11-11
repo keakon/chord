@@ -116,6 +116,20 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 				activity.AgentID = evt.AgentID
 				m.activities[evt.AgentID] = activity
 				delete(m.activities, previousAgentID)
+				// The retry-cycle substitution is keyed by agent ID: it moves
+				// with the activity while the copied state is still inside one
+				// connect/retry cycle (a live retry event re-arms it from the
+				// activity itself), and drops on both sides otherwise so the
+				// new ID cannot inherit a stale countdown.
+				override, hadOverride := m.retryCycleDisplay[previousAgentID]
+				delete(m.retryCycleDisplay, previousAgentID)
+				delete(m.retryCycleDisplay, evt.AgentID)
+				if hadOverride && retryAttemptCycleActivity(activity.Type) {
+					override.AgentID = evt.AgentID
+					m.retryCycleDisplay[evt.AgentID] = override
+				} else if activity.Type == agent.ActivityRetrying || activity.Type == agent.ActivityRetryingKey {
+					m.retryCycleDisplay[evt.AgentID] = activity
+				}
 			}
 			if changed, ok := m.activityLastChanged[previousAgentID]; ok {
 				m.activityLastChanged[evt.AgentID] = changed
@@ -243,7 +257,7 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			}
 		}
 
-		m.activities[evt.AgentID] = evt
+		m.setAgentActivity(evt)
 		effects.refreshSidebar = true
 		if evt.Type != prev.Type {
 			now := time.Now()
@@ -251,8 +265,15 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 			if normalizedAgentID == "" || normalizedAgentID == "main" {
 				normalizedAgentID = "main"
 			}
-			if lastChanged, ok := m.activityLastChanged[evt.AgentID]; !ok || now.Sub(lastChanged) >= 100*time.Millisecond {
-				m.activityStartTime[evt.AgentID] = now
+			// Alternation inside one connect/retry cycle (connecting ↔ retrying)
+			// is the same request re-probing, so the elapsed anchor set when the
+			// cycle began must hold across it; moving it per flip would reset the
+			// status-bar elapsed on every flip, storm or not. The 100ms window
+			// still guards every other transition pair.
+			if !retryAttemptCycleTransition(prev.Type, evt.Type) {
+				if lastChanged, ok := m.activityLastChanged[evt.AgentID]; !ok || now.Sub(lastChanged) >= 100*time.Millisecond {
+					m.activityStartTime[evt.AgentID] = now
+				}
 			}
 			m.activityLastChanged[evt.AgentID] = now
 			if evt.Type != agent.ActivityIdle {
@@ -445,5 +466,56 @@ func subAgentStatusSuspendsActivity(status string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// retryAttemptCycleActivity reports whether an activity type is part of one LLM
+// request's connect/retry cycle: connecting, and the retry states that re-enter
+// connecting after a failed attempt. Transitions between them carry no new work
+// phase, so the elapsed anchor must hold across the whole cycle.
+func retryAttemptCycleActivity(t agent.ActivityType) bool {
+	switch t {
+	case agent.ActivityConnecting, agent.ActivityRetrying, agent.ActivityRetryingKey:
+		return true
+	default:
+		return false
+	}
+}
+
+// retryAttemptCycleTransition reports whether both sides of an activity
+// transition stay inside one connect/retry cycle. A slow alternation inside the
+// cycle (or a burst of alternating status events under a zero-backoff failure
+// storm) crosses the elapsed-anchor debounce window on every flip, so cycle
+// transitions hold the anchor instead of relying on that window.
+func retryAttemptCycleTransition(prev, next agent.ActivityType) bool {
+	return retryAttemptCycleActivity(prev) && retryAttemptCycleActivity(next)
+}
+
+// setAgentActivity records a new activity event and keeps the retry-cycle
+// display override consistent with it. Every write to m.activities must go
+// through here (or mirror the tracker call): a direct write that skips the
+// tracker leaves a stale substitution masking the agent's real state.
+func (m *Model) setAgentActivity(evt agent.AgentActivityEvent) {
+	m.activities[evt.AgentID] = evt
+	m.trackRetryCycleDisplay(evt)
+}
+
+// trackRetryCycleDisplay maintains the retry-phase event shown while an agent's
+// current request keeps re-entering connecting. Retry events refresh it (they
+// carry the countdown deadline of the upcoming attempt), connecting stays in
+// the current cycle, and any other type means the request moved on — waiting
+// for headers, streaming, tool work, idle — so the held display is dropped and
+// the next status-bar sample shows the real state immediately.
+func (m *Model) trackRetryCycleDisplay(evt agent.AgentActivityEvent) {
+	agentID := evt.AgentID
+	if agentID == "" {
+		agentID = "main"
+	}
+	switch evt.Type {
+	case agent.ActivityRetrying, agent.ActivityRetryingKey:
+		m.retryCycleDisplay[agentID] = evt
+	case agent.ActivityConnecting:
+	default:
+		delete(m.retryCycleDisplay, agentID)
 	}
 }

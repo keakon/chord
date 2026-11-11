@@ -25,7 +25,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.markAgentIdle("main")
 		mainLoopBusy := m.agent != nil && m.agent.LoopKeepsMainBusy()
 		if mainLoopBusy {
-			m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main", Detail: "loop"}
+			m.setAgentActivity(agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main", Detail: "loop"})
 			if m.terminalTitleBackgroundCompletedAgentID == "main" {
 				m.terminalTitleBackgroundCompletedAgentID = ""
 			}

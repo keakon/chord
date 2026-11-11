@@ -25,6 +25,11 @@ type activityRuntimeState struct {
 	activities          map[string]agent.AgentActivityEvent
 	activityStartTime   map[string]time.Time
 	activityLastChanged map[string]time.Time
+	// retryCycleDisplay holds, per agent, the latest retry-phase activity event
+	// of the agent's current connect/retry cycle. While the cycle keeps
+	// re-entering connecting, the status bar renders this event instead of the
+	// raw connecting flips so the lane stays stable during fast retry storms.
+	retryCycleDisplay   map[string]agent.AgentActivityEvent
 	requestProgress     map[string]requestProgressState
 	workStartedAt       map[string]time.Time
 	turnBusyStartedAt   map[string]time.Time

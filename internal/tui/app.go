@@ -629,6 +629,7 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		activities:          make(map[string]agent.AgentActivityEvent),
 		activityStartTime:   make(map[string]time.Time),
 		activityLastChanged: make(map[string]time.Time),
+		retryCycleDisplay:   make(map[string]agent.AgentActivityEvent),
 		requestProgress:     make(map[string]requestProgressState),
 		workStartedAt:       make(map[string]time.Time),
 		turnBusyStartedAt:   make(map[string]time.Time),

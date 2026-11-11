@@ -99,6 +99,11 @@ func (m *Model) markAgentIdle(agentID string) {
 	}
 	m.activities[agentID] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: agentID}
 	delete(m.requestProgress, agentID)
+	// Idle is a reliable terminal state for the agent's current request, so
+	// the retry-cycle display substitution must go with it: the entry is only
+	// meaningful while that request is still re-entering connecting, and a
+	// survivor would mask the next request's first connecting state.
+	delete(m.retryCycleDisplay, agentID)
 	tbk := turnBusyKey(agentID)
 	delete(m.workStartedAt, tbk)
 	delete(m.turnBusyStartedAt, tbk)
@@ -239,6 +244,7 @@ func (m *Model) resetTimingStateForSessionRestore(preserveRequestActivity bool) 
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
 	clear(m.activityStartTime)
 	clear(m.activityLastChanged)
+	clear(m.retryCycleDisplay)
 	clear(m.requestProgress)
 	clear(m.workStartedAt)
 	clear(m.turnBusyStartedAt)
