@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -676,6 +677,23 @@ func isProviderUnreachable(err error) bool {
 		return opErr.Op == "dial" || opErr.Op == "connect"
 	}
 	return false
+}
+
+// isConnectPhaseFailure reports whether err failed before the request reached
+// the server: DNS resolution, TCP dial, or TLS certificate verification. Such
+// an attempt carries no server feedback, so it is paced by the connect-failure
+// ladder instead of the provider's backoff setting; a DNS failure in
+// particular can be transient (an outage, a captive portal), which is why the
+// ladder retries instead of classifying the failure as permanent.
+func isConnectPhaseFailure(err error) bool {
+	if isProviderUnreachable(err) {
+		return true
+	}
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
+		return true
+	}
+	_, ok := errors.AsType[*tls.CertificateVerificationError](err)
+	return ok
 }
 
 func errorChainContainsAll(err error, parts ...string) bool {

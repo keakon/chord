@@ -894,7 +894,7 @@ providers:
 
 - `retry_backoff: exponential` 是默认策略，从 `retry_delay_ms`（默认 `1000`）开始逐轮翻倍，最多等待 60 秒；
 - `retry_backoff: fixed` 每轮固定等待 `retry_delay_ms`；
-- `retry_backoff: none` 关闭 Chord 生成的轮间退避。没有 `Retry-After` 提示的普通 429 不给失败 key 设置定时冷却，只把它标为 recovering，让健康 key 和 fallback target 保持优先；默认轮次没有上限，`none` 下上游快速持续失败时会被零间隔连续重试；
+- `retry_backoff: none` 关闭 Chord 生成的轮间退避。没有 `Retry-After` 提示的普通 429 不给失败 key 设置定时冷却，只把它标为 recovering，让健康 key 和 fallback target 保持优先；默认轮次没有上限，服务器有响应的失败在 `none` 下零间隔连续重试。从未到达服务器的请求（DNS 解析、连接建立、TLS 验证）不受该设置约束，按内置梯子节奏探测：等待从 1s 起每连续失败翻倍，梯子自身封顶 20s；最终等待取梯子与所配置退避中较大者，`exponential` 下会超过 20s、直到该模式的 60s 上限；
 - `retry_delay_ms` 可取 `0` 到 `60000`；`0` / 省略表示 1000ms。策略拼错、负数或超过上限都会作为配置错误暴露。
 
 带停顿的重试轮会把这段等待以倒计时显示在状态栏，指向下一次尝试的时刻（`↺ round 12 · retry in 45s`）。没有停顿、立刻重新探测的重试轮没有可倒数的等待，继续显示已经重试了多久。
@@ -1658,7 +1658,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `retry_after_max_s`| int    | 采纳 `Retry-After` 头的最长等待秒数（1-86400）。该头始终作为 key 冷却时长生效，优先于 `retry_backoff`/`retry_delay_ms`；本参数只限制单次提示最长能占用 key 多久。`preset: codex` 默认 `86400`；第三方网关可能回显任意值，默认 `60`。 |
 | `key_rotation`| string | `on_failure`（默认）/ `per_request`。控制何时重新选择 credential / API key。                                                                    |
 | `key_order`   | string | `sequential`（非 Codex 默认）/ `random` / `smart`（仅 Codex）。控制在候选 key 中如何选择。                                               |
-| `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制未携带合法 `Retry-After` 提示的普通 HTTP 429 的 key 冷却。合法服务端提示、已确认的配额重置与凭据硬状态仍然优先。 |
+| `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制未携带合法 `Retry-After` 提示的普通 HTTP 429 的 key 冷却。合法服务端提示、已确认的配额重置与凭据硬状态仍然优先。从未到达服务器的请求（DNS 解析、连接建立、TLS 验证）按内置连接梯子调度——1s 起每连续失败翻倍、梯子自身封顶 20s——不受本设置约束；最终等待取梯子与所配置退避中较大者。 |
 | `retry_delay_ms`| int   | 轮间退避和普通 429 冷却的基准值或固定值，单位毫秒，可取 `0` 到 `60000`；`0` / 省略默认 1000ms。即使省略 `retry_backoff`，只要写出该字段（包括显式 `0`）就算覆盖。`none` 模式下忽略。超出范围的值会记录日志并回退默认值，不会中断启动。 |
 | `compress`    | string | 上游请求体的压缩编码：`off`、`gzip` 或 `zstd`；不设即用 preset 默认值——`preset: codex` 发送 `zstd`，其他 preset 按原文发送。只在压缩能缩小体积时生效。旧的布尔写法 `compress: true` 已删除——会被忽略并由 `chord doctor config` 报告（改成 `compress: gzip` 即可）。 |
 | `response_header_timeout` | int | 从开始该 provider 的流式 HTTP 请求到收到响应头的超时，单位秒，包括连接建立与请求体上传。`0` / 省略表示使用内置默认值；健康流由 `stream_idle_timeout` 约束，而不是总请求计时器。 |

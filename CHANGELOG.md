@@ -22,6 +22,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Requests that fail before reaching the provider (DNS resolution, dial, TLS verification) are now retried on a built-in ladder — 1s doubling per consecutive failure with jitter — regardless of `retry_backoff`. The ladder itself caps at 20 seconds; the final wait is the longer of the ladder and the configured backoff, so higher backoff modes still wait longer. Under `retry_backoff: none` a network outage previously re-probed at whatever speed failures returned, sending thousands of requests per minute; failures where the server responded still follow the configured backoff unchanged.
 - Reduced terminal rendering overhead and temporary allocations, with fewer background wakeups while idle.
 - `chord config add` now saves resolved model settings explicitly with `catalog: false`, including applicable request-field rules and named reasoning variants. It leaves the base reasoning level unset unless explicitly configured. The saved model no longer depends on a catalog entry at runtime, and catalog refreshes leave its settings unchanged. Existing overrides and prices are preserved.
 - The main agent can receive an earlier checkpoint reminder when a task-completion report arrives or all todos reach a terminal state and newly added content is estimated to cross the reminder line. Automatic compaction continues to use the existing usage thresholds.

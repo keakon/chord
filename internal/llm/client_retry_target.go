@@ -24,6 +24,10 @@ type streamTargetAttemptResult struct {
 	hadRequestAttempt     bool
 	roundHadUsableReply   bool
 	skipProvider          bool
+	// Connection evidence accumulates across keys and retries independently
+	// of lastErr; a later local or connection failure cannot erase a response.
+	connectPhaseFailure bool
+	reachedServer       bool
 	// pendingRollbackReason is non-empty when partial streamed output is still
 	// rendered and its rollback is deferred until the retry regenerates
 	// content or the attempt chain ends; the value is the rollback reason.
@@ -378,8 +382,22 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 			effectiveMaxTokens,
 			requestTuning,
 			t.serviceTier,
-			tracker.Callback,
+			func(delta message.StreamDelta) {
+				// A provider may reconnect internally after receiving headers.
+				// Keep that response evidence even if its final attempt fails.
+				if delta.Status != nil {
+					switch delta.Status.Type {
+					case message.StatusDeltaWaitingHeaders, message.StatusDeltaWaitingToken, message.StatusDeltaStreaming:
+						result.reachedServer = true
+					}
+				}
+				tracker.Callback(delta)
+			},
 		)
+		result.connectPhaseFailure = result.connectPhaseFailure || isConnectPhaseFailure(err)
+		if _, apiResponse := errors.AsType[*APIError](err); resp != nil || apiResponse {
+			result.reachedServer = true
+		}
 		if executiongate.IsPaused(err) {
 			result.resp = resp
 			return result, lastInputTokens, err
@@ -607,6 +625,8 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 						probeResult, probeTokens, probeErr := c.probeWithoutForcedToolChoice(probe)
 						bodyCachePins = append(bodyCachePins, probeResult.bodyCachePins...)
 						pendingRollback = probeResult.pendingRollbackReason
+						probeResult.connectPhaseFailure = probeResult.connectPhaseFailure || result.connectPhaseFailure
+						probeResult.reachedServer = probeResult.reachedServer || result.reachedServer
 						if probeErr != nil {
 							// Only a plain request rejection belongs to this probe.
 							// Wrapped terminal/control errors must keep their identity.

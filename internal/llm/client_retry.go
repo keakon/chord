@@ -23,12 +23,20 @@ type streamRoundAttemptSummary struct {
 	requestDefectTargets      int
 	lastRequestDefectErr      error
 	lastRequestDefectProvider *ProviderConfig
+	// connectPhaseFailure records that some target of the round failed before
+	// reaching the server (DNS resolution, dial, TLS verification).
+	connectPhaseFailure bool
+	// reachedServer includes responses from earlier keys and internal retries,
+	// even when the target's final outcome was a connection failure.
+	reachedServer bool
 }
 
 func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) {
 	if s == nil {
 		return
 	}
+	s.connectPhaseFailure = s.connectPhaseFailure || result.connectPhaseFailure
+	s.reachedServer = s.reachedServer || result.reachedServer
 	if !result.hadRequestAttempt {
 		// A cooling target never reached the wire, but its sibling can recover
 		// once the window passes; it still counts as a retriable sibling when
@@ -177,6 +185,16 @@ func (c *Client) completeStreamWithRetry(
 	variantForStart := validVariantForModel(startProvider, startModelID, startVariant)
 
 	retryCount := 0
+	// consecutiveConnectFailures counts consecutive rounds that kept failing
+	// before reaching the server; any round that reached the wire restarts
+	// the connect-failure ladder from its first rung.
+	consecutiveConnectFailures := 0
+	// lastRoundConnectFailed is the previous round's ladder verdict — the
+	// round failed connect-phase and no target reached the server. The next
+	// round's pacing reads it before this round's targets run; the verdict is
+	// round-level because the last target's error cannot represent the round
+	// (a sibling that never went out would otherwise mask it either way).
+	lastRoundConnectFailed := false
 	replayEchoRejectedTargets := make(map[replayEchoTarget]struct{})
 	continuationExhaustedTargets := make(map[replayEchoTarget]struct{})
 
@@ -210,6 +228,16 @@ func (c *Client) completeStreamWithRetry(
 			delay := roundRetryDelay(startProvider.GetRetryDelay(retryCount), pendingRoundWait.sleep)
 			if waitingForCooling {
 				delay = pendingRoundWait.sleep
+			} else if lastRoundConnectFailed {
+				// The previous round never reached the server, so its failure
+				// carries no new information and the condition behind it
+				// (network down, resolver down) changes on the scale of
+				// seconds. Pace the re-probe on the connect ladder regardless
+				// of provider backoff: a none or fixed 0 setting would
+				// otherwise spin at whatever speed failures return.
+				if laddered := connectFailureRetryDelay(consecutiveConnectFailures); laddered > delay {
+					delay = laddered
+				}
 			}
 			if withheldTerminalErr != nil {
 				delay = min(delay, max(0, withheldTerminalFailureBudget-time.Since(withheldTerminalSince)))
@@ -474,6 +502,18 @@ func (c *Client) completeStreamWithRetry(
 			}
 			log.Infof("relay rejection withheld while sibling recovery budget remains provider=%v error=%v budget_left=%v", providerLogName(withheldTerminalProvider), withheldTerminalErr, withheldTerminalFailureBudget-time.Since(withheldTerminalSince))
 		}
+		// Advance the connect-failure ladder only while the round kept failing
+		// before the server; a round that reached the wire — whatever its
+		// outcome — restarts the ladder from the first rung. A round with no
+		// wire evidence either way (every target failed key selection or is
+		// cooling) holds the ladder: it neither advances nor restarts it.
+		switch {
+		case roundAttemptSummary.reachedServer:
+			consecutiveConnectFailures = 0
+		case roundAttemptSummary.connectPhaseFailure:
+			consecutiveConnectFailures++
+		}
+		lastRoundConnectFailed = !roundAttemptSummary.reachedServer && roundAttemptSummary.connectPhaseFailure
 		retryCount = nextRetryCount(retryCount, roundHadRequestAttempt, roundHadUsableReply, lastErr, hardCap)
 	} // end attempts loop
 

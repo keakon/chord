@@ -3,8 +3,11 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -735,5 +738,327 @@ func TestCompleteStreamDoesNotRetryOtherKeysWhenContextCancelled(t *testing.T) {
 	}
 	if impl.CallCount() != 0 {
 		t.Fatalf("provider CallCount=%d, want 0 (cancel should short-circuit before any request)", impl.CallCount())
+	}
+}
+
+// unresolvedHostErr mirrors what the HTTP transport returns when the provider
+// host cannot be resolved, wrapped the way the request path wraps it.
+func unresolvedHostErr() error {
+	return fmt.Errorf("send request: %w", &url.Error{
+		Op:  "Post",
+		URL: "https://example.invalid/v1/responses",
+		Err: &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "example.invalid"}},
+	})
+}
+
+// shrinkConnectFailureLadder shrinks the connect-failure ladder for a test and
+// restores the production shape on cleanup.
+func shrinkConnectFailureLadder(t *testing.T, base, ceiling time.Duration, jitter bool) {
+	t.Helper()
+	prevBase, prevCeiling, prevJitter := connectFailureRetryBase, connectFailureRetryCeiling, connectFailureRetryJitter
+	connectFailureRetryBase, connectFailureRetryCeiling, connectFailureRetryJitter = base, ceiling, jitter
+	t.Cleanup(func() {
+		connectFailureRetryBase, connectFailureRetryCeiling, connectFailureRetryJitter = prevBase, prevCeiling, prevJitter
+	})
+}
+
+func TestConnectFailureRetryDelayLadder(t *testing.T) {
+	shrinkConnectFailureLadder(t, time.Second, 20*time.Second, false)
+	// One rung per consecutive connect-failed round: 1s doubling to the 20s cap.
+	for _, tc := range []struct {
+		failures int
+		want     time.Duration
+	}{
+		{1, time.Second},
+		{2, 2 * time.Second},
+		{3, 4 * time.Second},
+		{4, 8 * time.Second},
+		{5, 16 * time.Second},
+		{6, 20 * time.Second},
+		{7, 20 * time.Second},
+		{50, 20 * time.Second},
+	} {
+		if got := connectFailureRetryDelay(tc.failures); got != tc.want {
+			t.Fatalf("connectFailureRetryDelay(%d) = %v, want %v", tc.failures, got, tc.want)
+		}
+	}
+	// With jitter the wait keeps at least half the rung and randomizes the rest.
+	shrinkConnectFailureLadder(t, time.Second, 20*time.Second, true)
+	for range 50 {
+		got := connectFailureRetryDelay(1)
+		if got < 500*time.Millisecond || got >= time.Second {
+			t.Fatalf("jittered first rung = %v, want in [500ms, 1s)", got)
+		}
+	}
+}
+
+func TestClientCompleteStreamConnectFailureLadderUnderNoneBackoff(t *testing.T) {
+	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	// retry_backoff: none — the ladder must pace the round regardless.
+	disableRetryDelayForTest(cfg)
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{err: unresolvedHostErr()},
+		{err: unresolvedHostErr()},
+		{resp: &message.Response{Content: "recovered"}},
+	}
+	c := NewClient(cfg, impl, "primary-model", 4096, "sys")
+
+	shrinkConnectFailureLadder(t, 10*time.Millisecond, 40*time.Millisecond, true)
+
+	type retryStatus struct {
+		at       time.Time
+		deadline time.Time
+	}
+	var statuses []retryStatus
+	cb := func(delta message.StreamDelta) {
+		if delta.Status != nil && delta.Status.Type == message.StatusDeltaRetrying {
+			statuses = append(statuses, retryStatus{at: time.Now(), deadline: delta.Status.Deadline})
+		}
+	}
+	start := time.Now()
+	resp, err := callCompleteStreamWithRetryForTest(
+		c, context.Background(), cfg, impl, "primary-model", 4096, RequestTuning{}, "",
+		[]message.Message{{Role: "user", Content: "hi"}}, nil, cb, false, nil, 0, &CallStatus{},
+	)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry err = %v", err)
+	}
+	if resp == nil || resp.Content != "recovered" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := impl.CallCount(); got != 3 {
+		t.Fatalf("provider calls = %d, want 3", got)
+	}
+	// Two floored waits: the first rung is at least half the 10ms base, the
+	// second at least half of 20ms.
+	if elapsed < 15*time.Millisecond {
+		t.Fatalf("two connect-failed rounds completed in %v, want >= the ladder waits", elapsed)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("retry statuses = %d, want 2", len(statuses))
+	}
+	for i, st := range statuses {
+		if st.deadline.IsZero() {
+			t.Fatalf("retry status %d carried no deadline", i)
+		}
+	}
+}
+
+func TestClientCompleteStreamConnectFailureLadderResetsAfterServerRound(t *testing.T) {
+	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	disableRetryDelayForTest(cfg)
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{err: unresolvedHostErr()},
+		{err: &APIError{StatusCode: 500, Message: "upstream overloaded"}},
+		{err: unresolvedHostErr()},
+		{resp: &message.Response{Content: "recovered"}},
+	}
+	c := NewClient(cfg, impl, "primary-model", 4096, "sys")
+
+	// Jitter off: each rung is exact, so the second connect failure must wait
+	// the first rung (10ms) again, not the second (20ms).
+	shrinkConnectFailureLadder(t, 10*time.Millisecond, 40*time.Millisecond, false)
+
+	type retryStatus struct {
+		at       time.Time
+		deadline time.Time
+	}
+	var statuses []retryStatus
+	cb := func(delta message.StreamDelta) {
+		if delta.Status != nil && delta.Status.Type == message.StatusDeltaRetrying {
+			statuses = append(statuses, retryStatus{at: time.Now(), deadline: delta.Status.Deadline})
+		}
+	}
+	resp, err := callCompleteStreamWithRetryForTest(
+		c, context.Background(), cfg, impl, "primary-model", 4096, RequestTuning{}, "",
+		[]message.Message{{Role: "user", Content: "hi"}}, nil, cb, false, nil, 0, &CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry err = %v", err)
+	}
+	if resp == nil || resp.Content != "recovered" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := impl.CallCount(); got != 4 {
+		t.Fatalf("provider calls = %d, want 4", got)
+	}
+	if len(statuses) != 3 {
+		t.Fatalf("retry statuses = %d, want 3", len(statuses))
+	}
+	// The server responded in round two, so the ladder restarts: the wait
+	// promised after the third round is the first rung again.
+	for _, i := range []int{0, 2} {
+		wait := statuses[i].deadline.Sub(statuses[i].at)
+		if wait < 9*time.Millisecond || wait > 13*time.Millisecond {
+			t.Fatalf("retry status %d promised %v, want the first rung (10ms)", i, wait)
+		}
+	}
+}
+
+func TestClientCompleteStreamAPIErrorRetryKeepsZeroDelay(t *testing.T) {
+	cfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	disableRetryDelayForTest(cfg)
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 500, Message: "upstream overloaded"}},
+		{resp: &message.Response{Content: "recovered"}},
+	}
+	c := NewClient(cfg, impl, "primary-model", 4096, "sys")
+
+	var statuses []message.StatusDelta
+	cb := func(delta message.StreamDelta) {
+		if delta.Status != nil {
+			statuses = append(statuses, *delta.Status)
+		}
+	}
+	resp, err := callCompleteStreamWithRetryForTest(
+		c, context.Background(), cfg, impl, "primary-model", 4096, RequestTuning{}, "",
+		[]message.Message{{Role: "user", Content: "hi"}}, nil, cb, false, nil, 0, &CallStatus{},
+	)
+	if err != nil {
+		t.Fatalf("completeStreamWithRetry err = %v", err)
+	}
+	if resp == nil || resp.Content != "recovered" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	// An in-band API error reached the server: with backoff disabled the retry
+	// round re-probes immediately and promises no countdown.
+	for _, st := range statuses {
+		if st.Type == message.StatusDeltaRetrying && !st.Deadline.IsZero() {
+			t.Fatalf("non-connect retry status carried a deadline: %+v", st)
+		}
+	}
+}
+
+// TestClientCompleteStreamConnectLadderIgnoresNeverSentSibling guards the
+// round-level ladder verdict: a sibling target that never went on the wire
+// (no usable keys) is the round's last target, so its error used to become
+// the round's lastErr and bypass the connect ladder — zero-wait retries on
+// the DNS-failing sibling, exactly the storm the ladder exists to stop.
+func TestClientCompleteStreamConnectLadderIgnoresNeverSentSibling(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	disableRetryDelayForTest(primaryCfg)
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		{err: unresolvedHostErr()},
+		{err: unresolvedHostErr()},
+		{resp: &message.Response{Content: "recovered"}},
+	}
+	siblingCfg := testProviderConfigWithKeys("sibling-prov", "sibling-model", []string{"k-dead"})
+	siblingCfg.mu.Lock()
+	siblingCfg.keyStates[0].Invalid = true
+	siblingCfg.mu.Unlock()
+	siblingImpl := &recordingProvider{}
+
+	client := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	client.SetModelPool([]FallbackModel{
+		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},
+		{ProviderConfig: siblingCfg, ProviderImpl: siblingImpl, ModelID: "sibling-model", MaxTokens: 4096, ContextLimit: 128000},
+	}, 0)
+
+	shrinkConnectFailureLadder(t, 10*time.Millisecond, 40*time.Millisecond, true)
+
+	var statuses []message.StatusDelta
+	resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		// Round-delay statuses carry the promised wait; the fallback target's
+		// own "fallback:" status is a target switch, not a pacing promise.
+		if delta.Status != nil && delta.Status.Type == message.StatusDeltaRetrying && strings.HasPrefix(delta.Status.Detail, "round ") {
+			statuses = append(statuses, *delta.Status)
+		}
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream err = %v", err)
+	}
+	if resp == nil || resp.Content != "recovered" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := primaryImpl.CallCount(); got != 3 {
+		t.Fatalf("primary calls = %d, want 3", got)
+	}
+	if got := siblingImpl.CallCount(); got != 0 {
+		t.Fatalf("sibling calls = %d, want 0 (no usable keys)", got)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("round retry statuses = %d, want 2", len(statuses))
+	}
+	for i, st := range statuses {
+		if st.Deadline.IsZero() {
+			t.Fatalf("round retry status %d carried no deadline: %+v", i, st)
+		}
+	}
+}
+
+// TestClientCompleteStreamConnectLadderResetsWhenSiblingReachesServer mirrors
+// the reset direction: the round's last target failed connect-phase (DNS), but
+// an earlier sibling reached the server and got a 500. A lastErr-based verdict
+// counts that round as connect-failed and lets the ladder climb; the
+// round-level verdict restarts it, so the next connect wait is the first rung.
+func TestClientCompleteStreamConnectLadderResetsWhenSiblingReachesServer(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+	disableRetryDelayForTest(primaryCfg)
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{
+		{err: &APIError{StatusCode: 500, Message: "upstream overloaded"}},
+		{err: unresolvedHostErr()},
+		{resp: &message.Response{Content: "recovered"}},
+	}
+	siblingCfg := testProviderConfigWithKeys("sibling-prov", "sibling-model", []string{"k2"})
+	disableRetryDelayForTest(siblingCfg)
+	siblingImpl := &recordingProvider{}
+	siblingImpl.calls = []scriptedCall{
+		{err: unresolvedHostErr()},
+		{err: unresolvedHostErr()},
+	}
+
+	client := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	client.SetModelPool([]FallbackModel{
+		{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},
+		{ProviderConfig: siblingCfg, ProviderImpl: siblingImpl, ModelID: "sibling-model", MaxTokens: 4096, ContextLimit: 128000},
+	}, 0)
+
+	// Jitter off: each rung is exact, so the wait after the server round must
+	// be the first rung (10ms), not the second (20ms).
+	shrinkConnectFailureLadder(t, 10*time.Millisecond, 40*time.Millisecond, false)
+
+	type retryStatus struct {
+		at       time.Time
+		deadline time.Time
+	}
+	var statuses []retryStatus
+	resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		// Round-delay statuses carry the promised wait; the fallback target's
+		// own "fallback:" status is a target switch, not a pacing promise.
+		if delta.Status != nil && delta.Status.Type == message.StatusDeltaRetrying && strings.HasPrefix(delta.Status.Detail, "round ") {
+			statuses = append(statuses, retryStatus{at: time.Now(), deadline: delta.Status.Deadline})
+		}
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream err = %v", err)
+	}
+	if resp == nil || resp.Content != "recovered" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := primaryImpl.CallCount(); got != 3 {
+		t.Fatalf("primary calls = %d, want 3", got)
+	}
+	if got := siblingImpl.CallCount(); got != 2 {
+		t.Fatalf("sibling calls = %d, want 2", got)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("round retry statuses = %d, want 2", len(statuses))
+	}
+	// Round one ended with a 500 from the primary: the server was reached, so
+	// the immediate re-probe promises no countdown.
+	if !statuses[0].deadline.IsZero() {
+		t.Fatalf("server-round retry status promised %v, want no deadline", statuses[0].deadline)
+	}
+	// Round two failed connect-phase, but the ladder had been restarted, so
+	// the promised wait is the first rung again.
+	wait := statuses[1].deadline.Sub(statuses[1].at)
+	if wait < 9*time.Millisecond || wait > 13*time.Millisecond {
+		t.Fatalf("retry after the server round promised %v, want the first rung (10ms)", wait)
 	}
 }

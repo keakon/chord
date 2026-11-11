@@ -1046,11 +1046,17 @@ providers:
 - `retry_backoff: exponential` is the default. It starts at `retry_delay_ms`
   (default `1000`) and doubles each round, capped at 60 seconds.
 - `retry_backoff: fixed` uses `retry_delay_ms` for every round.
-- `retry_backoff: none` disables generated round backoff. An ordinary 429
-  without a `Retry-After` hint marks the failed key as recovering without a
-  timed cooldown, so healthy keys and fallback targets still take priority.
-  Rounds are unlimited by default, so with `none` a fast-failing upstream is
-  retried back-to-back without delay.
+- `retry_backoff: none` disables generated round backoff for rounds where the
+  server responded. An ordinary 429 without a `Retry-After` hint marks the
+  failed key as recovering without a timed cooldown, so healthy keys and
+  fallback targets still take priority. Rounds are unlimited by default, so
+  with `none` a fast-failing upstream is retried back-to-back without delay.
+  Requests that never reach the server (DNS resolution, dial, TLS
+  verification) are paced independently of this setting: the wait starts at
+  1 second and doubles per consecutive failure, and the ladder itself caps
+  at 20 seconds. The final wait is the longer of the ladder and the
+  configured backoff, so under `exponential` it keeps growing past 20
+  seconds up to that mode's 60-second cap.
 - `retry_delay_ms` accepts `0` through `60000`; `0` / omitted means 1000ms.
   Invalid modes, negative values, and values above the cap are configuration
   errors.
@@ -1929,7 +1935,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `retry_after_max_s` | int    | Longest `Retry-After` wait honored, in seconds (1-86400). The header always applies as the key cooldown, ahead of `retry_backoff`/`retry_delay_ms`; this only bounds how long a single hint may block a key. `preset: codex` defaults to `86400`; third-party gateways, which can echo arbitrary values, default to `60`. |
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
-| `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown without valid `Retry-After` advice. Valid server advice, confirmed quota resets, and hard credential states still win. |
+| `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown without valid `Retry-After` advice. Valid server advice, confirmed quota resets, and hard credential states still win. Requests that never reach the server (DNS resolution, dial, TLS verification) are paced by the built-in connect ladder — 1s doubling per consecutive failure, the ladder itself capped at 20s — regardless of this setting; the final wait is the longer of the ladder and the configured backoff. |
 | `retry_delay_ms`| int   | Base/fixed round and ordinary-429 delay in milliseconds, from `0` through `60000`; `0` / omitted defaults to 1000ms. Setting the field—including explicit `0`—is an override even when `retry_backoff` is omitted. Ignored for `none`. Out-of-range values are logged and fall back to the default instead of failing startup. |
 | `compress`     | string | Upstream request body compression encoding: `off`, `gzip` or `zstd`; unset = the preset default — `preset: codex` sends `zstd`, other presets send the body uncompressed. Applies only when compression shrinks the payload. The boolean `compress: true` form is gone — it is ignored and reported by `chord doctor config` (migrate to `compress: gzip`). |
 | `response_header_timeout` | int | Timeout in seconds from starting a streaming HTTP request until response headers arrive, including connection setup and request-body upload. `0` / omitted uses the built-in default; healthy streams are bounded by `stream_idle_timeout`, not a total request timer. |

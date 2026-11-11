@@ -6,6 +6,8 @@ import (
 	"time"
 	"unicode"
 
+	randv2 "math/rand/v2"
+
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -194,6 +196,45 @@ func roundRetryDelay(backoffDelay, pendingRoundWait time.Duration) time.Duration
 		return pendingRoundWait
 	}
 	return backoffDelay
+}
+
+// connectFailureRetryBase and connectFailureRetryCeiling shape the retry
+// ladder for rounds whose requests never reached the server. They are vars so
+// tests can shrink the waits instead of sleeping them out; production keeps
+// 1s doubling to a 20s cap.
+var (
+	connectFailureRetryBase    = time.Second
+	connectFailureRetryCeiling = 20 * time.Second
+	// connectFailureRetryJitter keeps at least half of each rung's wait and
+	// randomizes the rest, so concurrent probers on one provider (a main
+	// request and a compaction round) do not align; tests can turn it off for
+	// exact rung assertions.
+	connectFailureRetryJitter = true
+)
+
+// connectFailureRetryDelay returns the wait before the next round after n
+// consecutive rounds that never reached the server: base doubling per
+// consecutive failure up to the ceiling, with equal jitter (lower half plus a
+// random share of the rest). The condition behind such failures — network
+// down, resolver down — changes on the scale of seconds, so probing faster
+// than the first rung only spins; the ladder stays unlimited in rounds, which
+// is what lets an in-flight turn ride out a minutes-long outage.
+func connectFailureRetryDelay(consecutiveFailures int) time.Duration {
+	d := connectFailureRetryBase
+	for i := 1; i < consecutiveFailures && d < connectFailureRetryCeiling; i++ {
+		d *= 2
+	}
+	if d > connectFailureRetryCeiling {
+		d = connectFailureRetryCeiling
+	}
+	if !connectFailureRetryJitter {
+		return d
+	}
+	half := d / 2
+	if half <= 0 {
+		return d
+	}
+	return half + time.Duration(randv2.Int64N(int64(half)))
 }
 
 func nextRetryCount(current int, roundHadRequestAttempt, roundHadUsableReply bool, lastErr error, hardCap bool) int {

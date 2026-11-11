@@ -1,9 +1,12 @@
 package llm
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
+	"syscall"
 	"testing"
 	"time"
 
@@ -555,5 +558,35 @@ func TestGeminiSchemaValidation400IsTerminalRequestShapeError(t *testing.T) {
 	// as HTTP 400, and those must stay retryable.
 	if isRequestOrParamError(&APIError{StatusCode: 400, Type: "upstream_error", Message: "upstream temporarily unavailable"}) {
 		t.Fatal("generic upstream 400 should not become terminal")
+	}
+}
+
+func TestIsConnectPhaseFailure(t *testing.T) {
+	t.Parallel()
+	// The chain an HTTP transport produces for an unresolvable provider host,
+	// wrapped the way the request path wraps it.
+	dnsChain := fmt.Errorf("send request: %w", &url.Error{
+		Op:  "Post",
+		URL: "https://example.invalid/v1/responses",
+		Err: &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "example.invalid"}},
+	})
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"dns via dial chain", dnsChain, true},
+		{"bare dns error", &net.DNSError{Err: "server misbehaving", Name: "example.invalid"}, true},
+		{"connection refused", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, true},
+		{"tls verification", fmt.Errorf("send request: %w", &tls.CertificateVerificationError{}), true},
+		{"mid-stream read reset", &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}, false},
+		{"api error", &APIError{StatusCode: 500, Message: "upstream overloaded"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isConnectPhaseFailure(tc.err); got != tc.want {
+				t.Fatalf("isConnectPhaseFailure = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
