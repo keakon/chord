@@ -1225,7 +1225,7 @@ func (a *MainAgent) finishCompactionCall(client *llm.Client, fallbackModelRef st
 			Purpose:          analytics.UsagePurposeCompaction,
 			SelectedModelRef: selectedRef,
 			RunningModelRef:  runningRef,
-		}, resp.Usage, serviceTier, nil)
+		}, resp.Usage, serviceTier, nil, responseUsageTiming(resp))
 	}
 	modelRef := fallbackModelRef
 	if strings.TrimSpace(runningRef) != "" {

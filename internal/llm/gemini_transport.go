@@ -33,6 +33,14 @@ type geminiHopResult struct {
 	UsageComplete bool
 	Err           error
 	Accepted      bool
+	// Deferred tools become visible after the transport returns.
+	startedAt time.Time
+	// RequestNs and FirstOutputNs measure one successfully finished hop from
+	// its pre-submission start (geminiHop start) to its terminal, in int64
+	// nanoseconds. Zero marks "not measured": failed hops never carry timing,
+	// so they cannot contribute throughput or latency samples downstream.
+	RequestNs     int64
+	FirstOutputNs int64
 }
 
 func geminiBodyWithContinuation(base []byte, token string) ([]byte, error) {
@@ -138,6 +146,7 @@ func redactGeminiCandidate(candidate json.RawMessage) (json.RawMessage, bool) {
 
 func (g *GeminiProvider) streamGeminiHop(ctx context.Context, frozen geminiFrozenRequest, body []byte, state *geminiDecodeState, cb StreamCallback) (result geminiHopResult) {
 	start := time.Now()
+	result.startedAt = start
 	requestToken := state.checkpoint.Token
 	dumpWriter, traceWriter := g.dumpWriter.Load(), g.traceWriter.Load()
 	var collector *SSECollector
@@ -154,6 +163,9 @@ func (g *GeminiProvider) streamGeminiHop(ctx context.Context, frozen geminiFroze
 		cb = trace.Callback
 	}
 	defer func() { state.cb = originalCB }()
+	// The decode state spans the whole continuation chain; first-visible-content
+	// timing is per hop, so reset it at every hop start.
+	state.firstContentAt = time.Time{}
 	statusCode := 0
 	var responseHeaders http.Header
 	defer func() {
@@ -275,6 +287,12 @@ func (g *GeminiProvider) streamGeminiHop(ctx context.Context, frozen geminiFroze
 		}
 		if result.Err == nil {
 			result.Err = io.ErrUnexpectedEOF
+		}
+	}
+	if state.finish != "" && result.Err == nil {
+		result.RequestNs = time.Since(start).Nanoseconds()
+		if first := state.firstContentAt; !first.IsZero() && first.After(start) {
+			result.FirstOutputNs = first.Sub(start).Nanoseconds()
 		}
 	}
 	if state.finish != "" && result.Err == nil && state.terminalUsage {

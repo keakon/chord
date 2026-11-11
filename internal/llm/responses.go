@@ -729,6 +729,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if isCodexWSChainStateMismatch(wsErr) {
 			log.Warnf("responses: Codex WebSocket chain-state mismatch, retrying full request without previous_response_id error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("ws_chain_state_mismatch")
+			restartResponseTiming(ctx)
 			retryResp, retryUsedIncremental, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true, SessionKey: sessionKey, TurnState: turnState, TurnStateIdentity: turnStateIdentity})
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
@@ -753,6 +754,7 @@ func (r *ResponsesProvider) CompleteStream(
 		if wsUsedIncremental {
 			log.Warnf("responses: Codex WebSocket incremental failed, retrying full request on websocket error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("error_fallback")
+			restartResponseTiming(ctx)
 			wsResp, _, retryErr := wsComplete(ctx, url, apiKey, model, &reqBody, fullInput, traceCB, start, codexWSCompleteOptions{SkipPrewarm: true, SessionKey: sessionKey, TurnState: turnState, TurnStateIdentity: turnStateIdentity})
 			if retryErr == nil {
 				r.lastTransportUsed.Store("websocket")
@@ -781,6 +783,7 @@ func (r *ResponsesProvider) CompleteStream(
 		}
 		log.Warnf("responses: Codex WebSocket failed, falling back to HTTP error=%v", wsErr)
 		r.resetCodexWebSocketChain("ws_fallback_http")
+		restartResponseTiming(ctx)
 	}
 
 	r.lastTransportUsed.Store("http")

@@ -1280,7 +1280,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 					TurnID:           turn.ID,
 					SelectedModelRef: selectedRef,
 					RunningModelRef:  runningRef,
-				}, resp.Usage, callStatus.ServiceTier, nil)
+				}, resp.Usage, callStatus.ServiceTier, nil, responseUsageTiming(resp))
 			}
 
 			// Hook: on_after_llm_call.

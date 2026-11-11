@@ -777,14 +777,25 @@ const (
 type Response struct {
 	UsageReported         bool
 	NativeRequestDuration int64 `json:"native_request_duration_ns"`
-	NativeTools           *NativeToolHistory
-	Content               string
-	ThinkingBlocks        []ThinkingBlock // non-nil when extended thinking was enabled
-	ResponsesOutput       []ResponsesOutputItem
-	GeminiParts           []GeminiReplayPart
-	ToolCalls             []ToolCall
-	Usage                 *TokenUsage
-	StopReason            string
+	// RequestNs is the wall-clock duration of the successfully completed
+	// physical request attempt, measured from just before the transport
+	// submission (including connection setup) to the client's success
+	// terminal. Zero marks "not measured": failed attempts, interruptions,
+	// and responses that bypass the attempt success branch carry no timing.
+	RequestNs int64 `json:"request_ns,omitzero"`
+	// FirstOutputNs is the latency from the same start point to the first
+	// non-empty visible content delta (non-blank text or summary thinking,
+	// or a tool-use delta carrying actual payload). Zero marks "not
+	// measured"; hidden-mode reasoning deltas never count as content.
+	FirstOutputNs   int64 `json:"first_output_ns,omitzero"`
+	NativeTools     *NativeToolHistory
+	Content         string
+	ThinkingBlocks  []ThinkingBlock // non-nil when extended thinking was enabled
+	ResponsesOutput []ResponsesOutputItem
+	GeminiParts     []GeminiReplayPart
+	ToolCalls       []ToolCall
+	Usage           *TokenUsage
+	StopReason      string
 	// ThinkingToolcallMarkerHit is true when provider-side reasoning content
 	// contained pseudo tool-call template markers (e.g. "<|tool_call_begin|>").
 	// This is observational metadata only; tool execution must still come from

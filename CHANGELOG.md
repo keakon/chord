@@ -13,6 +13,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- `/stats` Models tables now show per-model output speed (`tok/s`), average first visible output latency (`TTFT`), and the number of measured requests (`Samples`). `tok/s` divides output tokens by request wall time (a duration-weighted average) over main-conversation chat requests with measured timing; auxiliary calls such as compaction, sub-agent traffic, and requests without usable usage counts are excluded. Once the first measured request completes, the info panel TOKENS section shows the session-wide average `tok/s` over the same samples, updated as each request settles.
 - Added progress reminders for long tool-call chains without assistant text. Reminders appear as folded `PROGRESS REMINDER` cards and are available to headless clients through `progress_notice`.
 - Model-driven checkpoints can retain explicit user requirements that automatic constraint detection misses. Chord verifies their user-message source and preserves the complete instruction and its conditions in the existing bounded constraint window.
 - `confirm_ask_policy: deny` immediately refuses eligible permission asks in unattended runs, letting the main agent and Chord SubAgents continue without opening approval prompts. Headless integrations can observe each refusal through `tool_ask_policy_denied`; questions, loop confirmations, explicit compaction asks, and external-worker permission requests retain their existing behavior.

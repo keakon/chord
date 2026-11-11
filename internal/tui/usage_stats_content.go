@@ -58,17 +58,7 @@ func (m *Model) sessionUsageStatsLines(width int) []string {
 	switch m.usageStats.view {
 	case statsViewModels:
 		lines := []string{currentStyles.DialogTitleStyle.Render(titlePrefix + "Models")}
-		lines = append(lines, renderUsageTable(
-			[]overlaylist.Column{
-				{Title: "Model", Width: 0, Align: 0},
-				{Title: "Calls", Width: 6, Align: 1},
-				{Title: "Input", Width: 8, Align: 1},
-				{Title: "Output", Width: 8, Align: 1},
-				{Title: "Cost", Width: 8, Align: 1},
-			},
-			usageModelItems(stats.ByModel),
-			width,
-		)...)
+		lines = append(lines, renderUsageModels(usageModelItems(stats.ByModel), width)...)
 		return lines
 	case statsViewAgents:
 		lines := []string{currentStyles.DialogTitleStyle.Render(titlePrefix + "Agents")}
@@ -143,15 +133,8 @@ func (m *Model) projectUsageStatsLines(width int) []string {
 	switch m.usageStats.view {
 	case statsViewModels:
 		lines := []string{currentStyles.DialogTitleStyle.Render(titlePrefix + "Models")}
-		lines = append(lines, renderUsageTable(
-			[]overlaylist.Column{
-				{Title: "Model", Width: 0, Align: 0},
-				{Title: "Calls", Width: 6, Align: 1},
-				{Title: "Input", Width: 8, Align: 1},
-				{Title: "Output", Width: 8, Align: 1},
-				{Title: "Cost", Width: 8, Align: 1},
-			},
-			usageRefAggregateItemsByUsage(report.ByModelRef, func(key string) string { return key }),
+		lines = append(lines, renderUsageModels(
+			usageRefAggregateItemsByUsage(report.ByModelRef, func(key string) string { return key }, true),
 			width,
 		)...)
 		return lines
@@ -170,7 +153,7 @@ func (m *Model) projectUsageStatsLines(width int) []string {
 					return "main"
 				}
 				return key
-			}),
+			}, false),
 			width,
 		)...)
 		return lines

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"strings"
+	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -11,15 +12,36 @@ import (
 type visibleStreamTracker struct {
 	inner            StreamCallback
 	visible          bool
-	toolStreamStated bool   // a tool-call delta reached the UI in the current attempt
-	textStated       bool   // a non-blank text delta reached the UI; only this is resumable body text
-	pendingRollback  string // non-empty: a prior attempt's partial output is still rendered; its rollback must precede this attempt's first visible delta
-	rollbackFired    bool   // the armed pendingRollback was emitted to the UI
-	onVisibleStart   func() // called each time a visible streaming attempt begins; may be nil
+	toolStreamStated bool      // a tool-call delta reached the UI in the current attempt
+	textStated       bool      // a non-blank text delta reached the UI; only this is resumable body text
+	hasContent       bool      // a content-bearing delta arrived in the current attempt window
+	firstContentAt   time.Time // wall clock of the first content-bearing delta; zero before it
+	pendingRollback  string    // non-empty: a prior attempt's partial output is still rendered; its rollback must precede this attempt's first visible delta
+	rollbackFired    bool      // the armed pendingRollback was emitted to the UI
+	onVisibleStart   func()    // called each time a visible streaming attempt begins; may be nil
 	providerModel    string
 	keyLogID         string
 	keyAttempt       int
 	keyCount         int
+}
+
+// deltaCarriesContent reports whether a delta carries actual model output
+// rather than blank or format-only text, pure call metadata, or a stream marker.
+// It defines the first-visible-output measurement point, which is stricter than UI
+// visibility: blank text deltas and metadata-only tool-call frames reach the
+// UI but carry no content.
+func deltaCarriesContent(delta message.StreamDelta) bool {
+	switch delta.Type {
+	case message.StreamDeltaText:
+		return hasVisibleContent(delta.Text)
+	case message.StreamDeltaThinking:
+		// Hidden-mode reasoning is provider-internal and never reaches the
+		// UI, so it is not visible output even when non-blank.
+		return delta.ThinkingMode != message.StreamThinkingModeHidden && hasVisibleContent(delta.Text)
+	case message.StreamDeltaToolUseStart, message.StreamDeltaToolUseDelta:
+		return delta.ToolCall != nil && (delta.ToolCall.Name != "" || delta.ToolCall.ID != "" || delta.ToolCall.Input != "" || delta.ToolCall.InputText != "")
+	}
+	return false
 }
 
 func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
@@ -48,6 +70,10 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 				t.onVisibleStart()
 			}
 		}
+		if !t.hasContent && deltaCarriesContent(delta) {
+			t.hasContent = true
+			t.firstContentAt = time.Now()
+		}
 	case message.StreamDeltaRollback:
 		if t.visible {
 			reason := ""
@@ -59,6 +85,8 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 		t.visible = false
 		t.toolStreamStated = false
 		t.textStated = false
+		t.hasContent = false
+		t.firstContentAt = time.Time{}
 	}
 	if t.inner != nil {
 		t.inner(delta)
@@ -135,6 +163,17 @@ func (t *visibleStreamTracker) MarkInterruptedVisibleOutput() bool {
 // whether what it left behind is resumable.
 func (t *visibleStreamTracker) HadTextDelta() bool {
 	return t != nil && t.textStated
+}
+
+// FirstContentAt returns the wall-clock time of the attempt's first
+// content-bearing delta, or the zero time when none arrived. It is the
+// measurement point for the first-visible-output latency; a mid-attempt
+// rollback resets it, matching the output the UI actually kept.
+func (t *visibleStreamTracker) FirstContentAt() time.Time {
+	if t == nil || !t.hasContent {
+		return time.Time{}
+	}
+	return t.firstContentAt
 }
 
 func newStreamAttemptTracker(cb StreamCallback, target streamRetryTarget, apiKey, modelRef, attemptReason string, keyAttempt, keyCount int) *visibleStreamTracker {

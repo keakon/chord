@@ -17,6 +17,14 @@ type ContinuationUsage struct {
 	Outcome     string
 	UsageState  string
 	Usage       *message.TokenUsage
+	// RequestNs is the hop's wall-clock duration, reported only when the hop
+	// finished successfully and its usage counts are complete, so a receipt
+	// with non-zero timing is an eligible throughput sample. FirstOutputNs is
+	// the hop's first-visible-output latency, reported for any successfully
+	// finished hop that streamed content (independent of usage completeness).
+	// Both are int64 nanoseconds; zero marks "not measured".
+	RequestNs     int64
+	FirstOutputNs int64
 }
 type continuationObserverKey struct{}
 type continuationTargetKey struct{}
@@ -127,7 +135,24 @@ func (l *geminiUsageLedger) usage() *message.TokenUsage {
 	result.Context = &message.ContextTokenUsage{Known: l.known && l.promptKnown, PromptTokens: l.prompt, OutputTokens: l.aggregate.OutputTokens}
 	return result
 }
-func reportGeminiContinuationUsage(ctx context.Context, provider *ProviderConfig, chain string, request int, outcome, usageState string, usage *geminiUsageSnapshot) bool {
+
+// continuationHopTiming picks the timing values that may ride a hop's usage
+// receipt. Only successfully finished hops carry timing (failed and
+// interrupted hops never contribute speed samples); the wall clock
+// additionally requires complete usage counts, because an incomplete output
+// numerator would overstate the rate, while the first-visible-output
+// latency is independent of usage completeness.
+func continuationHopTiming(result geminiHopResult) (requestNs, firstOutputNs int64) {
+	if result.Err != nil || result.FinishReason == "" {
+		return 0, 0
+	}
+	if result.Usage != nil && result.UsageComplete {
+		requestNs = result.RequestNs
+	}
+	return requestNs, result.FirstOutputNs
+}
+
+func reportGeminiContinuationUsage(ctx context.Context, provider *ProviderConfig, chain string, request int, outcome, usageState string, usage *geminiUsageSnapshot, requestNs, firstOutputNs int64) bool {
 	observer, _ := ctx.Value(continuationObserverKey{}).(func(ContinuationUsage))
 	if observer == nil {
 		return false
@@ -135,7 +160,7 @@ func reportGeminiContinuationUsage(ctx context.Context, provider *ProviderConfig
 	target, _ := ctx.Value(continuationTargetKey{}).(continuationTarget)
 	response := &message.Response{Usage: usage.tokens()}
 	normalizeResponseUsage(provider, response)
-	observer(ContinuationUsage{ChainID: chain, Request: request, ModelRef: target.ref, ServiceTier: target.tier, Outcome: outcome, UsageState: usageState, Usage: response.Usage})
+	observer(ContinuationUsage{ChainID: chain, Request: request, ModelRef: target.ref, ServiceTier: target.tier, Outcome: outcome, UsageState: usageState, Usage: response.Usage, RequestNs: requestNs, FirstOutputNs: firstOutputNs})
 	return true
 }
 

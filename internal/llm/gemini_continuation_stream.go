@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -41,14 +42,21 @@ type geminiDecodeState struct {
 	bytes                         int
 	cb                            StreamCallback
 	finish                        string
-	latestUsage                   *geminiUsageSnapshot
-	hopCheckpointUsage            *geminiUsageSnapshot
-	hopCheckpointUsageComplete    bool
-	hopCheckpoint                 bool
-	terminalUsage                 bool
+	// firstContentAt timestamps the first visible output of the current hop:
+	// content-bearing text/thinking deltas. Tool calls stay buffered until the
+	// chain completes. The hop driver resets the timestamp at every hop start.
+	firstContentAt             time.Time
+	latestUsage                *geminiUsageSnapshot
+	hopCheckpointUsage         *geminiUsageSnapshot
+	hopCheckpointUsageComplete bool
+	hopCheckpoint              bool
+	terminalUsage              bool
 }
 
 func (s *geminiDecodeState) emit(delta message.StreamDelta) {
+	if s.firstContentAt.IsZero() && deltaCarriesContent(delta) {
+		s.firstContentAt = time.Now()
+	}
 	s.preview = append(s.preview, delta)
 	if s.cb != nil {
 		s.cb(delta)
@@ -206,7 +214,7 @@ func (s *geminiDecodeState) Materialize() (*message.Response, error) {
 	return resp, nil
 }
 
-func publishGeminiFinalTools(resp *message.Response, cb StreamCallback) {
+func publishGeminiFinalTools(resp *message.Response, cb StreamCallback) (firstOutputAt time.Time) {
 	if cb == nil {
 		return
 	}
@@ -216,9 +224,13 @@ func publishGeminiFinalTools(resp *message.Response, cb StreamCallback) {
 			if kind == message.StreamDeltaToolUseDelta {
 				d.Input = string(call.Args)
 			}
+			if firstOutputAt.IsZero() {
+				firstOutputAt = time.Now()
+			}
 			cb(message.StreamDelta{Type: kind, ToolCall: d})
 		}
 	}
+	return
 }
 
 func (s *geminiDecodeState) observeUsage(usage *geminiUsageSnapshot) {

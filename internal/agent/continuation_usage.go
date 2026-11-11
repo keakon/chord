@@ -70,7 +70,7 @@ func (a *MainAgent) continuationUsageObserver(client *llm.Client, target *wallti
 		if receipt.Usage == nil {
 			state = contextdiag.Missing
 		}
-		evt := analytics.UsageEvent{EventID: fmt.Sprintf("continuation:%s:%d", receipt.ChainID, receipt.Request), OccurredAt: time.Now(), AgentID: attr.AgentID, AgentKind: attr.AgentKind, AgentName: attr.AgentName, TaskID: attr.TaskID, Purpose: attr.Purpose, TurnID: attr.TurnID, SelectedModelRef: attr.SelectedModelRef, RunningModelRef: receipt.ModelRef, UsageRaw: raw, BillingUsage: billing, Cost: analytics.CalculateUsageCost(price, billing, receipt.ServiceTier), PricingSnapshot: analytics.PricingSnapshotFromCost(price, billing, receipt.ServiceTier), Diagnostic: map[string]string{"chain": receipt.ChainID, "request": fmt.Sprint(receipt.Request), "outcome": receipt.Outcome, "usage_state": state}}
+		evt := analytics.UsageEvent{EventID: fmt.Sprintf("continuation:%s:%d", receipt.ChainID, receipt.Request), OccurredAt: time.Now(), AgentID: attr.AgentID, AgentKind: attr.AgentKind, AgentName: attr.AgentName, TaskID: attr.TaskID, Purpose: attr.Purpose, TurnID: attr.TurnID, SelectedModelRef: attr.SelectedModelRef, RunningModelRef: receipt.ModelRef, UsageRaw: raw, BillingUsage: billing, Cost: analytics.CalculateUsageCost(price, billing, receipt.ServiceTier), PricingSnapshot: analytics.PricingSnapshotFromCost(price, billing, receipt.ServiceTier), RequestNs: receipt.RequestNs, FirstOutputNs: receipt.FirstOutputNs, Diagnostic: map[string]string{"chain": receipt.ChainID, "request": fmt.Sprint(receipt.Request), "outcome": receipt.Outcome, "usage_state": state}}
 		payload := continuationUsagePayload{target: target, event: evt}
 		if target != nil && target.ledger != nil {
 			err := target.ledger.AppendEvent(evt)

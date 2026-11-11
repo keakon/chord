@@ -173,7 +173,7 @@ func (a *MainAgent) nativeUsageRecorder(attr usageAttribution) func(llm.NativeRe
 		call := attr
 		call.SelectedModelRef = record.Target
 		call.RunningModelRef = record.Target
-		a.recordUsage(call, usage, record.ServiceTier, diagnostic)
+		a.recordUsage(call, usage, record.ServiceTier, diagnostic, usageTiming{})
 	}
 }
 

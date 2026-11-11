@@ -625,7 +625,7 @@ func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCa
 			attr.TaskID = sub.taskID
 		}
 	}
-	b.agent.recordUsage(attr, usage, serviceTier, diagnostic)
+	b.agent.recordUsage(attr, usage, serviceTier, diagnostic, usageTiming{})
 }
 
 // hostedObservationFromResponse enforces the success contract and annotates

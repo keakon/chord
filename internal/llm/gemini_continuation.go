@@ -119,28 +119,46 @@ func (g *GeminiProvider) runGeminiContinuation(ctx context.Context, frozen gemin
 				ledger.known = false
 			}
 		}
-		reported = reportGeminiContinuationUsage(ctx, g.provider, chain, request, outcome, result.usageState(), result.Usage) || reported
+		// A final hop is validated before its receipt lands: a rejected empty
+		// response is a failed attempt, so the billing receipt still lands but
+		// drops its speed timing and never contributes a throughput sample.
+		isFinalHop := result.Err == nil && result.FinishReason != "" && result.FinishReason != geminiContinuationFinish
+		var finalResponse *message.Response
+		var finalizeErr error
+		if isFinalHop {
+			finalResponse, finalizeErr = state.Materialize()
+			if finalizeErr == nil {
+				if state.thinking && cb != nil {
+					cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
+				}
+				finalizeErr = ctx.Err()
+				if finalizeErr == nil {
+					finalizeErr = executiongate.Check(ctx)
+				}
+				if finalizeErr == nil {
+					firstToolAt := publishGeminiFinalTools(finalResponse, cb)
+					if result.FirstOutputNs == 0 && !firstToolAt.IsZero() {
+						result.FirstOutputNs = firstToolAt.Sub(result.startedAt).Nanoseconds()
+					}
+					result.RequestNs = time.Since(result.startedAt).Nanoseconds()
+					finalizeErr = ctx.Err()
+				}
+			}
+		}
+		// Usage completeness gates throughput, while first-output latency only
+		// needs successful visible output. Keep billing even if finalization fails.
+		hopRequestNs, hopFirstOutputNs := continuationHopTiming(result)
+		if finalizeErr != nil {
+			hopRequestNs, hopFirstOutputNs = 0, 0
+		}
+		reported = reportGeminiContinuationUsage(ctx, g.provider, chain, request, outcome, result.usageState(), result.Usage, hopRequestNs, hopFirstOutputNs) || reported
 		if err := ctx.Err(); err != nil {
 			return interrupted(err)
 		}
-		if result.Err == nil && result.FinishReason != "" && result.FinishReason != geminiContinuationFinish {
-			response, err := state.Materialize()
-			response.Usage = ledger.usage()
-			response.UsageReported = reported
-			if err != nil {
-				return response, err
-			}
-			if state.thinking && cb != nil {
-				cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
-			}
-			if err := ctx.Err(); err != nil {
-				return interrupted(err)
-			}
-			if gateErr := executiongate.Check(ctx); gateErr != nil {
-				return response, gateErr
-			}
-			publishGeminiFinalTools(response, cb)
-			return response, nil
+		if isFinalHop {
+			finalResponse.Usage = ledger.usage()
+			finalResponse.UsageReported = reported
+			return finalResponse, finalizeErr
 		}
 		if err := executiongate.Check(ctx); err != nil {
 			return interrupted(err)

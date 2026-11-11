@@ -165,7 +165,7 @@ func TestUsageRefAggregateItemsByUsageSortedLikeSessionModels(t *testing.T) {
 		"x": {LLMCalls: 1, InputTokens: 1, OutputTokens: 1, TotalCost: 0.01},
 		"y": {LLMCalls: 10, InputTokens: 1, OutputTokens: 1, TotalCost: 0.02},
 	}
-	items := usageRefAggregateItemsByUsage(groups, func(k string) string { return k })
+	items := usageRefAggregateItemsByUsage(groups, func(k string) string { return k }, false)
 	if len(items) != 2 || items[0].Label != "y" || items[1].Label != "x" {
 		t.Fatalf("items = %#v, want y before x", items)
 	}

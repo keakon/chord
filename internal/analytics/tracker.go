@@ -22,6 +22,21 @@ type ModelStats struct {
 	CacheWriteTokens int64   `json:"cache_write_tokens"`
 	ReasoningTokens  int64   `json:"reasoning_tokens"`
 	EstimatedCost    float64 `json:"estimated_cost"`
+	// Throughput samples fold only successful main-conversation chat
+	// requests with client-measured request timing (see
+	// usageContribution.isThroughputSample). ThroughputTokens is the output
+	// token sum over those samples — deliberately independent of the
+	// all-purpose OutputTokens accumulator, which spans every agent and
+	// purpose. tok/s = ThroughputTokens ÷ ThroughputNs is a duration-weighted
+	// rate; persistence and restore fold sums, never rates.
+	ThroughputTokens  int64 `json:"throughput_tokens,omitzero"`
+	ThroughputNs      int64 `json:"throughput_ns,omitzero"`
+	ThroughputSamples int64 `json:"throughput_samples,omitzero"`
+	// FirstOutputTotalNs is the sum of first-visible-output latencies over
+	// FirstOutputSamples eligible samples. Eligibility does not require
+	// usable usage counts, so the two sample counts can legitimately differ.
+	FirstOutputTotalNs int64 `json:"first_output_total_ns,omitzero"`
+	FirstOutputSamples int64 `json:"first_output_samples,omitzero"`
 }
 
 // AgentStats holds per-agent aggregated statistics and a nested per-model
@@ -127,9 +142,48 @@ type usageContribution struct {
 	agentID string
 	taskID  string
 	model   string
+	purpose string
 	raw     UsageSnapshot
 	billing BillingUsage
 	cost    float64
+	// requestNs and firstOutputNs carry the client-measured per-attempt
+	// timing from the event; zero marks "not measured" (failed attempts and
+	// pre-timing historical events).
+	requestNs     int64
+	firstOutputNs int64
+}
+
+// isMainChatSpeedSampleGate reports whether a billed LLM call may fold into
+// the per-model throughput and first-output columns: only main-conversation
+// chat requests carry client-measured timing (the LLM client stamps it
+// exactly when an attempt completed successfully), so auxiliary purposes,
+// sub-agent traffic, and pre-timing historical events are excluded at the
+// aggregation entry. The session tracker and the ledger summary fold share
+// this gate so the two accumulation paths cannot drift.
+func isMainChatSpeedSampleGate(purpose, agentID string) bool {
+	return purpose == UsagePurposeChat && normalizeAgentID(agentID) == identity.MainAgentID
+}
+
+// isSpeedSampleEligible reports whether the contribution may fold into the
+// per-model throughput and first-output columns: only main-conversation
+// chat requests carry timing (the LLM client stamps it exactly when an
+// attempt completed successfully), so auxiliary purposes, sub-agent
+// traffic, and pre-timing events are excluded at the aggregation entry.
+func (c usageContribution) isSpeedSampleEligible() bool {
+	return isMainChatSpeedSampleGate(c.purpose, c.agentID)
+}
+
+// isThroughputSample reports eligibility plus a usable numerator: output
+// tokens must be present alongside the request wall clock.
+func (c usageContribution) isThroughputSample() bool {
+	return c.isSpeedSampleEligible() && c.requestNs > 0 && c.raw.OutputTokens > 0
+}
+
+// isFirstOutputSample reports eligibility for the first-visible-output
+// latency column. It does not require usable usage counts, so throughput
+// and latency sample counts can legitimately differ.
+func (c usageContribution) isFirstOutputSample() bool {
+	return c.isSpeedSampleEligible() && c.firstOutputNs > 0
 }
 
 // eventContribution projects a persisted usage event onto the shared
@@ -138,12 +192,15 @@ type usageContribution struct {
 // billed at event time instead of re-pricing with the current config.
 func eventContribution(event UsageEvent) usageContribution {
 	return usageContribution{
-		agentID: event.AgentID,
-		taskID:  event.TaskID,
-		model:   usageModelKey(event),
-		raw:     event.UsageRaw,
-		billing: event.BillingUsage,
-		cost:    event.Cost.TotalCost,
+		agentID:       event.AgentID,
+		taskID:        event.TaskID,
+		model:         usageModelKey(event),
+		purpose:       event.Purpose,
+		raw:           event.UsageRaw,
+		billing:       event.BillingUsage,
+		cost:          event.Cost.TotalCost,
+		requestNs:     event.RequestNs,
+		firstOutputNs: event.FirstOutputNs,
 	}
 }
 
@@ -174,10 +231,10 @@ func (s *SessionStats) applyUsage(contribution usageContribution) {
 	s.ReasoningTokens += raw.ReasoningTokens
 	s.LLMCalls++
 	s.EstimatedCost += cost
-	addModelUsage(s.ByModel, contribution.model, raw, billing, cost)
+	addModelUsage(s.ByModel, contribution)
 
 	agentID := normalizeAgentID(contribution.agentID)
-	addAgentUsage(s.ByAgent, agentID, contribution.model, raw, billing, cost)
+	addAgentUsage(s.ByAgent, agentID, contribution)
 
 	// Every non-main call lands in exactly one billing partition. The task ID
 	// is a runtime fact, never inferred from AgentKind: a historical record
@@ -190,34 +247,43 @@ func (s *SessionStats) applyUsage(contribution usageContribution) {
 		if s.ByTask == nil {
 			s.ByTask = make(map[string]*AgentStats)
 		}
-		addAgentUsage(s.ByTask, taskID, contribution.model, raw, billing, cost)
+		addAgentUsage(s.ByTask, taskID, contribution)
 		return
 	}
 	if s.Untracked == nil {
 		s.Untracked = &AgentStats{ByModel: make(map[string]*ModelStats)}
 	}
-	addAgentUsageStats(s.Untracked, contribution.model, raw, billing, cost)
+	addAgentUsageStats(s.Untracked, contribution)
 }
 
-func addModelUsage(group map[string]*ModelStats, model string, raw UsageSnapshot, billing BillingUsage, cost float64) {
+func addModelUsage(group map[string]*ModelStats, contribution usageContribution) {
 	if group == nil {
 		return
 	}
-	ms, ok := group[model]
+	ms, ok := group[contribution.model]
 	if !ok {
 		ms = &ModelStats{}
-		group[model] = ms
+		group[contribution.model] = ms
 	}
 	ms.Calls++
-	ms.InputTokens += billing.InputTokens
-	ms.OutputTokens += raw.OutputTokens
-	ms.CacheReadTokens += billing.CacheReadTokens
-	ms.CacheWriteTokens += billing.CacheWriteTokens
-	ms.ReasoningTokens += raw.ReasoningTokens
-	ms.EstimatedCost += cost
+	ms.InputTokens += contribution.billing.InputTokens
+	ms.OutputTokens += contribution.raw.OutputTokens
+	ms.CacheReadTokens += contribution.billing.CacheReadTokens
+	ms.CacheWriteTokens += contribution.billing.CacheWriteTokens
+	ms.ReasoningTokens += contribution.raw.ReasoningTokens
+	ms.EstimatedCost += contribution.cost
+	if contribution.isThroughputSample() {
+		ms.ThroughputTokens += contribution.raw.OutputTokens
+		ms.ThroughputNs += contribution.requestNs
+		ms.ThroughputSamples++
+	}
+	if contribution.isFirstOutputSample() {
+		ms.FirstOutputTotalNs += contribution.firstOutputNs
+		ms.FirstOutputSamples++
+	}
 }
 
-func addAgentUsage(group map[string]*AgentStats, key, model string, raw UsageSnapshot, billing BillingUsage, cost float64) {
+func addAgentUsage(group map[string]*AgentStats, key string, contribution usageContribution) {
 	if group == nil {
 		return
 	}
@@ -226,24 +292,24 @@ func addAgentUsage(group map[string]*AgentStats, key, model string, raw UsageSna
 		as = &AgentStats{ByModel: make(map[string]*ModelStats)}
 		group[key] = as
 	}
-	addAgentUsageStats(as, model, raw, billing, cost)
+	addAgentUsageStats(as, contribution)
 }
 
-func addAgentUsageStats(as *AgentStats, model string, raw UsageSnapshot, billing BillingUsage, cost float64) {
+func addAgentUsageStats(as *AgentStats, contribution usageContribution) {
 	if as == nil {
 		return
 	}
 	if as.ByModel == nil {
 		as.ByModel = make(map[string]*ModelStats)
 	}
-	as.InputTokens += billing.InputTokens
-	as.OutputTokens += raw.OutputTokens
-	as.CacheReadTokens += billing.CacheReadTokens
-	as.CacheWriteTokens += billing.CacheWriteTokens
-	as.ReasoningTokens += raw.ReasoningTokens
+	as.InputTokens += contribution.billing.InputTokens
+	as.OutputTokens += contribution.raw.OutputTokens
+	as.CacheReadTokens += contribution.billing.CacheReadTokens
+	as.CacheWriteTokens += contribution.billing.CacheWriteTokens
+	as.ReasoningTokens += contribution.raw.ReasoningTokens
 	as.LLMCalls++
-	as.EstimatedCost += cost
-	addModelUsage(as.ByModel, model, raw, billing, cost)
+	as.EstimatedCost += contribution.cost
+	addModelUsage(as.ByModel, contribution)
 }
 
 // AddUsageEvent applies one persisted usage event to the in-memory tracker.

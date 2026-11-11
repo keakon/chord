@@ -539,6 +539,8 @@ OAuth 发现与令牌请求直接访问公网 HTTPS 授权服务器，不使用�
 
 Session Overview 展示：LLM 调用次数、输入/输出 token、缓存读写 token、reasoning token、估算成本；发生过上下文压缩时，还会显示压缩生命周期计数（如 `applied`、`skipped/model_driven`）。Models 和 Agents 视图以表格展示各维度详细拆解。
 
+Models 视图额外提供每个模型的输出速度（`tok/s`）、首可见输出延迟（`TTFT`）和吞吐量样本数（`Samples`）。`tok/s` 用输出 token 除以每个已完成请求的墙钟耗时（按时长加权）；`TTFT` 是首段可见输出出现前的平均等待。这些指标只覆盖有测量计时的主对话请求，不计入压缩等辅助调用和子代理流量。吞吐量要求输出 token 计数可用，延迟统计没有这个要求，因此两者的样本数可能不同。`—` 表示尚无可用样本。表格列或模型名放不下时，每个模型分行展示名称、用量和速度指标。信息面板的 TOKENS 区会在 Calls 行下方以 `tok/s` 行显示同一口径的全会话平均值，随每个请求落账更新；聚焦 sub agent 时不显示，因为 worker 不产生主对话样本。
+
 Session 的 Tasks 视图按委派任务比较直接用量。main 行涵盖整个 session：主对话、上下文压缩及其 native/hosted 调用。每个任务只统计该任务自身的调用，跨 attempt、instance 和恢复累计。Chord 估算的用量排在前一组，并附该组 ledger 总量。通过外部 CLI（如 Claude Code）运行的任务由 CLI 自报累计 token 和费用，单列一组；CLI 的数字可能包含其嵌套 agent，两组既不混排也不相加。外部任务行在 Calls 列显示 `—`，因为 CLI 不提供调用次数。Untracked 是没有任务身份的非 main 调用（例如任务归因出现之前写入的历史记录），不会分摊到具体任务。外部任务在 CLI 报告费用之前显示 `unknown`，已报告的零费用照常显示为零。
 
 Project 统计自动从本地 sessions 目录聚合，支持 `today`、`7d`、`30d`、`90d`、`all` 五种时间范围。切换到 Project 时可能短暂显示「加载中」，稍后会展示统计数据。

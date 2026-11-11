@@ -252,6 +252,9 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 		if callsLine := renderUsageCallsLine(lineW, stats); callsLine != "" {
 			usageLines = append(usageLines, callsLine)
 		}
+		if speedLine := renderUsageSpeedLine(lineW, stats); speedLine != "" {
+			usageLines = append(usageLines, speedLine)
+		}
 		if costLine := renderUsageCostLine(lineW, stats); costLine != "" {
 			usageLines = append(usageLines, costLine)
 		}
@@ -916,6 +919,26 @@ func renderUsageCallsLine(lineW int, stats analytics.SessionStats) string {
 		return ""
 	}
 	return renderUsageCacheDetailLine(lineW, "Calls", ansi.StringWidth(usageDetailLabelWidth), currentStyles.InfoPanelValue.Render(strconv.FormatInt(stats.LLMCalls, 10)))
+}
+
+// renderUsageSpeedLine renders the session-wide average output throughput
+// behind the Calls row: a settled aggregate over the same main-chat samples
+// as the /stats Models tok/s column, refreshed only as requests settle.
+func renderUsageSpeedLine(lineW int, stats analytics.SessionStats) string {
+	var tokens, requestNs int64
+	samples := int64(0)
+	for _, ms := range stats.ByModel {
+		if ms == nil {
+			continue
+		}
+		tokens += ms.ThroughputTokens
+		requestNs += ms.ThroughputNs
+		samples += ms.ThroughputSamples
+	}
+	if samples <= 0 {
+		return ""
+	}
+	return renderUsageCacheDetailLine(lineW, "tok/s", ansi.StringWidth(usageDetailLabelWidth), currentStyles.InfoPanelValue.Render(formatUsageThroughput(tokens, requestNs)))
 }
 
 func renderUsageCostLine(lineW int, stats analytics.SessionStats) string {

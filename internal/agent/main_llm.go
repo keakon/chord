@@ -1066,7 +1066,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 			TurnID:           turnID,
 			SelectedModelRef: selectedRef,
 			RunningModelRef:  callStatus.RunningModelRef,
-		}, resp.Usage, callStatus.ServiceTier, cacheDiag)
+		}, resp.Usage, callStatus.ServiceTier, cacheDiag, responseUsageTiming(resp))
 	}
 
 	// Hook: on_after_llm_call (after LLM call).

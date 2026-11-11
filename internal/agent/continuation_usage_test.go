@@ -2,6 +2,7 @@ package agent
 
 import (
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
@@ -58,5 +59,38 @@ func TestContinuationUsagePinsLedgerAndIgnoresLateUI(t *testing.T) {
 	}
 	if current != nil && current.EventCount != 0 {
 		t.Fatalf("late receipt reached new ledger: %+v", current)
+	}
+}
+
+func TestContinuationUsageCarriesHopTiming(t *testing.T) {
+	oldDir := t.TempDir()
+	oldLedger := analytics.NewUsageLedger(oldDir, "")
+	recorder := newWalltimeRecorder(oldLedger, nil, nil)
+	target := recorder.captureAt("worker-1", "worker", 7)
+	agent := &MainAgent{walltime: recorder, eventCh: make(chan Event, 4), usageTracker: analytics.NewUsageTracker()}
+	provider := llm.NewProviderConfig("sample", config.ProviderConfig{Models: map[string]config.ModelConfig{"model-1": {Cost: &config.ModelCost{Input: 1, Output: 2}}}}, nil)
+	client := llm.NewClient(provider, nil, "model-1", 100, "")
+	observer := agent.continuationUsageObserver(client, target, usageAttribution{AgentID: "worker-1", AgentKind: agentKindSub, AgentName: "worker", TaskID: "task-1", Purpose: analytics.UsagePurposeChat, SelectedModelRef: "sample/model-1", TurnID: 7})
+
+	hopNs := int64(2 * time.Second)
+	latencyNs := int64(300 * time.Millisecond)
+	observer(llm.ContinuationUsage{ChainID: "chain", Request: 1, ModelRef: "sample/model-1", Outcome: "completed", UsageState: contextdiag.Reported, Usage: &message.TokenUsage{InputTokens: 100, OutputTokens: 50}, RequestNs: hopNs, FirstOutputNs: latencyNs})
+	payload := (<-agent.eventCh).Payload.(continuationUsagePayload)
+	if payload.event.RequestNs != hopNs {
+		t.Fatalf("event request ns = %d, want %d", payload.event.RequestNs, hopNs)
+	}
+	if payload.event.FirstOutputNs != latencyNs {
+		t.Fatalf("event first output ns = %d, want %d", payload.event.FirstOutputNs, latencyNs)
+	}
+
+	agent.handleContinuationUsage(payload)
+	// The timing rides the event, but the worker is a sub agent, so the
+	// speed-sample gate keeps it out of the per-model throughput columns.
+	stats := agent.usageTracker.SessionStats().ByModel["sample/model-1"]
+	if stats == nil || stats.ThroughputSamples != 0 || stats.FirstOutputSamples != 0 {
+		t.Fatalf("model speed stats = %+v, want no samples for a sub agent receipt", stats)
+	}
+	if stats.OutputTokens != 50 {
+		t.Fatalf("model output tokens = %d, want 50", stats.OutputTokens)
 	}
 }

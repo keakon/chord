@@ -370,6 +370,11 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 		})
 		choiceRequest := &toolChoiceRequest{}
 		attemptCtx = context.WithValue(attemptCtx, toolChoiceRequestKey{}, choiceRequest)
+		attemptCtx = context.WithValue(attemptCtx, responseTimingResetKey{}, func() {
+			attemptStartedAt = time.Now()
+			tracker.hasContent = false
+			tracker.firstContentAt = time.Time{}
+		})
 		resp, err = completeWithNativeTools(
 			attemptCtx,
 			t.impl,
@@ -482,6 +487,7 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 			// interrupted branch applies below would restart at its base wait
 			// every round and never grow for a gateway that keeps truncating.
 			if resp.StopReason != "interrupted" {
+				recordResponseTiming(resp, attemptStartedAt, tracker)
 				if responseHasUsableOutput(resp) {
 					result.roundHadUsableReply = true
 				}
@@ -810,4 +816,22 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 		result.resp = resp
 	}
 	return result, lastInputTokens, nil
+}
+
+// recordResponseTiming stamps the per-attempt wall-clock duration and the
+// first-visible-output latency onto a successfully completed response. The
+// start point is the attempt loop's pre-submission moment (connection setup
+// included, so HTTP and WebSocket transports share one definition). Both
+// figures are int64 nanoseconds where zero means "not measured": failed
+// attempts, interruptions, and bypass returns never carry timing, so they
+// cannot contribute throughput or latency samples downstream.
+func recordResponseTiming(resp *message.Response, startedAt time.Time, tracker *visibleStreamTracker) {
+	if resp == nil || startedAt.IsZero() {
+		return
+	}
+	resp.RequestNs = time.Since(startedAt).Nanoseconds()
+	firstContentAt := tracker.FirstContentAt()
+	if !firstContentAt.IsZero() && firstContentAt.After(startedAt) {
+		resp.FirstOutputNs = firstContentAt.Sub(startedAt).Nanoseconds()
+	}
 }

@@ -262,6 +262,11 @@ func mergeUsageAggregate(dst *UsageAggregate, src *UsageAggregate) {
 	dst.ProviderTotalTokens += src.ProviderTotalTokens
 	dst.BillingTotalTokens += src.BillingTotalTokens
 	dst.TotalCost += src.TotalCost
+	dst.ThroughputTokens += src.ThroughputTokens
+	dst.ThroughputNs += src.ThroughputNs
+	dst.ThroughputSamples += src.ThroughputSamples
+	dst.FirstOutputTotalNs += src.FirstOutputTotalNs
+	dst.FirstOutputSamples += src.FirstOutputSamples
 }
 
 func mergeUsageAggregateMap(dst map[string]*UsageAggregate, src map[string]*UsageAggregate) {
@@ -297,5 +302,7 @@ func isUsageAggregateZero(agg *UsageAggregate) bool {
 			agg.ReasoningTokens == 0 &&
 			agg.ProviderTotalTokens == 0 &&
 			agg.BillingTotalTokens == 0 &&
-			agg.TotalCost == 0)
+			agg.TotalCost == 0 &&
+			agg.ThroughputSamples == 0 &&
+			agg.FirstOutputSamples == 0)
 }

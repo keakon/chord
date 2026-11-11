@@ -26,28 +26,35 @@ const maxUsageSummaryFirstUserPreview = 80
 
 // UsageEvent is one immutable usage record in usage.jsonl.
 type UsageEvent struct {
-	EventID          string            `json:"event_id"`
-	SessionID        string            `json:"session_id"`
-	ProjectID        string            `json:"project_id,omitempty"`
-	ProjectPath      string            `json:"project_path,omitempty"`
-	OccurredAt       time.Time         `json:"occurred_at"`
-	Timezone         string            `json:"timezone,omitempty"`
-	LocalDate        string            `json:"local_date,omitempty"`
-	AgentID          string            `json:"agent_id"`
-	AgentKind        string            `json:"agent_kind,omitempty"`
-	AgentName        string            `json:"agent_name,omitempty"`
-	TaskID           string            `json:"task_id,omitempty"`
-	Purpose          string            `json:"purpose,omitempty"`
-	TurnID           uint64            `json:"turn_id,omitzero"`
-	SelectedModelRef string            `json:"selected_model_ref,omitempty"`
-	RunningModelRef  string            `json:"running_model_ref,omitempty"`
-	Provider         string            `json:"provider,omitempty"`
-	ModelID          string            `json:"model_id,omitempty"`
-	UsageRaw         UsageSnapshot     `json:"usage_raw"`
-	BillingUsage     BillingUsage      `json:"billing_usage"`
-	Cost             UsageCost         `json:"cost"`
-	PricingSnapshot  PricingSnapshot   `json:"pricing_snapshot"`
-	Diagnostic       map[string]string `json:"diagnostic,omitempty"`
+	EventID          string          `json:"event_id"`
+	SessionID        string          `json:"session_id"`
+	ProjectID        string          `json:"project_id,omitempty"`
+	ProjectPath      string          `json:"project_path,omitempty"`
+	OccurredAt       time.Time       `json:"occurred_at"`
+	Timezone         string          `json:"timezone,omitempty"`
+	LocalDate        string          `json:"local_date,omitempty"`
+	AgentID          string          `json:"agent_id"`
+	AgentKind        string          `json:"agent_kind,omitempty"`
+	AgentName        string          `json:"agent_name,omitempty"`
+	TaskID           string          `json:"task_id,omitempty"`
+	Purpose          string          `json:"purpose,omitempty"`
+	TurnID           uint64          `json:"turn_id,omitzero"`
+	SelectedModelRef string          `json:"selected_model_ref,omitempty"`
+	RunningModelRef  string          `json:"running_model_ref,omitempty"`
+	Provider         string          `json:"provider,omitempty"`
+	ModelID          string          `json:"model_id,omitempty"`
+	UsageRaw         UsageSnapshot   `json:"usage_raw"`
+	BillingUsage     BillingUsage    `json:"billing_usage"`
+	Cost             UsageCost       `json:"cost"`
+	PricingSnapshot  PricingSnapshot `json:"pricing_snapshot"`
+	// RequestNs is the successful attempt's wall-clock duration and
+	// FirstOutputNs the first-visible-output latency, both int64 nanoseconds
+	// measured by the LLM client. Zero marks "not measured": failed attempts
+	// and pre-timing historical events carry zero, so they never contribute
+	// throughput or latency samples (events before these fields existed).
+	RequestNs     int64             `json:"request_ns,omitzero"`
+	FirstOutputNs int64             `json:"first_output_ns,omitzero"`
+	Diagnostic    map[string]string `json:"diagnostic,omitempty"`
 }
 
 // AgentModelRefs is the last known selected and effective model for an agent.
@@ -67,6 +74,17 @@ type UsageAggregate struct {
 	ProviderTotalTokens int64   `json:"provider_total_tokens,omitzero"`
 	BillingTotalTokens  int64   `json:"billing_total_tokens,omitzero"`
 	TotalCost           float64 `json:"total_cost"`
+	// Throughput and first-output sample sums fold only main-conversation
+	// chat requests with client-measured timing (see isMainChatSpeedSampleGate).
+	// ThroughputTokens is the output token sum over throughput samples —
+	// deliberately independent of OutputTokens, which spans every agent and
+	// purpose. tok/s = ThroughputTokens ÷ ThroughputNs is a duration-weighted
+	// rate; summary persistence and range slicing merge sums, never rates.
+	ThroughputTokens   int64 `json:"throughput_tokens,omitzero"`
+	ThroughputNs       int64 `json:"throughput_ns,omitzero"`
+	ThroughputSamples  int64 `json:"throughput_samples,omitzero"`
+	FirstOutputTotalNs int64 `json:"first_output_total_ns,omitzero"`
+	FirstOutputSamples int64 `json:"first_output_samples,omitzero"`
 }
 
 // SessionUsageSummary is the materialized session-level view of usage.jsonl.
@@ -1122,6 +1140,17 @@ func addUsageAggregate(dst *UsageAggregate, event UsageEvent) {
 	dst.ProviderTotalTokens += billing.InputTokens + billing.CacheReadTokens + event.UsageRaw.OutputTokens
 	dst.BillingTotalTokens += billing.BillingTotalTokens
 	dst.TotalCost += event.Cost.TotalCost
+	if isMainChatSpeedSampleGate(event.Purpose, event.AgentID) {
+		if event.RequestNs > 0 && event.UsageRaw.OutputTokens > 0 {
+			dst.ThroughputTokens += event.UsageRaw.OutputTokens
+			dst.ThroughputNs += event.RequestNs
+			dst.ThroughputSamples++
+		}
+		if event.FirstOutputNs > 0 {
+			dst.FirstOutputTotalNs += event.FirstOutputNs
+			dst.FirstOutputSamples++
+		}
+	}
 }
 
 func summaryGroup(groups map[string]*UsageAggregate, key string) *UsageAggregate {

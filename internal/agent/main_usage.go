@@ -304,11 +304,32 @@ type usageAttribution struct {
 
 const agentKindSub = "sub"
 
+// usageTiming carries the per-attempt wall-clock duration and the
+// first-visible-output latency measured by the LLM client for one
+// successfully completed request, in int64 nanoseconds. Zero values mean
+// "not measured": only successfully completed attempts carry timing, so
+// failed requests never contribute throughput or latency samples.
+type usageTiming struct {
+	RequestNs     int64
+	FirstOutputNs int64
+}
+
+// responseUsageTiming extracts the client-measured timing from a completed
+// response. Responses produced outside the attempt success branch (Gemini
+// continuation chains report per-hop receipts instead) carry zero timing.
+func responseUsageTiming(resp *message.Response) usageTiming {
+	if resp == nil {
+		return usageTiming{}
+	}
+	return usageTiming{RequestNs: resp.RequestNs, FirstOutputNs: resp.FirstOutputNs}
+}
+
 func (a *MainAgent) recordUsage(
 	attr usageAttribution,
 	usage *message.TokenUsage,
 	serviceTier config.ServiceTier,
 	diagnostic map[string]string,
+	timing usageTiming,
 ) {
 	attr.RunningModelRef = strings.TrimSpace(attr.RunningModelRef)
 	if attr.RunningModelRef == "" {
@@ -337,6 +358,8 @@ func (a *MainAgent) recordUsage(
 		BillingUsage:     billingUsage,
 		Cost:             analytics.CalculateUsageCost(costCfg, billingUsage, serviceTier),
 		PricingSnapshot:  analytics.PricingSnapshotFromCost(costCfg, billingUsage, serviceTier),
+		RequestNs:        timing.RequestNs,
+		FirstOutputNs:    timing.FirstOutputNs,
 		Diagnostic:       diagnostic,
 	})
 }
