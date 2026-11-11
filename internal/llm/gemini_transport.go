@@ -84,19 +84,56 @@ func redactGeminiChunk(data []byte) string {
 	if _, ok := value["error"]; ok {
 		return "[Gemini error event]"
 	}
-	var candidates []map[string]json.RawMessage
+	var candidates []json.RawMessage
 	if json.Unmarshal(value["candidates"], &candidates) == nil {
-		for _, candidate := range candidates {
-			delete(candidate, "continuationToken")
-			delete(candidate, "continuation_token")
+		changed := false
+		for i, candidate := range candidates {
+			if redacted, ok := redactGeminiCandidate(candidate); ok {
+				candidates[i] = redacted
+				changed = true
+			}
 		}
-		value["candidates"], _ = jsonx.Marshal(candidates)
+		if changed {
+			value["candidates"], _ = jsonx.Marshal(candidates)
+		}
 	}
 	encoded, err := jsonx.Marshal(value)
 	if err != nil {
 		return "[invalid Gemini chunk]"
 	}
 	return string(encoded)
+}
+
+// redactGeminiCandidate removes the continuation capability from one
+// candidate. Most chunks carry no token; probing with a tiny typed struct
+// avoids decoding the full candidate (and its text parts) into a map just to
+// find that out.
+func redactGeminiCandidate(candidate json.RawMessage) (json.RawMessage, bool) {
+	var probe struct {
+		Token json.RawMessage `json:"continuationToken"`
+		Snake json.RawMessage `json:"continuation_token"`
+	}
+	if json.Unmarshal(candidate, &probe) != nil || (probe.Token == nil && probe.Snake == nil) {
+		return candidate, false
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(candidate, &fields) != nil {
+		return candidate, false
+	}
+	// The probe matches field names case-insensitively (encoding/json struct
+	// semantics), so a variant spelling such as "ContinuationToken" enters
+	// this path; deletion must use the same tolerance or the token value
+	// survives into dumps under a key the exact deletes never remove.
+	for key := range fields {
+		if strings.EqualFold(key, "continuationToken") || strings.EqualFold(key, "continuation_token") {
+			delete(fields, key)
+		}
+	}
+	encoded, err := jsonx.Marshal(fields)
+	if err != nil {
+		return candidate, false
+	}
+	return encoded, true
 }
 
 func (g *GeminiProvider) streamGeminiHop(ctx context.Context, frozen geminiFrozenRequest, body []byte, state *geminiDecodeState, cb StreamCallback) (result geminiHopResult) {

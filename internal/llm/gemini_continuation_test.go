@@ -197,6 +197,40 @@ func TestGeminiContinuationRedaction(t *testing.T) {
 	}
 }
 
+func TestGeminiContinuationRedactionPreservesCandidateFields(t *testing.T) {
+	for _, token := range []string{
+		`"continuationToken":"opaque-secret"`,
+		`"continuation_token":"opaque-secret"`,
+		`"continuationT\u006fken":"opaque-secret"`,
+		`"continuationtoken":"opaque-secret"`,
+		`"ContinuationToken":"opaque-secret"`,
+		`"CONTINUATION_TOKEN":"opaque-secret"`,
+	} {
+		data := []byte(`{"candidates":[{"content":{"parts":[{"text":"A"}]},` + token + `,"finishReason":"STOP"}],"usageMetadata":{"totalTokenCount":1}}`)
+		redacted := redactGeminiChunk(data)
+		if strings.Contains(redacted, "opaque-secret") {
+			t.Fatalf("token leaked for %s: %s", token, redacted)
+		}
+		var got struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+				FinishReason string `json:"finishReason"`
+			} `json:"candidates"`
+			UsageMetadata map[string]int `json:"usageMetadata"`
+		}
+		if err := json.Unmarshal([]byte(redacted), &got); err != nil {
+			t.Fatalf("decode redacted chunk for %s: %v", token, err)
+		}
+		if len(got.Candidates) != 1 || len(got.Candidates[0].Content.Parts) != 1 || got.Candidates[0].Content.Parts[0].Text != "A" || got.Candidates[0].FinishReason != "STOP" || got.UsageMetadata["totalTokenCount"] != 1 {
+			t.Fatalf("redaction changed candidate fields for %s: %+v", token, got)
+		}
+	}
+}
+
 func TestGeminiContinuationFallbackUsesReliableHistory(t *testing.T) {
 	requests := 0
 	provider, cfg := continuationProvider(t, func(w http.ResponseWriter, r *http.Request) {
