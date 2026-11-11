@@ -9,7 +9,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.2
-	github.com/charmbracelet/x/ansi v0.11.8
+	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/dgraph-io/ristretto/v2 v2.4.2
@@ -18,13 +18,13 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/keakon/bubbles/v2 v2.2.1-fork.3
-	github.com/keakon/bubbletea/v2 v2.0.9-fork.1
+	github.com/keakon/bubbletea/v2 v2.1.1-fork.1
 	github.com/keakon/dbus/v5 v5.2.3-fork.2
-	github.com/keakon/glamour/v2 v2.0.1-fork.2
+	github.com/keakon/glamour/v2 v2.0.1-fork.3
 	github.com/keakon/golog v0.4.1
-	github.com/keakon/lipgloss/v2 v2.0.6-fork.1
-	github.com/keakon/ultraviolet v0.0.1-fork.10
-	github.com/keakon/x/ansi v0.11.8-fork.2
+	github.com/keakon/lipgloss/v2 v2.1.0-fork.1
+	github.com/keakon/ultraviolet v0.0.1-fork.11
+	github.com/keakon/x/ansi v0.11.9-fork.1
 	github.com/keakon/x/powernap v0.1.10-fork
 	github.com/klauspost/compress v1.20.0
 	github.com/mackee/go-readability v0.3.1

@@ -253,10 +253,28 @@ func (m *Model) renderToCache(cache *cachedRenderable, text string) {
 	// previous one; View() only skips its per-cell comparison when no layer
 	// re-rendered and no visible layer disappeared.
 	m.frameContentDirty = true
+	oldText := cache.text
+	oldRows := len(cache.lines)
+	rows := strings.Count(text, "\n") + 1
+	if cap(cache.lines) < rows || cap(cache.lines) > 2*rows {
+		lines := make([][]uv.Cell, rows)
+		copy(lines, cache.lines)
+		cache.lines = lines
+	} else {
+		if rows < oldRows {
+			clear(cache.lines[rows:])
+		}
+		cache.lines = cache.lines[:rows]
+	}
 	cache.text = text
-	parts := strings.Split(text, "\n")
-	cache.lines = make([][]uv.Cell, len(parts))
-	for i, part := range parts {
+	i := -1
+	for part := range strings.SplitSeq(text, "\n") {
+		i++
+		var oldPart string
+		oldPart, oldText, _ = strings.Cut(oldText, "\n")
+		if cache.cellsValid && i < oldRows && part == oldPart {
+			continue
+		}
 		if part == "" {
 			cache.lines[i] = nil
 			continue
@@ -279,9 +297,19 @@ func (m *Model) renderToCache(cache *cachedRenderable, text string) {
 			cache.lines[i] = nil
 			continue
 		}
-		copied := make([]uv.Cell, end)
-		copy(copied, line[:end])
-		cache.lines[i] = copied
+		cells := cache.lines[i]
+		// Bound retained capacity after a large region shrinks. Clear the
+		// unused tail so links and graphemes cannot retain previous content.
+		if cap(cells) < end || cap(cells) > 2*end {
+			cells = make([]uv.Cell, end)
+		} else {
+			if end < len(cells) {
+				clear(cells[end:])
+			}
+			cells = cells[:end]
+		}
+		copy(cells, line[:end])
+		cache.lines[i] = cells
 	}
 	cache.cellsValid = true
 }

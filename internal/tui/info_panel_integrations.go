@@ -36,11 +36,19 @@ func (m *Model) captureInfoPanelIntegrations() infoPanelIntegrations {
 	if provider, ok := m.agent.(agent.MCPStateProvider); ok {
 		snapshot.mcp = provider.MCPServerList()
 	}
-	snapshot.skills = m.infoPanelSkills()
-	snapshot.invoked = m.agent.InvokedSkills()
 	if provider, ok := m.agent.(agent.FocusedSkillInvocationStateProvider); ok {
 		snapshot.states = provider.FocusedSkillInvocationStates()
 		snapshot.statesPresent = true
+		// Invocation states already contain the complete catalog under the
+		// focused agent's rules. Avoid two more catalog/history snapshots.
+		for _, state := range snapshot.states {
+			if state.Meta != nil && state.UserLoadable {
+				snapshot.skills = append(snapshot.skills, state.Meta)
+			}
+		}
+	} else {
+		snapshot.skills = m.infoPanelSkills()
+		snapshot.invoked = m.agent.InvokedSkills()
 	}
 	return snapshot
 }

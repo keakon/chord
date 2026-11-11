@@ -3,6 +3,7 @@ package tui
 import (
 	"image"
 	"image/color"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -235,6 +236,71 @@ func TestRenderToCachePreservesAllPlainTextCells(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != text {
 		t.Fatalf("cached lines = %q, want %q", strings.Join(got, "\n"), text)
+	}
+}
+
+func TestRenderToCacheUpdatesMatchFreshRender(t *testing.T) {
+	var m Model
+	var cache cachedRenderable
+	for _, text := range []string{
+		"first\n\x1b[31mcolored\x1b[m\nlast",
+		"first\n\x1b[32mcolored\x1b[m\nlast",
+		"first\n\x1b]8;;https://example.invalid\x1b\\link\x1b]8;;\x1b\\\nlast",
+		"first\n界🙂e\u0301\nlast",
+		"first\nshort",
+		"\n\n",
+		"",
+		"restored\nlast",
+	} {
+		m.renderToCache(&cache, text)
+		var fresh cachedRenderable
+		m.renderToCache(&fresh, text)
+		if len(cache.lines) != len(fresh.lines) {
+			t.Fatalf("text %q: got %d rows, want %d", text, len(cache.lines), len(fresh.lines))
+		}
+		for i, line := range fresh.lines {
+			if !slices.EqualFunc(cache.lines[i], line, func(a, b uv.Cell) bool { return a.Equal(&b) }) {
+				t.Fatalf("text %q: row %d differs from fresh render", text, i)
+			}
+		}
+	}
+}
+
+func TestRenderToCacheOwnsCells(t *testing.T) {
+	var m Model
+	var first, second cachedRenderable
+	m.renderToCache(&first, "first\nsecond")
+	saved := slices.Clone(first.lines[0])
+	m.renderToCache(&second, "other\ncontent")
+	m.renderScratchBuffer(200)
+	if !slices.EqualFunc(first.lines[0], saved, func(a, b uv.Cell) bool { return a.Equal(&b) }) {
+		t.Fatal("another render or scratch resize changed cached cells")
+	}
+}
+
+func BenchmarkRenderToCacheUpdate(b *testing.B) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = "\x1b[38;2;120;180;240m" + strings.Repeat("sample text ", 8) + "\x1b[m"
+	}
+	first := strings.Join(lines, "\n")
+	lines[len(lines)-1] += "tail"
+	tail := strings.Join(lines, "\n")
+	for i := range lines {
+		lines[i] = strings.ReplaceAll(lines[i], "sample", "output")
+	}
+	all := strings.Join(lines, "\n")
+	for _, tc := range []struct{ name, next string }{{"Tail", tail}, {"All", all}} {
+		b.Run(tc.name, func(b *testing.B) {
+			var m Model
+			var cache cachedRenderable
+			m.renderToCache(&cache, first)
+			b.ReportAllocs()
+			for b.Loop() {
+				m.renderToCache(&cache, tc.next)
+				m.renderToCache(&cache, first)
+			}
+		})
 	}
 }
 

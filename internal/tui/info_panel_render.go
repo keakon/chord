@@ -13,17 +13,18 @@ import (
 // unscrolled info panel content. The scroll offset is applied separately.
 func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIntegrations) string {
 	var b strings.Builder
+	var number [64]byte
 	appendInt := func(v int) {
-		b.WriteString(strconv.Itoa(v))
+		b.Write(strconv.AppendInt(number[:0], int64(v), 10))
 	}
 	appendInt64 := func(v int64) {
-		b.WriteString(strconv.FormatInt(v, 10))
+		b.Write(strconv.AppendInt(number[:0], v, 10))
 	}
 	appendUint64 := func(v uint64) {
-		b.WriteString(strconv.FormatUint(v, 10))
+		b.Write(strconv.AppendUint(number[:0], v, 10))
 	}
 	appendFloat6 := func(v float64) {
-		b.WriteString(strconv.FormatFloat(v, 'f', 6, 64))
+		b.Write(strconv.AppendFloat(number[:0], v, 'f', 6, 64))
 	}
 	appendBool := func(v bool) {
 		if v {
@@ -233,7 +234,6 @@ func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIn
 		}
 		b.WriteByte('K')
 		b.WriteString(sk.Name)
-		b.WriteString(sk.Description)
 		appendBool(sk.Invoked)
 		appendBool(sk.DisableModelInvocation)
 		appendSep()
@@ -244,8 +244,6 @@ func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIn
 		}
 		b.WriteByte('S')
 		b.WriteString(sk.Name)
-		b.WriteString(sk.Description)
-		appendBool(sk.Discovered)
 		appendSep()
 	}
 	appendBool(m.infoPanelSectionCollapsed(infoPanelSectionSkills, integrations.collapsed(infoPanelSectionSkills)))
