@@ -172,6 +172,43 @@ func decodeQuestionItemsForDisplay(argsJSON string) []tools.QuestionItem {
 	return items
 }
 
+// questionCallKind names which step of the question lifecycle a call performs.
+// Ask, asynchronous ask and wait_for share the same tool name and, without
+// this row, the same card. The kind is derived only from the durable call
+// arguments: a restored transcript keeps the args but has no runtime question
+// state, so a label inferred from state would drift (or disappear) after a
+// resume. Unparsable or argument-less calls get no label rather than a guess.
+// The second return reports whether the call is a wait, decided from the same
+// normalized arguments so the body renderer never keys off the label's wording.
+func questionCallKind(argsJSON string, questions []tools.QuestionItem) (kind string, waiting bool) {
+	args, err := tools.DecodeQuestionArgs(json.RawMessage(argsJSON))
+	if err != nil {
+		// Keep partial arguments visible on calls rejected by validation.
+		var envelope struct {
+			Wait    *bool    `json:"wait"`
+			WaitFor []string `json:"wait_for"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &envelope) != nil {
+			return "", false
+		}
+		args = tools.QuestionArgs{Questions: questions, Wait: envelope.Wait, WaitFor: envelope.WaitFor}
+	}
+	if n := len(args.WaitFor); n > 0 {
+		noun := "questions"
+		if n == 1 {
+			noun = "question"
+		}
+		return fmt.Sprintf("wait_for (%d %s)", n, noun), true
+	}
+	if len(args.Questions) == 0 {
+		return "", false
+	}
+	if args.Wait != nil && !*args.Wait {
+		return "ask (async)", false
+	}
+	return "ask", false
+}
+
 // renderQuestionCall renders a Question tool call showing the question text and options.
 func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 	metrics := newToolCardMetrics(width)
@@ -198,14 +235,30 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 	}
 
 	prefix := b.renderToolPrefix(spinnerFrame)
-	// The card always renders every question in full, so the header stays a
-	// bare tool-name line: naming the first question there only repeated the
-	// first body section.
+	// The card always renders every question in full, so the header does not
+	// repeat the first question's text. It still names the call's role, derived
+	// purely from the durable arguments, so an async ask, a wait_for and a
+	// synchronous ask read as distinct cards at a glance. The role is withheld
+	// on errored or cancelled calls: there the failure is the story and the
+	// header must stay bare, since a suffix would read as a diagnostic.
+	kind, waiting := questionCallKind(b.Content, questions)
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	headerLine = buildToolHeaderLine(headerLine, b.ToolProgress, cardWidth, b.toolExecutionIsQueued() && b.ToolQueuedByExecutionEvent, b.toolExecutionIsRunning())
+	// The role rides the header's tail alongside any live status badge; show it
+	// only on settled cards so it never competes with (or truncates away) the
+	// queued/running marker, and never reads as a diagnostic on a failed call.
+	if kind != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !b.toolExecutionIsRunning() && !b.ToolQueuedByExecutionEvent {
+		headerLine = appendToolHeaderSuffix(headerLine, currentStyles.DimStyle.Render(" · "+kind), cardWidth-4)
+	}
 
 	var result []string
 	result = append(result, headerLine)
+	// A wait_for call has no questions to render and would otherwise leave an
+	// empty body on an always-expanded card; one line of context explains what
+	// the blocked call is waiting on without echoing the protocol id.
+	if waiting {
+		result = append(result, toolFieldInline(currentStyles.QuestionSeparatorStyle, "Waiting for", "an answer asked earlier in this session"))
+	}
 
 	for i, q := range questions {
 		answer, hasAnswer := questionAnswerForRender(answers, i, q.Header)

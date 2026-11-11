@@ -184,8 +184,13 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 	if strings.Contains(header, "questions[0].header") {
 		t.Fatalf("expected an invalid arg to stay off the question header line, got:\n%s", header)
 	}
+	// An errored question carries no role suffix: the failure is the story, and
+	// a suffix there would read as a diagnostic rather than a label. A
+	// successful question, by contrast, names its role in the header (see
+	// below) so an async ask, a wait_for and a synchronous ask read as distinct
+	// cards instead of looking identical.
 	if strings.Contains(header, "·") {
-		t.Fatalf("expected the question header line to carry no diagnostic suffix, got:\n%s", header)
+		t.Fatalf("expected the errored question header line to carry no role suffix, got:\n%s", header)
 	}
 	// Nothing is lost: the parameters render in the body and the schema
 	// message — which names the field and the rejected value — renders below.
@@ -199,6 +204,21 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 	// The error text wraps at this card width, so match within one line.
 	if !strings.Contains(plain, "args.questions[0].header must be a string") {
 		t.Fatalf("expected the schema message naming the invalid argument, got:\n%s", plain)
+	}
+
+	// A successful synchronous ask surfaces its role in the header.
+	resolved := &Block{
+		ID:            3,
+		Type:          BlockToolCall,
+		ToolName:      "question",
+		Content:       `{"questions":[{"header":"H","question":"Q"}]}`,
+		ResultStatus:  message.ToolStatusSuccess,
+		ResultPayload: `{"status":"resolved","answers":[{"header":"H","selected":["x"],"selected_ids":["x"],"outcome":"answered"}]}`,
+		ResultDone:    true,
+	}
+	resolvedHeader := terminaltext.StripANSI(renderedLineContaining(t, resolved.Render(100, ""), "question"))
+	if !strings.Contains(resolvedHeader, "· ask") {
+		t.Fatalf("expected a successful question header to name its role, got:\n%s", resolvedHeader)
 	}
 }
 

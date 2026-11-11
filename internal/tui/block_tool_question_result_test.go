@@ -95,3 +95,58 @@ func TestQuestionCallMarksOnlySelectedIDForDuplicateLabels(t *testing.T) {
 		t.Fatalf("free text interpreted as selection:\n%s", view)
 	}
 }
+
+func TestQuestionCallLabelsLifecycleKindFromDurableArgs(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     string
+		want     string // header role suffix that must appear
+		bodyWant string // optional body line that must appear
+		reject   []string
+	}{
+		{name: "sync ask", args: `{"questions":[{"header":"H","question":"Q"}]}`, want: "· ask", reject: []string{"async", "wait_for", "↳ Kind:"}},
+		{name: "explicit sync ask", args: `{"questions":[{"header":"H","question":"Q"}],"wait":true}`, want: "· ask", reject: []string{"async", "wait_for", "↳ Kind:"}},
+		{name: "async ask", args: `{"questions":[{"header":"H","question":"Q"}],"wait":false}`, want: "· ask (async)", reject: []string{"wait_for", "↳ Kind:"}},
+		{name: "wait_for one", args: `{"wait_for":["q-1"]}`, want: "· wait_for (1 question)", bodyWant: "asked earlier", reject: []string{"q-1", "ask (async)", "↳ Kind:"}},
+		{name: "wait_for many", args: `{"wait_for":["q-1","q-2","q-3"]}`, want: "· wait_for (3 questions)", reject: []string{"q-1", "q-2", "q-3", "↳ Kind:"}},
+		{name: "single question object", args: `{"questions":{"header":"H","question":"Q"},"wait":false}`, want: "· ask (async)"},
+		{name: "ask with blank wait IDs", args: `{"questions":[{"header":"Choice","question":"Pick one"}],"wait_for":[""," "]}`, want: "· ask", bodyWant: "Pick one", reject: []string{"wait_for", "Waiting for"}},
+		{name: "wait skips blank IDs", args: `{"wait_for":[""," q-1 "," "]}`, want: "· wait_for (1 question)", bodyWant: "asked earlier", reject: []string{"2 questions", "3 questions"}},
+		{name: "nested wait item", args: `{"questions":[{"wait_for":["q-1"]}]}`, want: "· wait_for (1 question)", bodyWant: "asked earlier"},
+		{name: "nested wait object", args: `{"questions":{"wait_for":["q-1"]}}`, want: "· wait_for (1 question)", bodyWant: "asked earlier"},
+		{name: "malformed args", args: `{"questions":`, reject: []string{"· ", "↳ Kind:"}},
+		{name: "no arguments", args: `{}`, reject: []string{"· ", "↳ Kind:"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			block := &Block{Type: BlockToolCall, ToolName: tools.NameQuestion, Content: tc.args, ResultDone: true, ResultStatus: message.ToolStatusSuccess}
+			view := terminaltext.StripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
+			if tc.want != "" && !strings.Contains(view, tc.want) {
+				t.Fatalf("view lacks role suffix %q:\n%s", tc.want, view)
+			}
+			if tc.bodyWant != "" && !strings.Contains(view, tc.bodyWant) {
+				t.Fatalf("view lacks body line %q:\n%s", tc.bodyWant, view)
+			}
+			for _, reject := range tc.reject {
+				if strings.Contains(view, reject) {
+					t.Fatalf("view leaks %q:\n%s", reject, view)
+				}
+			}
+		})
+	}
+}
+
+func TestQuestionCallKindSurvivesTranscriptRebuild(t *testing.T) {
+	args := `{"wait_for":["819a8c293c20c4dbded169ee2df0c978"]}`
+	restored := newTranscriptToolCallBlock(0, message.ToolCall{
+		ID:   "call-d7db42dc05334fde8f0ac056c0fcf7bc",
+		Name: tools.NameQuestion,
+		Args: json.RawMessage(args),
+	})
+	view := terminaltext.StripANSI(strings.Join(restored.renderQuestionCall(100, ""), "\n"))
+	if !strings.Contains(view, "· wait_for (1 question)") {
+		t.Fatalf("restored card lost its role suffix:\n%s", view)
+	}
+	if strings.Contains(view, "819a8c293c20c4dbded169ee2df0c978") {
+		t.Fatalf("protocol id leaked into the card:\n%s", view)
+	}
+}
