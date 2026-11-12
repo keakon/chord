@@ -39,6 +39,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Confirmation dialogs now list the permission rules that triggered the prompt in a read-only `Rules requiring approval (N)` section, showing each rule's tool name, quoted pattern, and action — for example `shell: "rm *" → ask`. A patch blocked by a `delete` rule shows `delete` rather than the current tool. Some tools and decision paths do not report matched rules, so a missing or empty section does not mean no rule matched; the rule picker still lists rules to save, not the cause of this prompt.
 
 ### Fixes
+- Multi-file `apply_patch` previews now draw a separator on file operation markers, so `Add File` groups without a hunk header no longer blend into the preceding file's lines. The failed-patch card and the "Requested patch" fallback share this renderer and gain the same boundary; `Move to` stays plain because it renames the preceding Update.
 - In the permission rule picker, the selected rule row keeps its highlight across the whole line; the path and summary after the tool name no longer fall back to the dialog background.
 
 - During LLM connect/retry cycles the status bar activity lane no longer flip-flops between the retry and connecting glyphs, and its timer no longer resets on every reconnect: consecutive retries keep one elapsed timer from the start of the retry run and keep showing the retry state (counting down when a wait is scheduled) while attempts reconnect. Waiting for headers, streaming output, and terminal states still take over the lane immediately.

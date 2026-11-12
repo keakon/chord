@@ -862,28 +862,50 @@ func renderApplyPatchPreviewLine(line string, width int, hl *syntax.Highlighter)
 	case strings.HasPrefix(line, "@@"):
 		return renderApplyPatchPreviewHunkHeader(line, width)
 	case strings.HasPrefix(line, "***"):
-		return "    " + currentStyles.ToolResultStyle.Render(truncateApplyPatchDisplayLine(line, width))
+		header := truncateApplyPatchDisplayLine(line, width)
+		styled := currentStyles.ToolResultStyle.Render(header)
+		// A file operation opens a new section just like a hunk header does.
+		// Begin/End Patch and Move to are not file boundaries: Move to renames
+		// the Update File before it, so a rule there would split one operation.
+		if isApplyPatchFileSectionMarker(line) {
+			styled += applyPatchPreviewRule(header, width)
+		}
+		return "    " + styled
 	default:
 		return "    " + currentStyles.DimStyle.Render(truncateApplyPatchDisplayLine(line, width))
 	}
 }
 
-func renderApplyPatchPreviewHunkHeader(line string, width int) string {
-	header := truncateApplyPatchDisplayLine(line, width)
+// isApplyPatchFileSectionMarker reports whether a patch row opens a file
+// section. streamingApplyPatchOperationMarkers is the shared spelling of those
+// markers; Move to is deliberately absent because it renames the preceding
+// Update, and the envelope rows are not operations at all. Trimming the
+// trailing space also matches a marker whose path has not streamed in yet.
+func isApplyPatchFileSectionMarker(line string) bool {
+	for _, marker := range streamingApplyPatchOperationMarkers {
+		if strings.HasPrefix(line, strings.TrimSuffix(marker.prefix, " ")) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyPatchPreviewRule fills the rest of a patch header row with the same dim
+// rule the applied-diff view draws at file and hunk boundaries. It stays on the
+// header row: the streaming preview maps one patch line to one screen line, so
+// a standalone rule would break that mapping and the per-line render memo.
+// The body remains independently highlighted; this is only a visual boundary.
+func applyPatchPreviewRule(header string, width int) string {
 	headerWidth := terminaltext.Width(header)
 	if headerWidth >= width {
-		return "    " + currentStyles.ToolResultExpandedStyle.Render(header)
+		return ""
 	}
+	return currentStyles.DimStyle.Render(strings.Repeat("─", width-headerWidth))
+}
 
-	// Keep the hunk separator on the header row so the line-level render memo
-	// stays one-to-one with the patch input. The body remains independently
-	// highlighted; this is only a visual boundary, not a new syntax block.
-	// Standalone diff separators use applyPatchDiffSeparator with the same
-	// full-width dim rule so requested-patch and applied-diff views share one
-	// visual language.
-	ruleWidth := width - headerWidth
-	rule := strings.Repeat("─", ruleWidth)
-	return "    " + currentStyles.ToolResultExpandedStyle.Render(header) + currentStyles.DimStyle.Render(rule)
+func renderApplyPatchPreviewHunkHeader(line string, width int) string {
+	header := truncateApplyPatchDisplayLine(line, width)
+	return "    " + currentStyles.ToolResultExpandedStyle.Render(header) + applyPatchPreviewRule(header, width)
 }
 
 // applyPatchDiffSeparator renders a standalone full-width dim rule for applied

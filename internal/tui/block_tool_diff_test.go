@@ -1962,3 +1962,74 @@ func TestApplyPatchPreviewMemoDropsLinesFromAStaleHighlighter(t *testing.T) {
 		}
 	}
 }
+
+// TestApplyPatchPreviewMarksFileSections pins which patch rows carry the
+// inline separator. Only hunk headers and file operation markers open a
+// section; envelope rows and Move to stay plain so one Update is not split.
+func TestApplyPatchPreviewMarksFileSections(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	hl := syntax.New("src/demo.go", "", "")
+	cases := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{"begin patch", "*** Begin Patch", false},
+		{"end patch", "*** End Patch", false},
+		{"move to", "*** Move to: src/renamed.go", false},
+		{"add file", "*** Add File: docs/note.md", true},
+		{"update file", "*** Update File: src/demo.go", true},
+		{"delete file", "*** Delete File: tmp/old.txt", true},
+		{"marker without path", "*** Add File:", true},
+		{"hunk header", "@@", true},
+		{"added content", "+# heading", false},
+		{"context line", " unchanged", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plain := terminaltext.StripANSI(renderApplyPatchPreviewLine(tc.line, 60, hl))
+			if got := strings.Contains(plain, "─"); got != tc.want {
+				t.Fatalf("renderApplyPatchPreviewLine(%q) rule=%v, want %v; plain=%q", tc.line, got, tc.want, plain)
+			}
+		})
+	}
+}
+
+// TestApplyPatchStreamingPreviewSeparatesFileSections covers the live card:
+// an Add File group following an Update File group must be visually separated
+// by both the cold render and the streaming range path.
+func TestApplyPatchStreamingPreviewSeparatesFileSections(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: src/demo.go",
+		"@@",
+		"-func old() {}",
+		"+func main() {}",
+		"*** Add File: docs/note.md",
+		"+# heading",
+		"*** End Patch",
+	}, "\n")
+	newBlock := func() *Block { return applyPatchStreamingTestBlock(patch) }
+
+	assertApplyPatchFileSectionRules(t, newBlock().Render(100, ""))
+
+	block := newBlock()
+	assertApplyPatchFileSectionRules(t, block.RenderRange(100, "", 0, block.LineCount(100)))
+}
+
+func assertApplyPatchFileSectionRules(t *testing.T, lines []string) {
+	t.Helper()
+	for _, marker := range []string{"*** Update File: src/demo.go", "*** Add File: docs/note.md"} {
+		line := renderedLineContaining(t, lines, marker)
+		if !strings.Contains(terminaltext.StripANSI(line), "─") {
+			t.Fatalf("file section %q has no inline separator: %q", marker, terminaltext.StripANSI(line))
+		}
+	}
+	for _, marker := range []string{"*** Begin Patch", "*** End Patch"} {
+		line := renderedLineContaining(t, lines, marker)
+		if strings.Contains(terminaltext.StripANSI(line), "─") {
+			t.Fatalf("envelope row %q should not carry a separator: %q", marker, terminaltext.StripANSI(line))
+		}
+	}
+}
