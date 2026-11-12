@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/keakon/lipgloss/v2"
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/tui/terminaltext"
@@ -60,6 +61,38 @@ func preserveDialogBackground(body string) string {
 		lines[i] = terminaltext.EnsureReset(terminaltext.PreserveBackground(line, currentStyles.Palette.DialogBg))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// renderDialogSelectedRow renders a selector row on the SelectedStyle surface
+// across width. lipgloss opens the style once per line and never reopens it
+// after an SGR reset inside content, so text after an inline styled segment
+// (such as a tool label) would lose SelectedFg/SelectedBg, and the dialog
+// background pass would then fill it with DialogBg. Reopening the selection
+// style after each inner reset keeps the whole row on its own surface; the
+// dialog pass still inserts DialogBg after those resets, but the reopened
+// selection sequence follows it and wins. Plain content skips the extra work.
+func renderDialogSelectedRow(width int, content string) string {
+	style := currentStyles.SelectedStyle
+	if strings.Contains(content, "\x1b[") {
+		content = terminaltext.ReapplyAfterResets(content, styleOpenSequence(style))
+	}
+	return style.Width(width).Render(content)
+}
+
+// styleOpenSequence returns the escape sequences lipgloss emits before the
+// first content cell of style, or "" when style emits none (or adds padding or
+// margins before the content).
+func styleOpenSequence(style lipgloss.Style) string {
+	const probe = "x"
+	rendered := style.Render(probe)
+	i := 0
+	for i < len(rendered) && rendered[i] == '\x1b' {
+		i = terminaltext.SkipANSI(rendered, i)
+	}
+	if i == 0 || !strings.HasPrefix(rendered[i:], probe) {
+		return ""
+	}
+	return rendered[:i]
 }
 
 // wrapDialogLines runs before scroll-window sizing, so navigation counts the

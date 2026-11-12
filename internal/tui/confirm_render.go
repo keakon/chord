@@ -225,7 +225,7 @@ func (m *Model) renderRulePicker(maxWidth int) string {
 			line += " ⚠ very broad"
 		}
 		if i == m.confirm.patternIdx {
-			line = currentStyles.SelectedStyle.Width(width).Render(line)
+			line = renderDialogSelectedRow(width, line)
 		}
 		lines = append(lines, line)
 	}

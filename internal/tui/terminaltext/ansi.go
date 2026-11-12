@@ -92,11 +92,23 @@ func PreserveBackground(line, bgColor string) string {
 	if !strings.Contains(line, "\x1b[") {
 		return line
 	}
-	bgSeq := BackgroundSequence(bgColor)
-	if bgSeq == "" {
+	return ReapplyAfterResets(line, BackgroundSequence(bgColor))
+}
+
+// ReapplyAfterResets inserts seq after every SGR reset (`\x1b[0m`, `\x1b[m`,
+// `\x1b[49m`, `\x1b[39m`) in line. PreserveBackground uses it with a
+// background sequence; callers that own a full surface style (foreground and
+// background) pass that style's opening sequence so text after an inner styled
+// segment stays on the surface.
+func ReapplyAfterResets(line, seq string) string {
+	if seq == "" || line == "" {
 		return line
 	}
-	// Card rendering calls this for every body line of every frame. Count the
+	if !strings.Contains(line, "\x1b[") {
+		return line
+	}
+	// Card rendering calls this (through PreserveBackground) for every body
+	// line of every frame. Count the
 	// reset sequences first so a line with ANSI styling but no reset allocates
 	// nothing, and a line with many resets reserves the exact output size.
 	// A sequence that is not one of the four resets resumes the scan one byte in
@@ -121,7 +133,7 @@ func PreserveBackground(line, bgColor string) string {
 		return line
 	}
 	var b strings.Builder
-	b.Grow(len(line) + resetCount*len(bgSeq))
+	b.Grow(len(line) + resetCount*len(seq))
 	last := 0
 	for i := 0; i < len(line); {
 		if line[i] != '\x1b' {
@@ -131,7 +143,7 @@ func PreserveBackground(line, bgColor string) string {
 		end := SkipANSI(line, i)
 		if isTerminalResetSequence(line[i:end]) {
 			b.WriteString(line[last:end])
-			b.WriteString(bgSeq)
+			b.WriteString(seq)
 			last = end
 			i = end
 			continue

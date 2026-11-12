@@ -251,3 +251,15 @@ func TestPreserveBackgroundMatchesReference(t *testing.T) {
 		}
 	}
 }
+
+func TestReapplyAfterResetsReopensFullStyleSequence(t *testing.T) {
+	const open = "\x1b[38;5;230;48;5;62m"
+	line := open + "a \x1b[38;5;252mlabel\x1b[m rest\x1b[39m end"
+	want := open + "a \x1b[38;5;252mlabel\x1b[m" + open + " rest\x1b[39m" + open + " end"
+	if got := ReapplyAfterResets(line, open); got != want {
+		t.Fatalf("ReapplyAfterResets\n got=%q\nwant=%q", got, want)
+	}
+	if got := ReapplyAfterResets(line, ""); got != line {
+		t.Fatalf("empty sequence changed the line: %q", got)
+	}
+}

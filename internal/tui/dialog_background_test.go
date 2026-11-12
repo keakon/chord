@@ -11,6 +11,8 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/permission/rulesuggest"
+	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/terminaltext"
 	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
@@ -145,6 +147,68 @@ func TestHandoffDenyReasonKeepsDialogBg(t *testing.T) {
 		t.Fatalf("missing deny input value: %q", terminaltext.StripANSI(out))
 	}
 	requireCellBg(t, line, "use reviewer first", "u", wantBg)
+}
+
+// requireTextCellsStyle checks every cell of needle in line, so a surface that
+// breaks partway through the text is caught, not only its first character.
+func requireTextCellsStyle(t *testing.T, line, needle string, wantBg, wantFg interface {
+	RGBA() (r, g, b, a uint32)
+}) {
+	t.Helper()
+	cells := drawLineCells(t, line)
+	plain := terminaltext.StripANSI(line)
+	idx := strings.Index(plain, needle)
+	if idx < 0 {
+		t.Fatalf("line %q does not contain %q", plain, needle)
+	}
+	start := ansi.StringWidth(plain[:idx])
+	end := start + ansi.StringWidth(needle)
+	if end > len(cells) {
+		t.Fatalf("needle %q ends at column %d past %d cells in %q", needle, end, len(cells), plain)
+	}
+	for col := start; col < end; col++ {
+		cell := cells[col]
+		if !colorsEqual(cell.Style.Bg, wantBg) {
+			t.Fatalf("cell %d %q of %q background = %v, want %v (line %q)", col, cell.Content, needle, cell.Style.Bg, wantBg, plain)
+		}
+		if wantFg != nil && !colorsEqual(cell.Style.Fg, wantFg) {
+			t.Fatalf("cell %d %q of %q foreground = %v, want %v (line %q)", col, cell.Content, needle, cell.Style.Fg, wantFg, plain)
+		}
+	}
+}
+
+// The selected rule-picker row embeds a separately styled tool label whose SGR
+// reset used to end the selection surface: the pattern and summary after the
+// label fell back to DialogBg while only the trailing padding stayed selected.
+func TestRulePickerSelectedRowKeepsSelectionSurfaceAfterToolLabel(t *testing.T) {
+	dialogBg := dialogBgColor(t)
+	selectedBg := colorOfTheme(currentStyles.Palette.SelectedBg)
+	selectedFg := colorOfTheme(currentStyles.Palette.SelectedFg)
+	m := NewModelWithSize(nil, 100, 30)
+	m.confirm.request = &ConfirmRequest{ToolName: tools.NameDelete, ArgsJSON: `{}`}
+	m.confirm.pickingRule = true
+	m.confirm.candidates = []rulesuggest.Candidate{
+		{Tool: "delete", Pattern: "/tmp/sample.txt", Summary: "one file"},
+		{Tool: "delete", Pattern: "/tmp/other.txt"},
+	}
+	m.confirm.patternIdx = 0
+	m.confirm.selectedPatterns = map[int]struct{}{0: {}}
+
+	out := m.renderConfirmDialog()
+	selected := findRenderedLineContaining(out, "/tmp/sample.txt")
+	if selected == "" {
+		t.Fatalf("missing selected candidate row: %q", terminaltext.StripANSI(out))
+	}
+	requireTextCellsStyle(t, selected, "❯ [x] ", selectedBg, selectedFg)
+	requireTextCellsStyle(t, selected, "delete", selectedBg, nil)
+	requireTextCellsStyle(t, selected, " /tmp/sample.txt — one file   ", selectedBg, nil)
+	requireTextCellsStyle(t, selected, "/tmp/sample.txt — one file", selectedBg, selectedFg)
+
+	unselected := findRenderedLineContaining(out, "/tmp/other.txt")
+	if unselected == "" {
+		t.Fatalf("missing unselected candidate row: %q", terminaltext.StripANSI(out))
+	}
+	requireTextCellsStyle(t, unselected, "[ ] delete /tmp/other.txt   ", dialogBg, nil)
 }
 
 func TestRenderOverlayPreservesButtons(t *testing.T) {
