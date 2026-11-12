@@ -15,16 +15,12 @@ hero:
       link: /chord/quickstart/
       icon: right-arrow
       variant: primary
-    - text: Model access
-      link: /chord/model-choice/#supported-accounts-and-apis
+    - text: See benchmarks
+      link: /chord/performance/
       variant: secondary
-    - text: GitHub
-      link: https://github.com/keakon/chord
-      icon: external
-      variant: minimal
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { Card, CardGrid } from '@astrojs/starlight/components';
 import screenshot from '../../../../docs/assets/screenshot.png';
 
 <figure class="chord-screenshot">
@@ -34,11 +30,47 @@ import screenshot from '../../../../docs/assets/screenshot.png';
   />
 </figure>
 
-## Measured results
+## Three-step setup
 
-### Adding streaming JSON iteration to httpx
+<CardGrid>
+  <Card title="1. Install" icon="download">
+    Install with Homebrew (macOS and Linux):
 
-Six coding agents used `deepseek-flash` for the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): add streaming JSON iteration to Python's `httpx` client, handling decoding errors and single-use responses. The model alias is now served by DeepSeek-V4.1-Flash-1017. Time includes model interactions, code changes, and test execution; it excludes environment setup and final cleanup.
+    ```bash
+    brew install keakon/tap/chord
+    ```
+
+    You can also download the archive from [GitHub Releases](https://github.com/keakon/chord/releases), or install with Go 1.27.0 or newer:
+
+    ```bash
+    go install github.com/keakon/chord/cmd/chord@latest
+    ```
+
+    See [Quickstart](/chord/quickstart/#1-install) for details.
+  </Card>
+  <Card title="2. Run from your project" icon="window">
+    ```bash
+    cd my-project
+    chord
+    ```
+    On the first run, the wizard guides you through model setup: enter an API URL, model name, and API key, or sign in with Codex OAuth. See [Model access](/chord/model-choice/#supported-accounts-and-apis) for supported accounts and APIs.
+  </Card>
+  <Card title="3. Send your first task" icon="pencil">
+    Type a task and press `Enter`:
+
+    ```text
+    Explain this project's main modules and how to run its tests. Do not change any files yet.
+    ```
+
+    Default permissions allow edits and commands directly; to approve actions first, see [Permissions & Safety](/chord/permissions-and-safety/).
+  </Card>
+</CardGrid>
+
+Supported on macOS, Linux, and Windows (including WSL); a few system-level features are platform-specific. See [Platform support](/chord/platforms/).
+
+## Measured comparison
+
+Six coding agents completed the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) with the same model (`deepseek-flash`). Chord was fastest and cheapest:
 
 | Harness | Time | Estimated cost |
 |---------|------|------|
@@ -49,69 +81,4 @@ Six coding agents used `deepseek-flash` for the same [DeepSWE v1.1 task](https:/
 | mini-swe-agent 2.4.6 | 18m29s (2.79×) <span class="chord-bar" style="--bar: 82%"></span> | $0.125 (2.40×) <span class="chord-bar" style="--bar: 76%"></span> |
 | claude code 2.1.272 | 22m25s (3.39×) <span class="chord-bar" style="--bar: 100%"></span> | $0.166 (3.17×) <span class="chord-bar" style="--bar: 100%"></span> |
 
-Multipliers are relative to Chord. Chord was fastest and cheapest, and used the fewest input and output tokens (54,530 / 58,559).
-
-Chord trims old tool output when building each request, compacts long-session context, and starts safe tools as soon as their arguments are complete; see [Performance](/chord/performance/#how-it-works) for details.
-
-### App memory
-
-Memory measured on macOS 15.3.2 (arm64), with an empty session and after loading 200 messages:
-
-| Harness | Empty session | 200 messages | Growth |
-|---------|---------------|--------------|--------|
-| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
-| codex 0.154.0 | **27MB** | 47MB | +20MB |
-| claude code 2.1.273 | 143MB | 216MB | +73MB |
-
-One measured task and one memory test; your numbers will differ. [See the token breakdown and test conditions](/chord/performance/#measured-results).
-
-## Three-step setup
-
-<CardGrid>
-  <Card title="1. Install" icon="download">
-    Download the archive for your OS and architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`. No Go installation is needed.
-
-    You can also install with Go 1.27.0 or newer:
-
-    ```bash
-    go install github.com/keakon/chord/cmd/chord@latest
-    ```
-
-    On macOS, the downloaded binary may be blocked on first run; see [Quickstart](/chord/quickstart/#1-install) for the steps to unblock it.
-  </Card>
-  <Card title="2. Run from your project" icon="window">
-    ```bash
-    cd my-project
-    chord
-    ```
-    On the first run without a configuration file, the wizard guides you through entering your model API URL, model name, and API key, or signing in with Codex OAuth.
-  </Card>
-  <Card title="3. Send your first task" icon="pencil">
-    Type a task and press `Enter`:
-
-    ```text
-    Explain this project's main modules and how to run its tests. Do not change any files yet.
-    ```
-
-    Press `Esc` from the composer to enter Normal mode and browse the reply and tool cards. For a coding task, review changes in the terminal as Chord works. Default permissions allow edits and commands directly; deletions governed by the `delete` rule require confirmation. To configure approval before execution, see [Permissions & Safety](/chord/permissions-and-safety/).
-  </Card>
-</CardGrid>
-
-Supported on macOS, Linux, and Windows (including WSL); a few system-level features are platform-specific. See [Platform support](/chord/platforms/).
-
-## More features
-
-- [Automatic model fallback](/chord/configuration/#model-pools-selecting-providermodel): configure multiple models so Chord can automatically try the next model when a request fails.
-- [Import existing sessions](/chord/usage/#importing-external-sessions): bring your Claude Code, Codex, or OpenCode history into Chord and continue working.
-- [Vim-style keyboard controls](/chord/keybindings/): browse sessions, operate tool cards, and switch panels from the keyboard.
-
-## Find a guide
-
-<CardGrid>
-  <LinkCard title="Start quickly" href="/chord/quickstart/" description="Install, connect a model, and complete your first task." />
-  <LinkCard title="Model access" href="/chord/model-choice/#supported-accounts-and-apis" description="Check whether your existing account or API works with Chord." />
-  <LinkCard title="Permissions and safety" href="/chord/permissions-and-safety/" description="Choose which actions need approval and understand file and command risks." />
-  <LinkCard title="Everyday use" href="/chord/usage/" description="Browse sessions, run long tasks, or work in parallel." />
-  <LinkCard title="Extend and customize" href="/chord/customization/" description="Configure multiple agents, skills, code diagnostics, and external tools." />
-  <LinkCard title="Troubleshoot" href="/chord/troubleshooting/" description="Startup, auth, model, TUI, context, and integration symptoms." />
-</CardGrid>
+After loading 200 messages, Chord uses just 39MB of memory (Claude Code: 216MB). See [Performance](/chord/performance/#measured-results) for token breakdowns and test conditions.

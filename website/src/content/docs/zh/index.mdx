@@ -15,16 +15,12 @@ hero:
       link: /chord/zh/quickstart/
       icon: right-arrow
       variant: primary
-    - text: 模型接入
-      link: /chord/zh/model-choice/#账号与-api-支持
+    - text: 查看实测数据
+      link: /chord/zh/performance/
       variant: secondary
-    - text: GitHub
-      link: https://github.com/keakon/chord
-      icon: external
-      variant: minimal
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { Card, CardGrid } from '@astrojs/starlight/components';
 import screenshot from '../../../../../docs/assets/screenshot.png';
 
 <figure class="chord-screenshot">
@@ -34,11 +30,47 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
   />
 </figure>
 
-## 实测数据
+## 三步上手
 
-### 给 httpx 添加流式 JSON 迭代接口
+<CardGrid>
+  <Card title="1. 安装" icon="download">
+    macOS 和 Linux 用 Homebrew 安装：
 
-六款编程 Agent 都使用 `deepseek-flash`，执行同一道 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)：给 Python HTTP 客户端 `httpx` 添加流式 JSON 迭代接口，并处理解码失败、响应重复迭代等边界情况。该模型别名现由 DeepSeek-V4.1-Flash-1017 提供服务。耗时包含模型交互、代码修改和测试执行，不含环境准备和最终收尾。
+    ```bash
+    brew install keakon/tap/chord
+    ```
+
+    也可以从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载压缩包解压，或用 Go 1.27.0 或更新版本安装：
+
+    ```bash
+    go install github.com/keakon/chord/cmd/chord@latest
+    ```
+
+    详见[快速开始](/chord/zh/quickstart/#1-安装)。
+  </Card>
+  <Card title="2. 在项目里启动" icon="window">
+    ```bash
+    cd my-project
+    chord
+    ```
+    首次运行时，向导会引导你配置模型：填写 API 地址、模型名称和 API key，或通过 Codex OAuth 登录。支持哪些账号和 API 见[模型接入](/chord/zh/model-choice/#账号与-api-支持)。
+  </Card>
+  <Card title="3. 发送第一个任务" icon="pencil">
+    输入任务，按 `Enter` 发送：
+
+    ```text
+    请解释这个项目的主要模块和测试入口，先不要修改文件。
+    ```
+
+    默认权限允许直接修改文件和执行命令，需要执行前审批见[权限与安全](/chord/zh/permissions-and-safety/)。
+  </Card>
+</CardGrid>
+
+支持 macOS、Linux、Windows（含 WSL），少数系统级能力只在部分平台生效，见[平台支持](/chord/zh/platforms/)。
+
+## 实测对比
+
+六款编程 Agent 用同一模型（`deepseek-flash`）完成同一 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)，Chord 用时最短、成本最低：
 
 | 工具 | 耗时 | 估算成本 |
 |---------|------|------|
@@ -49,69 +81,4 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
 | mini-swe-agent 2.4.6 | 18m29s（2.79 倍） <span class="chord-bar" style="--bar: 82%"></span> | ￥0.835（2.40 倍） <span class="chord-bar" style="--bar: 76%"></span> |
 | claude code 2.1.272 | 22m25s（3.39 倍） <span class="chord-bar" style="--bar: 100%"></span> | ￥1.104（3.17 倍） <span class="chord-bar" style="--bar: 100%"></span> |
 
-括号内为相对 Chord 的倍数。Chord 用时最短、成本最低，输入和输出 token（54,530 / 58,559）也最少。
-
-Chord 会在每次请求前剪裁旧工具输出、对长会话做持久压缩，并在参数完整时提前执行安全工具；实现细节见[性能](/chord/zh/performance/#工作方式)。
-
-### 应用内存
-
-在 macOS 15.3.2（arm64）上，分别测量空会话和加载 200 条消息后的内存占用：
-
-| 工具 | 空会话 | 200 条消息 | 增量 |
-|---------|--------|------------|------|
-| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
-| codex 0.154.0 | **27MB** | 47MB | +20MB |
-| claude code 2.1.273 | 143MB | 216MB | +73MB |
-
-以上数据来自一次任务实测和一次内存测试，不代表普遍结果。[查看 token 明细与测量条件](/chord/zh/performance/#实测数据)。
-
-## 三步上手
-
-<CardGrid>
-  <Card title="1. 安装" icon="download">
-    从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载对应系统和架构的压缩包，解压后把 `chord` 加入 `PATH`，不需要安装 Go。
-
-    也可用 Go 1.27.0 或更新版本安装：
-
-    ```bash
-    go install github.com/keakon/chord/cmd/chord@latest
-    ```
-
-    macOS 下载版首次运行可能被系统阻止，处理步骤见[快速开始](/chord/zh/quickstart/#1-安装)。
-  </Card>
-  <Card title="2. 在项目里启动" icon="window">
-    ```bash
-    cd my-project
-    chord
-    ```
-    首次运行且没有配置文件时，向导会引导你填写模型 API 地址、模型名称和 API key，或通过 Codex OAuth 登录。
-  </Card>
-  <Card title="3. 发送第一个任务" icon="pencil">
-    输入任务，按 `Enter` 发送：
-
-    ```text
-    请解释这个项目的主要模块和测试入口，先不要修改文件。
-    ```
-
-    在输入框按 `Esc` 进入 Normal 模式，浏览回复和工具卡。交给 Chord 开发任务后，可在终端里检查改动。默认权限允许直接修改文件和执行命令；受 `delete` 规则管控的删除操作需要确认。需要执行前审批时，见[权限与安全](/chord/zh/permissions-and-safety/)。
-  </Card>
-</CardGrid>
-
-支持 macOS、Linux、Windows（含 WSL），少数系统级能力只在部分平台生效，见[平台支持](/chord/zh/platforms/)。
-
-## 更多功能
-
-- [模型自动切换](/chord/zh/configuration/#模型池)：配置多个模型，请求失败时自动尝试切换到下一个模型并重试。
-- [导入已有会话](/chord/zh/usage/#导入外部会话)：导入 Claude Code、Codex 或 OpenCode 的会话历史，在 Chord 中继续工作。
-- [Vim 风格键盘操作](/chord/zh/keybindings/)：用键盘浏览会话、操作工具卡和切换面板。
-
-## 按主题查文档
-
-<CardGrid>
-  <LinkCard title="快速启动" href="/chord/zh/quickstart/" description="安装、连接模型，完成第一个任务。" />
-  <LinkCard title="模型接入" href="/chord/zh/model-choice/#账号与-api-支持" description="确认已有账号或 API 能否用于 Chord。" />
-  <LinkCard title="权限与安全" href="/chord/zh/permissions-and-safety/" description="决定哪些操作需要确认，了解文件和命令的风险。" />
-  <LinkCard title="日常使用" href="/chord/zh/usage/" description="浏览会话、运行长任务或并行工作。" />
-  <LinkCard title="扩展定制" href="/chord/zh/customization/" description="配置多 Agent、技能、代码诊断和外部工具。" />
-  <LinkCard title="排障" href="/chord/zh/troubleshooting/" description="启动、认证、模型、TUI、上下文和集成问题。" />
-</CardGrid>
+内存方面，加载 200 条消息后 Chord 仅占 39MB（Claude Code: 216MB）。完整测量条件见[性能](/chord/zh/performance/#实测数据)。
