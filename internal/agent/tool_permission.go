@@ -45,8 +45,8 @@ func normalizeToolPermissionAction(toolName string, action permission.Action) pe
 // The rule's own argument pattern is passed through as the lookup argument, so
 // the answer is "does this rule name the tool?" independently of what the
 // argument pattern happens to be. Tools whose permission decision has no
-// meaningful matching argument (compact_context, and the YOLO-protected
-// control tools) need exactly that question answered; matching them against a
+// meaningful matching argument (compact_context and the other control tools
+// that take no matching argument) need exactly that question answered; matching them against a
 // literal "*" argument would silently drop every parameterized rule, because
 // globMatch("*", "some-argument") is false.
 //

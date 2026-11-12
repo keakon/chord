@@ -17,6 +17,8 @@ type skillActivationCandidate struct {
 }
 
 func (a *MainAgent) skillActivationView() skillActivationView {
+	// Skill reachability is directory membership: it evaluates the configured
+	// ruleset and never follows the YOLO transformation.
 	v := skillActivationView{TaskID: identity.MainAgentID, Catalog: a.loadedSkillsSnapshot(), Ruleset: a.effectiveRuleset()}
 	if r := a.directoryInstructions.Load(); r != nil {
 		v.CheckoutRoot = r.binding.CheckoutRoot

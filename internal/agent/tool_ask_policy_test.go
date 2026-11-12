@@ -131,6 +131,39 @@ func TestToolAskPolicySubAgentAndYolo(t *testing.T) {
 	}
 }
 
+// TestYoloLiftedAskPrecedesUnattendedAskPolicy pins the ordering on the main
+// agent: the YOLO transformation turns an ask into an allow before the
+// unattended ask policy can deny it, so confirm_ask_policy=deny never fires
+// for a call YOLO already released. With YOLO off the policy denies as usual.
+func TestYoloLiftedAskPrecedesUnattendedAskPolicy(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.globalConfig = &config.Config{ConfirmAskPolicy: new(config.ConfirmAskPolicyDeny)}
+	a.ruleset = permissionRuleset(t, "shell: ask")
+	a.newTurn("")
+	events := make([]AgentEvent, 0, 1)
+	pipeline := a.toolExecutionPipeline()
+	pipeline.emit = func(e AgentEvent) { events = append(events, e) }
+
+	call := message.ToolCall{ID: "call-1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"pwd"}`)}
+	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); !errors.Is(err, errToolAskPolicyDenied) {
+		t.Fatalf("YOLO off: policy must deny the ask, got %v", err)
+	}
+
+	a.yoloEnabled.Store(true)
+	events = events[:0]
+	pipeline = a.toolExecutionPipeline()
+	pipeline.emit = func(e AgentEvent) { events = append(events, e) }
+	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
+		t.Fatalf("YOLO must release the ask before the policy denies it, got %v", err)
+	}
+	for _, event := range events {
+		if _, ok := event.(ToolAskPolicyDeniedEvent); ok {
+			t.Fatalf("released ask produced a policy decision: %T", event)
+		}
+	}
+}
+
 func TestToolAskPolicyCancellationBeforeDecision(t *testing.T) {
 	emitted := false
 	p := toolExecutionPipeline{

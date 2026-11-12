@@ -52,7 +52,10 @@ func (a *MainAgent) SetSkills(skills []*skill.Meta) {
 }
 
 // callableSkillsSnapshot returns the complete model loading set for this agent,
-// independently of startup listing and path activation state.
+// independently of startup listing and path activation state. The catalog is
+// directory membership, so it always evaluates the configured ruleset: the YOLO
+// transformation only lifts execution friction and never rewrites which skills
+// exist.
 func (a *MainAgent) callableSkillsSnapshot() []*skill.Meta {
 	return modelCallableSkillsForRuleset(a.loadedSkillsSnapshot(), a.effectiveRuleset())
 }

@@ -163,10 +163,13 @@ func (a *MainAgent) delegationCallerFromContext(ctx context.Context) (delegation
 			cfg = config.DefaultBuilderAgent()
 		}
 		return delegationCaller{
-			AgentID:      "",
-			TaskID:       "",
-			Depth:        0,
-			Delegation:   cfg.Delegation,
+			AgentID:    "",
+			TaskID:     "",
+			Depth:      0,
+			Delegation: cfg.Delegation,
+			// Admission checks directory membership against the configured
+			// ruleset: scoped delegate denies stay bound under YOLO, so the
+			// admission decision never follows the toggle.
 			Ruleset:      a.effectiveRuleset(),
 			WorkDir:      a.subAgentWorkDir(),
 			WorkDirState: a.workDirState.load(),
@@ -1288,9 +1291,15 @@ func (a *MainAgent) AvailableSubAgents() []tools.AgentInfo {
 	if cfg := a.currentActiveConfig(); cfg != nil {
 		activeName = cfg.Name
 	}
+	// Directory membership: the delegate catalog always reflects the
+	// configured ruleset and never the YOLO transformation.
 	return a.availableSubAgentInfosForRuleset(a.effectiveRuleset(), activeName)
 }
 
+// delegateAgentAvailable answers directory membership: does this ruleset admit
+// the agent type at all. It always evaluates the configured ruleset — the YOLO
+// transformation keeps scoped delegate denies bound (they name the catalog, not
+// path friction), so the admission decision is toggle-independent.
 func delegateAgentAvailable(ruleset permission.Ruleset, agentType string) bool {
 	if len(ruleset) == 0 {
 		return true

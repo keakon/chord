@@ -411,7 +411,7 @@ shell: allow
 		}
 	}
 	// The main agent's authorization line lives with its confirmation channel.
-	if confirm := a.userConfirmationPromptBlock(); !strings.Contains(confirm, "Execution authorization is handled by the permission system") {
+	if confirm := a.userConfirmationPromptBlock(); !strings.Contains(confirm, "Execution authorization is decided by the permission system at runtime") {
 		t.Fatalf("userConfirmationPromptBlock() missing authorization line: %q", confirm)
 	}
 }
@@ -608,7 +608,7 @@ question: allow
 	// The confirmation section owns the question-versus-text choice and the
 	// authorization line; the capability block no longer points at it.
 	got := a.userConfirmationPromptBlock()
-	for _, want := range []string{"## Structured User Confirmation", "prefer `question`", "Execution authorization is handled by the permission system"} {
+	for _, want := range []string{"## Structured User Confirmation", "prefer `question`", "Execution authorization is decided by the permission system at runtime"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("userConfirmationPromptBlock() missing %q when Question is visible, got %q", want, got)
 		}
@@ -638,7 +638,7 @@ question: deny
 	// The threshold and information standard for a question live in Guidelines
 	// and the confirmation block, which also carries the authorization line.
 	confirm := a.userConfirmationPromptBlock()
-	for _, want := range []string{"## Plain-Text User Confirmation", "Execution authorization is handled by the permission system"} {
+	for _, want := range []string{"## Plain-Text User Confirmation", "Execution authorization is decided by the permission system at runtime"} {
 		if !strings.Contains(confirm, want) {
 			t.Fatalf("userConfirmationPromptBlock() missing %q without Question, got %q", want, confirm)
 		}

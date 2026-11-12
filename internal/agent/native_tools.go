@@ -84,7 +84,10 @@ func (a *MainAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
 		return nil
 	}
 	journal := recovery.NativeRequestJournal{SessionDir: a.SessionDir(), AgentID: identity.MainAgentID, TurnID: turn.ID, Generation: turn.Epoch}
-	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(a.tools, a.snapshotRuleset(), a.hookEngine, name) }, a.nativeUsageRecorder(usageAttribution{AgentID: identity.MainAgentID, AgentKind: identity.MainAgentID, AgentName: a.currentAgentName(), Purpose: analytics.UsagePurposeChat, TurnID: turn.ID}))
+	// Server-side native tool pre-authorization always evaluates the configured
+	// ruleset: the YOLO transformation only lifts local execution friction, it
+	// never widens what a hosted request may do.
+	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(a.tools, a.effectiveRuleset(), a.hookEngine, name) }, a.nativeUsageRecorder(usageAttribution{AgentID: identity.MainAgentID, AgentKind: identity.MainAgentID, AgentName: a.currentAgentName(), Purpose: analytics.UsagePurposeChat, TurnID: turn.ID}))
 	policy.Preflight = nativeReceiptPreflight(policy.Preflight, a.nativeReceipt.Load())
 	a.configureNativeImagePolicy(policy, turn, a.tools, journal, a.instanceID)
 	policy.Failed = func(receipt *message.NativeToolHistory) {

@@ -101,10 +101,10 @@ type MainAgent struct {
 	projectConfig *config.Config
 	ruleset       permission.Ruleset  // merged ruleset (base + overlays)
 	overlay       *permission.Overlay // layered permission rules
-	// YOLO bypasses ordinary tools' permission checks entirely. The
-	// mechanism control tools delegate/handoff/cancel stay rule-governed
-	// (their deny rules still reject, and their ask relaxes to allow); done
-	// and compact_context keep their dedicated actions.
+	// YOLO keeps the role's capability set frozen and only lifts in-scope
+	// confirmation and call-level friction: execution decisions evaluate
+	// executionRuleset (see main_yolo.go), every model-visible surface keeps
+	// reading the configured ruleset.
 	yoloEnabled atomic.Bool
 
 	// confirmFn is called when permission evaluates to "ask". It must be set

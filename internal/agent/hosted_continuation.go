@@ -64,6 +64,9 @@ func (b *hostedBackend) checkContinuation(ctx context.Context, target llm.Fallba
 		}
 		ruleset, scope = sub.currentRuleset(), sub.effectivePathScope()
 	} else {
+		// Hosted continuation pre-authorization always evaluates the configured
+		// ruleset: the YOLO transformation only lifts local execution friction,
+		// never what a hosted request may do.
 		ruleset, scope = b.agent.effectiveRuleset(), b.agent.effectivePathScope()
 	}
 	raw, err := jsonx.Marshal(args)

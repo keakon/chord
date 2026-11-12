@@ -251,7 +251,7 @@ func fileModificationConstraintsPromptBlock(visible map[string]struct{}, ruleset
 // executionAuthorizationLine tells the model that tool approval is the
 // runtime's job. The main agent carries it in its user-confirmation section
 // (userConfirmationPromptBlock); a SubAgent carries it here.
-const executionAuthorizationLine = "- Execution authorization is handled by the permission system: when a tool call needs approval, the runtime asks automatically, so attempt the call instead of asking for permission in text."
+const executionAuthorizationLine = "- Execution authorization is decided by the permission system at runtime: attempt the call instead of asking for permission in text."
 
 // authorizationAndDecisionsPromptBlock explains how a SubAgent handles
 // execution authorization and when to ask the user directly. The main agent's

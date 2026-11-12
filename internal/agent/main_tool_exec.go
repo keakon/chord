@@ -146,7 +146,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		guidance:        mainToolOutputGuidance,
 		applyPatchRetry: &a.applyPatchRetry,
 		currentRuleset: func() permission.Ruleset {
-			return a.effectiveRuleset()
+			return a.executionRuleset()
 		},
 		toolBaseDir:           a.effectiveToolBaseDir(),
 		machineStateRoot:      a.ContentRoot(),
@@ -154,7 +154,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		pathScope:             a.effectivePathScope(),
 		refreshRulesetAfterRuleIntent: func(toolName string, intent *ConfirmRuleIntent) (permission.Ruleset, []ConfirmRuleIntentResult) {
 			results := a.processRuleIntentWithResult(toolName, intent, a.currentAgentName())
-			return a.effectiveRuleset(), results
+			return a.executionRuleset(), results
 		},
 		isInternalTool:        isInternalControlTool,
 		confirm:               a.confirmFn,
@@ -174,24 +174,12 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 			}
 			return nil
 		},
-		// YOLO bypasses ordinary tools outright, including rules the user
-		// wrote as deny: on the main agent a role is a permission preset
-		// rather than a capability boundary, so running a read-only role with
-		// YOLO on makes it writable. That is intended. The protected control
-		// tools keep their rules, and a SubAgent never installs this hook, so
-		// the scope it was delegated with survives the parent's YOLO (see
-		// subAgentBaseRuleset).
-		bypassPermission: func(name string) bool {
-			return a.YoloEnabled() && !yoloProtectedPermissionTool(name)
-		},
-		yoloDowngradeAsk: func(name string) bool {
-			// Under YOLO the mechanism control tools' ask rules stop raising
-			// the shared confirmation dialog while their deny rules still
-			// reject; ordinary tools are already skipped by bypassPermission
-			// above, and done/compact_context report false through
-			// toolAskPolicyApplies.
-			return a.YoloEnabled() && toolAskPolicyApplies(name)
-		},
+		// YOLO is not a bypass here: the gate evaluates every call against
+		// executionRuleset, which applies the mode's per-decision
+		// transformation (see main_yolo.go). The role's capability boundary
+		// keeps holding; only in-scope confirmation and call-level friction
+		// lifts. SubAgents inherit only yoloDowngradeAsk, preserving their
+		// delegated scope (see subAgentBaseRuleset).
 		loopExitAuthorized: a.loopExitAuthorized,
 		preapprovedPermission: func(callID, name string, args json.RawMessage, cwd string, pctx toolPermissionContext) bool {
 			return a.permissionApprovalMatches(callID, name, string(args), cwd, pctx)

@@ -289,10 +289,11 @@ func TestCompactionContinuationFilesGateKeyFilesByReadPermission(t *testing.T) {
 	}
 }
 
-// Under YOLO the execution gate bypasses ordinary tools outright, so every
-// path is already reachable and the filtered ruleset's missing read rules must
-// not report a false deny: the overlay has to stay available or the flagship
-// state-file re-load silently no-ops in the mode long autonomous sessions use.
+// TestCompactionContinuationFilesInjectUnderYolo pins that the internal
+// state-file read gate decides with the same ruleset the execution gate does,
+// YOLO transformation included: an absent ruleset is the gate's unrestricted
+// case, a lifted in-scope read limit re-loads, and a wildcard read deny (a
+// hidden read capability) keeps the overlay out.
 func TestCompactionContinuationFilesInjectUnderYolo(t *testing.T) {
 	projectRoot := t.TempDir()
 	notesAbs := filepath.Join(projectRoot, ".chord", "notes", "task.md")
@@ -305,20 +306,48 @@ func TestCompactionContinuationFilesInjectUnderYolo(t *testing.T) {
 
 	a := newContextPolicyTestAgent(projectRoot)
 	a.SetInitialYoloMode(true)
-	// Deliberately no rules at all: the pre-fix gate evaluated the YOLO-
-	// filtered ruleset, found no read rules, and re-loaded nothing.
 	summary := "## Externalized State\n- .chord/notes/task.md\n\n## Next Step\n- continue"
+
+	// No rules at all: the gate is unrestricted, so the overlay neither hides
+	// nor widens anything by re-loading the file.
 	if got := a.compactionContinuationFiles(summary); !slices.Equal(got, []string{".chord/notes/task.md"}) {
-		t.Fatalf("YOLO must mirror the execution bypass for state-file re-loads, got %v", got)
+		t.Fatalf("state files must re-load when no ruleset restricts reads, got %v", got)
 	}
 
-	// An explicit wildcard allow plus a read deny still bypasses: YOLO never
-	// evaluates ordinary tools, and this must match the execution gate.
+	// An independent scoped read deny is call-level friction the gate lifts,
+	// so the overlay follows it instead of reporting a false deny.
 	a.ruleset = permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
 		{Permission: tools.NameRead, Pattern: ".chord/notes/*", Action: permission.ActionDeny},
 	}
 	if got := a.compactionContinuationFiles(summary); !slices.Equal(got, []string{".chord/notes/task.md"}) {
-		t.Fatalf("YOLO bypass must ignore ordinary read rules, got %v", got)
+		t.Fatalf("YOLO must lift the in-scope read limit for state-file re-loads, got %v", got)
+	}
+
+	// A wildcard read deny hides the read capability itself: the boundary
+	// holds and the overlay must not sneak the content back in.
+	a.ruleset = permission.Ruleset{
+		{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionDeny},
+	}
+	if got := a.compactionContinuationFiles(summary); len(got) != 0 {
+		t.Fatalf("YOLO must keep a wildcard read deny binding for state-file re-loads, got %v", got)
+	}
+
+	// Without YOLO the same scoped deny binds again, and so does the ask rule
+	// whose confirmation the overlay cannot answer.
+	a.SetInitialYoloMode(false)
+	if got := a.compactionContinuationFiles(summary); len(got) != 0 {
+		t.Fatalf("the scoped read deny must bind again with YOLO off, got %v", got)
+	}
+	a.ruleset = permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameRead, Pattern: ".chord/notes/*", Action: permission.ActionAsk},
+	}
+	if got := a.compactionContinuationFiles(summary); len(got) != 0 {
+		t.Fatalf("an ask rule must block the overlay while YOLO is off, got %v", got)
+	}
+	a.SetInitialYoloMode(true)
+	if got := a.compactionContinuationFiles(summary); !slices.Equal(got, []string{".chord/notes/task.md"}) {
+		t.Fatalf("YOLO must lift the ask friction for state-file re-loads, got %v", got)
 	}
 }

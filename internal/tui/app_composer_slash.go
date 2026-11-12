@@ -239,9 +239,9 @@ func (m *Model) getSlashCompletions(input string) []slashCommand {
 	yoloCommands := []slashCommand{}
 	if m.focusedAgentID == "" && strings.HasPrefix("/yolo", prefix) {
 		if m.yoloEnabled() {
-			yoloCommands = append(yoloCommands, slashCommand{Cmd: "/yolo off", Desc: "disable YOLO permission bypass"})
+			yoloCommands = append(yoloCommands, slashCommand{Cmd: "/yolo off", Desc: "disable YOLO mode"})
 		} else {
-			yoloCommands = append(yoloCommands, slashCommand{Cmd: "/yolo on", Desc: "enable YOLO permission bypass"})
+			yoloCommands = append(yoloCommands, slashCommand{Cmd: "/yolo on", Desc: "enable YOLO mode: release in-scope confirmations and call-level permission limits"})
 		}
 	}
 	out = append(out, yoloCommands...)

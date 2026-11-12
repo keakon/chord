@@ -173,7 +173,7 @@ func newRootCmd() *cobra.Command {
 		forkHistoryFlagHelp)
 	rootCmd.Flags().Lookup("fork-history").NoOptDefVal = "latest"
 	rootCmd.Flags().BoolVar(&flagYolo, "yolo", false,
-		"Temporarily bypass main-agent tool permissions except Handoff, Delegate, Cancel, and Done")
+		"Start with YOLO mode on: release the main agent's in-scope confirmations and call-level permission limits; role capability boundaries still hold")
 	rootCmd.Flags().StringVarP(&flagWorktree, "worktree", "w", "",
 		"Create or enter a chord-managed git worktree by name (auto-named when empty); sessions are shared by every checkout of the repository")
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""

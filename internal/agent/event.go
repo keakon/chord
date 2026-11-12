@@ -419,7 +419,7 @@ type LoopStateChangedEvent struct{}
 
 func (LoopStateChangedEvent) agentEvent() {}
 
-// YoloModeChangedEvent notifies the TUI that YOLO permission-bypass state changed.
+// YoloModeChangedEvent notifies the TUI that the YOLO mode toggled.
 type YoloModeChangedEvent struct {
 	Enabled bool
 }

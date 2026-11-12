@@ -38,6 +38,7 @@ func (rs Ruleset) lastMatch(permission, pattern string, skipCompoundShellAllow b
 	for _, r := range slices.Backward(rs) {
 
 		if r.Matches(permission, pattern) {
+			r = rs.executionRule(permission, r)
 			if skipCompoundShellAllow && r.Action == ActionAllow && shellCompoundCommandNeedsReview(permission, pattern, r.Pattern) {
 				continue
 			}
@@ -62,7 +63,7 @@ func (rs Ruleset) LastSpecificToolMatch(permission, pattern string) MatchResult 
 			continue
 		}
 		if globMatch(permission, normRulePerm) && globMatch(pattern, r.Pattern) {
-			return MatchResult{Rule: r, Found: true}
+			return MatchResult{Rule: rs.executionRule(permission, r), Found: true}
 		}
 	}
 	return MatchResult{}
@@ -89,7 +90,7 @@ func (rs Ruleset) LastExactPatternMatch(permission, pattern string) MatchResult 
 			continue
 		}
 		if globMatch(permission, toolname.Normalize(r.Permission)) && r.Pattern == pattern {
-			return MatchResult{Rule: r, Found: true}
+			return MatchResult{Rule: rs.executionRule(permission, r), Found: true}
 		}
 	}
 	return MatchResult{}

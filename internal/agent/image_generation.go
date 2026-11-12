@@ -59,7 +59,9 @@ func (b *imageGenerationBackend) caller(ctx context.Context) (permission.Ruleset
 		}
 		return sub.currentRuleset(), sub.effectivePathScope(), nil
 	}
-	return b.agent.effectiveRuleset(), b.agent.effectivePathScope(), nil
+	// The main agent re-checks its read/write resources with the same ruleset
+	// the execution gate decided the call with, YOLO transformation included.
+	return b.agent.executionRuleset(), b.agent.effectivePathScope(), nil
 }
 
 func (b *imageGenerationBackend) Check(ctx context.Context, r imagegen.Request) error {

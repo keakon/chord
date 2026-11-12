@@ -230,8 +230,11 @@ func (a *MainAgent) compactionContinuationFiles(signature string) []string {
 // stateFileInjectableForRead reports whether the runtime may put a
 // model-declared or summary-extracted state file back into the context after a
 // reset. The overlay must never widen what the model could already reach, so
-// the current read permission rule has to resolve to allow — an ask rule would
-// otherwise turn the overlay into a silent auto-approval. The file tracker is
+// the read decision has to resolve to allow under the same ruleset the
+// execution gate decides with — the main agent's executionRuleset, YOLO
+// transformation included, so an ask rule or an in-scope read limit the gate
+// would lift does not block the overlay either. An absent ruleset is the
+// gate's unrestricted case and stays injectable. The file tracker is
 // deliberately not consulted: it only carries the surviving transcript, so an
 // archived checkpoint's read records are gone after a restore, and re-injecting
 // content the model itself registered is what this overlay exists for.
@@ -239,14 +242,11 @@ func (a *MainAgent) stateFileInjectableForRead(absPath string) bool {
 	if a == nil || absPath == "" {
 		return false
 	}
-	// Under YOLO the execution gate bypasses ordinary tools outright, so a
-	// read of this file is already reachable and the overlay cannot widen
-	// anything: mirror the bypass instead of evaluating the filtered ruleset,
-	// whose ordinary read rules are dropped and would report a false deny.
-	if a.YoloEnabled() {
+	ruleset := a.executionRuleset()
+	if len(ruleset) == 0 {
 		return true
 	}
-	action := a.effectiveRuleset().EvaluatePath(tools.NameRead, absPath, a.effectivePathScope())
+	action := ruleset.EvaluatePath(tools.NameRead, absPath, a.effectivePathScope())
 	return normalizeToolPermissionAction(tools.NameRead, action) == permission.ActionAllow
 }
 

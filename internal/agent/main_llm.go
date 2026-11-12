@@ -430,10 +430,12 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		thinkingFlushInterval:   defaultStreamThinkingFlushInterval,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
-		agentID:      "",
-		turn:         turn,
-		registry:     a.tools,
-		ruleset:      a.effectiveRuleset,
+		agentID:  "",
+		turn:     turn,
+		registry: a.tools,
+		// The streaming speculative policy decides with the same ruleset the
+		// execution gate will use, YOLO transformation included.
+		ruleset:      a.executionRuleset,
 		syncHookGate: a.syncToolHooksConfigured,
 		pathScope:    a.effectivePathScope(),
 		emit:         a.emitToTUI,

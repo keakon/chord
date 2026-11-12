@@ -16,10 +16,14 @@ func (a *MainAgent) currentActiveConfig() *config.AgentConfig {
 	return a.activeConfig
 }
 
-// snapshotRuleset returns a defensive copy of the main agent's merged ruleset,
-// without any YOLO-mode filtering. Use this when the caller needs the same
-// rules the user configured, regardless of the temporary YOLO bypass.
-func (a *MainAgent) snapshotRuleset() permission.Ruleset {
+// effectiveRuleset returns a defensive copy of the main agent's merged ruleset
+// exactly as the user configured it, regardless of the YOLO mode. Every
+// LLM-facing surface (system prompt, tool visibility, delegate and skill
+// catalogs) and the directory-membership checks derive from it, so a YOLO
+// toggle never changes what the model sees or what the catalogs admit. The
+// main-agent execution path evaluates through executionRuleset instead, and
+// SubAgents must use subAgentBaseRuleset.
+func (a *MainAgent) effectiveRuleset() permission.Ruleset {
 	a.stateMu.RLock()
 	defer a.stateMu.RUnlock()
 	if len(a.ruleset) == 0 {
@@ -28,27 +32,12 @@ func (a *MainAgent) snapshotRuleset() permission.Ruleset {
 	return append(permission.Ruleset(nil), a.ruleset...)
 }
 
-// effectiveRuleset returns the ruleset that should drive the main agent's own
-// LLM-facing surface (system prompt, tool visibility) and rule evaluation.
-// Under YOLO it returns the yoloRuleset view of the user's rules: unprotected
-// rules drop out (those tools bypass), while delegate/handoff/cancel/done/
-// compact_context rules survive together with the mechanism tools' mirrored
-// defaults, so the visible surface matches what the execution gate still
-// decides. SubAgents must use subAgentBaseRuleset instead.
-func (a *MainAgent) effectiveRuleset() permission.Ruleset {
-	ruleset := a.snapshotRuleset()
-	if a.yoloEnabled.Load() {
-		return yoloRuleset(ruleset)
-	}
-	return ruleset
-}
-
-// subAgentBaseRuleset returns the unfiltered ruleset SubAgents should inherit
+// subAgentBaseRuleset returns the configured ruleset SubAgents should inherit
 // when they are created or refreshed. SubAgents evaluate the user's full rule
 // set; the only YOLO effect they inherit is the ask→allow downgrade the
 // SubAgent execution pipeline applies while the main agent's YOLO mode is on.
 func (a *MainAgent) subAgentBaseRuleset() permission.Ruleset {
-	return a.snapshotRuleset()
+	return a.effectiveRuleset()
 }
 
 // buildSubAgentRuleset returns the ruleset a freshly created or restored

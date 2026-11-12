@@ -3,8 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -12,44 +10,139 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestYoloRulesetKeepsProtectedRulesAndDropsOthers(t *testing.T) {
-	ruleset := permission.Ruleset{
-		{Permission: tools.NameShell, Pattern: "*", Action: permission.ActionAllow},
-		{Permission: tools.NameHandoff, Pattern: "*", Action: permission.ActionAllow},
-		{Permission: tools.NameDelegate, Pattern: "*", Action: permission.ActionAsk},
-		{Permission: tools.NameCancel, Pattern: "*", Action: permission.ActionDeny},
-		{Permission: tools.NameDone, Pattern: "*", Action: permission.ActionAllow},
+// TestYoloExecutionRulesetTransformationTable walks the YOLO authorization
+// transformation row by row. Each case evaluates the same (tool, args) against
+// the raw ruleset and against the YOLO-transformed ruleset, so the delta is
+// exactly the table: capability boundaries (no-match, wildcard deny,
+// allowlist-structure scoped deny, delegate/skill scoped deny) keep rejecting,
+// while confirmation and call-level friction (ask, independent scoped deny)
+// relaxes to allow.
+func TestYoloExecutionRulesetTransformationTable(t *testing.T) {
+	cases := []struct {
+		name     string
+		yaml     string
+		tool     string
+		args     string
+		wantRaw  permission.Action
+		wantYolo permission.Action
+	}{
+		{
+			name:     "no match in a non-empty ruleset stays denied",
+			yaml:     "read: allow",
+			tool:     tools.NameShell,
+			args:     `{"command":"ls"}`,
+			wantRaw:  permission.ActionDeny,
+			wantYolo: permission.ActionDeny,
+		},
+		{
+			name:     "tool-level wildcard deny stays denied",
+			yaml:     "shell: deny\nread: allow",
+			tool:     tools.NameShell,
+			args:     `{"command":"ls"}`,
+			wantRaw:  permission.ActionDeny,
+			wantYolo: permission.ActionDeny,
+		},
+		{
+			name:     "global wildcard deny (allowlist default) stays denied",
+			yaml:     "\"*\": deny\nread: allow",
+			tool:     tools.NameShell,
+			args:     `{"command":"ls"}`,
+			wantRaw:  permission.ActionDeny,
+			wantYolo: permission.ActionDeny,
+		},
+		{
+			name:     "scoped deny inside an allowlist structure stays denied",
+			yaml:     "\"*\": deny\nshell:\n  \"git *\": allow\n  \"rm *\": deny",
+			tool:     tools.NameShell,
+			args:     `{"command":"rm -rf build"}`,
+			wantRaw:  permission.ActionDeny,
+			wantYolo: permission.ActionDeny,
+		},
+		{
+			name:     "allowlist grant stays allowed",
+			yaml:     "\"*\": deny\nshell:\n  \"git *\": allow\n  \"rm *\": deny",
+			tool:     tools.NameShell,
+			args:     `{"command":"git status --short"}`,
+			wantRaw:  permission.ActionAllow,
+			wantYolo: permission.ActionAllow,
+		},
+		{
+			name:     "delegate scoped deny (directory membership) stays denied",
+			yaml:     "\"*\": allow\ndelegate:\n  reviewer: deny",
+			tool:     tools.NameDelegate,
+			args:     `{"agent_type":"reviewer"}`,
+			wantRaw:  permission.ActionDeny,
+			wantYolo: permission.ActionDeny,
+		},
+		{
+			name:     "skill scoped deny (directory membership) stays denied",
+			yaml:     "\"*\": allow\nskill:\n  go-expert: deny",
+			tool:     tools.NameSkill,
+			args:     `{"name":"go-expert"}`,
+			wantRaw:  permission.ActionDeny,
+			wantYolo: permission.ActionDeny,
+		},
+		{
+			name:     "independent scoped deny relaxes to allow",
+			yaml:     "shell: allow\nshell:\n  \"rm *\": deny",
+			tool:     tools.NameShell,
+			args:     `{"command":"rm -rf build"}`,
+			wantRaw:  permission.ActionDeny,
+			wantYolo: permission.ActionAllow,
+		},
+		{
+			name:     "scoped ask relaxes to allow",
+			yaml:     "shell:\n  \"git *\": ask",
+			tool:     tools.NameShell,
+			args:     `{"command":"git status --short"}`,
+			wantRaw:  permission.ActionAsk,
+			wantYolo: permission.ActionAllow,
+		},
+		{
+			name:     "tool-level ask relaxes to allow",
+			yaml:     "shell: ask",
+			tool:     tools.NameShell,
+			args:     `{"command":"ls"}`,
+			wantRaw:  permission.ActionAsk,
+			wantYolo: permission.ActionAllow,
+		},
+		{
+			name:     "compact_context explicit ask relaxes to allow",
+			yaml:     "compact_context: ask",
+			tool:     tools.NameCompactContext,
+			args:     `{}`,
+			wantRaw:  permission.ActionAsk,
+			wantYolo: permission.ActionAllow,
+		},
+		{
+			name:     "allow stays allowed",
+			yaml:     "shell: allow",
+			tool:     tools.NameShell,
+			args:     `{"command":"ls"}`,
+			wantRaw:  permission.ActionAllow,
+			wantYolo: permission.ActionAllow,
+		},
 	}
-	filtered := yoloRuleset(ruleset)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := permissionRuleset(t, tc.yaml)
+			if got := evaluateToolPermissionInDir(raw, tc.tool, json.RawMessage(tc.args), permission.PathScope{}).Action; got != tc.wantRaw {
+				t.Fatalf("raw action = %v, want %v", got, tc.wantRaw)
+			}
+			relaxed := raw.RelaxCalls()
+			if got := evaluateToolPermissionInDir(relaxed, tc.tool, json.RawMessage(tc.args), permission.PathScope{}).Action; got != tc.wantYolo {
+				t.Fatalf("YOLO action = %v, want %v", got, tc.wantYolo)
+			}
+		})
+	}
+}
 
-	for _, rule := range filtered {
-		if !yoloProtectedPermissionTool(rule.Permission) {
-			t.Fatalf("non-protected rule %+v should be filtered in YOLO ruleset: %+v", rule, filtered)
-		}
+func TestYoloExecutionRulesetEmptyInputReturnsNil(t *testing.T) {
+	if got := (permission.Ruleset(nil)).RelaxCalls(); got != nil {
+		t.Fatalf("RelaxCalls(nil) = %v, want nil", got)
 	}
-
-	// The Shell allow rule is filtered out of the YOLO decision surface
-	// entirely: ordinary tools never evaluate against it (the execution gate
-	// bypasses them under YOLO), so an unfiltered leftover here would deny
-	// nothing but would contradict the visible bypass. At this unit level the
-	// filtered ruleset therefore has no Shell rule at all.
-	for _, rule := range filtered {
-		if rule.Permission == tools.NameShell {
-			t.Fatalf("Shell rule %+v must be filtered from the YOLO ruleset", rule)
-		}
-	}
-	// Protected rules survive with their original action (Handoff allow, Delegate ask, Cancel deny, Done allow).
-	if got := evaluateToolPermissionInDir(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`), permission.PathScope{}); got.Action != permission.ActionAllow {
-		t.Fatalf("Handoff action = %v, want allow", got.Action)
-	}
-	if got := evaluateToolPermissionInDir(filtered, tools.NameDelegate, json.RawMessage(`{"agent_type":"builder"}`), permission.PathScope{}); got.Action != permission.ActionAsk {
-		t.Fatalf("Delegate action = %v, want ask", got.Action)
-	}
-	if got := evaluateToolPermissionInDir(filtered, tools.NameCancel, json.RawMessage(`{}`), permission.PathScope{}); got.Action != permission.ActionDeny {
-		t.Fatalf("Cancel action = %v, want deny", got.Action)
-	}
-	if got := evaluateToolPermissionInDir(filtered, tools.NameDone, json.RawMessage(`{"report":"done"}`), permission.PathScope{}); got.Action != permission.ActionAllow {
-		t.Fatalf("Done action = %v, want allow", got.Action)
+	if got := (permission.Ruleset{}).RelaxCalls(); got != nil {
+		t.Fatalf("RelaxCalls(empty) = %v, want nil", got)
 	}
 }
 
@@ -79,62 +172,10 @@ func TestEvaluateDelegatePermissionMatchesAgentType(t *testing.T) {
 	}
 }
 
-func TestYoloRulesetEmptyInputReturnsNil(t *testing.T) {
-	if got := yoloRuleset(nil); got != nil {
-		t.Fatalf("yoloRuleset(nil) = %v, want nil", got)
-	}
-	if got := yoloRuleset(permission.Ruleset{}); got != nil {
-		t.Fatalf("yoloRuleset(empty) = %v, want nil", got)
-	}
-}
-
-// TestYoloRulesetMechanismDefaultsMatchFullRuleset pins the core invariant:
-// the YOLO ruleset must decide delegate/handoff/cancel exactly as the user's
-// full ruleset does, because YOLO may only widen permissions, never narrow
-// them. Wildcard defaults are mirrored onto the control tools, and a ruleset
-// with no wildcard gets the engine's no-match default (deny) mirrored for
-// tools the user did not mention.
-func TestYoloRulesetMechanismDefaultsMatchFullRuleset(t *testing.T) {
-	configs := []string{
-		`"*": allow`,
-		`"*": deny`,
-		`read: allow`,
-		`"*": deny
-delegate: allow`,
-		`delegate: deny`,
-		`"*": allow
-delegate: deny`,
-		`"*": deny
-handoff: ask`,
-		`"*": deny
-delegate:
-  reviewer: allow
-  tester: ask`,
-	}
-	// Cancel and handoff calls always evaluate with a "*" argument; delegate
-	// matches on agent_type, so sample a few types.
-	for _, src := range configs {
-		full := permissionRuleset(t, src)
-		filtered := yoloRuleset(full)
-		for _, toolName := range []string{tools.NameDelegate, tools.NameHandoff, tools.NameCancel} {
-			args := []string{"*"}
-			if toolName == tools.NameDelegate {
-				args = []string{"builder", "reviewer", "tester"}
-			}
-			for _, arg := range args {
-				got := filtered.Evaluate(toolName, arg)
-				want := full.Evaluate(toolName, arg)
-				if got != want {
-					t.Fatalf("ruleset %q: %s(%q) under YOLO = %v, full ruleset = %v", src, toolName, arg, got, want)
-				}
-			}
-		}
-	}
-}
-
-// TestYoloAskDowngradeScope pins which tools' ask decisions YOLO relaxes:
-// ordinary tools and the delegate/handoff/cancel mechanism tools relax, while
-// done and compact_context keep their dedicated action semantics.
+// TestYoloAskDowngradeScope pins which tools' ask decisions the SubAgent
+// inheritance relaxes: ordinary tools and the delegate/handoff/cancel mechanism
+// tools relax, while done and compact_context keep their dedicated action
+// semantics.
 func TestYoloAskDowngradeScope(t *testing.T) {
 	for name, want := range map[string]bool{
 		tools.NameDelegate:       true,
@@ -151,44 +192,65 @@ func TestYoloAskDowngradeScope(t *testing.T) {
 	}
 }
 
-func TestYoloBypassesOnlyUnprotectedToolPermissions(t *testing.T) {
-	pipeline := toolExecutionPipeline{
-		registry: tools.NewRegistry(),
-		currentRuleset: func() permission.Ruleset {
-			return permission.Ruleset{
-				{Permission: tools.NameShell, Pattern: "*", Action: permission.ActionDeny},
-				{Permission: tools.NameHandoff, Pattern: "*", Action: permission.ActionDeny},
-				{Permission: tools.NameDelegate, Pattern: "*", Action: permission.ActionDeny},
-				{Permission: tools.NameCancel, Pattern: "*", Action: permission.ActionDeny},
-				{Permission: tools.NameDone, Pattern: "*", Action: permission.ActionDeny},
-			}
-		},
-		bypassPermission: func(name string) bool {
-			return !yoloProtectedPermissionTool(name)
-		},
+// TestYoloTransformationCoversCompositeDependencies pins that apply_patch's
+// per-operation write/delete dependency checks and generate_image's read/write
+// resource checks decide with the same YOLO transformation as the main call:
+// a scoped deny lifts only when the dependency has its own tool-wide grant.
+func TestYoloTransformationCoversCompositeDependencies(t *testing.T) {
+	// Add sections need a "+ "-prefixed content line; Delete takes none.
+	// A malformed patch would fail ApplyPatchDisplayTargets and fall back to
+	// the whole-tool evaluation, skipping the dependency check under test.
+	patchArgs := func(op string) json.RawMessage {
+		body := ""
+		if op == "Add" {
+			body = `+notes\n`
+		}
+		return json.RawMessage(`{"patch":"*** Begin Patch\n*** ` + op + ` File: drafts/notes.md\n` + body + `"}`)
+	}
+	scoped := permissionRuleset(t, "apply_patch: allow\nwrite:\n  \"drafts/*\": deny")
+
+	// Without YOLO the write-specific deny makes the whole patch reject.
+	if got := evaluateToolPermissionInDir(scoped, tools.NameApplyPatch, patchArgs("Add"), permission.PathScope{}).Action; got != permission.ActionDeny {
+		t.Fatalf("baseline apply_patch add with a scoped write deny = %v, want deny", got)
+	}
+	if got := evaluateToolPermissionInDir(scoped.RelaxCalls(), tools.NameApplyPatch, patchArgs("Add"), permission.PathScope{}).Action; got != permission.ActionDeny {
+		t.Fatalf("apply_patch add under YOLO without a write grant = %v, want deny", got)
+	}
+	grantedWrite := permissionRuleset(t, "apply_patch: allow\nwrite:\n  \"*\": allow\n  \"drafts/*\": deny")
+	if got := evaluateToolPermissionInDir(grantedWrite.RelaxCalls(), tools.NameApplyPatch, patchArgs("Add"), permission.PathScope{}).Action; got != permission.ActionAllow {
+		t.Fatalf("apply_patch add under YOLO with a write grant = %v, want allow", got)
+	}
+	// A delete operation depends on the delete rules, not write: its wildcard
+	// deny (the hidden standalone tool) keeps rejecting.
+	wildcardDelete := permissionRuleset(t, "apply_patch: allow\ndelete: deny")
+	if got := evaluateToolPermissionInDir(wildcardDelete.RelaxCalls(), tools.NameApplyPatch, patchArgs("Delete"), permission.PathScope{}).Action; got != permission.ActionDeny {
+		t.Fatalf("apply_patch delete under YOLO with delete wildcard-denied = %v, want deny", got)
 	}
 
-	for _, toolName := range []string{tools.NameShell, tools.NameWrite, tools.NameRead} {
-		t.Run(toolName+" bypassed", func(t *testing.T) {
-			call := message.ToolCall{Name: toolName, Args: json.RawMessage(`{}`)}
-			if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
-				t.Fatalf("applyPermission(%s) err = %v, want nil", toolName, err)
-			}
-		})
+	// The output_path write resource needs its own grant; without one it is a
+	// no-match deny for every ruleset below.
+	imageArgs := func() json.RawMessage {
+		return json.RawMessage(`{"prompt":"a lighthouse at dawn","reference_images":["refs/shore.png"],"output_path":"out/shore.png"}`)
 	}
+	scopedRead := permissionRuleset(t, "generate_image: allow\nwrite: allow\nread:\n  \"refs/*\": deny")
+	wildcardRead := permissionRuleset(t, "generate_image: allow\nwrite: allow\nread: deny")
 
-	for _, toolName := range []string{tools.NameHandoff, tools.NameDelegate, tools.NameCancel, tools.NameDone} {
-		t.Run(toolName+" protected", func(t *testing.T) {
-			call := message.ToolCall{Name: toolName, Args: json.RawMessage(`{}`)}
-			err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{})
-			if err == nil || !strings.Contains(err.Error(), "denied by permission policy") {
-				t.Fatalf("applyPermission(%s) err = %v, want permission denied", toolName, err)
-			}
-		})
+	if got := evaluateToolPermissionInDir(scopedRead.RelaxCalls(), tools.NameGenerateImage, imageArgs(), permission.PathScope{}).Action; got != permission.ActionDeny {
+		t.Fatalf("generate_image under YOLO without a read grant = %v, want deny", got)
+	}
+	grantedRead := permissionRuleset(t, "generate_image: allow\nwrite: allow\nread:\n  \"*\": allow\n  \"refs/*\": deny")
+	if got := evaluateToolPermissionInDir(grantedRead.RelaxCalls(), tools.NameGenerateImage, imageArgs(), permission.PathScope{}).Action; got != permission.ActionAllow {
+		t.Fatalf("generate_image under YOLO with a read grant = %v, want allow", got)
+	}
+	if got := evaluateToolPermissionInDir(wildcardRead.RelaxCalls(), tools.NameGenerateImage, imageArgs(), permission.PathScope{}).Action; got != permission.ActionDeny {
+		t.Fatalf("generate_image under YOLO with read wildcard-denied = %v, want deny", got)
 	}
 }
 
-func TestYoloBusyToggleDefersPromptAndToolSurfaceUntilNextRequest(t *testing.T) {
+// TestYoloToggleLeavesPromptAndToolSurfaceByteIdentical pins the frozen-surface
+// contract: toggling YOLO never changes the system prompt or the tool
+// declarations, immediately or after the next request rebuild.
+func TestYoloToggleLeavesPromptAndToolSurfaceByteIdentical(t *testing.T) {
 	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -196,48 +258,177 @@ func TestYoloBusyToggleDefersPromptAndToolSurfaceUntilNextRequest(t *testing.T) 
 	a.MarkSkillsReady()
 	a.markMCPReady()
 	a.tools.Register(tools.GlobTool{})
-	a.ruleset = permission.Ruleset{{Permission: tools.NameGlob, Pattern: "*", Action: permission.ActionDeny}}
-	a.sessionBuilt.Store(true)
-	a.freezeToolSurface()
-	beforePrompt := a.installedSysPrompt
-	if _, ok := a.tools.Get(tools.NameGlob); !ok {
-		t.Fatal("expected Glob registered")
+	a.ruleset = permissionRuleset(t, "glob: ask")
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("initial ensureSessionBuilt: %v", err)
 	}
-	if len(a.mainLLMToolDefinitions()) != 0 {
-		t.Fatal("initial frozen surface should hide Glob under deny rule")
+
+	promptBefore := a.installedSysPrompt
+	defsBefore := a.mainLLMToolDefinitions()
+	defsJSONBefore := mustJSONText(t, defsBefore)
+	if len(defsBefore) != 1 {
+		t.Fatalf("initial tool definitions = %d, want 1", len(defsBefore))
 	}
 
 	a.handleYoloCommand("/yolo on", true)
-
 	if !a.YoloEnabled() {
-		t.Fatal("YOLO should enable while busy")
+		t.Fatal("YOLO should be on")
 	}
-	decision := evaluateToolPermissionInDir(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"patterns":["*"]}`), permission.PathScope{})
-	if decision.Action != permission.ActionDeny {
-		t.Fatalf("effective Glob action after YOLO = %v, want deny via empty YOLO ruleset", decision.Action)
+	if got := a.installedSysPrompt; got != promptBefore {
+		t.Fatalf("system prompt changed after toggling YOLO on")
 	}
-	if got := a.installedSysPrompt; got != beforePrompt {
-		t.Fatalf("system prompt changed immediately after busy YOLO toggle")
+	if got := mustJSONText(t, a.mainLLMToolDefinitions()); defsJSONBefore != got {
+		t.Fatalf("tool definitions changed after toggling YOLO on")
 	}
-	if frozen := a.frozenToolDefs.Load(); frozen != nil && len(*frozen) != 0 {
-		t.Fatalf("frozen tool surface changed immediately: %#v", *frozen)
+	if a.surfaceDirty.Load() {
+		t.Fatal("YOLO toggle must not mark the runtime surface dirty")
 	}
-	if a.sessionBuilt.Load() {
-		t.Fatal("sessionBuilt should be reset so next request rebuilds context")
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt after YOLO on: %v", err)
+	}
+	if got := a.installedSysPrompt; got != promptBefore {
+		t.Fatalf("system prompt changed after the post-toggle rebuild")
+	}
+	if got := mustJSONText(t, a.mainLLMToolDefinitions()); defsJSONBefore != got {
+		t.Fatalf("tool definitions changed after the post-toggle rebuild")
 	}
 
-	if err := a.ensureSessionBuilt(context.Background()); err != nil {
-		t.Fatalf("ensureSessionBuilt: %v", err)
+	a.handleYoloCommand("/yolo off", true)
+	if got := a.installedSysPrompt; got != promptBefore {
+		t.Fatalf("system prompt changed after toggling YOLO off")
 	}
-	defs := a.mainLLMToolDefinitions()
-	if got := len(defs); got != 1 {
-		t.Fatalf("rebuilt tool definitions count = %d, want 1", got)
-	}
-	if got := defs[0].Name; got != tools.NameGlob {
-		t.Fatalf("rebuilt tool = %q, want %q", got, tools.NameGlob)
+	if got := mustJSONText(t, a.mainLLMToolDefinitions()); defsJSONBefore != got {
+		t.Fatalf("tool definitions changed after toggling YOLO off")
 	}
 }
 
+// TestYoloMainGateAskRelaxesAndRestores runs the real MainAgent wiring: a rule
+// ask (mechanism or ordinary) relaxes to an implicit allow while YOLO is on —
+// no shared confirmation dialog — and the dialog returns the moment YOLO
+// switches off.
+func TestYoloMainGateAskRelaxesAndRestores(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.ruleset = permissionRuleset(t, "delegate: ask\nshell: ask")
+	a.newTurn("")
+	var confirmCalls int
+	a.confirmFn = func(context.Context, string, string, []string, []string, []permission.Rule, []permission.Rule) (ConfirmResponse, error) {
+		confirmCalls++
+		return ConfirmResponse{Approved: false, DenyReason: "test rejection"}, nil
+	}
+
+	calls := []message.ToolCall{
+		{Name: tools.NameDelegate, Args: json.RawMessage(`{"agent_type":"worker"}`)},
+		{Name: tools.NameShell, Args: json.RawMessage(`{"command":"git status --short"}`)},
+	}
+	for _, call := range calls {
+		pipeline := a.toolExecutionPipeline()
+		if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
+			t.Fatalf("%s ask must confirm while YOLO is off", call.Name)
+		}
+	}
+	if confirmCalls != len(calls) {
+		t.Fatalf("confirm calls with YOLO off = %d, want %d", confirmCalls, len(calls))
+	}
+
+	a.yoloEnabled.Store(true)
+	for _, call := range calls {
+		pipeline := a.toolExecutionPipeline()
+		if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
+			t.Fatalf("YOLO must relax the %s ask to allow, got %v", call.Name, err)
+		}
+	}
+	if confirmCalls != len(calls) {
+		t.Fatalf("confirm calls under YOLO = %d, want still %d", confirmCalls, len(calls))
+	}
+
+	a.yoloEnabled.Store(false)
+	for _, call := range calls {
+		pipeline := a.toolExecutionPipeline()
+		if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
+			t.Fatalf("%s ask must confirm again after YOLO is switched off", call.Name)
+		}
+	}
+	if confirmCalls != 2*len(calls) {
+		t.Fatalf("confirm calls after YOLO off = %d, want %d", confirmCalls, 2*len(calls))
+	}
+}
+
+// TestYoloMainGateIndependentScopedDenyLiftsAndRestores runs the new lifting
+// through the real gate: an independent scoped deny is call-level friction and
+// relaxes while YOLO is on, then rejects again once it is off.
+func TestYoloMainGateIndependentScopedDenyLiftsAndRestores(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.ruleset = permissionRuleset(t, "shell: allow\nshell:\n  \"rm *\": deny")
+	a.newTurn("")
+
+	call := message.ToolCall{Name: tools.NameShell, Args: json.RawMessage(`{"command":"rm -rf build"}`)}
+	pipeline := a.toolExecutionPipeline()
+	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
+		t.Fatal("scoped deny must reject while YOLO is off")
+	}
+
+	a.yoloEnabled.Store(true)
+	pipeline = a.toolExecutionPipeline()
+	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
+		t.Fatalf("YOLO must lift an independent scoped deny, got %v", err)
+	}
+
+	a.yoloEnabled.Store(false)
+	pipeline = a.toolExecutionPipeline()
+	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
+		t.Fatal("scoped deny must reject again after YOLO is switched off")
+	}
+}
+
+// TestYoloMainGateWildcardDenyStaysDenied pins the capability boundary: a
+// tool-level wildcard deny means the tool is not granted at all, so YOLO keeps
+// rejecting it instead of redefining the role.
+func TestYoloMainGateWildcardDenyStaysDenied(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.ruleset = permissionRuleset(t, "\"*\": deny\nread: allow")
+	a.yoloEnabled.Store(true)
+	a.newTurn("")
+
+	for _, call := range []message.ToolCall{
+		{Name: tools.NameShell, Args: json.RawMessage(`{"command":"ls"}`)},
+		{Name: tools.NameWrite, Args: json.RawMessage(`{"path":"notes.txt"}`)},
+		{Name: tools.NameDelegate, Args: json.RawMessage(`{"agent_type":"worker"}`)},
+	} {
+		pipeline := a.toolExecutionPipeline()
+		if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
+			t.Fatalf("wildcard deny must keep rejecting %s under YOLO", call.Name)
+		}
+	}
+}
+
+// TestYoloToggleInvalidatesSpeculativeApprovalCache pins that a recorded
+// non-interactive allow never survives a YOLO toggle: the gate's release set
+// changes with the mode, so the speculative-reuse prefilter must re-evaluate.
+func TestYoloToggleInvalidatesSpeculativeApprovalCache(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	a.ruleset = permissionRuleset(t, "read: allow")
+	a.newTurn("")
+	a.recordPermissionApproval(a.currentTurn(), "call-1", tools.NameRead, `{"path":"notes.txt"}`, a.effectiveToolBaseDir())
+
+	if !a.permissionApprovalMatches("call-1", tools.NameRead, `{"path":"notes.txt"}`, a.effectiveToolBaseDir(), toolPermissionContext{}) {
+		t.Fatal("recorded allow should match before the toggle")
+	}
+	a.yoloEnabled.Store(true)
+	if a.permissionApprovalMatches("call-1", tools.NameRead, `{"path":"notes.txt"}`, a.effectiveToolBaseDir(), toolPermissionContext{}) {
+		t.Fatal("recorded allow must not match after toggling YOLO on")
+	}
+	a.yoloEnabled.Store(false)
+	if !a.permissionApprovalMatches("call-1", tools.NameRead, `{"path":"notes.txt"}`, a.effectiveToolBaseDir(), toolPermissionContext{}) {
+		t.Fatal("recorded allow should match again once YOLO is back off: the gate set is identical to the recorded one")
+	}
+}
+
+// TestYoloToggleReturningToSameStateKeepsFrozenContext verifies that an on/off
+// round trip leaves the frozen context surface untouched.
 func TestYoloToggleReturningToSameStateKeepsFrozenContext(t *testing.T) {
 	t.Parallel()
 	projectRoot := t.TempDir()
@@ -276,104 +467,5 @@ func TestYoloToggleReturningToSameStateKeepsFrozenContext(t *testing.T) {
 	}
 	if a.surfaceDirty.Load() {
 		t.Fatal("surface dirty flag should clear after unchanged surface comparison")
-	}
-}
-
-// TestYoloRulesetKeepsNarrowGlobRules pins that YOLO's protected-rule filter
-// matches tool names the way the permission engine does — normalization plus
-// globs — instead of comparing exact strings. A narrow glob such as
-// `compact_*` is a rule about a protected tool and must survive YOLO. The
-// wildcard `*` rule does not survive verbatim (it would deny every bypassed
-// ordinary tool on the visible surface); it is mirrored onto the
-// capability-granting control tools so their default keeps matching the user's
-// configuration, and a glob that only reaches unprotected tools (`sh*`) is
-// dropped.
-func TestYoloRulesetKeepsNarrowGlobRules(t *testing.T) {
-	ruleset := permission.Ruleset{
-		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
-		{Permission: "compact_*", Pattern: "*", Action: permission.ActionDeny},
-		{Permission: "handoff*", Pattern: "*", Action: permission.ActionAsk},
-		{Permission: "sh*", Pattern: "*", Action: permission.ActionAllow},
-	}
-	filtered := yoloRuleset(ruleset)
-	// The wildcard deny mirrors onto delegate/handoff/cancel, then the two
-	// surviving user rules; the `sh*` rule is dropped.
-	if len(filtered) != len(yoloCapabilityControlTools)+2 {
-		t.Fatalf("YOLO ruleset = %+v, want the wildcard mirrors plus the compact_* and handoff* rules only", filtered)
-	}
-	if got := compactContextPermissionAction(filtered); got != permission.ActionDeny {
-		t.Fatalf("compact_* deny must survive YOLO, got %v", got)
-	}
-	if got := evaluateToolPermissionInDir(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`), permission.PathScope{}); got.Action != permission.ActionAsk {
-		t.Fatalf("handoff* ask must survive YOLO, got %v", got.Action)
-	}
-	// The wildcard deny mirror keeps an allowlist role's default: delegate and
-	// cancel stay denied even though the wildcard rule itself is gone.
-	if got := evaluateToolPermissionInDir(filtered, tools.NameDelegate, json.RawMessage(`{"agent_type":"builder"}`), permission.PathScope{}); got.Action != permission.ActionDeny {
-		t.Fatalf("delegate must keep the wildcard deny default under YOLO, got %v", got.Action)
-	}
-	if got := evaluateToolPermissionInDir(filtered, tools.NameCancel, json.RawMessage(`{}`), permission.PathScope{}); got.Action != permission.ActionDeny {
-		t.Fatalf("cancel must keep the wildcard deny default under YOLO, got %v", got.Action)
-	}
-	// A glob that only reaches unprotected tools is still dropped.
-	for _, rule := range filtered {
-		if yoloProtectedPermissionRule(rule) {
-			continue
-		}
-		if rule.Permission == "sh*" || strings.HasPrefix(rule.Permission, "sh") {
-			t.Fatalf("Shell rule %+v must be dropped from the YOLO ruleset", rule)
-		}
-	}
-}
-
-// TestYoloProtectedPermissionToolNormalizesNames pins that an alias spelling of
-// a protected tool cannot slip past the execution-time bypass.
-func TestYoloProtectedPermissionToolNormalizesNames(t *testing.T) {
-	for _, name := range []string{tools.NameCompactContext, " " + tools.NameDone, tools.NameHandoff + "\t"} {
-		if !yoloProtectedPermissionTool(name) {
-			t.Fatalf("%q must stay protected under YOLO", name)
-		}
-	}
-	if yoloProtectedPermissionTool(tools.NameShell) {
-		t.Fatal("shell must not be protected under YOLO")
-	}
-}
-
-// Regression (new adjudication), through the real MainAgent wiring: a
-// mechanism ask relaxes to an implicit allow while YOLO is on (no shared
-// confirmation dialog) and the dialog returns the moment YOLO switches off.
-func TestYoloMainGateMechanismAskRelaxesAndRestores(t *testing.T) {
-	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
-	a.ruleset = permissionRuleset(t, "delegate: ask")
-	a.newTurn("")
-	var confirmCalls atomic.Int32
-	a.confirmFn = subYoloConfirmStub(&confirmCalls)
-
-	call := message.ToolCall{Name: tools.NameDelegate, Args: json.RawMessage(`{"agent_type":"worker"}`)}
-	pipeline := a.toolExecutionPipeline()
-	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
-		t.Fatal("mechanism ask must confirm while YOLO is off")
-	}
-	if got := confirmCalls.Load(); got != 1 {
-		t.Fatalf("confirm calls with YOLO off = %d, want 1", got)
-	}
-
-	a.yoloEnabled.Store(true)
-	pipeline = a.toolExecutionPipeline()
-	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
-		t.Fatalf("YOLO must relax the mechanism ask to allow, got %v", err)
-	}
-	if got := confirmCalls.Load(); got != 1 {
-		t.Fatalf("confirm calls under YOLO = %d, want still 1", got)
-	}
-
-	a.yoloEnabled.Store(false)
-	pipeline = a.toolExecutionPipeline()
-	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
-		t.Fatal("mechanism ask must confirm again after YOLO is switched off")
-	}
-	if got := confirmCalls.Load(); got != 2 {
-		t.Fatalf("confirm calls after YOLO off = %d, want 2", got)
 	}
 }

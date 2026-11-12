@@ -77,12 +77,14 @@ type toolExecutionPipeline struct {
 	fireHook                      func(context.Context, string, uint64, string, map[string]any) (*hook.Result, error)
 	updatePending                 func(PendingToolCall)
 	reservedToolError             func(string) error
-	bypassPermission              func(string) bool
 	// yoloDowngradeAsk reports whether an ask decision relaxes to an implicit
-	// allow because YOLO mode is on (for the main agent) or inherited from the
-	// parent (for SubAgents). Deny never reaches the ask branch; done returns
-	// before it and compact_context reports false so its explicit ask rules
-	// still confirm. nil keeps every ask confirming.
+	// allow because the parent agent's YOLO mode is on. Only SubAgents install
+	// it: they evaluate the configured ruleset and inherit just the ask→allow
+	// downgrade. The main agent instead evaluates executionRuleset, whose YOLO
+	// transformation already lifts ask decisions before they reach this
+	// branch, so its pipeline leaves this nil. Deny never reaches the ask
+	// branch; done returns before it and compact_context reports false so its
+	// explicit ask rules still confirm. nil keeps every ask confirming.
 	yoloDowngradeAsk func(string) bool
 	// loopExitAuthorized reports whether loop mode is active, which authorizes
 	// done against wildcard-only rules. nil means "not a loop-capable agent"
@@ -209,15 +211,13 @@ func (p toolExecutionPipeline) effectivePathScope() permission.PathScope {
 
 // withWebFetchAuthorizer installs the redirect re-check on a WebFetch call's
 // context: every hop re-runs the live ruleset so a redirect cannot reach a
-// host the pre-fetch decision never approved. It mirrors the pre-fetch
-// evaluation paths — an ask relaxed by YOLO stays reachable, while a deny or
-// an unmatched host does not — and installs nothing when permission is
-// bypassed or absent, matching the pre-fetch check that would also have been
-// skipped.
+// host the pre-fetch decision never approved. It evaluates the same ruleset
+// the pre-fetch check used — the main agent's executionRuleset (whose YOLO
+// transformation already lifted ask decisions and in-scope call-level limits)
+// or the SubAgent's configured ruleset — and installs nothing when that
+// ruleset is absent, matching the pre-fetch check that would also have been
+// skipped. An unmatched host or a surviving deny rejects the hop.
 func (p toolExecutionPipeline) withWebFetchAuthorizer(ctx context.Context) context.Context {
-	if p.bypassPermission != nil && p.bypassPermission(tools.NameWebFetch) {
-		return ctx
-	}
 	if p.currentRuleset == nil {
 		return ctx
 	}
@@ -230,6 +230,9 @@ func (p toolExecutionPipeline) withWebFetchAuthorizer(ctx context.Context) conte
 		case match.Found && match.Rule.Action == permission.ActionAllow:
 			return nil
 		case match.Found && match.Rule.Action == permission.ActionAsk && p.yoloDowngradeAsk != nil && p.yoloDowngradeAsk(tools.NameWebFetch):
+			// SubAgent inheritance: an ask relaxes while the parent's YOLO is
+			// on. The main agent reaches allow through the executionRuleset
+			// transformation instead, so this branch stays nil there.
 			return nil
 		default:
 			return fmt.Errorf("redirect to %q not allowed by WebFetch permission rules", rawURL)
@@ -1227,9 +1230,6 @@ func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message
 			p.imageAccessGuard = p.imagePermissionGuard(*tc, approvedRules)
 		}
 	}()
-	if p.bypassPermission != nil && p.bypassPermission(tc.Name) {
-		return nil
-	}
 	if p.currentRuleset == nil {
 		return nil
 	}
@@ -1262,10 +1262,11 @@ func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message
 			return nil
 		}
 		if p.yoloDowngradeAsk != nil && p.yoloDowngradeAsk(tc.Name) {
-			// YOLO relaxes ask to an implicit allow so the user is not
-			// prompted: mechanism tool asks stop confirming on the main agent,
-			// and a SubAgent's ordinary asks stop confirming while the parent
-			// YOLO is on. Deny decisions never reach this branch; done returns
+			// SubAgent inheritance only: an ask relaxes to an implicit allow
+			// while the parent agent's YOLO mode is on, so the user is not
+			// prompted. The main agent does not install this hook — its
+			// executionRuleset transformation lifts ask decisions before they
+			// reach this branch. Deny decisions never reach it; done returns
 			// before it and an explicit compact_context ask reports false, so
 			// those stay as they are.
 			return nil

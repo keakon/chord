@@ -38,7 +38,7 @@ func (rs Ruleset) EvaluatePath(permission, pattern string, scope PathScope) Acti
 	counterpart := getEditPatchCounterpart(normPerm)
 	if counterpart != "" {
 		if match, ok := rs.lastSpecificEditApplyPatchToolMatchPath(normPerm, counterpart, pattern, scope); ok {
-			return match.Action
+			return rs.executionRule(normPerm, match).Action
 		}
 	}
 	if match := rs.lastMatchPath(permission, pattern, scope); match.Found {
@@ -63,7 +63,7 @@ func (rs Ruleset) LastSpecificToolMatchPath(permission, pattern string, scope Pa
 			continue
 		}
 		if globMatch(permission, normRulePerm) && pathRuleMatches(r.Pattern, normalized) {
-			return MatchResult{Rule: r, Found: true}
+			return MatchResult{Rule: rs.executionRule(permission, r), Found: true}
 		}
 	}
 	return MatchResult{}
@@ -81,7 +81,7 @@ func (rs Ruleset) LastSpecificMatchPath(permission, pattern string, scope PathSc
 	normPerm := toolname.Normalize(permission)
 	if counterpart := getEditPatchCounterpart(normPerm); counterpart != "" {
 		if match, ok := rs.lastSpecificEditApplyPatchToolMatchPath(normPerm, counterpart, pattern, scope); ok {
-			return MatchResult{Rule: match, Found: true}
+			return MatchResult{Rule: rs.executionRule(normPerm, match), Found: true}
 		}
 	}
 	return rs.LastSpecificToolMatchPath(permission, pattern, scope)
@@ -121,7 +121,7 @@ func (rs Ruleset) LastNamedPathMatch(permission, pattern string, scope PathScope
 			continue
 		}
 		if globMatch(permission, normRulePerm) && pathRuleMatches(r.Pattern, normalized) {
-			return MatchResult{Rule: r, Found: true}
+			return MatchResult{Rule: rs.executionRule(permission, r), Found: true}
 		}
 	}
 	return MatchResult{}
@@ -135,7 +135,7 @@ func (rs Ruleset) lastNamedPathMatch(permission, pattern string) MatchResult {
 			continue
 		}
 		if globMatch(permission, normRulePerm) && globMatch(pattern, r.Pattern) {
-			return MatchResult{Rule: r, Found: true}
+			return MatchResult{Rule: rs.executionRule(permission, r), Found: true}
 		}
 	}
 	return MatchResult{}
@@ -160,7 +160,7 @@ func (rs Ruleset) lastMatchPath(permission, pattern string, scope PathScope) Mat
 	normalized := normalizePathInput(pattern, scope)
 	for _, r := range slices.Backward(rs) {
 		if globMatch(permission, toolname.Normalize(r.Permission)) && pathRuleMatches(r.Pattern, normalized) {
-			return MatchResult{Rule: r, Found: true}
+			return MatchResult{Rule: rs.executionRule(permission, r), Found: true}
 		}
 	}
 	return MatchResult{}

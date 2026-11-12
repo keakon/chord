@@ -66,7 +66,7 @@ type KeyMap struct {
 	SwitchModel []string // open model pool selector
 	ServiceTier []string // switch service tier for subsequent model requests
 	Diagnostics []string // export diagnostics bundle
-	Yolo        []string // toggle YOLO permission-bypass mode
+	Yolo        []string // toggle YOLO mode
 	MCP         []string // open MCP server selector
 
 	// History navigation leaves searches and dialogs in control of their keys.

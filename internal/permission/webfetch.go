@@ -39,7 +39,7 @@ func (rs Ruleset) EvaluateWebFetch(rawURL string) MatchResult {
 			continue
 		}
 		if strings.TrimSpace(r.Pattern) == "*" || parsed && matchWebFetchPattern(r.Pattern, target) {
-			return MatchResult{Rule: r, Found: true}
+			return MatchResult{Rule: rs.executionRule(toolname.WebFetch, r), Found: true}
 		}
 	}
 	return MatchResult{}

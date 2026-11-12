@@ -30,6 +30,8 @@ type Rule struct {
 	Permission string // tool name pattern (e.g., "Shell", "Skill", "*")
 	Pattern    string // sub-command/argument pattern (e.g., "rm *", "go-expert", "*")
 	Action     Action
+	// Set only on execution copies; never part of permission configuration.
+	relaxScopedDeny bool
 }
 
 // Ruleset is an ordered list of permission rules.
@@ -126,7 +128,7 @@ func (rs Ruleset) evaluateWithEditPatchFallback(permission, pattern string) Acti
 
 	if counterpart != "" {
 		if match, ok := rs.lastSpecificEditApplyPatchToolMatch(normPerm, counterpart, pattern); ok {
-			return match.Action
+			return rs.executionRule(normPerm, match).Action
 		}
 	}
 

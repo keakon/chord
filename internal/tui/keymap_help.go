@@ -92,7 +92,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding(km.Stop, "stop active turn and running subagents"),
 		helpBinding(km.SwitchModel, "open model pool selector"),
 		helpBinding(km.ServiceTier, "switch service tier for subsequent model requests"),
-		helpBinding(km.Yolo, "toggle YOLO permission bypass"),
+		helpBinding(km.Yolo, "toggle YOLO mode"),
 		helpBinding(km.MCP, "open MCP selector"),
 		helpBinding(km.Diagnostics, "export diagnostics bundle"),
 		helpBinding(km.Quit, "quit"),
@@ -122,7 +122,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 	insertBindings = append(insertBindings,
 		helpBinding(km.SwitchModel, "open model pool selector"),
 		helpBinding(km.InsertHistorySearch, "search saved inputs"),
-		helpBinding(km.Yolo, "toggle YOLO permission bypass"),
+		helpBinding(km.Yolo, "toggle YOLO mode"),
 		helpBinding(km.Diagnostics, "export diagnostics bundle"),
 	)
 

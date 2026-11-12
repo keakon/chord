@@ -67,9 +67,10 @@ func (p toolExecutionPipeline) imagePermissionGuard(tc message.ToolCall, approve
 		if !resources[tool+"\x00"+path] {
 			return fmt.Errorf("image resource changed after permission approval")
 		}
-		if p.bypassPermission != nil && p.bypassPermission(tc.Name) {
-			return nil
-		}
+		// Re-evaluate against the same live ruleset the pre-approval check
+		// used — the main agent's executionRuleset (YOLO transformation
+		// included) or the SubAgent's configured ruleset — so a read/write
+		// dependency decides exactly like it did at the gate.
 		rules := approved
 		if p.currentRuleset != nil {
 			rules = p.currentRuleset()
