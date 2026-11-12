@@ -22,14 +22,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if ! CI="${CI:-true}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" \
-  GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-Chord Test}" \
-  GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-chord-test@example.invalid}" \
-  GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Chord Test}" \
-  GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-chord-test@example.invalid}" \
-  "${CHORD_GO:-go}" test -race -count=1 -timeout=10m "${packages[@]}" \
-  >"${stdout_file}" 2>"${stderr_file}"; then
-  echo "go test -race failed" >&2
+print_test_output() {
   if [[ -s "${stderr_file}" ]]; then
     echo "--- go test -race stderr ---" >&2
     cat "${stderr_file}" >&2
@@ -38,12 +31,23 @@ if ! CI="${CI:-true}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" \
     echo "--- go test -race stdout ---" >&2
     cat "${stdout_file}" >&2
   fi
+}
+
+if ! CI="${CI:-true}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" \
+  GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-Chord Test}" \
+  GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-chord-test@example.invalid}" \
+  GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Chord Test}" \
+  GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-chord-test@example.invalid}" \
+  "${CHORD_GO:-go}" test -race -count=1 -timeout=10m "${packages[@]}" \
+  >"${stdout_file}" 2>"${stderr_file}"; then
+  echo "go test -race failed" >&2
+  print_test_output
   exit 1
 fi
 
 if [[ -s "${stderr_file}" ]]; then
   echo "unexpected stderr from successful go test -race:" >&2
-  cat "${stderr_file}" >&2
+  print_test_output
   exit 1
 fi
 
@@ -51,6 +55,7 @@ leak_pattern='go: downloading|^\[[DIWE] [0-9]{4}-[0-9]{2}-[0-9]{2} |Created work
 if grep -En "${leak_pattern}" "${stdout_file}" "${stderr_file}" >"${leaks_file}"; then
   echo "unexpected CI race test output detected:" >&2
   cat "${leaks_file}" >&2
+  print_test_output
   exit 1
 fi
 

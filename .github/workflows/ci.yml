@@ -202,8 +202,22 @@ jobs:
           fi
           rm -f "${log}"
 
+      - name: Test race gate
+        run: bash scripts/test_check_ci_race.sh
+
       - name: Test with -race
-        run: scripts/check_ci_race.sh
+        id: race
+        shell: bash
+        run: |
+          set -o pipefail
+          scripts/check_ci_race.sh 2>&1 | tee "${RUNNER_TEMP}/race.log"
+      - name: Upload race log
+        if: failure() && steps.race.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: race-log
+          path: ${{ runner.temp }}/race.log
+          retention-days: 14
 
   staticcheck:
     name: Staticcheck
