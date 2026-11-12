@@ -109,7 +109,7 @@ Search also covers older regions of lazily loaded large sessions. Chord loads a 
 | `Ctrl+X` | Stop the current operation; also leave loop mode, keeping the draft and session |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+R`     | Normal mode: cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model; `/tier` slash completion predicts the same next tier and is hidden when there is no actual switch target |
-| `Ctrl+Y`     | Toggle YOLO mode; ordinary tools skip their permission checks and confirmations; handoff, delegate, cancel, done, and compact_context keep following their configured rules                 |
+| `Ctrl+Y`     | Toggle YOLO mode: releases in-scope confirmations and call-level permission limits for the main agent; role capability boundaries and directory membership hold                 |
 | `Ctrl+O`     | Open the MCP server selector; manual changes while running apply on the next model request                   |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
 

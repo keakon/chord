@@ -74,7 +74,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `--takeover <id>` | 接管同一工作区中网关管理的会话，恢复后保持暂停 |
 | `--takeover-timeout <duration>` | 接管等待预算；省略时持续等待，`0` 仅等待接纳 |
 | `--fork-history[=N]`         | 先把 `--resume` 指定的会话在某次压缩边界上 fork 出来，再恢复这个 fork：省略 N 表示最近一次已应用边界，或传 `history-N` 序号（如 `=2`）。只能与 `--resume` 一起用，且该会话必须属于当前仓库。源会话即使正被其它进程打开也可以 fork（见下文[恢复会话](#恢复会话)） |
-| `--yolo`                     | 启动时启用 YOLO 模式：普通工具跳过权限检查、不再弹确认；handoff、delegate、cancel、done 和 compact_context 仍按各自配置的规则执行                                                       |
+| `--yolo`                     | 启动时启用 YOLO 模式：解除主 agent 已获授范围内的确认与调用级权限限制；角色能力边界保持不变                                                       |
 | `-w`, `--worktree [name]`    | 创建或进入 chord 管理的 git worktree（不传名字时自动命名）；同一仓库的所有 checkout 共享会话。与 `--continue` / `--resume` 配合时，以该 worktree 为工作目录继续仓库里最近的会话 |
 | `--reset-branch`             | 仅与 `--worktree` 搭配：把没有任何 worktree 检出的遗留分支重置到当前 HEAD，而不是拒绝复用该名字                                                              |
 

@@ -93,7 +93,7 @@ With [native search in the main request](./configuration.md#native-search-in-the
 
 ## Orchestration and control
 
-These tools control agent workflows rather than local side effects, so YOLO does not sweep their permission rules aside the way it does for ordinary tools: it removes the confirmation friction of file edits and shell commands, and never redefines the role's orchestration boundary. It does lift the main agent's ordinary permission limits, including the ones coming from the active role's own permission config, but it never grants an orchestration capability the rules do not already allow. See [Permissions & Safety: Special permission semantics](./permissions-and-safety.md#special-permission-semantics) for how `handoff`, `delegate`, `cancel`, `done`, and `compact_context` resolve under YOLO.
+These tools control agent workflows rather than local side effects, and YOLO does not change what they may do. While the mode is on, their `ask` rules pass without a confirmation like every other ask, but a `deny` keeps rejecting — including a scoped deny naming a delegate agent type or a skill, which expresses directory membership — and a wildcard deny default decides exactly as it does with YOLO off. YOLO never grants an orchestration capability the rules do not already allow. See [Permissions & Safety: Special permission semantics](./permissions-and-safety.md#special-permission-semantics) for how `handoff`, `delegate`, `cancel`, `done`, and `compact_context` resolve under YOLO.
 
 | Tool | What it does |
 | --- | --- |

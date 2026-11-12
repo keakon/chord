@@ -10,6 +10,7 @@
 - 会话导入和模型流式响应不再接受 JSON 字符串中的裸控制字符。导出程序和服务端须把制表符、换行编码为 `\t`、`\n`。
 - `chord import --json` 的顶层键改为 snake_case（`project_root`、`session_id`、`session_dir`、`messages`、`report`），不再使用 Go 字段名（`ProjectRoot`、`SessionID`、`SessionDir`、`Messages`、`Report`），与嵌套 `report` 对象内部及 Chord 其他机器可读输出的键名风格一致。消费该 JSON 输出的脚本需要改用新键名。
 - 外部边界的 JSON 输入改用 v2 严格语义：MCP 服务端响应、headless 输入命令和大部分 LLM 流式事件不再静默接受重复对象成员与非法 UTF-8（此前按后者胜出、字节替换处理），改为拒绝或跳过该条数据。工具参数、转发头等原始负载捕获仍逐字节接受。
+- YOLO 模式保持角色能力集合不变，不再整体绕过权限检查。开启期间，主 agent 的 `ask` 规则不再弹确认、直接放行，写在已授予工具之上的调用级 deny 也会解除（例如 `shell: allow` 旁边的 `shell: rm *: deny`）；工具级与通配 deny、allowlist 的补集、指名 delegate agent 类型或 skill 的 deny、无规则可匹配的调用照常拒绝，只读角色在 YOLO 下仍然只读。模型可见面（系统提示词、工具声明、工具可见性）不再随开关变化，切换模式不会触发请求面重建。`compact_context` 的显式 `ask` 在 YOLO 下直接放行，压缩状态文件的重载走同一道门。此前依赖 YOLO 在受限角色下写入的场景，需要改为调整该角色的权限规则或切换角色。
 
 ### 新功能
 
