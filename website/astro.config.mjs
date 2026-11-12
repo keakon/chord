@@ -49,6 +49,16 @@ export default defineConfig({
       },
       lastUpdated: true,
       pagination: true,
+      // Shell blocks default to a terminal frame whose title bar stays empty
+      // (only the three dots) because the docs never title them; the plain
+      // code frame keeps the copy button without that extra strip.
+      expressiveCode: {
+        defaultProps: {
+          overridesByLang: {
+            'bash,sh,shell,zsh,console,powershell,ps,ps1': { frame: 'code' },
+          },
+        },
+      },
       sidebar: [
         {
           label: 'Getting started',

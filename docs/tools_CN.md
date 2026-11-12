@@ -146,9 +146,9 @@ worker 在 `complete.summary` 中汇报实际运行的检查和结果，用 `rem
 
 ### 通知与请求回复
 
-- **向上级汇报：**省略 `target_task_id`，使用 `message_type: progress`（默认）或 `notice`。此形式可带 `subtype`、`correlation_id`，以及不超过 32 KiB 的 JSON 对象 `payload`。主代理没有上级，不能使用此形式。
-- **普通定向消息：**提供 `target_task_id`、`message`，可选填 `kind`；省略 `message_type`、`subtype`、`correlation_id` 和 `payload`。纠正或追加工作使用此形式。
-- **回复待处理请求：**除 `target_task_id`、`message_type: response` 和 `message` 外，**必须**提供该请求的 `correlation_id`；可选填 `kind`。此形式不接受 `subtype` 与 `payload`。只能向上级汇报的角色不能发送定向回复。
+- **向上级汇报**：省略 `target_task_id`，使用 `message_type: progress`（默认）或 `notice`。此形式可带 `subtype`、`correlation_id`，以及不超过 32 KiB 的 JSON 对象 `payload`。主代理没有上级，不能使用此形式。
+- **普通定向消息**：提供 `target_task_id`、`message`，可选填 `kind`；省略 `message_type`、`subtype`、`correlation_id` 和 `payload`。纠正或追加工作使用此形式。
+- **回复待处理请求**：除 `target_task_id`、`message_type: response` 和 `message` 外，**必须**提供该请求的 `correlation_id`；可选填 `kind`。此形式不接受 `subtype` 与 `payload`。只能向上级汇报的角色不能发送定向回复。
 
 ### 长文本控制工具
 

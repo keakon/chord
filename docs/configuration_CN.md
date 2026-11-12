@@ -13,11 +13,11 @@
 
 无需从头到尾阅读本页：
 
-- **首次配置：**先看[快速开始](./quickstart_CN.md)，还没选定渠道时先看[按工作选模型](./model-choice_CN.md)，再用 [`chord config add`](./cli_CN.md#chord-config-add) 添加模型。
-- **凭据与 OAuth：**直接查看 [`auth.yaml`](#authyaml) 或 [OAuth 登录](#oauth-登录)。
-- **路由与稳定性：**查看[模型池](#模型池)、[服务商超时](#provider-超时)和[流式重试上限](#流式重试上限)。
-- **长会话：**查看[上下文管理](./context-management_CN.md)。
-- **准确字段名：**查看[配置字段速查表](#配置字段速查表)。
+- **首次配置**：先看[快速开始](./quickstart_CN.md)，还没选定渠道时先看[按工作选模型](./model-choice_CN.md)，再用 [`chord config add`](./cli_CN.md#chord-config-add) 添加模型。
+- **凭据与 OAuth**：直接查看 [`auth.yaml`](#authyaml) 或 [OAuth 登录](#oauth-登录)。
+- **路由与稳定性**：查看[模型池](#模型池)、[服务商超时](#provider-超时)和[流式重试上限](#流式重试上限)。
+- **长会话**：查看[上下文管理](./context-management_CN.md)。
+- **准确字段名**：查看[配置字段速查表](#配置字段速查表)。
 
 ## 配置层级
 

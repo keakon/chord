@@ -39,10 +39,10 @@ Chord 主要在 macOS 上开发和测试。其他平台不同程度可用：大�
 
 设置 `prevent_sleep: true` 后，主 Agent 或任一 SubAgent 工作期间，Chord 会申请阻止运行主机休眠；所有 Agent 空闲一秒后释放。TUI、headless、ACP 均适用，远程客户端不会控制自己的电脑电源。省略或设为 `false` 时不介入电源管理。macOS、Linux、Windows 的首次运行向导都会询问此选项，统一默认 **No**。
 
-- **macOS：**通过 `caffeinate -i` 阻止系统空闲休眠，并绑定 Chord 进程生命周期。
-- **Linux：**通过本地 Unix D-Bus 分别申请 logind 的 `idle/block` 锁和 GNOME 会话的 `suspend` 锁。任一服务可用即可提供对应的部分保护：logind 覆盖自身的 `IdleAction`，GNOME 覆盖会话挂起。GNOME 锁也可能让用户主动挂起时出现提示，用户仍可强制操作。Chord 不申请 GNOME idle 锁，不请求改变屏幕熄灭或锁屏策略。KDE 等其它桌面仅由可用的 logind IdleAction 抑制提供保护。容器、SSH 和服务器取决于可用的本地服务；Chord 不使用转发或 TCP D-Bus 连接。
-- **Windows：**通过 Windows 电源 API 申请 `SystemRequired`，仍受设备电源策略限制。Modern Standby 设备使用电池时，系统/执行请求会在系统睡眠超时届满五分钟后终止；API 申请成功不代表可以无限期阻止休眠。
-- **WSL：**只向可用的 Linux 服务申请，无法阻止 Windows 宿主机休眠。其它平台不支持。
+- **macOS**：通过 `caffeinate -i` 阻止系统空闲休眠，并绑定 Chord 进程生命周期。
+- **Linux**：通过本地 Unix D-Bus 分别申请 logind 的 `idle/block` 锁和 GNOME 会话的 `suspend` 锁。任一服务可用即可提供对应的部分保护：logind 覆盖自身的 `IdleAction`，GNOME 覆盖会话挂起。GNOME 锁也可能让用户主动挂起时出现提示，用户仍可强制操作。Chord 不申请 GNOME idle 锁，不请求改变屏幕熄灭或锁屏策略。KDE 等其它桌面仅由可用的 logind IdleAction 抑制提供保护。容器、SSH 和服务器取决于可用的本地服务；Chord 不使用转发或 TCP D-Bus 连接。
+- **Windows**：通过 Windows 电源 API 申请 `SystemRequired`，仍受设备电源策略限制。Modern Standby 设备使用电池时，系统/执行请求会在系统睡眠超时届满五分钟后终止；API 申请成功不代表可以无限期阻止休眠。
+- **WSL**：只向可用的 Linux 服务申请，无法阻止 Windows 宿主机休眠。其它平台不支持。
 
 Chord 不请求保持显示器点亮，也不保证阻止主动休眠、合盖、关机、管理员覆盖、强制策略或低电量保护。服务不可用或授权失败时会记录日志，Agent 继续工作。此选项不会修改持久电源设置。
 
