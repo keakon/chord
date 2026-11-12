@@ -135,7 +135,14 @@ falls back to the default temp dir:
 ```bash
 make test-fast
 make test-fast PKGS=./internal/agent
+make test-fast PKGS=./internal/agent GO_TESTFLAGS="-run 'Compaction|Memory' -v"
+make test-fast PKGS=./internal/analytics GO_TESTFLAGS="-run '^TestSpeedSampleScopeSeparatesSessionAndAgent$' -count=1"
 ```
+
+`GO_TESTFLAGS` adds flags to the `go test` command of `make test` and
+`make test-fast`. It accepts shell-quoted arguments, including regular
+expressions with literal `$` anchors. `make preflight` (and so the pre-push
+hook) clears both exported values and command-line assignments.
 
 `scripts/test_tmpdir.sh` resolves the directory — first writable one wins:
 
@@ -350,7 +357,7 @@ invalidated and re-run automatically; on an unchanged tree, `internal/agent`
 drops from ~67s to ~3s.
 
 To force every selected package to run again, use `make test`, which keeps
-`-count=1`, or pass `-count=1` to an explicit `go test` command. A flaky test
+`-count=1`, or `make test-fast GO_TESTFLAGS=-count=1`. A flaky test
 stays pinned to its cached result while its inputs are unchanged; CI always
 runs cold and catches it there.
 

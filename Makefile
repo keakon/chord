@@ -7,6 +7,9 @@ SHELL := /bin/bash
 
 GO ?= go
 PKGS ?= ./...
+# Extra go test flags for `make test` / `make test-fast`, for example
+# GO_TESTFLAGS="-run 'Compaction|Memory' -v". The preflight gate clears it.
+GO_TESTFLAGS ?=
 LOCAL ?= github.com/keakon/chord
 RUN_GO = CHORD_GO='$(GO)' bash scripts/run_tests.sh --default-temp
 
@@ -28,6 +31,8 @@ ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check mode
 # they depend on the changed paths. deadcode-check covers the host target only;
 # the other baselines stay in the CI deadcode job.
 preflight: fmt-check deps-check vet staticcheck gopls-check modernize-check deadcode-check test-fast resource-scripts-check
+# Local test flags must not narrow the gate's test run.
+preflight: override GO_TESTFLAGS :=
 
 # Release-style build: pure Go (no cgo), path-trimmed, and stripped.
 build:
@@ -51,7 +56,7 @@ deps-check:
 	./scripts/check_deps.sh
 
 test:
-	@CHORD_GO='$(GO)' bash scripts/run_tests.sh --default-temp $(GO) test -count=1 $(PKGS)
+	@CHORD_GO='$(GO)' bash scripts/run_tests.sh --default-temp $(GO) test -count=1 $(value GO_TESTFLAGS) $(PKGS)
 
 # Opt-in speed-up: run the tests with a memory-backed temp dir when one is
 # available, otherwise fall back to the default temp dir. See
@@ -59,7 +64,7 @@ test:
 # root so go test result caching skips unchanged packages; `make test` keeps
 # -count=1 for a fresh full run.
 test-fast:
-	@CHORD_GO='$(GO)' bash scripts/run_tests.sh $(GO) test $(PKGS)
+	@CHORD_GO='$(GO)' bash scripts/run_tests.sh $(GO) test $(value GO_TESTFLAGS) $(PKGS)
 
 test-cover:
 	CHORD_GO='$(GO)' CHORD_TEST_COUNT=1 ./scripts/check_ci_local.sh $(PKGS)
@@ -108,6 +113,8 @@ docs-examples-check:
 	./scripts/check_docs_examples.sh
 
 resource-scripts-check:
+	bash -n scripts/test_go_testflags.sh
+	bash scripts/test_go_testflags.sh
 	bash -n scripts/test_tmpdir.sh scripts/test_tmpdir_ownership.sh scripts/run_tests.sh
 	bash -n scripts/check_model_catalog_update.sh
 	bash -n scripts/test_model_catalog_check.sh
