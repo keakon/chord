@@ -26,8 +26,12 @@ func TestSessionInputBackpressureReleasesAdmission(t *testing.T) {
 				}
 				time.Sleep(time.Millisecond)
 			}
-			if !a.pause.inputMu.TryLock() {
-				t.Fatal("input retained admission lock while waiting for capacity")
+			// Backpressure is recorded before the admission lock is released.
+			for !a.pause.inputMu.TryLock() {
+				if time.Now().After(deadline) {
+					t.Fatal("input retained admission lock while waiting for capacity")
+				}
+				time.Sleep(time.Millisecond)
 			}
 			a.pause.inputClosed = name == "cutoff"
 			a.pause.inputMu.Unlock()
