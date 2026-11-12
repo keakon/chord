@@ -17,10 +17,24 @@
   --sl-color-accent-high: #6b4409;
 }
 
-/* Starlight scales the splash hero's bottom padding up to 10rem on wide
-   viewports, which reads as dead space once the screenshot follows the hero. */
+/* Starlight scales the splash hero's vertical padding up to 10rem on wide
+   viewports. The homepage hero has no image, so that padding only pushes the
+   setup steps below the first screen. */
 .hero {
   padding-bottom: 1rem;
+}
+@media (min-width: 50rem) {
+  .hero {
+    padding-top: clamp(1.5rem, 4vmin, 3rem);
+  }
+}
+/* Keep the three setup steps on one row once each card can still fit the
+   install command; Starlight's default two-column card grid leaves the third
+   step alone on a second row. */
+@media (min-width: 60rem) {
+  .chord-steps .card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* Hero tagline: Starlight caps `.copy > *` at 50ch, tuned for Latin

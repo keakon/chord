@@ -85,9 +85,9 @@ Describe what you want and press `Enter`. For example, have it read through your
 Explain this project's main modules and how to run its tests. Do not change any files yet.
 ```
 
-Read its answer. With the default configuration, Chord edits files and runs commands directly; only file deletions through the `delete` tool ask first. When a confirmation appears, inspect the pending action before deciding whether to allow it. To require approval for more actions, see [Permissions & Safety](./permissions-and-safety.md). Once you are comfortable, give Chord a specific change: it edits code and runs tests, and you review the diff in the terminal.
+Read its answer. With the default configuration, Chord edits files and runs commands directly. File deletions through `delete` and deletions or moves through `apply_patch` require confirmation. When a confirmation appears, inspect the pending action before deciding whether to allow it. To require approval for more actions, see [Permissions & Safety](./permissions-and-safety.md). Once you are comfortable, give Chord a specific change: it edits code and runs tests, and you review the diff in the terminal.
 
-To quit, press `Esc` to enter Normal mode, then `q`; alternatively, press `Ctrl+C` twice within 2 seconds. Next time, run this from your project directory:
+To quit, press `Esc` to enter Normal mode, then press `q` twice within 2 seconds; alternatively, press `Ctrl+C` twice within 2 seconds. Next time, run this from your project directory:
 
 ```bash
 chord --continue

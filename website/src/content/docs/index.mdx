@@ -15,45 +15,31 @@ hero:
       link: /chord/quickstart/
       icon: right-arrow
       variant: primary
-    - text: See benchmarks
-      link: /chord/performance/
-      variant: secondary
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 import screenshot from '../../../../docs/assets/screenshot.png';
-
-<figure class="chord-screenshot">
-  <img
-    src={screenshot.src}
-    alt="Chord terminal UI: tool calls, patches, and diagnostics on the left; model, usage, todos, and changed files on the right"
-  />
-</figure>
 
 ## Three-step setup
 
+<div class="chord-steps">
 <CardGrid>
   <Card title="1. Install" icon="download">
-    Install with Homebrew (macOS and Linux):
+    macOS and Linux:
 
     ```bash
     brew install keakon/tap/chord
     ```
 
-    You can also download the archive from [GitHub Releases](https://github.com/keakon/chord/releases), or install with Go 1.27.0 or newer:
-
-    ```bash
-    go install github.com/keakon/chord/cmd/chord@latest
-    ```
-
-    See [Quickstart](/chord/quickstart/#1-install) for details.
+    On Windows, download the archive from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and add `chord` to your `PATH`.
   </Card>
   <Card title="2. Run from your project" icon="window">
     ```bash
     cd my-project
     chord
     ```
-    On the first run, the wizard guides you through model setup: enter an API URL, model name, and API key, or sign in with Codex OAuth. See [Model access](/chord/model-choice/#supported-accounts-and-apis) for supported accounts and APIs.
+
+    The first run opens a setup wizard: enter an API URL, model name, and API key, or sign in with a Codex account.
   </Card>
   <Card title="3. Send your first task" icon="pencil">
     Type a task and press `Enter`:
@@ -62,13 +48,38 @@ import screenshot from '../../../../docs/assets/screenshot.png';
     Explain this project's main modules and how to run its tests. Do not change any files yet.
     ```
 
-    Default permissions allow edits and commands directly; to approve actions first, see [Permissions & Safety](/chord/permissions-and-safety/).
+    By default, Chord edits files and runs commands without asking. File deletions through `delete` and deletions or moves through `apply_patch` require confirmation.
+  </Card>
+</CardGrid>
+</div>
+
+See [Quickstart](/chord/quickstart/) for other install methods, upgrades, and full first-run setup.
+
+<figure class="chord-screenshot">
+  <img
+    src={screenshot.src}
+    alt="Chord terminal UI: tool calls, patches, and diagnostics on the left; model, usage, todos, and changed files on the right"
+  />
+</figure>
+
+## Why Chord
+
+<CardGrid>
+  <Card title="Parallel agents" icon="random">
+    After you [define subagent roles and grant the main role delegation permission](/chord/configuration/#agent-config), the main agent can delegate subtasks to subagents that run in parallel. Press `Shift+Tab` to switch between agents and see each one's progress and context.
+  </Card>
+  <Card title="Automatic model fallback" icon="setting">
+    Model pools combine several providers and models and move to the next one when a request fails. One provider can rotate across several API keys.
+  </Card>
+  <Card title="Long sessions that fit" icon="list-format">
+    Before each request, Chord trims old bulky tool output. Near the context limit, it compacts history into a summary and archives the original.
+  </Card>
+  <Card title="Approve before it runs" icon="approve-check">
+    Set allow / ask / deny rules per tool and command, so risky actions wait for your confirmation.
   </Card>
 </CardGrid>
 
-Supported on macOS, Linux, and Windows (including WSL); a few system-level features are platform-specific. See [Platform support](/chord/platforms/).
-
-## Measured comparison
+### Measured comparison
 
 Six coding agents completed the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) with the same model (`deepseek-flash`). Chord was fastest and cheapest:
 
@@ -82,3 +93,12 @@ Six coding agents completed the same [DeepSWE v1.1 task](https://deepswe.datacur
 | claude code 2.1.272 | 22m25s (3.39×) <span class="chord-bar" style="--bar: 100%"></span> | $0.166 (3.17×) <span class="chord-bar" style="--bar: 100%"></span> |
 
 After loading 200 messages, Chord uses just 39MB of memory (Claude Code: 216MB). See [Performance](/chord/performance/#measured-results) for token breakdowns and test conditions.
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Usage guide" description="Everyday use, resuming sessions, long tasks, and parallel work" href="/chord/usage/" />
+  <LinkCard title="Choose a model" description="Pick providers and models by budget and role, and check account support" href="/chord/model-choice/" />
+  <LinkCard title="Permissions & Safety" description="Require approval before actions run and understand the risks" href="/chord/permissions-and-safety/" />
+  <LinkCard title="Troubleshooting" description="Go from a symptom to the next step" href="/chord/troubleshooting/" />
+</CardGrid>

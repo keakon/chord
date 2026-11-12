@@ -1394,7 +1394,7 @@ mcp:
 
 ## Agent 配置
 
-内置角色包括 `builder`、`planner`。两者都是 main 模式，因此在你自行定义至少一个 `mode: subagent` 角色之前，`delegate` 不会被注册，见下方的 `mode` 字段说明。可新增自定义 agent 或覆盖内置 agent。Agent 文件可放在：
+内置角色包括 `builder`、`planner`。两者都为 `main` 模式，默认禁用 `delegate`。启用委派需定义至少一个 `mode: subagent` 角色，并在主角色的 `permission` 中将 `delegate` 设为 `allow` 或 `ask`；该权限也可按子角色名称设置规则。可新增自定义 agent 或覆盖内置 agent。Agent 文件可放在：
 
 - `~/.config/chord/agents/`
 - `.chord/agents/`

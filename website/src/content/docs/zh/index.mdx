@@ -9,51 +9,37 @@ hero:
   tagline: >-
     <strong>更快、更省、更轻的终端 Coding Agent。</strong><br />
     同一任务实测：耗时和成本约为 Claude Code 的 1/3。<br />
-    单个会话只占几十兆内存，配置不高的电脑也能同时跑多个 Agent。
+    单个会话只占几十 MB 内存，配置不高的电脑也能同时跑多个 Agent。
   actions:
     - text: 快速开始
       link: /chord/zh/quickstart/
       icon: right-arrow
       variant: primary
-    - text: 查看实测数据
-      link: /chord/zh/performance/
-      variant: secondary
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 import screenshot from '../../../../../docs/assets/screenshot.png';
-
-<figure class="chord-screenshot">
-  <img
-    src={screenshot.src}
-    alt="Chord 终端界面：左侧是工具调用、补丁和诊断，右侧是模型、用量、待办和变更文件"
-  />
-</figure>
 
 ## 三步上手
 
+<div class="chord-steps">
 <CardGrid>
   <Card title="1. 安装" icon="download">
-    macOS 和 Linux 用 Homebrew 安装：
+    macOS 和 Linux：
 
     ```bash
     brew install keakon/tap/chord
     ```
 
-    也可以从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载压缩包解压，或用 Go 1.27.0 或更新版本安装：
-
-    ```bash
-    go install github.com/keakon/chord/cmd/chord@latest
-    ```
-
-    详见[快速开始](/chord/zh/quickstart/#1-安装)。
+    Windows 从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载压缩包，解压后把 `chord` 加入 `PATH`。
   </Card>
   <Card title="2. 在项目里启动" icon="window">
     ```bash
     cd my-project
     chord
     ```
-    首次运行时，向导会引导你配置模型：填写 API 地址、模型名称和 API key，或通过 Codex OAuth 登录。支持哪些账号和 API 见[模型接入](/chord/zh/model-choice/#账号与-api-支持)。
+
+    首次运行会进入向导：填写 API 地址、模型名称和 API key，或用 Codex 账号登录。
   </Card>
   <Card title="3. 发送第一个任务" icon="pencil">
     输入任务，按 `Enter` 发送：
@@ -62,13 +48,38 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
     请解释这个项目的主要模块和测试入口，先不要修改文件。
     ```
 
-    默认权限允许直接修改文件和执行命令，需要执行前审批见[权限与安全](/chord/zh/permissions-and-safety/)。
+    Chord 默认会直接修改文件和执行命令；使用 `delete` 删除文件，或通过 `apply_patch` 删除、移动文件时，需要确认。
+  </Card>
+</CardGrid>
+</div>
+
+其他安装方式、升级和首次配置的完整步骤见[快速开始](/chord/zh/quickstart/)。
+
+<figure class="chord-screenshot">
+  <img
+    src={screenshot.src}
+    alt="Chord 终端界面：左侧是工具调用、补丁和诊断，右侧是模型、用量、待办和变更文件"
+  />
+</figure>
+
+## 为什么选 Chord
+
+<CardGrid>
+  <Card title="多 Agent 并行" icon="random">
+    [定义子 Agent 角色并授予主 Agent 委派权限](/chord/zh/configuration/#agent-配置)后，主 Agent 可把子任务交给子 Agent 并行处理，按 `Shift+Tab` 切换查看每个 Agent 的进度和上下文。
+  </Card>
+  <Card title="模型自动切换" icon="setting">
+    用模型池组合多个服务商和模型，请求失败时自动换下一个；同一服务商可以配多个 key 轮换。
+  </Card>
+  <Card title="长会话不爆上下文" icon="list-format">
+    每次请求前自动剪掉旧的大块工具输出；上下文接近上限时压缩成摘要，原文归档备查。
+  </Card>
+  <Card title="执行前可审批" icon="approve-check">
+    按工具和命令设置 allow / ask / deny 规则，高风险操作先确认再执行。
   </Card>
 </CardGrid>
 
-支持 macOS、Linux、Windows（含 WSL），少数系统级能力只在部分平台生效，见[平台支持](/chord/zh/platforms/)。
-
-## 实测对比
+### 实测对比
 
 六款编程 Agent 用同一模型（`deepseek-flash`）完成同一 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)，Chord 用时最短、成本最低：
 
@@ -82,3 +93,12 @@ import screenshot from '../../../../../docs/assets/screenshot.png';
 | claude code 2.1.272 | 22m25s（3.39 倍） <span class="chord-bar" style="--bar: 100%"></span> | ￥1.104（3.17 倍） <span class="chord-bar" style="--bar: 100%"></span> |
 
 内存方面，加载 200 条消息后 Chord 仅占 39MB（Claude Code: 216MB）。完整测量条件见[性能](/chord/zh/performance/#实测数据)。
+
+## 下一步
+
+<CardGrid>
+  <LinkCard title="使用指南" description="日常操作、会话恢复、长任务与并行工作" href="/chord/zh/usage/" />
+  <LinkCard title="选择模型" description="按预算和用途选服务商与模型，确认账号是否支持" href="/chord/zh/model-choice/" />
+  <LinkCard title="权限与安全" description="设置执行前审批，了解哪些操作有风险" href="/chord/zh/permissions-and-safety/" />
+  <LinkCard title="常见问题排查" description="从症状找到下一步操作" href="/chord/zh/troubleshooting/" />
+</CardGrid>

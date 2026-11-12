@@ -2,17 +2,17 @@
 
 **更快、更省、更轻的终端 Coding Agent。**
 
-六款编程 Agent 用同一个模型分别完成同一个 DeepSWE v1.1 任务（给 `httpx` 添加流式 JSON 迭代接口），Chord 用时最短、成本最低：6m37s，估算成本 ￥0.348，耗时和成本约为 Claude Code 的 1/3。完整对比表和测量条件见[性能](./performance_CN.md)。
+六款编程 Agent 用同一模型（`deepseek-flash`）完成同一 DeepSWE v1.1 任务（给 `httpx` 添加流式 JSON 迭代接口），Chord 用时最短、成本最低：6m37s，估算成本 ￥0.348，耗时和成本约为 Claude Code 的 1/3。完整对比表和测量条件见[性能](./performance_CN.md)。
 
-单个会话只占几十兆内存，配置不高的电脑也能同时跑多个 Agent。
+单个会话只占几十 MB 内存，配置不高的电脑也能同时跑多个 Agent。
 
-[快速开始](./quickstart_CN.md)带你安装、接入模型并完成第一个任务。查看已有账号或 API 是否支持，见[账号与 API 支持](./model-choice_CN.md#账号与-api-支持)。默认配置下 Chord 会直接修改文件和执行命令，想先审批再执行，见[权限与安全](./permissions-and-safety_CN.md)。
+[快速开始](./quickstart_CN.md)带你安装、接入模型并完成第一个任务。查看已有账号或 API 是否支持，见[账号与 API 支持](./model-choice_CN.md#账号与-api-支持)。默认配置下，Chord 会直接修改文件和执行命令；使用 `delete` 删除文件，或通过 `apply_patch` 删除、移动文件时，需要确认。想让其他操作也先审批再执行，见[权限与安全](./permissions-and-safety_CN.md)。
 
 [English](./index.md)
 
 ## 开始使用
 
-- [快速开始](./quickstart_CN.md)：安装并完成第一次任务
+- [快速开始](./quickstart_CN.md)：安装并完成第一个任务
 - [使用指南](./usage_CN.md)：日常操作、会话恢复、长任务与并行工作
 - [快捷键](./keybindings_CN.md)：查找按键和自定义键位
 
@@ -34,7 +34,7 @@
 ## 扩展与集成
 
 - [扩展与定制](./customization_CN.md)：配置角色、技能、代码诊断和外部工具
-- [外部 coding agent 子 Agent](./external-agents_CN.md)：让子 Agent 运行在外部 coding agent 进程中
+- [外部 Agent](./external-agents_CN.md)：把子任务交给外部 Claude Code 进程执行
 - [Hooks](./hooks_CN.md)：自动通知、检查和处理工具结果
 - [项目记忆](./project-memory_CN.md)：沉淀可跨会话复用、便于审阅的项目记忆
 - [Headless 集成](./headless_CN.md)：从脚本或其他界面控制 Chord

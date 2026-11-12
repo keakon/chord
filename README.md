@@ -5,11 +5,11 @@
   </picture>
 </p>
 
-<p align="center"><strong>A faster, cheaper, lighter terminal coding agent.</strong></p>
-
-<p align="center">In one measured task: about 1/3 of Claude Code's time and cost.</p>
-
-<p align="center">A session uses tens of megabytes of memory, so you can run several agents at once even on modest hardware.</p>
+<p align="center">
+  <strong>A faster, cheaper, lighter terminal coding agent.</strong><br>
+  In one measured task: <strong>about 1/3 of Claude Code's time and cost.</strong><br>
+  A session uses tens of megabytes of memory, so you can run several agents at once even on modest hardware.
+</p>
 
 <p align="center">
   <a href="./docs/quickstart.md">Quickstart</a> ·
@@ -31,59 +31,44 @@
 
 ## Measured results
 
-### Adding streaming JSON iteration to httpx
-
-Six coding agents used `deepseek-flash` for the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): add streaming JSON iteration to Python's `httpx` client, handling decoding errors and single-use responses. The model alias is now served by DeepSeek-V4.1-Flash-1017. Time includes model interactions, code changes, and test execution; it excludes environment setup and final cleanup.
+Six coding agents completed the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) with the same model (`deepseek-flash`). Chord was fastest and cheapest:
 
 | Harness | Time | Estimated cost |
 |---------|------|------|
 | Chord 0.8.1 | **6m37s** | **$0.052** |
 | deepseek-harness 0.1.5-rc.1 | 9m50s (1.49×) | $0.079 (1.51×) |
 | pi 0.85.1 | 10m22s (1.57×) | $0.086 (1.65×) |
-| codex 0.154.0 | 17m01s (2.57×) | $0.139 (2.67×) |
+| Codex 0.154.0 | 17m01s (2.57×) | $0.139 (2.67×) |
 | mini-swe-agent 2.4.6 | 18m29s (2.79×) | $0.125 (2.40×) |
-| claude code 2.1.272 | 22m25s (3.39×) | $0.166 (3.17×) |
+| Claude Code 2.1.272 | 22m25s (3.39×) | $0.166 (3.17×) |
 
-Multipliers are relative to Chord. Chord was fastest and cheapest, and used the fewest input and output tokens (54,530 / 58,559).
-
-Chord trims old tool output when building each request, compacts long-session context, and starts safe tools as soon as their arguments are complete; see [Performance](./docs/performance.md#how-it-works) for details.
-
-### App memory
-
-Memory measured on macOS 15.3.2 (arm64), with an empty session and after loading 200 messages:
-
-| Harness | Empty session | 200 messages | Growth |
-|---------|---------------|--------------|--------|
-| Chord 0.8.1 | 30MB | **39MB** | **+9MB** |
-| codex 0.154.0 | **27MB** | 47MB | +20MB |
-| claude code 2.1.273 | 143MB | 216MB | +73MB |
-
-One measured task and one memory test; your numbers will differ. [See the token breakdown and test conditions](./docs/performance.md#measured-results).
+After loading 200 messages, Chord uses 39 MB of memory (Claude Code: 216 MB). These numbers come from one task and one memory test, so yours will differ; see [Performance](./docs/performance.md#measured-results) for token breakdowns and test conditions.
 
 ## Three-step setup
 
 ### 1. Install
 
-On macOS or Linux with [Homebrew](https://brew.sh) installed:
+On macOS or Linux with [Homebrew](https://brew.sh):
 
 ```bash
 brew install keakon/tap/chord
 chord --version
 ```
 
-Homebrew installs the release binary for macOS or Linux on ARM64 or x86_64, without Go or a source build. See [Quickstart](./docs/quickstart.md#homebrew-macos-and-linux) for upgrades.
+On Windows, download the archive from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`.
 
-Alternatively, download the archive for your OS and architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`. These binaries do not require Go.
+<details>
+<summary>Install with Go</summary>
 
-On macOS, the downloaded binary may be blocked on first run; see [Quickstart](./docs/quickstart.md#1-install) for the steps to unblock it.
-
-You can also install with Go 1.27.0 or newer:
+With Go 1.27.0 or newer:
 
 ```bash
 go install github.com/keakon/chord/cmd/chord@latest
 ```
 
-The default `GOTOOLCHAIN=auto` downloads the required toolchain when needed.
+</details>
+
+For upgrades and unblocking a downloaded binary on macOS, see [Quickstart](./docs/quickstart.md#1-install).
 
 ### 2. Start in your project
 
@@ -94,27 +79,29 @@ cd my-project
 chord
 ```
 
-On the first run without a configuration file, the wizard guides you through entering your model API URL, model name, and API key, or signing in with Codex OAuth.
-
-See [supported accounts and APIs](./docs/model-choice.md#supported-accounts-and-apis) to check compatibility with your existing keys or accounts. For detailed steps, see [Quickstart](./docs/quickstart.md).
+On the first run, a setup wizard asks for your model API URL, model name, and API key, or lets you sign in with Codex OAuth. See [supported accounts and APIs](./docs/model-choice.md#supported-accounts-and-apis) to check whether your keys or accounts work.
 
 ### 3. Send your first task
 
-Describe your task and press `Enter`. Start by asking about your project:
+> [!IMPORTANT]
+> By default, Chord edits files and runs commands without asking. File deletions through `delete` and deletions or moves through `apply_patch` require confirmation. To approve other actions first, set up [permission rules](./docs/permissions-and-safety.md) before sending a task.
+
+Describe your task and press <kbd>Enter</kbd>. Start by asking about your project:
 
 ```text
 Explain this project's main modules and how to run its tests. Do not change any files yet.
 ```
 
-Then give Chord a specific change: it edits code and runs tests, and you review the diff in the terminal. Default permissions allow file edits and commands to run directly; deletions governed by the `delete` rule require confirmation. Configure approval before execution in [Permissions & Safety](./docs/permissions-and-safety.md).
+Press <kbd>Esc</kbd> to enter Normal mode, then press <kbd>q</kbd> twice within two seconds to quit. Run `chord --continue` from the same project directory next time to resume the most recent session.
 
-Press `Esc` to enter Normal mode, then press `q` twice within two seconds to quit. Run `chord --continue` from the same project directory next time to resume the most recent session.
+## Features
 
-## More features
-
-- [Automatic model fallback](./docs/configuration.md#model-pools-selecting-providermodel): configure multiple models so Chord can automatically try the next model when a request fails.
+- [Parallel agents](./docs/usage.md#multi-agent-focus-switching): after you [define subagent roles and grant the main role delegation permission](./docs/configuration.md#agent-config), the main agent can delegate subtasks to subagents that run in parallel; press <kbd>Shift</kbd>+<kbd>Tab</kbd> to switch between them.
+- [Automatic model fallback](./docs/configuration.md#model-pools-selecting-providermodel): model pools combine several providers and models and move to the next one when a request fails.
+- [Long sessions that fit](./docs/context-management.md): Chord trims old tool output before each request and compacts history into a summary near the context limit.
+- [Approve before it runs](./docs/permissions-and-safety.md): `allow` / `ask` / `deny` rules per tool and command decide which actions wait for confirmation.
 - [Import existing sessions](./docs/usage.md#importing-external-sessions): bring your Claude Code, Codex, or OpenCode history into Chord and continue working.
-- [Vim-style keyboard controls](./docs/keybindings.md): browse sessions, operate tool cards, and switch panels from the keyboard.
+- [Headless](./docs/headless.md) and [ACP](./docs/acp.md): use `chord headless` for external interfaces or `chord acp` with editors such as Zed.
 
 ## Find a guide
 
@@ -129,14 +116,14 @@ Press `Esc` to enter Normal mode, then press `q` twice within two seconds to qui
 
 ## Project links
 
-- Companion: [keakon/chord-gateway](https://github.com/keakon/chord-gateway)
+- Companion project: [keakon/chord-gateway](https://github.com/keakon/chord-gateway)
 - [Contributing](./CONTRIBUTING.md)
 - [Changelog](./CHANGELOG.md)
 - [Issues](https://github.com/keakon/chord/issues)
 
 ## Platform support
 
-Chord is developed and tested primarily on macOS. Linux works well; Windows mostly works but may have undiscovered bugs. Some features (`prevent_sleep`) are macOS-only and silently no-op elsewhere. See [Platform support](./docs/platforms.md) for the per-feature matrix.
+Chord is developed and tested primarily on macOS. Linux works well, and Windows mostly works but may have undiscovered bugs. See [Platform support](./docs/platforms.md) for per-feature differences.
 
 ## Acknowledgements
 

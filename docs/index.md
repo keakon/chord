@@ -2,11 +2,11 @@
 
 **A faster, cheaper, lighter terminal coding agent.**
 
-Six coding agents each ran the same DeepSWE v1.1 task (adding streaming JSON iteration to `httpx`) on the same model. Chord was fastest and cheapest: 6m37s at an estimated $0.052, about 1/3 of Claude Code's time and cost. See [Performance](./performance.md) for the full comparisons and test conditions.
+Six coding agents each ran the same DeepSWE v1.1 task (adding streaming JSON iteration to `httpx`) on the same model (`deepseek-flash`). Chord was fastest and cheapest: 6m37s at an estimated $0.052, about 1/3 of Claude Code's time and cost. See [Performance](./performance.md) for the full comparisons and test conditions.
 
 A session uses tens of megabytes of memory, so you can run several agents at once even on modest hardware.
 
-The [Quickstart](./quickstart.md) takes you through installation, model setup, and your first task. See [supported accounts and APIs](./model-choice.md#supported-accounts-and-apis) to check compatibility with your existing keys or accounts. With the default configuration, Chord edits files and runs commands directly; to approve actions before they run, see [Permissions & Safety](./permissions-and-safety.md).
+The [Quickstart](./quickstart.md) takes you through installation, model setup, and your first task. See [supported accounts and APIs](./model-choice.md#supported-accounts-and-apis) to check compatibility with your existing keys or accounts. With the default configuration, Chord edits files and runs commands directly. File deletions through `delete` and deletions or moves through `apply_patch` require confirmation. To approve other actions before they run, see [Permissions & Safety](./permissions-and-safety.md).
 
 [中文](./index_CN.md)
 
@@ -34,7 +34,7 @@ The [Quickstart](./quickstart.md) takes you through installation, model setup, a
 ## Customization and integration
 
 - [Customization](./customization.md): Configure roles, skills, code diagnostics, and external tools
-- [External coding-agent subagents](./external-agents.md): Run a subagent on an external coding-agent process
+- [External coding-agent subagents](./external-agents.md): Delegate subtasks to Claude Code running in an external process
 - [Hooks](./hooks.md): Automate notifications, checks, and tool-result processing
 - [Project Memory](./project-memory.md): Store durable, reviewable cross-session project memory
 - [Headless](./headless.md): Control Chord from scripts or another interface

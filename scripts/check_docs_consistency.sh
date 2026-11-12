@@ -7,9 +7,11 @@ cd "$repo_root"
 docs=(README.md README_CN.md)
 required_links=(docs/index.md docs/index_CN.md docs/headless.md docs/headless_CN.md)
 public_docs=(README.md README_CN.md docs website/src/content/docs)
-# The two website index pages are hand-maintained (sync-docs.mjs skips them), so
-# they need the same Go version enforcement as the Markdown docs.
-version_docs=(README.md README_CN.md docs/quickstart.md docs/quickstart_CN.md CONTRIBUTING.md website/src/content/docs/index.mdx website/src/content/docs/zh/index.mdx)
+version_docs=(README.md README_CN.md docs/quickstart.md docs/quickstart_CN.md CONTRIBUTING.md)
+# The two website index pages are hand-maintained (sync-docs.mjs skips them) and
+# leave the Go install path to Quickstart, so they need not mention the Go
+# version, but any minimum they do state must still match go.mod.
+version_scan_docs=("${version_docs[@]}" website/src/content/docs/index.mdx website/src/content/docs/zh/index.mdx)
 forbidden_patterns=(
  '\bserve\b'
  'HTTP/SSE'
@@ -65,7 +67,7 @@ done
 # historical reference legal, and deriving the expected version from go.mod means
 # this gate needs no edit on the next toolchain bump.
 version_requirement='Go [0-9]+(\.[0-9]+)+(\+| or newer| or later| 或更新版本)|需要 Go [0-9]+(\.[0-9]+)+'
-if stale=$(grep -REIn "$version_requirement" "${version_docs[@]}" | grep -vF "Go $go_mod_version"); then
+if stale=$(grep -REIn "$version_requirement" "${version_scan_docs[@]}" | grep -vF "Go $go_mod_version"); then
  fail "public Go version docs state a minimum other than Go $go_mod_version: $stale"
 fi
 

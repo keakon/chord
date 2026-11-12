@@ -1643,10 +1643,11 @@ prefix-cache reuse.
 
 ## Agent config
 
-Built-in roles include `builder` and `planner`. Both are main-mode, so
-`delegate` is not registered until you define at least one `mode: subagent`
-role of your own; see [`mode`](#agent-config) below. You can also add custom
-agents or override built-ins. Agent files can live in:
+Built-in roles include `builder` and `planner`. Both are main-mode and deny
+`delegate` by default. To enable delegation, define at least one `mode: subagent`
+role and set the main role's `delegate` permission to `allow` or `ask`. Rules can
+apply to all subagents or specific role names. You can also add custom agents or
+override built-ins. Agent files can live in:
 
 - `~/.config/chord/agents/`
 - `.chord/agents/`
