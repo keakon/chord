@@ -79,6 +79,7 @@ func collectSemanticIssues(cfg *Config) []string {
 	}
 	issues = append(issues, collectDiagnosticsConfigIssues(cfg)...)
 	resetInvalidDiagnosticsFields(&cfg.Diagnostics)
+	issues = append(issues, collectMaintenanceCleanupIssues(cfg)...)
 	issues = append(issues, collectCompactionConfigIssues(cfg)...)
 	issues = append(issues, collectModelCompactionIssues(cfg)...)
 	issues = append(issues, collectConfirmConfigIssues(cfg)...)
@@ -113,6 +114,21 @@ func loadConfigData(path string, data []byte, withDefaults bool, diagnostics *[]
 	for _, issue := range terrors {
 		log.Warnf("config %s: ignoring invalid value: %s", path, issue)
 		appendLoadPathDiagnostic(diagnostics, path, locator.path(issue), issue, "inherited/default value")
+	}
+	// A decode error inside maintenance.cleanup must disable the affected
+	// policy: falling back to defaults would delete sessions with a retention
+	// period the user never configured.
+	if invalidSessions, invalidDumps, messages := cleanupDecodeIssues(data); len(messages) > 0 {
+		if invalidSessions {
+			cfg.Maintenance.Cleanup.Sessions = MaintenanceRetainConfig{}
+		}
+		if invalidDumps {
+			cfg.Maintenance.Cleanup.LLMDumps = MaintenanceRetainConfig{}
+		}
+		for _, message := range messages {
+			log.Warnf("config %s: disabling maintenance cleanup: %s", path, message)
+			appendLoadDiagnostic(diagnostics, path, "", message, "inherited/default value")
+		}
 	}
 	if err := orchestrationConfigLoadError(cfg); err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)

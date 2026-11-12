@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -39,6 +38,8 @@ func newCleanupCmd() *cobra.Command {
 		switch kind {
 		case "sessions":
 			res, err = maintenance.CleanupSessions(locator, opts)
+		case "dumps":
+			res, err = maintenance.CleanupLLMDumps(locator, opts)
 		case "cache":
 			res, err = maintenance.CleanupCache(locator, opts)
 		case "logs":
@@ -74,7 +75,7 @@ func newCleanupCmd() *cobra.Command {
 		}
 		return nil
 	}
-	for _, kind := range []string{"sessions", "cache", "logs", "project"} {
+	for _, kind := range []string{"sessions", "dumps", "cache", "logs", "project"} {
 		k := kind
 		sub := &cobra.Command{Use: k, Short: "Clean " + k + " under managed Chord paths", RunE: func(cmd *cobra.Command, _ []string) error { return runCleanup(cmd, k) }}
 		sub.Flags().DurationVar(&olderThan, "older-than", 0, "only clean entries older than this duration (for example 720h)")
@@ -100,9 +101,7 @@ func writeCleanupCandidate(w io.Writer, verb string, candidate maintenance.Clean
 	fmt.Fprintf(w, "%s %s (%s)\n", verb, candidate.Path, bytefmt.Short(candidate.Bytes))
 }
 
-// writeCleanupSummary prints one aggregate line after the per-entry lines. Empty
-// project dirs hold only a leftover project.json, so sessions are counted
-// separately from them and the byte total is not read as belonging to the dirs.
+// writeCleanupSummary prints one aggregate line after the per-entry lines.
 func writeCleanupSummary(w io.Writer, verb, kind string, removed []maintenance.CleanupCandidate) {
 	if len(removed) == 0 {
 		return
@@ -113,23 +112,7 @@ func writeCleanupSummary(w io.Writer, verb, kind string, removed []maintenance.C
 	}
 	what := fmt.Sprintf("%d items", len(removed))
 	if kind == "sessions" {
-		var sessions, emptyDirs int
-		for _, c := range removed {
-			switch c.Kind {
-			case "session":
-				sessions++
-			case "empty project sessions":
-				emptyDirs++
-			}
-		}
-		parts := make([]string, 0, 2)
-		if sessions > 0 {
-			parts = append(parts, fmt.Sprintf("%d sessions", sessions))
-		}
-		if emptyDirs > 0 {
-			parts = append(parts, fmt.Sprintf("%d empty project dirs", emptyDirs))
-		}
-		what = strings.Join(parts, ", ")
+		what = fmt.Sprintf("%d sessions", len(removed))
 	}
 	fmt.Fprintf(w, "%s %s, total %s\n", verb, what, bytefmt.Short(total))
 }

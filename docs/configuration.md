@@ -1854,6 +1854,33 @@ chord doctor models --pool thinking
 
 Use this command as an auth, endpoint, transport, model, and variant tuning smoke test. It uses the same merged global + project config view as normal runtime startup, so project-level provider/proxy/model overrides are included. Pool diagnostics request each pool entry independently rather than following the normal fallback chain.
 
+## Maintenance
+
+```yaml
+maintenance:
+  size_check_on_startup: false
+  warn_state_bytes: 10737418240
+  warn_cache_bytes: 5368709120
+  cleanup:
+    sessions:
+      enabled: false
+      retain_days: 30
+    llm_dumps:
+      enabled: false
+      retain_days: 1
+```
+
+`size_check_on_startup` reports state/cache sizes in the log at startup and warns against `warn_state_bytes` / `warn_cache_bytes`. It never deletes anything.
+
+`cleanup` runs a background sweep at startup when a policy is enabled:
+
+- `sessions` removes session directories whose last activity (the same signal the session picker and `--continue` use) is older than `retain_days`. Session directories are the only local copy of a conversation, so this policy is off by default.
+- `llm_dumps` removes completed `.json` dump files under a session's `dumps/llm/` older than `retain_days`. Temporary files and empty directories are kept. Dumps only exist when `log_level` is `debug` and are debug artifacts. Locked sessions (open in another process, including the one running the sweep) are skipped by both policies.
+- `retain_days` defaults to 30 for sessions and 1 for dumps when omitted; it must be between 1 and 36500.
+- Only the global config is honored: the sweep covers every project under the configured sessions root, so project configs cannot enable it.
+
+Unknown keys, wrong types, and out-of-range values in a policy disable that policy with a warning. Unknown keys at the `cleanup` level disable both policies. YAML aliases and merges follow the same validation. Sessions whose activity files cannot be checked are skipped. Deletions are logged. Preview candidates with `chord cleanup sessions|dumps --older-than <duration>`; manual cleanup defaults to a dry run.
+
 ## Configuration cheatsheet
 
 The full top-level keys of `config.yaml` (both global `~/.config/chord/config.yaml` and project-level `.chord/config.yaml`). All keys are optional unless noted.
@@ -1881,7 +1908,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `ime_switch_target`     | string                | empty                            | global / project         | IM identifier passed to `im-select` / `im-select.exe` when entering Normal mode. Linux/macOS/Windows.                    |
 | `log_level`             | string                | `info`                           | global / project         | `debug` / `info` / `warn` / `error`. `debug` is verbose.                                                                |
 | `paths`                 | object                | XDG defaults                     | global only              | `state_dir`, `cache_dir`, `sessions_dir`, `logs_dir`. CLI flags and `CHORD_*` env vars override.                         |
-| `maintenance`           | object                | disabled                         | global only              | `size_check_on_startup`, `warn_state_bytes`, `warn_cache_bytes`.                            |
+| `maintenance`           | object                | disabled                         | global only              | `size_check_on_startup`, `warn_state_bytes`, `warn_cache_bytes`, `cleanup` (startup retention sweep; see [Maintenance](#maintenance)). |
 | `lsp`                   | `map[name]Server`     | empty                            | global / project         | Per-language-server config. See [Customization: LSP](./customization.md#lsp).                                          |
 | `mcp`                   | `map[name]MCP`        | empty                            | global / project / agent | Per-MCP-server config. See [MCP](#mcp).                                                                                  |
 | `hooks`                 | object                | empty                            | global / project / agent | Hooks per trigger point. See [Hooks](./hooks.md).                                                                        |

@@ -630,6 +630,10 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		log.Infof("session %s is open in another Chord process; continuing with %s instead", skipped, ac.logCtx.SID)
 	}
 
+	// Startup maintenance sweep: log system is live and the target session is
+	// locked, so nothing the sweep can delete is in use by this process.
+	startMaintenanceSweep(ac)
+
 	tracePath := filepath.Join(ac.SessionDir, "traces", llm.LLMTraceFileName())
 	var traceWriter *llm.TraceWriter
 	if ac.ProviderCache.traceWriter != nil {

@@ -1584,6 +1584,33 @@ chord doctor models --pool thinking
 
 该命令适合做认证、endpoint、transport、模型存在性以及 variant tuning 的冒烟测试。它读取的配置视图与正常运行时一致：会先加载全局配置，再叠加项目级 provider / proxy / model 覆盖。Pool 诊断会逐项独立请求，不走正常 fallback 链。
 
+## 维护
+
+```yaml
+maintenance:
+  size_check_on_startup: false
+  warn_state_bytes: 10737418240
+  warn_cache_bytes: 5368709120
+  cleanup:
+    sessions:
+      enabled: false
+      retain_days: 30
+    llm_dumps:
+      enabled: false
+      retain_days: 1
+```
+
+`size_check_on_startup` 在启动时把 state/cache 体积写进日志，超过 `warn_state_bytes` / `warn_cache_bytes` 时告警，不做任何删除。
+
+`cleanup` 在有策略启用时于启动阶段后台执行一次清理：
+
+- `sessions` 删除最近活动时间早于 `retain_days` 的会话目录。活动时间与会话列表、`--continue` 使用同一个口径。会话目录是对话的唯一本地副本，所以该策略默认关闭。
+- `llm_dumps` 删除会话 `dumps/llm/` 下早于 `retain_days`、已写完的 `.json` 转储文件，保留临时文件和空目录。转储只在 `log_level` 为 `debug` 时产生，属于调试产物。两条策略都会跳过正在使用的会话，包括执行清理的进程自己打开的会话。
+- `retain_days` 省略时 sessions 用 30、llm_dumps 用 1；取值范围 1 到 36500。
+- 只接受全局配置：清理覆盖配置的会话根目录下全部项目，项目配置不能开启它。
+
+策略内出现未知键、类型错误或越界值时，Chord 禁用该策略并告警；`cleanup` 层出现未知键时，两条策略都会禁用。YAML 别名和合并也遵守这些校验。无法检查活动文件的会话会跳过，删除动作写入日志。用 `chord cleanup sessions|dumps --older-than <duration>` 预览候选；手动清理默认只预览。
+
 ## 配置字段速查表
 
 下面是 `config.yaml` 的全部顶层 key（同时适用于全局 `~/.config/chord/config.yaml` 和项目级 `.chord/config.yaml`）。除特别注明外，所有 key 均可选。
@@ -1611,7 +1638,7 @@ chord doctor models --pool thinking
 | `ime_switch_target`     | string                | 空                              | global / project         | 进 Normal 模式时传给 `im-select` / `im-select.exe` 的 IM 标识。                           |
 | `log_level`             | string                | `info`                          | global / project         | `debug` / `info` / `warn` / `error`。`debug` 输出较多。                                                              |
 | `paths`                 | object                | XDG 默认值                      | 仅 global                | `state_dir`、`cache_dir`、`sessions_dir`、`logs_dir`。会被 CLI flag 与 `CHORD_*` 环境变量覆盖。                       |
-| `maintenance`           | object                | 关闭                            | 仅 global                | `size_check_on_startup`、`warn_state_bytes`、`warn_cache_bytes`。                       |
+| `maintenance`           | object                | 关闭                            | 仅 global                | `size_check_on_startup`、`warn_state_bytes`、`warn_cache_bytes`、`cleanup`（启动期保留期清理，见「维护」）。 |
 | `lsp`                   | `map[name]Server`     | 空                              | global / project         | 各 language server 的配置。见 [扩展与定制：LSP](./customization_CN.md#lsp)。                                      |
 | `mcp`                   | `map[name]MCP`        | 空                              | global / project / agent | 各 MCP 服务器的配置。见 [MCP](#mcp)。                                                                              |
 | `hooks`                 | object                | 空                              | global / project / agent | 按触发点分组的 hooks。见 [Hooks](./hooks_CN.md)。                                                                    |

@@ -189,7 +189,7 @@ func queryTakeover(ctx context.Context, loc takeoverLocation, sid, transferID st
 		return status, nil
 	}
 	status.State = recovery.SessionPauseSaved
-	lock, err := recovery.AcquireSessionLock(loc.sessionDir)
+	lock, err := recovery.AcquireExistingSessionLock(loc.sessionDir)
 	if err == nil {
 		if err = lock.Release(); err != nil {
 			return status, err

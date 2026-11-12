@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,9 @@ func planSessionStartup(sessionsDir, stateDir string, opts sessionStartupOptions
 		return newSessionStartupPlan(sessionsDir, stateDir, opts.NewSessionMeta, opts.Plan.SkippedLockedIDs)
 	}
 	if opts.ResumeID != "" {
+		if !recovery.ValidResumeSessionID(opts.ResumeID) {
+			return sessionStartupPlan{}, fmt.Errorf("session %s not found or has no messages in the current project", opts.ResumeID)
+		}
 		sessionDir := filepath.Join(sessionsDir, opts.ResumeID)
 		mainPath := filepath.Join(sessionDir, identity.MainSessionLogFilename)
 		info, err := os.Stat(mainPath)
@@ -72,12 +76,19 @@ func planSessionStartup(sessionsDir, stateDir string, opts sessionStartupOptions
 		}
 		// --resume names one specific session: silently substituting another
 		// would not be honoring the request, so a busy session is an error.
-		lock, lockErr := recovery.AcquireSessionLock(sessionDir)
+		// Existing-only acquisition: a session that vanished between the check
+		// above and the lock (renamed for deletion by a concurrent cleanup)
+		// must surface as "not found", not be recreated as an empty shell.
+		lock, lockErr := recovery.AcquireExistingSessionLock(sessionDir)
 		if lockErr != nil {
 			if _, ok := errors.AsType[*recovery.SessionLockedError](lockErr); ok {
 				return sessionStartupPlan{}, fmt.Errorf("%w; close that process, or run chord --continue to pick up the most recent session you can open", lockErr)
 			}
 			return sessionStartupPlan{}, lockErr
+		}
+		if !ownedSessionDirHoldsTranscript(sessionDir) {
+			_ = lock.Release()
+			return sessionStartupPlan{}, fmt.Errorf("session %s not found or has no messages in the current project", opts.ResumeID)
 		}
 		if opts.ExpectedTransfer.TransferID != "" {
 			if _, err := validateTakeoverStartup(sessionDir, opts.ExpectedTransfer); err != nil {
@@ -104,23 +115,33 @@ func planSessionStartup(sessionsDir, stateDir string, opts sessionStartupOptions
 	return newSessionStartupPlan(sessionsDir, stateDir, opts.NewSessionMeta, nil)
 }
 
-// planContinueSessionStartup walks the --continue candidates newest-first and
-// takes the first one this process can actually own. Trying the lock is the
-// authoritative check, so there is no window between testing and claiming.
-// taken reports whether a candidate was claimed; when it is false the returned
-// plan carries the sessions that were skipped because another live Chord
-// process owns them, and the caller creates a fresh session instead.
 func planContinueSessionStartup(sessionsDir string) (sessionStartupPlan, bool, error) {
+	return planContinueFromCandidates(recovery.RecentSessionCandidates(sessionsDir, ""))
+}
+
+// planContinueFromCandidates claims the first candidate this process can own.
+// Separated from the listing so tests can drive the claim protocol (locked,
+// vanished mid-flight, lost transcript) against explicit candidates.
+func planContinueFromCandidates(candidates []string) (sessionStartupPlan, bool, error) {
 	var skipped []string
-	for _, sessionDir := range recovery.RecentSessionCandidates(sessionsDir, "") {
-		lock, lockErr := recovery.AcquireSessionLock(sessionDir)
+	for _, sessionDir := range candidates {
+		lock, lockErr := recovery.AcquireExistingSessionLock(sessionDir)
 		if lockErr == nil {
+			if !ownedSessionDirHoldsTranscript(sessionDir) {
+				// The candidate vanished or lost its transcript between the
+				// listing and the lock; fall through to the next one.
+				_ = lock.Release()
+				continue
+			}
 			return sessionStartupPlan{
 				SessionDir:       sessionDir,
 				RestoreOnStartup: true,
 				SessionLock:      lock,
 				SkippedLockedIDs: skipped,
 			}, true, nil
+		}
+		if errors.Is(lockErr, fs.ErrNotExist) {
+			continue
 		}
 		if _, ok := errors.AsType[*recovery.SessionLockedError](lockErr); ok {
 			skipped = append(skipped, filepath.Base(sessionDir))
@@ -129,6 +150,19 @@ func planContinueSessionStartup(sessionsDir string) (sessionStartupPlan, bool, e
 		return sessionStartupPlan{}, false, lockErr
 	}
 	return sessionStartupPlan{SkippedLockedIDs: skipped}, false, nil
+}
+
+// ownedSessionDirHoldsTranscript reports whether a session directory still
+// holds a usable session once this process owns its lock: a non-empty
+// main.jsonl or a complete paused checkpoint. It closes the window between a
+// pre-lock existence check (or a listing) and the lock acquisition, which a
+// concurrent deletion protocol can exploit by renaming the directory away.
+func ownedSessionDirHoldsTranscript(sessionDir string) bool {
+	mainPath := filepath.Join(sessionDir, identity.MainSessionLogFilename)
+	if info, err := os.Stat(mainPath); err == nil && info.Size() > 0 {
+		return true
+	}
+	return hasCompletePausedCheckpoint(sessionDir)
 }
 
 // newSessionStartupPlan creates a fresh session directory and owns it. The

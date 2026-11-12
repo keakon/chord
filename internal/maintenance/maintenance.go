@@ -1,6 +1,7 @@
 package maintenance
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -33,6 +34,12 @@ type CleanupOptions struct {
 	OlderThan   time.Duration
 	Yes         bool
 	Now         time.Time
+	// Cutoff overrides OlderThan when set. The startup sweep uses it to apply
+	// RetainDays directly, avoiding a Duration conversion that overflows
+	// beyond ~106752 days and would flip the sign into "no age limit".
+	Cutoff *time.Time
+	// Ctx cancels a long sweep between candidates; nil means no cancellation.
+	Ctx context.Context
 }
 
 type CleanupCandidate struct {
@@ -110,6 +117,17 @@ func CleanupLogs(locator *config.PathLocator, opts CleanupOptions) (*CleanupResu
 	return cleanupChildren(locator.LogsDir, "logs", opts)
 }
 
+// CleanupSessions collects and removes expired session directories under
+// <sessions-root>/<project-key>/. Project directories themselves are never
+// removed: a concurrent process can create and lock a new session inside one
+// at any time, and pruning the parent would race that creation (the space
+// saved by dropping a leftover project.json is not worth the coordination).
+//
+// Age is the session's last activity per recovery.SessionActivityTime — the
+// shared "last active" definition of the session list and --continue; the
+// directory mtime only feeds sessions without an activity signal, and any
+// failure to determine age, lock state, or identity skips the candidate.
+// Deletion goes through the rename-to-tombstone protocol (see removeSessionDir).
 func CleanupSessions(locator *config.PathLocator, opts CleanupOptions) (*CleanupResult, error) {
 	if locator == nil {
 		return nil, fmt.Errorf("path locator is nil")
@@ -124,104 +142,214 @@ func CleanupSessions(locator *config.PathLocator, opts CleanupOptions) (*Cleanup
 		return nil, err
 	}
 	for _, projectEntry := range projectDirs {
+		if err := ctxErr(opts.Ctx); err != nil {
+			return res, err
+		}
 		if !projectEntry.IsDir() {
 			continue
 		}
 		projectDir := filepath.Join(locator.SessionsRoot, projectEntry.Name())
-		var projectModTime time.Time
-		if cutoff != nil {
-			if info, err := projectEntry.Info(); err == nil {
-				projectModTime = info.ModTime()
-			}
-		}
 		sessionEntries, err := os.ReadDir(projectDir)
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			return nil, err
 		}
-		remainingEntries := make(map[string]struct{}, len(sessionEntries))
 		for _, entry := range sessionEntries {
+			if err := ctxErr(opts.Ctx); err != nil {
+				return res, err
+			}
 			if !entry.IsDir() {
-				remainingEntries[entry.Name()] = struct{}{}
 				continue
 			}
 			dir := filepath.Join(projectDir, entry.Name())
-			if cutoff != nil {
-				info, err := entry.Info()
-				if err == nil && info.ModTime().After(*cutoff) {
-					remainingEntries[entry.Name()] = struct{}{}
-					continue
-				}
+			candidate, ageErr := sessionRemovalCandidate(dir, entry.Name(), cutoff)
+			if !candidate && ageErr == nil {
+				continue
 			}
 			cand := CleanupCandidate{Path: dir, Kind: "session", Bytes: dirSize(dir, nil)}
-			if locked, err := recovery.SessionLockActive(dir); err != nil {
-				cand.Skip = "lock check failed: " + err.Error()
-			} else if locked {
-				cand.Skip = "session is locked"
+			if ageErr != nil {
+				cand.Skip = "activity check failed: " + ageErr.Error()
+			} else {
+				cand.Skip = sessionRemovalSkipReason(dir)
 			}
-			res.Candidates = append(res.Candidates, cand)
 			if cand.Skip != "" {
-				remainingEntries[entry.Name()] = struct{}{}
+				res.Candidates = append(res.Candidates, cand)
 				res.Skipped = append(res.Skipped, cand)
 				continue
 			}
+			res.Candidates = append(res.Candidates, cand)
 			if res.DryRun {
 				continue
 			}
-			if err := os.RemoveAll(dir); err != nil {
+			if err := removeSessionDir(dir, cutoff); err != nil {
 				cand.Skip = err.Error()
-				remainingEntries[entry.Name()] = struct{}{}
 				res.Skipped = append(res.Skipped, cand)
 				continue
 			}
 			res.Deleted = append(res.Deleted, cand)
 		}
-		if cutoff != nil && !projectModTime.IsZero() && projectModTime.After(*cutoff) {
-			continue
-		}
-		prunable, err := projectSessionsDirPrunable(projectDir, remainingEntries)
-		if err != nil {
-			return nil, err
-		}
-		if !prunable {
-			continue
-		}
-		cand := CleanupCandidate{Path: projectDir, Kind: "empty project sessions", Bytes: dirSize(projectDir, nil)}
-		res.Candidates = append(res.Candidates, cand)
-		if res.DryRun {
-			continue
-		}
-		if err := os.RemoveAll(projectDir); err != nil {
-			cand.Skip = err.Error()
-			res.Skipped = append(res.Skipped, cand)
-			continue
-		}
-		res.Deleted = append(res.Deleted, cand)
 	}
 	return res, nil
 }
 
-func projectSessionsDirPrunable(projectDir string, remainingEntries map[string]struct{}) (bool, error) {
-	if remainingEntries != nil {
-		for name := range remainingEntries {
-			if name != "project.json" {
-				return false, nil
-			}
-		}
+// sessionRemovalCandidate reports whether a session directory is old enough to
+// be considered for removal. Tombstones are always candidates regardless of
+// age: they are logically deleted already and only await their final removal.
+func sessionRemovalCandidate(dir, name string, cutoff *time.Time) (bool, error) {
+	if recovery.IsDeletingSessionDirName(name) {
 		return true, nil
 	}
-	entries, err := os.ReadDir(projectDir)
+	if cutoff == nil {
+		return true, nil
+	}
+	age, err := sessionAge(dir)
+	return !age.After(*cutoff), err
+}
+
+// sessionRemovalSkipReason reports why a candidate must not be removed, or ""
+// when removal may proceed. Age-based exclusions are handled by
+// sessionRemovalCandidate; this covers lock state and identity failures only.
+func sessionRemovalSkipReason(dir string) string {
+	if locked, err := recovery.SessionLockActive(dir); err != nil {
+		return "lock check failed: " + err.Error()
+	} else if locked {
+		return "session is locked"
+	}
+	return ""
+}
+
+// sessionAge reports when a session was last active. The shared activity
+// definition (main.jsonl / input-delivery.json / usage summary mtimes) is the
+// primary signal; the directory mtime only backs sessions without one. The
+// directory mtime is also bumped by taking or releasing the session lock, so
+// it must never override the file-based activity signals.
+func sessionAge(dir string) (time.Time, error) {
+	age, present, err := recovery.SessionActivityTime(dir)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if present {
+		return age, nil
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
+}
+
+// removeSessionDir deletes one session directory under the deletion protocol:
+// take the directory guard (never creating the directory), re-check
+// inside the lock that the session stayed inactive, then rename
+// to the tombstone name and remove. A session locked between the probe and
+// here, or active between the scan and the lock, is skipped, not deleted.
+func removeSessionDir(dir string, cutoff *time.Time) error {
+	if err := recovery.DeleteSessionDir(dir, cutoff); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("session vanished")
+		}
+		return err
+	}
+	return nil
+}
+
+// CleanupLLMDumps removes over-age published LLM dump files
+// (<session>/dumps/llm/*.json) from sessions that no process holds open.
+// Only files are removed: the dump directory stays in place because DumpWriter
+// creates it lazily and removing it would race a concurrent dump write between
+// its MkdirAll and CreateTemp.
+func CleanupLLMDumps(locator *config.PathLocator, opts CleanupOptions) (*CleanupResult, error) {
+	if locator == nil {
+		return nil, fmt.Errorf("path locator is nil")
+	}
+	res := &CleanupResult{DryRun: !opts.Yes}
+	cutoff := cutoffTime(opts)
+	projectDirs, err := os.ReadDir(locator.SessionsRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, nil
+			return res, nil
 		}
-		return false, err
+		return nil, err
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || entry.Name() != "project.json" {
-			return false, nil
+	for _, projectEntry := range projectDirs {
+		if err := ctxErr(opts.Ctx); err != nil {
+			return res, err
+		}
+		if !projectEntry.IsDir() {
+			continue
+		}
+		projectDir := filepath.Join(locator.SessionsRoot, projectEntry.Name())
+		sessionEntries, err := os.ReadDir(projectDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		for _, sessionEntry := range sessionEntries {
+			if err := ctxErr(opts.Ctx); err != nil {
+				return res, err
+			}
+			if !sessionEntry.IsDir() {
+				continue
+			}
+			sessionDir := filepath.Join(projectDir, sessionEntry.Name())
+			dumpsDir := filepath.Join(sessionDir, "dumps", "llm")
+			dumpEntries, err := os.ReadDir(dumpsDir)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: err.Error()})
+				continue
+			}
+			locked, err := recovery.SessionLockActive(sessionDir)
+			if err != nil {
+				res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: "lock check failed: " + err.Error()})
+				continue
+			}
+			if locked {
+				// An active session may be appending dumps right now.
+				res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: "session is locked"})
+				continue
+			}
+			for _, f := range dumpEntries {
+				if f.IsDir() {
+					continue
+				}
+				name := f.Name()
+				if !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".tmp-") {
+					continue
+				}
+				path := filepath.Join(dumpsDir, name)
+				cand := CleanupCandidate{Path: path, Kind: "llm dump"}
+				info, err := f.Info()
+				if err != nil {
+					cand.Skip = "stat failed: " + err.Error()
+					res.Candidates = append(res.Candidates, cand)
+					res.Skipped = append(res.Skipped, cand)
+					continue
+				}
+				if !info.Mode().IsRegular() || cutoff != nil && info.ModTime().After(*cutoff) {
+					continue
+				}
+				cand.Bytes = info.Size()
+				res.Candidates = append(res.Candidates, cand)
+				if res.DryRun {
+					continue
+				}
+				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+					cand.Skip = err.Error()
+					res.Skipped = append(res.Skipped, cand)
+					continue
+				}
+				res.Deleted = append(res.Deleted, cand)
+			}
 		}
 	}
-	return true, nil
+	return res, nil
 }
 
 func cleanupChildren(root, kind string, opts CleanupOptions) (*CleanupResult, error) {
@@ -258,6 +386,9 @@ func cleanupChildren(root, kind string, opts CleanupOptions) (*CleanupResult, er
 }
 
 func cutoffTime(opts CleanupOptions) *time.Time {
+	if opts.Cutoff != nil {
+		return opts.Cutoff
+	}
 	if opts.OlderThan <= 0 {
 		return nil
 	}
@@ -267,6 +398,14 @@ func cutoffTime(opts CleanupOptions) *time.Time {
 	}
 	cutoff := now.Add(-opts.OlderThan)
 	return &cutoff
+}
+
+// ctxErr returns the context error, or nil when no context is set.
+func ctxErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func dirSize(root string, warnings *[]string) int64 {

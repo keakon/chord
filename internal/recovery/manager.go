@@ -819,6 +819,11 @@ func listSessions(sessionsDir string, excludeDir string, display bool) ([]Sessio
 		if !entry.IsDir() {
 			continue
 		}
+		// Deletion tombstones are logically deleted; no picker or listing may
+		// offer them.
+		if IsDeletingSessionDirName(entry.Name()) {
+			continue
+		}
 		sessionPath := filepath.Join(sessionsDir, entry.Name())
 		if excludeDir != "" && sessionPath == excludeDir {
 			continue
@@ -1043,23 +1048,10 @@ func FirstUserMessageFromFile(mainPath string) (string, error) {
 // definition of "last active" shared by the session list and by --continue, so
 // the picker's first row and --continue always agree.
 func sessionActivityTime(sessionPath string) (time.Time, bool) {
-	mainInfo, err := os.Stat(filepath.Join(sessionPath, identity.MainSessionLogFilename))
-	if err != nil || mainInfo.Size() == 0 {
-		mainInfo, err = os.Stat(filepath.Join(sessionPath, "input-delivery.json"))
-		if err != nil || mainInfo.Size() == 0 {
-			return time.Time{}, false
-		}
-	}
-	lastActive := mainInfo.ModTime()
-	if queueInfo, err := os.Stat(filepath.Join(sessionPath, "input-delivery.json")); err == nil && queueInfo.ModTime().After(lastActive) {
-		lastActive = queueInfo.ModTime()
-	}
-	if summaryInfo, err := os.Stat(filepath.Join(sessionPath, analytics.SessionUsageSummaryFileName)); err == nil {
-		if modTime := summaryInfo.ModTime(); modTime.After(lastActive) {
-			lastActive = modTime
-		}
-	}
-	return lastActive, true
+	mainInfo, _ := os.Stat(filepath.Join(sessionPath, identity.MainSessionLogFilename))
+	queueInfo, _ := os.Stat(filepath.Join(sessionPath, InputDeliveryFile))
+	summaryInfo, _ := os.Stat(filepath.Join(sessionPath, analytics.SessionUsageSummaryFileName))
+	return sessionActivityFromFiles(mainInfo, queueInfo, summaryInfo)
 }
 
 // RecentSessionCandidates returns the paths of every session with a non-empty
@@ -1085,6 +1077,11 @@ func RecentSessionCandidates(sessionsDir string, excludeDir string) []string {
 	candidates := make([]candidate, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			continue
+		}
+		// Deletion tombstones are logically deleted; --continue must never
+		// auto-select one.
+		if IsDeletingSessionDirName(entry.Name()) {
 			continue
 		}
 		sessionPath := filepath.Join(sessionsDir, entry.Name())

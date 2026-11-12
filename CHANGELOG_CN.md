@@ -22,6 +22,7 @@
 - `/stats` 在会话范围新增 Tasks 视图：可分别查看每个委派任务自身的调用次数、token 与估算费用，不再依附执行它的 agent 维度。main 行涵盖整个 session，任务跨 attempt 与恢复累计，缺少任务身份的调用归入 untracked。外部 Claude Code 任务单列一组，展示 CLI 自报的累计 token 与费用；该报告可能包含嵌套 agent，不与 Chord 估算合计，CLI 尚未报告费用时显示 `unknown`。
 - `chord doctor skills` 新增 `--agent <name>` 参数，报告所选角色的权限基线、按运行时优先级排列的技能目录，以及模型实际会收到什么：按名加载的 allow/ask/deny、`Available Skills` 条目的状态、模型能否自行加载、条件 `paths` 状态、提供 metadata 的 sidecar，以及三档分开的体积（`SKILL.md` 源文件、解析正文、截断前的渲染结果）。基线是角色自身的规则，因此 worker 的行不等于 worker 运行时的实际权限，外部 backend 角色报 `not_applicable`；角色名不存在时以退出码 `2` 失败。
 - 为 Anthropic Messages 目标新增消息级动态 MCP 工具挂载。开启 `compat.anthropic.mcp_inline_tools` 的模型把运行时 manual MCP 工具声明挂成固定位置的对话中段 `role: system` 消息，内容块按值携带 `tool_addition` 工具定义（`inline-tools` beta，请求发送 `anthropic-beta: inline-tools-2026-09-15` 头），会话中途启用 MCP server 时顶层 `tools` 数组与 prompt cache 前缀保持稳定。挂载形态跟随选中的目标：不接受该形态的池成员收到的请求会把声明并入其顶层 `tools` 数组。开关在所有场景默认关闭，借用官方 catalog 配方的自定义端点也不例外——只为官方 API 和验证过会透传对话中段 system 消息的网关开启。
+- 全局配置新增可选的启动期清理 `maintenance.cleanup`。`sessions` 删除最近活动时间早于 `retain_days`（默认 30）的会话目录；`llm_dumps` 删除各会话 `dumps/llm/` 下早于 `retain_days`（默认 1）的调试 dump 文件。两条策略默认都关闭。清理在启动后的后台执行，跳过被其他进程打开中的会话，逐条记录删除动作，且只能由全局配置开启。cleanup 配置段出现无效条目（未知键或类型错误）时，受影响的策略会被禁用并告警，不会按一个从未配置过的保留期去删除。`chord cleanup dumps` 可用同一候选逻辑手动预览和删除 dump 文件。
 
 ### 改进
 
@@ -62,6 +63,7 @@
 - `chord import claude` 过滤 Claude Code 的命令包装文本（`<command-name>`、`<command-message>`），以及本地命令输出和提示（`<local-command-stdout>`、`<local-command-stderr>`、`<local-command-caveat>`）。独立的 `<command-args>` 块仍会保留；包装块中的参数非空或参数标签未闭合时，也整块保留，避免丢失命令参数。导入报告分别统计剔除的文本块数和整条跳过的源记录数，并显示一条汇总警告和一行摘要。中断标记、系统提醒及工具结果保持原样。过滤不影响会话选择，也不会触发历史跨度不足的误报；过滤后没有消息的转录会被拒绝。
 - `chord import codex` 导入分叉线程时会拼接完整历史。Codex 把 `thread/revert` 与引用式子代理页写成不重放继承历史的 `history_base` 链；导入会沿链回溯，把基页拼接在选中页之前，并按子页声明的边界截断各基页。引用链无法完整读取时导入失败，包括基页缺失或为 `.jsonl.zst` 压缩格式的情况。`--id` 按会话记录（rollout）文件名里的线程 ID 匹配，选择文件名时间戳最新的一份，同秒平局按记录 ID 排序。这遵循 Codex 的文件名回退规则，不读取会话数据库，因此选择结果可能与 `codex resume` 不同。最新页为压缩格式时会明确报错，不会静默跳过。导入报告与 CLI 摘要记录拼接页数与来自基页的记录数。
 - `/mcp` 的启用和禁用操作现在有 60 秒超时。MCP 服务器在切换中途停止响应时，此前会一直卡在 `MCP change already in progress`、阻塞后续切换直到重启，进行中的切换也可能活过 shutdown。
+- `chord cleanup sessions` 不再删除只剩 `project.json` 的项目目录。此前的收尾逻辑可能把命令扫描期间其他进程新建并已锁定的会话一并删掉；现在项目目录一律保留。会话的 `--older-than` 年龄也改为与会话列表、`--continue` 相同的最近活动口径，不再用会被会话锁刷新的目录 mtime。
 - headless 事件转发不再因控制循环退出后发生的第二次会话暂停转移而卡住；run 会正常排空并退出，不必等满清理 deadline。
 
 ## 0.8.3 - 2026-11-05

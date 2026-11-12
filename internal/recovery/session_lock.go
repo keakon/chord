@@ -83,22 +83,49 @@ func (e *SessionLockCorruptError) Unwrap() error { return e.Err }
 // SessionLock represents an acquired ownership lock on a sessionDir.
 // Call Release when the session is no longer active.
 type SessionLock struct {
-	path      string   // path to session.lock
-	guardPath string   // path to session.lock.guard
-	guardFile *os.File // held open for the lifetime of the ownership lock
+	directory *sessionDirectoryLock
 	ownerID   string
 }
 
-// AcquireSessionLock tries to acquire exclusive ownership of sessionDir.
+// AcquireSessionLock tries to acquire exclusive ownership of sessionDir,
+// creating the directory when missing (fresh-session paths).
 // A kernel file lock on session.lock.guard provides the actual cross-process
 // exclusion, while session.lock stores readable owner metadata for errors,
 // listings, and safe release.
 func AcquireSessionLock(sessionDir string) (*SessionLock, error) {
+	if IsDeletingSessionDirName(filepath.Base(filepath.Clean(sessionDir))) {
+		return nil, fmt.Errorf("session is being deleted: %w", os.ErrNotExist)
+	}
 	if err := privatefs.EnsureDir(sessionDir, sessionDir); err != nil {
 		return nil, fmt.Errorf("secure session directory: %w", err)
 	}
-	lockPath := filepath.Join(sessionDir, sessionLockFile)
-	guardPath := filepath.Join(sessionDir, sessionGuardFile)
+	return acquireSessionLock(sessionDir)
+}
+
+// AcquireExistingSessionLock acquires exclusive ownership of a session
+// directory that must already exist (resume and deletion paths). Unlike
+// AcquireSessionLock it never creates the directory: a session that vanished —
+// for example renamed for deletion by a concurrent cleanup — fails with an
+// error wrapping fs.ErrNotExist instead of being silently recreated as an
+// empty shell.
+func AcquireExistingSessionLock(sessionDir string) (*SessionLock, error) {
+	if IsDeletingSessionDirName(filepath.Base(filepath.Clean(sessionDir))) {
+		return nil, fmt.Errorf("session is being deleted: %w", os.ErrNotExist)
+	}
+	return acquireSessionLock(sessionDir)
+}
+
+func acquireSessionLock(sessionDir string) (*SessionLock, error) {
+	directory, err := acquireSessionDirectoryLock(sessionDir)
+	if err != nil {
+		return nil, err
+	}
+	owned := false
+	defer func() {
+		if !owned {
+			_ = directory.Close()
+		}
+	}()
 	ownerID := newOwnerID()
 	hostname, _ := os.Hostname()
 	info := sessionLockInfo{
@@ -113,26 +140,7 @@ func AcquireSessionLock(sessionDir string) (*SessionLock, error) {
 	}
 	data = append(data, '\n')
 
-	guardFile, err := privatefs.OpenFile(sessionDir, guardPath, os.O_CREATE|os.O_RDWR)
-	if err != nil {
-		return nil, fmt.Errorf("open session guard lock: %w", err)
-	}
-	if err := lockSessionGuardFile(guardFile); err != nil {
-		_ = guardFile.Close()
-		if isWouldBlockError(err) {
-			return nil, currentSessionLockedError(sessionDir, lockPath)
-		}
-		return nil, fmt.Errorf("acquire session guard lock: %w", err)
-	}
-
-	guardHeld := true
-	defer func() {
-		if guardHeld {
-			_ = unlockAndCloseGuard(guardFile)
-		}
-	}()
-
-	existing, readErr := readLockFile(lockPath)
+	existing, readErr := readSessionLock(directory.root)
 	switch {
 	case readErr == nil:
 		if isProcessAlive(existing.PID) {
@@ -153,12 +161,15 @@ func AcquireSessionLock(sessionDir string) (*SessionLock, error) {
 		return nil, fmt.Errorf("read session lock: %w", readErr)
 	}
 
-	if err := writeLockFile(sessionDir, lockPath, data); err != nil {
+	if err := directory.verify(sessionDir); err != nil {
+		return nil, err
+	}
+	if err := writeLockFile(directory.root, data); err != nil {
 		return nil, err
 	}
 
-	guardHeld = false
-	return &SessionLock{path: lockPath, guardPath: guardPath, guardFile: guardFile, ownerID: ownerID}, nil
+	owned = true
+	return &SessionLock{directory: directory, ownerID: ownerID}, nil
 }
 
 // Release removes the session lock file only if this instance still owns it.
@@ -167,12 +178,12 @@ func (l *SessionLock) Release() error {
 	if l == nil {
 		return nil
 	}
-	if l.guardFile == nil {
+	if l.directory == nil {
 		return nil
 	}
 
 	var firstErr error
-	existing, err := readLockFile(l.path)
+	existing, err := readSessionLock(l.directory.root)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			if _, ok := errors.AsType[*sessionLockParseError](err); !ok {
@@ -180,15 +191,15 @@ func (l *SessionLock) Release() error {
 			}
 		}
 	} else if existing.OwnerID == l.ownerID {
-		if err := os.Remove(l.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := l.directory.root.Remove(sessionLockFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 			firstErr = fmt.Errorf("remove session lock: %w", err)
 		}
 	}
 
-	if err := unlockAndCloseGuard(l.guardFile); err != nil && firstErr == nil {
+	if err := l.directory.Close(); err != nil && firstErr == nil {
 		firstErr = err
 	}
-	l.guardFile = nil
+	l.directory = nil
 	return firstErr
 }
 
@@ -200,6 +211,15 @@ func (e *sessionLockParseError) Unwrap() error { return e.Err }
 // readLockFile reads and parses the lock file at path.
 func readLockFile(path string) (*sessionLockInfo, error) {
 	data, err := os.ReadFile(path)
+	return parseSessionLock(data, err)
+}
+
+func readSessionLock(root *os.Root) (*sessionLockInfo, error) {
+	data, err := root.ReadFile(sessionLockFile)
+	return parseSessionLock(data, err)
+}
+
+func parseSessionLock(data []byte, err error) (*sessionLockInfo, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -211,13 +231,19 @@ func readLockFile(path string) (*sessionLockInfo, error) {
 }
 
 // writeLockFile atomically overwrites the lock file with new content.
-func writeLockFile(sessionDir, lockPath string, data []byte) error {
-	tmp := lockPath + ".tmp"
-	if err := privatefs.WriteFile(sessionDir, tmp, data); err != nil {
+func writeLockFile(root *os.Root, data []byte) error {
+	tmp := sessionLockFile + ".tmp"
+	f, err := openSessionLockFile(root, tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
+	if err != nil {
+		return fmt.Errorf("open session lock tmp: %w", err)
+	}
+	_, writeErr := f.Write(data)
+	closeErr := f.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
 		return fmt.Errorf("write session lock tmp: %w", err)
 	}
-	if err := os.Rename(tmp, lockPath); err != nil {
-		_ = os.Remove(tmp)
+	if err := root.Rename(tmp, sessionLockFile); err != nil {
+		_ = root.Remove(tmp)
 		return fmt.Errorf("install session lock: %w", err)
 	}
 	return nil

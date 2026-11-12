@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -316,6 +317,9 @@ func (a *MainAgent) resolveResumeSessionPath(sessionID string) (string, error) {
 	if sessionID == "" {
 		return "", fmt.Errorf("no session to resume")
 	}
+	if !recovery.ValidResumeSessionID(sessionID) {
+		return "", fmt.Errorf("session %s not found or has no messages", sessionID)
+	}
 	sessionsDir, err := a.projectSessionsDir()
 	if err != nil {
 		return "", err
@@ -332,6 +336,18 @@ func (a *MainAgent) resolveResumeSessionPath(sessionID string) (string, error) {
 	return sessionPath, nil
 }
 
+// sessionDirHoldsTranscript re-verifies after this process owns the session
+// lock that the directory still holds a usable session. It closes the window
+// between resolveResumeSessionPath (or a candidate listing) and the lock
+// acquisition, which the deletion protocol's rename can exploit.
+func (a *MainAgent) sessionDirHoldsTranscript(sessionPath string) bool {
+	mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
+	if info, err := os.Stat(mainPath); err == nil && info.Size() > 0 {
+		return true
+	}
+	return completePausedSessionWithoutMessages(recovery.NewRecoveryManager(sessionPath), sessionPath)
+}
+
 // acquireLatestResumeCandidate opens the most recent session this process can
 // actually own, matching --continue's "carry on where I left off" meaning for
 // the in-app /resume with no ID. Ownership is decided by an actual lock
@@ -346,9 +362,18 @@ func (a *MainAgent) acquireLatestResumeCandidate() (string, *recovery.SessionLoc
 		return "", nil, err
 	}
 	for _, sessionDir := range recovery.RecentSessionCandidates(sessionsDir, a.sessionDir) {
-		lock, err := recovery.AcquireSessionLock(sessionDir)
+		lock, err := recovery.AcquireExistingSessionLock(sessionDir)
 		if err == nil {
+			if !a.sessionDirHoldsTranscript(sessionDir) {
+				// The candidate vanished between the listing and the lock;
+				// fall through to the next one.
+				_ = lock.Release()
+				continue
+			}
 			return sessionDir, lock, nil
+		}
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
 		}
 		if _, ok := errors.AsType[*recovery.SessionLockedError](err); ok {
 			log.Infof("latest recent session %s became owned by another process; trying an earlier candidate", filepath.Base(sessionDir))
@@ -1679,7 +1704,11 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 	if targetID != "" {
 		sessionPath, err = a.resolveResumeSessionPath(targetID)
 		if err == nil {
-			newLock, err = recovery.AcquireSessionLock(sessionPath)
+			newLock, err = recovery.AcquireExistingSessionLock(sessionPath)
+		}
+		if err == nil && !a.sessionDirHoldsTranscript(sessionPath) {
+			_ = newLock.Release()
+			err = fmt.Errorf("session %s not found or has no messages", targetID)
 		}
 		if err != nil {
 			a.emitToTUI(ErrorEvent{Err: err})

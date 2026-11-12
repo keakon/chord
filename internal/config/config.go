@@ -87,7 +87,44 @@ type MaintenanceConfig struct {
 	SizeCheckOnStartup bool  `json:"size_check_on_startup" yaml:"size_check_on_startup"`
 	WarnStateBytes     int64 `json:"warn_state_bytes" yaml:"warn_state_bytes"`
 	WarnCacheBytes     int64 `json:"warn_cache_bytes" yaml:"warn_cache_bytes"`
+	// Cleanup configures the startup sweep that removes expired sessions and
+	// LLM dump files. Only the global config is honored: the sweep deletes
+	// across all projects of the state dir, so a project config must not be
+	// able to turn it on.
+	Cleanup MaintenanceCleanupConfig `json:"cleanup,omitzero" yaml:"cleanup,omitempty"`
 }
+
+// MaintenanceRetainConfig is one retention policy of the startup sweep.
+type MaintenanceRetainConfig struct {
+	// Enabled turns the policy on. Defaults to false: session directories are
+	// the only local copy of a conversation, so deletion is opt-in.
+	Enabled bool `json:"enabled,omitzero" yaml:"enabled,omitempty"`
+	// RetainDays keeps entries from the last N days. Omitted fields inherit the
+	// policy default. Explicit values outside [1, MaxMaintenanceRetainDays]
+	// disable the policy instead of guessing.
+	RetainDays int `json:"retain_days,omitzero" yaml:"retain_days,omitempty"`
+}
+
+// MaintenanceCleanupConfig groups the retention policies. Explicit errors
+// inside the section (unknown keys, wrong types) disable the affected policy
+// and warn rather than falling back to defaults and deleting.
+type MaintenanceCleanupConfig struct {
+	Sessions MaintenanceRetainConfig `json:"sessions,omitzero" yaml:"sessions,omitempty"`
+	LLMDumps MaintenanceRetainConfig `json:"llm_dumps,omitzero" yaml:"llm_dumps,omitempty"`
+}
+
+const (
+	// DefaultSessionsRetainDays keeps sessions for 30 days when enabled
+	// without an explicit retain_days.
+	DefaultSessionsRetainDays = 30
+	// DefaultLLMDumpsRetainDays keeps LLM dumps for 1 day when enabled without
+	// an explicit retain_days; dumps are debug artifacts.
+	DefaultLLMDumpsRetainDays = 1
+	// MaxMaintenanceRetainDays bounds retain_days: time.Duration overflows at
+	// ~106752 days, and a negative duration would read as "no age limit" and
+	// delete everything. 100 years is far past any real retention intent.
+	MaxMaintenanceRetainDays = 36500
+)
 
 // SkillsConfig configures additional skill directories.
 type SkillsConfig struct {
@@ -127,6 +164,14 @@ func DefaultConfig() *Config {
 			},
 		},
 		Diagnostics: DefaultDiagnosticsConfig(),
-		Maintenance: MaintenanceConfig{SizeCheckOnStartup: false, WarnStateBytes: 10 * 1024 * 1024 * 1024, WarnCacheBytes: 5 * 1024 * 1024 * 1024},
+		Maintenance: MaintenanceConfig{
+			SizeCheckOnStartup: false,
+			WarnStateBytes:     10 * 1024 * 1024 * 1024,
+			WarnCacheBytes:     5 * 1024 * 1024 * 1024,
+			Cleanup: MaintenanceCleanupConfig{
+				Sessions: MaintenanceRetainConfig{RetainDays: DefaultSessionsRetainDays},
+				LLMDumps: MaintenanceRetainConfig{RetainDays: DefaultLLMDumpsRetainDays},
+			},
+		},
 	}
 }

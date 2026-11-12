@@ -201,13 +201,13 @@ func TestWriteCleanupSummarySessions(t *testing.T) {
 	removed := []maintenance.CleanupCandidate{
 		{Path: "/sessions/p1/s1", Kind: "session", Bytes: 1000},
 		{Path: "/sessions/p1/s2", Kind: "session", Bytes: 1000},
-		{Path: "/sessions/p2", Kind: "empty project sessions", Bytes: 490},
+		{Path: "/sessions/p2/s3", Kind: "session", Bytes: 490},
 	}
 
 	var buf bytes.Buffer
 	writeCleanupSummary(&buf, "removed", "sessions", removed)
 
-	want := "removed 2 sessions, 1 empty project dirs, total 2.4 KB\n"
+	want := "removed 3 sessions, total 2.4 KB\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("cleanup sessions summary output = %q, want %q", got, want)
 	}
@@ -273,7 +273,8 @@ func TestCleanupSessionsCommandYesPrintsSummary(t *testing.T) {
 		}
 	}
 	// Age the whole tree last so creating session dirs does not refresh the
-	// project dir mtimes past the cutoff.
+	// transcript mtimes past the cutoff: session age follows main.jsonl, not
+	// the directory mtime.
 	for _, project := range []string{"HOME-Workspace-p1", "HOME-Workspace-p2"} {
 		projectDir := filepath.Join(sessionsDir, project)
 		for _, sid := range []string{"20260101000000000", "20260102000000000"} {
@@ -281,6 +282,9 @@ func TestCleanupSessionsCommandYesPrintsSummary(t *testing.T) {
 			if info, err := os.Stat(sessionDir); err == nil && info.IsDir() {
 				if err := os.Chtimes(sessionDir, old, old); err != nil {
 					t.Fatalf("Chtimes %s: %v", sessionDir, err)
+				}
+				if err := os.Chtimes(filepath.Join(sessionDir, "main.jsonl"), old, old); err != nil {
+					t.Fatalf("Chtimes main.jsonl: %v", err)
 				}
 			}
 		}
@@ -298,7 +302,7 @@ func TestCleanupSessionsCommandYesPrintsSummary(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "removed 2 sessions, 2 empty project dirs, total ") {
+	if !strings.Contains(out, "removed 2 sessions, total ") {
 		t.Fatalf("cleanup sessions --yes output = %q, want summary line", out)
 	}
 	if strings.Contains(out, "dry-run") {
@@ -306,5 +310,12 @@ func TestCleanupSessionsCommandYesPrintsSummary(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(sessionsDir, "HOME-Workspace-p1", "20260101000000000")); !os.IsNotExist(err) {
 		t.Fatalf("cleanup sessions --yes should remove old session, stat err=%v", err)
+	}
+	// Project directories are never pruned: a concurrent process may create
+	// and lock a new session inside one at any time.
+	for _, project := range []string{"HOME-Workspace-p1", "HOME-Workspace-p2"} {
+		if _, err := os.Stat(filepath.Join(sessionsDir, project)); err != nil {
+			t.Fatalf("project dir %s must survive cleanup: %v", project, err)
+		}
 	}
 }

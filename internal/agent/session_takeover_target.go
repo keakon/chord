@@ -89,7 +89,7 @@ func (a *MainAgent) handleTakeoverTarget(req sessionTakeoverTarget) {
 		reply(err)
 		return
 	}
-	lock, err := recovery.AcquireSessionLock(path)
+	lock, err := recovery.AcquireExistingSessionLock(path)
 	if err != nil {
 		reply(fmt.Errorf("lock_busy: %w", err))
 		return

@@ -57,6 +57,21 @@ func TestListSessionActivityDoesNotLoadDisplayMetadata(t *testing.T) {
 	}
 }
 
+func TestListSessionActivityKeepsSessionWithInvalidOptionalSignal(t *testing.T) {
+	root := t.TempDir()
+	dir := writeSessionWithTranscript(t, root, "sample")
+	if err := os.Mkdir(filepath.Join(dir, "usage-summary.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	list, err := ListSessionActivity(root, "")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("activity list must preserve existing read behavior: %+v %v", list, err)
+	}
+	if _, _, err := SessionActivityTime(dir); err == nil {
+		t.Fatal("destructive retention check must reject an invalid activity file")
+	}
+}
+
 func BenchmarkListSessionActivity(b *testing.B) {
 	root := b.TempDir()
 	for i := range 100 {

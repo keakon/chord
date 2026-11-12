@@ -29,7 +29,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord doctor skills`             | 诊断 skill 的发现、加载与可见性                                    |
 | `chord doctor agents`             | 诊断 agent 定义与外部后端命令                                      |
 | `chord cleanup status`            | 查看路径定位器管理的 state/cache/logs 体积                        |
-| `chord cleanup <kind>`            | 清理 `sessions` / `cache` / `logs` / `project`（默认 dry-run）    |
+| `chord cleanup <kind>`            | 清理 `sessions` / `dumps` / `cache` / `logs` / `project`（默认 dry-run）    |
 | `chord worktree list`             | 列出当前仓库下 chord 管理的 worktree                              |
 | `chord worktree remove <name>`    | 移除 chord 管理的 worktree                                        |
 | `chord worktree finish <name>`    | 先将目标分支合入真实 worktree，再把结果 squash 回去并删除 worktree |
@@ -503,7 +503,7 @@ logs_dir: /Users/me/.local/state/chord/logs (263.5 MB)
 sessions: 42 across 7 projects
 ```
 
-### `chord cleanup sessions | cache | logs | project`
+### `chord cleanup sessions | dumps | cache | logs | project`
 
 清理指定类别的数据。**默认是 dry-run**：加 `--yes` 才真正删除。
 
@@ -514,7 +514,8 @@ sessions: 42 across 7 projects
 
 | 类别        | 清理内容                                                                                                                   |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `sessions`  | `<state-dir>/sessions/<project-key>/` 下的旧会话目录；项目会话目录在会话删除后若只剩 `project.json`，也会一并移除        |
+| `sessions`  | `<state-dir>/sessions/<project-key>/` 下早于截止时间的会话目录，以及残留的删除 tombstone。会话年龄与会话列表、`--continue` 使用同一个最近活动口径；项目目录一律保留 |
+| `dumps`     | 各会话 `dumps/llm/` 下超龄、已写完的 `.json` LLM 转储文件；保留临时文件和空目录，跳过被其他进程打开的会话 |
 | `cache`     | `<cache-dir>/runtime/` 下的可重建缓存                                                                                     |
 | `logs`      | `<state-dir>/logs/` 下的轮转日志                                                                                          |
 | `project`   | 孤立的项目元数据（项目目录已不存在的注册项）                                                                               |
@@ -536,12 +537,11 @@ chord cleanup cache --yes
 
 ```text
 would remove /Users/me/.local/state/chord/sessions/project-a/202605120001 (263.5 MB)
-would remove /Users/me/.local/state/chord/sessions/project-b (490 B)
-would remove 1 sessions, 1 empty project dirs, total 263.5 MB
+would remove 1 sessions, total 263.5 MB
 dry-run: pass --yes to delete
 ```
 
-最后一行汇总本次将要删除的条目与总大小。会话目录与空壳项目目录（只剩一个 `project.json`）分开计数，字节总量不会让人误以为是空壳目录占用的。加 `--yes` 后同样输出这些行，只是 `would remove` 变为 `removed`，末尾不再有 `dry-run` 提示。
+最后一行汇总本次将要删除的条目与总大小。加 `--yes` 后同样输出这些行，只是 `would remove` 变为 `removed`，末尾不再有 `dry-run` 提示。
 
 ```text
 removed /Users/me/.local/state/chord/sessions/project-a/202605120001 (263.5 MB)

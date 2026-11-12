@@ -29,7 +29,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord doctor skills`            | Diagnose skill discovery, loading, and visibility                |
 | `chord doctor agents`            | Diagnose agent definitions and external backend commands         |
 | `chord cleanup status`           | Inspect state/cache/log sizes managed by the path locator        |
-| `chord cleanup <kind>`           | Clean `sessions` / `cache` / `logs` / `project` (dry-run by default) |
+| `chord cleanup <kind>`           | Clean `sessions` / `dumps` / `cache` / `logs` / `project` (dry-run by default) |
 | `chord worktree list`            | List chord-managed worktrees of the current repository           |
 | `chord worktree remove <name>`   | Remove a chord-managed worktree                                  |
 | `chord worktree finish <name>`   | Merge the target branch into the real worktree, squash the result back as one commit, then remove the worktree |
@@ -503,7 +503,7 @@ logs_dir: /Users/me/.local/state/chord/logs (263.5 MB)
 sessions: 42 across 7 projects
 ```
 
-### `chord cleanup sessions | cache | logs | project`
+### `chord cleanup sessions | dumps | cache | logs | project`
 
 Clean a specific kind of managed data. **Defaults to a dry run**: pass `--yes` to actually delete.
 
@@ -514,7 +514,8 @@ Clean a specific kind of managed data. **Defaults to a dry run**: pass `--yes` t
 
 | Kind        | What it cleans                                                                                                  |
 | ----------- | --------------------------------------------------------------------------------------------------------------- |
-| `sessions`  | Old session directories under `<state-dir>/sessions/<project-key>/`; removes project session dirs left with only `project.json` after their sessions are gone |
+| `sessions`  | Session directories under `<state-dir>/sessions/<project-key>/` older than the cutoff, plus leftover deletion tombstones. Session age follows the same last-activity signal as the session picker and `--continue`. Project directories are never removed. |
+| `dumps`     | Over-age completed `.json` LLM dump files under each session's `dumps/llm/`; temporary files and empty directories are kept, and sessions open in another process are skipped |
 | `cache`     | Rebuildable cache under `<cache-dir>/runtime/`                                                                  |
 | `logs`      | Rotated logs under `<state-dir>/logs/`                                                                          |
 | `project`   | Orphan project entries (project directories that no longer exist on disk)                                       |
@@ -536,12 +537,11 @@ Sample output:
 
 ```text
 would remove /Users/me/.local/state/chord/sessions/project-a/202605120001 (263.5 MB)
-would remove /Users/me/.local/state/chord/sessions/project-b (490 B)
-would remove 1 sessions, 1 empty project dirs, total 263.5 MB
+would remove 1 sessions, total 263.5 MB
 dry-run: pass --yes to delete
 ```
 
-The last line summarizes what would be removed. Session directories and empty project dirs (which hold only a leftover `project.json`) are counted separately, so the byte total is not read as belonging to the empty dirs. With `--yes`, the same lines use `removed` instead of `would remove`, with no `dry-run` trailer.
+The last line summarizes what would be removed. With `--yes`, the same lines use `removed` instead of `would remove`, with no `dry-run` trailer.
 
 ```text
 removed /Users/me/.local/state/chord/sessions/project-a/202605120001 (263.5 MB)

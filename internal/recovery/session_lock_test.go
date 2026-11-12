@@ -41,7 +41,12 @@ func TestSessionLockHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeLockFile(dir, lockPath, append(data, '\n')); err != nil {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := writeLockFile(root, append(data, '\n')); err != nil {
 		t.Fatal(err)
 	}
 	got, err := readLockFile(lockPath)
