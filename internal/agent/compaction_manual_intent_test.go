@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
@@ -707,6 +708,21 @@ func TestManualIntentRequiresVisibleToolForInjection(t *testing.T) {
 	a.handleCompactCommand()
 	if !a.manualNoticeActive() {
 		t.Fatal("premise: the command armed the intent")
+	}
+	// The draft worker reads the shared tool registry from its goroutine (the
+	// reduction scratch and the request surface). The registry is immutable
+	// after startup, so the replacement must wait until the in-flight worker
+	// has exited; the slot still counts as running because the queued terminal
+	// event is never drained here.
+	workerDone := make(chan struct{})
+	go func() {
+		a.compactionWg.Wait()
+		close(workerDone)
+	}()
+	select {
+	case <-workerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("compaction worker did not finish before replacing the tool registry")
 	}
 	a.tools = tools.NewRegistry()
 
