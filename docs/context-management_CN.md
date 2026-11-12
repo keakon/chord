@@ -233,11 +233,11 @@ context:
 
 ### 手动压缩与超长恢复
 
-除自动触发外，你也可通过 TUI 的 `/compact` 命令随时手动压缩。手动压缩与自动压缩使用同一套后台 worker：即使 agent 正在执行任务也可以启动，进度会显示在后台压缩状态槽位，并在下一个安全的 continuation/idle barrier 应用，而不是立刻打断当前 turn。也可使用 `/compact --no` 临时关闭当前会话的后续自动压缩。
+除自动触发外，你也可通过 TUI 的 `/compact` 命令随时手动压缩。手动压缩与自动压缩使用同一套后台 worker：即使 agent 正在执行任务也可以启动，进度会显示在后台压缩状态槽位，并在下一个安全的 continuation/idle barrier 应用，而不是立刻打断当前 turn。
 
 启用 `context.compaction.model_driven` 且 agent 正忙时，`/compact` 还会让模型自己尝试 checkpoint：一条持久指令（显示为 "COMPACT REQUESTED" 卡片）在 checkpoint 应用前随每个请求重放，要求模型立刻单独调用 `compact_context`。先完成的一方生效：模型在后台摘要就绪前提交 checkpoint，则由它替代运行时结果；后台摘要先应用，模型之后的 `compact_context` 调用按新窗口的常规门槛判定。模型侧尝试收口但未应用（被低收益 / 间隔门槛跳过、失败或取消）时，运行时直接重启后台压缩，不再向模型重复提示。手动指令的优先级高于用量类通知：它存续期间，阈值 warning、宽限倒计时和压力提醒都不再新注入（已送达的通知照常重放）。该请求是运行时内存状态：崩溃或恢复后未完成的 `/compact` 不会续跑，残留的通知卡片在下一个 idle 边界撤除。
 
-如果实际尝试过的所有候选模型都因为上下文长度错误拒绝请求，且自动压缩已启用，Chord 会启动 oversize recovery 压缩，并在压缩应用后重试。若自动压缩已关闭（`threshold: 0` 或 `/compact --no`），Chord 会停止当前 turn 并给出明确错误，而不是继续重试同一个超长 prompt。
+如果实际尝试过的所有候选模型都因为上下文长度错误拒绝请求，且自动压缩已启用，Chord 会启动 oversize recovery 压缩，并在压缩应用后重试。若自动压缩已关闭（`threshold: 0`），Chord 会停止当前 turn 并给出明确错误，而不是继续重试同一个超长 prompt。
 
 ### 区分 input/output 上限
 

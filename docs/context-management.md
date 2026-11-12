@@ -413,8 +413,7 @@ Beyond automatic triggering, you can manually compact at any time with the
 worker as automatic compaction: it can be started while the agent is already
 working, shows progress in the background compaction status slot, and applies
 at the next safe continuation/idle barrier rather than interrupting the active
-turn immediately. You can also use `/compact --no` to temporarily disable
-subsequent automatic compaction for the current session.
+turn immediately.
 
 While `context.compaction.model_driven` is enabled and the agent is busy, a
 `/compact` also asks the model to checkpoint on its own: a persistent
@@ -435,8 +434,8 @@ withdrawn at the next idle boundary.
 
 If every attempted candidate model rejects a request with a context-length error
 and automatic compaction is enabled, Chord starts an oversize-recovery compaction
-and retries after it applies. If automatic compaction is disabled (`threshold: 0`
-or `/compact --no`), Chord stops the turn and reports a clear error instead of
+and retries after it applies. If automatic compaction is disabled (`threshold: 0`),
+Chord stops the turn and reports a clear error instead of
 continuing to retry the same oversized prompt.
 
 ### Split input/output limits

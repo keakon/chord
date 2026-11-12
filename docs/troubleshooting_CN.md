@@ -447,8 +447,7 @@ github.com/keakon/chord/internal/tui.renderMarkdownContent
 1. 确认 `context.compaction.threshold` 是否已设置且大于 0（0 表示关闭自动压缩）。
 2. 检查 TUI 底部栏或信息面板的 `Context` 百分比。它按扣除预留余量后的**固定压缩预算**计算；模型的最大输出或独立输入上限可能使这个基数小于总窗口（详见 [上下文管理：上下文压缩](./context-management_CN.md#上下文压缩compaction)）。
 3. 如果设置了 `context.compaction.reserved`，由于会先扣除预留再应用 `threshold`，自动压缩会在更低的绝对 token 数触发；若压缩过于频繁，可检查 reserved 是否设得过大。
-4. `/compact --no` 会临时关闭当前会话的自动压缩；重新启动会话或执行 `/compact` 可恢复。
-5. 如果网关返回缺失或为 0 的用量数据，请开启 `log_level: debug`，并在自动压缩日志中查看 `estimated_input_tokens` 和 `effective_input_tokens`。
+4. 如果网关返回缺失或为 0 的用量数据，请开启 `log_level: debug`，并在自动压缩日志中查看 `estimated_input_tokens` 和 `effective_input_tokens`。
 
 **注意**：loop 模式既不会改变自动压缩，也不会改变请求级上下文剪裁，两者都保持启用。
 
