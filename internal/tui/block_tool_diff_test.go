@@ -613,9 +613,11 @@ func TestApplyPatchErrorCardKeepsHighlightedPatchPreview(t *testing.T) {
 	if !strings.Contains(plain, "apply_patch src/demo.go") || !strings.Contains(plain, "↳ Requested patch:") || !strings.Contains(plain, "+func main() {}") || !strings.Contains(plain, "hunk not found") {
 		t.Fatalf("expected error card to preserve path, patch, and error, got:\n%s", plain)
 	}
+	// The failed card's only file operation and hunk head their sections, so
+	// neither carries a separating rule.
 	hunkHeader := renderedLineContaining(t, lines, "@@")
-	if !strings.Contains(terminaltext.StripANSI(hunkHeader), "─") {
-		t.Fatalf("expected failed patch preview hunk header to include an inline separator, got %q", terminaltext.StripANSI(hunkHeader))
+	if strings.Contains(terminaltext.StripANSI(hunkHeader), "─") {
+		t.Fatalf("expected the failed patch preview's first hunk header to stay plain, got %q", terminaltext.StripANSI(hunkHeader))
 	}
 	added := renderedLineContaining(t, lines, "func main")
 	assertRenderedTextForeground(t, added, "func", renderedCellsForText(t, syntax.New("sample.go", "", "").Line("func sample() {}", ""), "func")[0].Style.Fg)
@@ -1864,9 +1866,11 @@ func TestApplyPatchStreamingPreviewRendersHighlightedWithoutFullParse(t *testing
 			t.Fatalf("expected streaming preview to contain %q, got:\n%s", want, plain)
 		}
 	}
+	// The patch's first file operation and its only hunk head their sections:
+	// nothing above them is being separated, so neither carries a rule.
 	hunkHeader := renderedLineContaining(t, lines, "@@")
-	if !strings.Contains(terminaltext.StripANSI(hunkHeader), "─") {
-		t.Fatalf("expected streaming patch preview hunk header to include an inline separator, got %q", terminaltext.StripANSI(hunkHeader))
+	if strings.Contains(terminaltext.StripANSI(hunkHeader), "─") {
+		t.Fatalf("expected the file's first hunk header to stay plain, got %q", terminaltext.StripANSI(hunkHeader))
 	}
 	added := renderedLineContaining(t, lines, "func main")
 	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentStyles.Palette.DiffAddLineBg))
@@ -1894,6 +1898,16 @@ func TestApplyPatchPreviewIncrementalRenderEqualsCold(t *testing.T) {
 			sb.WriteString(fmt.Sprintf(" \t\tlogger.Info(\"completed\", zap.Int(\"idx\", %d))\n", i))
 		}
 	}
+	// A second hunk and a second file operation exercise the between-sections
+	// rules on both the memo path and the cold path.
+	sb.WriteString("@@ cleanup\n")
+	sb.WriteString("-\tcleanup(stale)\n")
+	sb.WriteString("+\tcleanup(done)\n")
+	sb.WriteString("*** Update File: internal/tui/streamed_second.go\n")
+	sb.WriteString("@@\n")
+	sb.WriteString("+\tvar second = true\n")
+	sb.WriteString("*** Add File: docs/streamed.md\n")
+	sb.WriteString("+# streamed preview\n")
 	sb.WriteString("*** End Patch")
 	patch := sb.String()
 	if len(patch) < 16<<10 {
@@ -1963,41 +1977,67 @@ func TestApplyPatchPreviewMemoDropsLinesFromAStaleHighlighter(t *testing.T) {
 	}
 }
 
-// TestApplyPatchPreviewMarksFileSections pins which patch rows carry the
-// inline separator. Only hunk headers and file operation markers open a
-// section; envelope rows and Move to stay plain so one Update is not split.
+// TestApplyPatchPreviewMarksFileSections pins which patch rows are preceded by
+// a standalone separator. A separator separates the content above it: file
+// operations other than the patch's first, and hunks other than their file's
+// first — the applied-diff view's placement. Envelope rows and Move to stay
+// plain so one operation is not split, and every row heading the first section
+// stays plain because it has nothing above it to separate. The rendered header
+// row itself never carries a rule; the separator is its own row.
 func TestApplyPatchPreviewMarksFileSections(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	hl := syntax.New("src/demo.go", "", "")
-	cases := []struct {
-		name string
-		line string
-		want bool
-	}{
-		{"begin patch", "*** Begin Patch", false},
-		{"end patch", "*** End Patch", false},
-		{"move to", "*** Move to: src/renamed.go", false},
-		{"add file", "*** Add File: docs/note.md", true},
-		{"update file", "*** Update File: src/demo.go", true},
-		{"delete file", "*** Delete File: tmp/old.txt", true},
-		{"marker without path", "*** Add File:", true},
-		{"hunk header", "@@", true},
-		{"added content", "+# heading", false},
-		{"context line", " unchanged", false},
+	patch := []string{
+		"*** Begin Patch",
+		"*** Update File: src/demo.go",
+		"@@",
+		"-func old() {}",
+		"+func main() {}",
+		"@@",
+		"-func gone() {}",
+		"+func live() {}",
+		"*** Add File: docs/note.md",
+		"+# heading",
+		"*** Delete File: tmp/old.txt",
+		"*** Add File:",
+		"*** Update File: src/next.go",
+		"*** Move to: src/renamed.go",
+		"*** End Patch",
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			plain := terminaltext.StripANSI(renderApplyPatchPreviewLine(tc.line, 60, hl))
-			if got := strings.Contains(plain, "─"); got != tc.want {
-				t.Fatalf("renderApplyPatchPreviewLine(%q) rule=%v, want %v; plain=%q", tc.line, got, tc.want, plain)
-			}
-		})
+	want := []bool{
+		false, // envelope row
+		false, // the patch's first file operation heads the section list
+		false, // each file's first hunk heads its section
+		false, // diff body
+		false, // diff body
+		true,  // second hunk separates the first hunk's body
+		false, // diff body
+		false, // diff body
+		true,  // second file operation separates the first file's body
+		false, // added content
+		true,  // delete marker separates the Add File body
+		true,  // a marker whose path has not arrived yet is still a boundary
+		true,  // update marker separates the rows above it
+		false, // move to renames the update before it, not a boundary
+		false, // envelope row
+	}
+	var state applyPatchPreviewState
+	for i, line := range patch {
+		plain := terminaltext.StripANSI(renderApplyPatchPreviewLine(line, 60, hl))
+		if strings.Contains(plain, "─") {
+			t.Fatalf("renderApplyPatchPreviewLine(%q) still draws an inline rule: %q", line, plain)
+		}
+		if got := applyPatchPreviewBoundary(line, state); got != want[i] {
+			t.Fatalf("applyPatchPreviewBoundary(%q) = %v, want %v", line, got, want[i])
+		}
+		state.advance(line)
 	}
 }
 
 // TestApplyPatchStreamingPreviewSeparatesFileSections covers the live card:
 // an Add File group following an Update File group must be visually separated
-// by both the cold render and the streaming range path.
+// by both the cold render and the streaming range path, while the rows heading
+// the first section stay plain.
 func TestApplyPatchStreamingPreviewSeparatesFileSections(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	patch := strings.Join([]string{
@@ -2006,30 +2046,273 @@ func TestApplyPatchStreamingPreviewSeparatesFileSections(t *testing.T) {
 		"@@",
 		"-func old() {}",
 		"+func main() {}",
+		"@@",
+		"-func gone() {}",
+		"+func live() {}",
 		"*** Add File: docs/note.md",
 		"+# heading",
 		"*** End Patch",
 	}, "\n")
 	newBlock := func() *Block { return applyPatchStreamingTestBlock(patch) }
 
-	assertApplyPatchFileSectionRules(t, newBlock().Render(100, ""))
+	full := newBlock().Render(100, "")
+	assertApplyPatchFileSectionRules(t, full, 100)
 
 	block := newBlock()
-	assertApplyPatchFileSectionRules(t, block.RenderRange(100, "", 0, block.LineCount(100)))
-}
-
-func assertApplyPatchFileSectionRules(t *testing.T, lines []string) {
-	t.Helper()
-	for _, marker := range []string{"*** Update File: src/demo.go", "*** Add File: docs/note.md"} {
-		line := renderedLineContaining(t, lines, marker)
-		if !strings.Contains(terminaltext.StripANSI(line), "─") {
-			t.Fatalf("file section %q has no inline separator: %q", marker, terminaltext.StripANSI(line))
+	assertApplyPatchFileSectionRules(t, block.RenderRange(100, "", 0, block.LineCount(100)), 100)
+	// A boundary line owns two rows, so every window must still line up with
+	// the full render when it starts on a separator, a header, or a body row.
+	for start := range full {
+		for end := start; end <= len(full); end++ {
+			got := block.RenderRange(100, "", start, end)
+			if strings.Join(got, "\n") != strings.Join(full[start:end], "\n") {
+				t.Fatalf("range [%d:%d] differs from full render:\n got:\n%s\nwant:\n%s",
+					start, end, strings.Join(got, "\n"), strings.Join(full[start:end], "\n"))
+			}
 		}
 	}
-	for _, marker := range []string{"*** Begin Patch", "*** End Patch"} {
-		line := renderedLineContaining(t, lines, marker)
-		if strings.Contains(terminaltext.StripANSI(line), "─") {
-			t.Fatalf("envelope row %q should not carry a separator: %q", marker, terminaltext.StripANSI(line))
+}
+
+// TestApplyPatchPreviewSeparatorSurvivesLongPath pins why the preview uses a
+// standalone row: the old inline rule filled the space left of the header, so
+// a path that reached the content width left no separator at all — exactly
+// where the file boundary matters. Both render paths must keep the separator
+// above a long-path header and truncate the header instead.
+func TestApplyPatchPreviewSeparatorSurvivesLongPath(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	const width = 80
+	longPath := "/very/long/absolute/path/" + strings.Repeat("segment/", 12) + "file.go"
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: src/demo.go",
+		"@@",
+		"-old",
+		"+new",
+		"*** Add File: " + longPath,
+		"+# heading",
+		"*** End Patch",
+	}, "\n")
+	check := func(lines []string) {
+		t.Helper()
+		idx := renderedLineIndexContaining(t, lines, "*** Add File:")
+		header := terminaltext.StripANSI(lines[idx])
+		if strings.Contains(header, "─") {
+			t.Fatalf("long-path header still carries an inline rule: %q", header)
+		}
+		if !strings.Contains(header, "…") {
+			t.Fatalf("expected the long path to be truncated, got %q", header)
+		}
+		prev := lines[idx-1]
+		if !applyPatchSeparatorRow(prev, width) {
+			t.Fatalf("expected a full-width separator row above the long-path header, got %q", terminaltext.StripANSI(prev))
+		}
+	}
+	check(applyPatchStreamingTestBlock(patch).Render(width, ""))
+	block := applyPatchStreamingTestBlock(patch)
+	check(block.RenderRange(width, "", 0, block.LineCount(width)))
+}
+
+// applyPatchSeparatorRow reports whether a rendered card row is the full-width
+// standalone section rule. Checking for the whole rule (rather than a single ─)
+// keeps a diff body line that happens to contain a box-drawing character from
+// passing the boundary assertions.
+func applyPatchSeparatorRow(line string, width int) bool {
+	ruleWidth := max(newToolCardMetrics(width).cardWidth-4, 1)
+	return strings.Contains(terminaltext.StripANSI(line), strings.Repeat("─", ruleWidth))
+}
+
+func applyPatchSeparatorIndexes(lines []string, width int) []int {
+	var indexes []int
+	for i, line := range lines {
+		if applyPatchSeparatorRow(line, width) {
+			indexes = append(indexes, i)
+		}
+	}
+	return indexes
+}
+
+// TestApplyPatchSeparatorRowRequiresFullWidthRule guards the assertion helper
+// itself: relaxing it back to "contains a ─" would let the old inline tail
+// rule pass the section-boundary assertions.
+func TestApplyPatchSeparatorRowRequiresFullWidthRule(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	const width = 100
+	ruleWidth := max(newToolCardMetrics(width).cardWidth-4, 1)
+	if !applyPatchSeparatorRow(applyPatchDiffSeparator(ruleWidth), width) {
+		t.Fatal("standalone full-width rule not recognized")
+	}
+	inlineTail := "*** Update File: src/demo.go" + strings.Repeat("─", ruleWidth/2)
+	if applyPatchSeparatorRow(inlineTail, width) {
+		t.Fatal("an inline tail rule must not count as a separator row")
+	}
+}
+
+// TestApplyPatchPreviewAndAppliedDiffShareSectionSeparators pins the point of
+// unifying the two views: one multi-file, multi-hunk patch must draw the same
+// number of standalone rules in the requested-patch preview and in the applied
+// diff, with byte-identical rule rows and the same file/hunk boundary order.
+func TestApplyPatchPreviewAndAppliedDiffShareSectionSeparators(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	const width = 100
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: src/first.go",
+		"@@",
+		"-first old",
+		"+first new",
+		"@@",
+		"-second old",
+		"+second new",
+		"*** Update File: src/second.go",
+		"@@",
+		"-other old",
+		"+other new",
+		"@@",
+		"-another old",
+		"+another new",
+		"*** End Patch",
+	}, "\n")
+	args := `{"patch":"` + strings.ReplaceAll(patch, "\n", `\n`) + `"}`
+	previewLines := applyPatchStreamingTestBlock(patch).Render(width, "")
+
+	diff := strings.Join([]string{
+		"--- src/first.go",
+		"+++ src/first.go",
+		"@@ -1,1 +1,1 @@",
+		"-first old",
+		"+first new",
+		"@@ -8,1 +8,1 @@",
+		"-second old",
+		"+second new",
+		"--- src/second.go",
+		"+++ src/second.go",
+		"@@ -1,1 +1,1 @@",
+		"-other old",
+		"+other new",
+		"@@ -8,1 +8,1 @@",
+		"-another old",
+		"+another new",
+	}, "\n")
+	applied := &Block{
+		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
+		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
+		Diff: diff, ResultDone: true,
+	}
+	appliedLines := applied.Render(width, "")
+
+	previewAt := applyPatchSeparatorIndexes(previewLines, width)
+	appliedAt := applyPatchSeparatorIndexes(appliedLines, width)
+	// One boundary for the second file and one for each file's second hunk.
+	const wantSeparators = 3
+	if len(previewAt) != wantSeparators || len(appliedAt) != wantSeparators {
+		t.Fatalf("separator rows: preview %v, applied %v; want %d each\n--- preview ---\n%s\n--- applied ---\n%s",
+			previewAt, appliedAt, wantSeparators,
+			terminaltext.StripANSI(strings.Join(previewLines, "\n")),
+			terminaltext.StripANSI(strings.Join(appliedLines, "\n")))
+	}
+	for i := range previewAt {
+		previewRule := terminaltext.StripANSI(previewLines[previewAt[i]])
+		appliedRule := terminaltext.StripANSI(appliedLines[appliedAt[i]])
+		if previewRule != appliedRule {
+			t.Fatalf("separator %d differs between views:\n preview=%q\n applied=%q", i, previewRule, appliedRule)
+		}
+	}
+
+	// The preview spells section heads as patch markers; the applied diff
+	// spells them as ↳ M rows and numbered diff lines. Classifying only the
+	// head type lets both views be checked against one boundary sequence.
+	previewKinds := make([]string, 0, wantSeparators)
+	for _, idx := range previewAt {
+		if idx+1 >= len(previewLines) {
+			t.Fatalf("preview separator at %d has no section head below it", idx)
+		}
+		next := terminaltext.StripANSI(previewLines[idx+1])
+		switch {
+		case strings.Contains(next, "*** Update File:"):
+			previewKinds = append(previewKinds, "file")
+		case strings.Contains(next, "@@"):
+			previewKinds = append(previewKinds, "hunk")
+		default:
+			t.Fatalf("preview separator followed by %q, want a file or hunk head", next)
+		}
+	}
+	appliedKinds := make([]string, 0, wantSeparators)
+	for _, idx := range appliedAt {
+		if idx+1 >= len(appliedLines) {
+			t.Fatalf("applied separator at %d has no section head below it", idx)
+		}
+		next := terminaltext.StripANSI(appliedLines[idx+1])
+		if strings.Contains(next, "↳") {
+			appliedKinds = append(appliedKinds, "file")
+		} else {
+			appliedKinds = append(appliedKinds, "hunk")
+		}
+	}
+	const wantKinds = "hunk,file,hunk"
+	if strings.Join(previewKinds, ",") != wantKinds || strings.Join(appliedKinds, ",") != wantKinds {
+		t.Fatalf("boundary order: preview %v, applied %v; want %q", previewKinds, appliedKinds, wantKinds)
+	}
+
+	// A rule must own its row: the old inline rule filled the rest of a header
+	// row instead, which is what made long paths lose the boundary entirely.
+	for _, fragment := range []string{"*** Update File: src/first.go", "@@"} {
+		idx := renderedLineIndexContaining(t, previewLines, fragment)
+		if applyPatchSeparatorRow(previewLines[idx], width) {
+			t.Fatalf("preview header %q shares its row with a separator rule", fragment)
+		}
+	}
+}
+
+// assertApplyPatchFileSectionRules pins where the standalone separators sit for
+// a patch with two hunks and two file operations: the rows heading the first
+// section stay plain, the second hunk and the Add File operation are preceded
+// by a full-width rule. Header rows never carry an inline rule.
+func assertApplyPatchFileSectionRules(t *testing.T, lines []string, width int) {
+	t.Helper()
+	// A separator separates content above it: the patch's first file operation
+	// and each file's first hunk head their sections and stay plain; the second
+	// hunk separates the first hunk's body and the Add File operation
+	// separates the update's body.
+	cases := []struct {
+		fragment string
+		wantRule bool
+	}{
+		{"*** Update File: src/demo.go", false},
+		{"*** Add File: docs/note.md", true},
+		{"*** Begin Patch", false},
+		{"*** End Patch", false},
+	}
+	for _, tc := range cases {
+		idx := renderedLineIndexContaining(t, lines, tc.fragment)
+		plain := terminaltext.StripANSI(lines[idx])
+		if strings.Contains(plain, "─") {
+			t.Fatalf("section row %q still carries an inline rule: %q", tc.fragment, plain)
+		}
+		prev := ""
+		if idx > 0 {
+			prev = terminaltext.StripANSI(lines[idx-1])
+		}
+		if got := applyPatchSeparatorRow(prev, width); got != tc.wantRule {
+			t.Fatalf("row above %q rule=%v, want %v: %q", tc.fragment, got, tc.wantRule, prev)
+		}
+	}
+	var hunkIdxs []int
+	for i, line := range lines {
+		if strings.Contains(terminaltext.StripANSI(line), "@@") {
+			hunkIdxs = append(hunkIdxs, i)
+		}
+	}
+	if len(hunkIdxs) != 2 {
+		t.Fatalf("expected two hunk headers, got %d:\n%s", len(hunkIdxs), terminaltext.StripANSI(strings.Join(lines, "\n")))
+	}
+	for i, idx := range hunkIdxs {
+		plain := terminaltext.StripANSI(lines[idx])
+		if strings.Contains(plain, "─") {
+			t.Fatalf("hunk header %d still carries an inline rule: %q", i, plain)
+		}
+		prev := terminaltext.StripANSI(lines[idx-1])
+		if got := applyPatchSeparatorRow(prev, width); got != (i == 1) {
+			t.Fatalf("row above hunk header %d rule=%v, want %v: %q", i, got, i == 1, prev)
 		}
 	}
 }

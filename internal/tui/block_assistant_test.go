@@ -860,7 +860,7 @@ func TestCloneBlockForDeferredSourceClearsApplyPatchPreviewMemo(t *testing.T) {
 	clone := cloneBlockForDeferredSource(block)
 	if clone.previewRenderedPatch != "" || clone.previewRenderedWidth != 0 ||
 		clone.previewRenderedHL != nil || clone.previewRenderedHLPath != "" ||
-		clone.previewRenderedLines != nil {
+		clone.previewRenderedLines != nil || clone.previewRenderedBoundaries != nil {
 		t.Fatalf("deferred source clone kept part of the preview memo: %#v", clone)
 	}
 }

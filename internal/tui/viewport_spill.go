@@ -295,9 +295,13 @@ func (b *Block) estimatedHotBytes() int64 {
 	total += len(b.patchPreviewText)
 	total += len(b.previewRenderedPatch)
 	total += len(b.streamingPatchLineStarts) * 8
+	total += len(b.streamingPatchLineStates) * 2
+	total += len(b.streamingPatchLineBoundaries)
+	total += len(b.streamingPatchLineRowOffsets) * 8
 	for _, line := range b.previewRenderedLines {
 		total += len(line)
 	}
+	total += len(b.previewRenderedBoundaries)
 	for _, line := range b.mdCache {
 		total += len(line)
 	}

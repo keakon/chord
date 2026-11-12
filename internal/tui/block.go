@@ -179,22 +179,31 @@ type Block struct {
 	// the stream ends and the memo is dropped. Without the memo, every coalesced
 	// stream step re-highlights all N lines, which is linear per step and
 	// quadratic over the stream.
-	previewRenderedPatch  string
-	previewRenderedWidth  int
-	previewRenderedHL     *syntax.Highlighter
-	previewRenderedHLPath string
-	previewRenderedLines  []string
+	previewRenderedPatch      string
+	previewRenderedWidth      int
+	previewRenderedHL         *syntax.Highlighter
+	previewRenderedHLPath     string
+	previewRenderedLines      []string
+	previewRenderedBoundaries []bool
 
-	// streamingPatchMemo caches the normalized patch and byte offsets for the
+	// streamingPatchMemo caches the normalized patch, byte offsets, per-line
+	// preview rule states, section boundaries and screen-row offsets for the
 	// live apply_patch range renderer. It avoids splitting the complete patch
 	// again when LineCount and RenderRange serve the same frame; the key is the
 	// preview version, or the args length while no preview text is available.
+	// The states hold the fold before each line, so an append-only growth only
+	// refolds from the previous last line; boundaries and row offsets follow the
+	// same truncation point because that line can flip classification while it
+	// completes.
 	streamingPatchPreviewVersion uint64
 	streamingPatchArgsLen        int
 	streamingPatchFromPreview    bool
 	streamingPatchMemoValid      bool
 	streamingPatchText           string
 	streamingPatchLineStarts     []int
+	streamingPatchLineStates     []applyPatchPreviewState
+	streamingPatchLineBoundaries []bool
+	streamingPatchLineRowOffsets []int
 
 	// toolArgsCache memoizes parsed JSON arguments for tool-call rendering.
 	// It must be invalidated whenever ToolName or Content changes.

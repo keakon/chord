@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/syntax"
 	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func streamingApplyPatchTestBlock(lineCount int) *Block {
@@ -451,23 +452,70 @@ func TestStreamingApplyPatchPreviewMemoTracksPreviewVersion(t *testing.T) {
 		patchPreviewText:   patch, patchPreviewVersion: 1, patchPreviewLen: len(patch),
 		RawArgs: strings.Repeat("x", 4096),
 	}
-	text, starts := b.streamingApplyPatchPreviewData()
-	if text != patch || len(starts) != 4 {
-		t.Fatalf("preview = %q with %d starts, want patch with 4 starts", text, len(starts))
+	preview := b.streamingApplyPatchPreviewData()
+	if preview.patch != patch || len(preview.lineStarts) != 4 || len(preview.lineStates) != len(preview.lineStarts) ||
+		len(preview.lineBoundaries) != len(preview.lineStarts) || len(preview.lineRowOffsets) != len(preview.lineStarts)+1 {
+		t.Fatalf("preview = %q with %d starts, %d states, %d boundaries, %d row offsets, want patch with 4 starts and matching slices",
+			preview.patch, len(preview.lineStarts), len(preview.lineStates), len(preview.lineBoundaries), len(preview.lineRowOffsets))
 	}
 
 	// Growing raw args without a preview refresh must reuse the sanitized text
 	// and line starts instead of parsing the whole accumulated payload again.
 	b.RawArgs += strings.Repeat("y", 4096)
-	text, starts = b.streamingApplyPatchPreviewData()
-	if text != patch || len(starts) != 4 {
-		t.Fatalf("cached preview = %q with %d starts, want patch with 4 starts", text, len(starts))
+	preview = b.streamingApplyPatchPreviewData()
+	if preview.patch != patch || len(preview.lineStarts) != 4 || len(preview.lineStates) != len(preview.lineStarts) ||
+		len(preview.lineBoundaries) != len(preview.lineStarts) || len(preview.lineRowOffsets) != len(preview.lineStarts)+1 {
+		t.Fatalf("cached preview = %q with %d starts, %d states, %d boundaries, %d row offsets, want patch with 4 starts and matching slices",
+			preview.patch, len(preview.lineStarts), len(preview.lineStates), len(preview.lineBoundaries), len(preview.lineRowOffsets))
 	}
 
 	b.patchPreviewText = patch + "\n+second\n*** End Patch"
 	b.patchPreviewVersion++
-	text, starts = b.streamingApplyPatchPreviewData()
-	if text != b.patchPreviewText || len(starts) != 6 {
-		t.Fatalf("refreshed preview = %q with %d starts, want updated patch with 6 starts", text, len(starts))
+	preview = b.streamingApplyPatchPreviewData()
+	if preview.patch != b.patchPreviewText || len(preview.lineStarts) != 6 || len(preview.lineStates) != len(preview.lineStarts) ||
+		len(preview.lineBoundaries) != len(preview.lineStarts) || len(preview.lineRowOffsets) != len(preview.lineStarts)+1 {
+		t.Fatalf("refreshed preview = %q with %d starts, %d states, %d boundaries, %d row offsets, want updated patch with 6 starts and matching slices",
+			preview.patch, len(preview.lineStarts), len(preview.lineStates), len(preview.lineBoundaries), len(preview.lineRowOffsets))
 	}
+}
+
+// TestStreamingApplyPatchPreviewRefoldsGrownMarkerLines pins the per-line rule
+// states across an append-only growth whose previous last line completes a
+// marker mid-stream. A row's state depends only on the rows above it, so
+// earlier entries stand; the grown row reclassifies once its colon arrives,
+// and the rows below must fold from its new classification — otherwise the
+// file operation after it misses its separating rule. The growth loop drives
+// both render paths — the cold memo fold via Render and the streaming range
+// path via RenderRange — and requires byte-identical output on every frame.
+func TestStreamingApplyPatchPreviewRefoldsGrownMarkerLines(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	const width = 100
+	block := &Block{
+		ID:                 1,
+		Type:               BlockToolCall,
+		ToolName:           tools.NameApplyPatch,
+		RawArgs:            `{"patch":"*** Begin Patch\n*** Update File`,
+		Collapsed:          false,
+		ToolExecutionState: agent.ToolCallExecutionStateReceiving,
+	}
+	// The frame ends inside the marker line: `*** Update File` does not match
+	// the marker prefix until the colon streams in, exactly like a `@` that
+	// has not grown into `@@` yet.
+	marker := renderedLineContaining(t, block.Render(width, ""), "*** Update File")
+	if strings.Contains(terminaltext.StripANSI(marker), "─") {
+		t.Fatalf("incomplete marker row should stay plain: %q", terminaltext.StripANSI(marker))
+	}
+
+	fullArgs := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-func old() {}\n+func main() {}\n@@\n-func gone() {}\n+func live() {}\n*** Add File: docs/note.md\n+# heading\n*** End Patch"}`
+	for i := len(block.RawArgs); i <= len(fullArgs); i++ {
+		block.RawArgs = fullArgs[:i]
+		block.InvalidateCache()
+		full := strings.Join(block.Render(width, ""), "\n")
+		got := strings.Join(block.RenderRange(width, "", 0, block.LineCount(width)), "\n")
+		if got != full {
+			t.Fatalf("range render diverged from cold render at %d bytes\n--- cold ---\n%s\n--- range ---\n%s", i, full, got)
+		}
+	}
+	block.InvalidateCache()
+	assertApplyPatchFileSectionRules(t, block.Render(width, ""), width)
 }

@@ -194,13 +194,18 @@ func TestHighlightedFileToolsUseExpectedBackgrounds(t *testing.T) {
 
 func renderedLineContaining(t *testing.T, lines []string, text string) string {
 	t.Helper()
-	for _, line := range lines {
+	return lines[renderedLineIndexContaining(t, lines, text)]
+}
+
+func renderedLineIndexContaining(t *testing.T, lines []string, text string) int {
+	t.Helper()
+	for i, line := range lines {
 		if strings.Contains(terminaltext.StripANSI(line), text) {
-			return line
+			return i
 		}
 	}
 	t.Fatalf("rendered output does not contain %q:\n%s", text, terminaltext.StripANSI(strings.Join(lines, "\n")))
-	return ""
+	return -1
 }
 
 func assertRenderedTextBackground(t *testing.T, line, text string, want color.Color) {

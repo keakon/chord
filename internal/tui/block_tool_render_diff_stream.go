@@ -1,28 +1,46 @@
 package tui
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/syntax"
 )
 
+// streamingApplyPatchPreview is the memoized line model of the live patch
+// preview. lineRowOffsets has one more entry than lineStarts and records how
+// many screen rows precede each patch line; a boundary line occupies two rows
+// (separator, then header), so the range renderer maps a screen row to its
+// patch line instead of assuming a one-to-one mapping.
+type streamingApplyPatchPreview struct {
+	patch          string
+	lineStarts     []int
+	lineStates     []applyPatchPreviewState
+	lineBoundaries []bool
+	lineRowOffsets []int
+}
+
 // streamingApplyPatchCardLayout describes the small fixed part of a live
-// apply_patch card and the one-line-per-input-line preview that follows it.
-// The layout deliberately keeps patch lines out of the fixed slice: a
-// viewport can then render only the requested rows instead of assembling the
-// complete card on every streamed update.
+// apply_patch card and the preview rows that follow it. The layout deliberately
+// keeps patch lines out of the fixed slice: a viewport can then render only the
+// requested rows instead of assembling the complete card on every streamed
+// update.
 type streamingApplyPatchCardLayout struct {
-	frame       prewrappedCardFrame
-	fixedLines  []string
-	tailLines   []string
-	patch       string
-	lineStarts  []int
-	patchWidth  int
-	syntaxPath  string
-	patchStart  int
-	totalLines  int
-	highlighter *syntax.Highlighter
+	frame          prewrappedCardFrame
+	fixedLines     []string
+	tailLines      []string
+	patch          string
+	lineStarts     []int
+	patchStates    []applyPatchPreviewState
+	lineBoundaries []bool
+	lineRowOffsets []int
+	patchWidth     int
+	syntaxPath     string
+	patchStart     int
+	patchRows      int
+	totalLines     int
+	highlighter    *syntax.Highlighter
 }
 
 func (b *Block) streamingApplyPatchRangeEligible() bool {
@@ -45,14 +63,23 @@ func (b *Block) clearStreamingApplyPatchRangeMemo() {
 	b.streamingPatchMemoValid = false
 	b.streamingPatchText = ""
 	b.streamingPatchLineStarts = nil
+	b.streamingPatchLineStates = nil
+	b.streamingPatchLineBoundaries = nil
+	b.streamingPatchLineRowOffsets = nil
 }
 
-func (b *Block) streamingApplyPatchPreviewData() (string, []int) {
+func (b *Block) streamingApplyPatchPreviewData() streamingApplyPatchPreview {
 	argsJSON := b.editPatchArgsJSON()
 	fromPreview := strings.HasPrefix(strings.TrimSpace(b.patchPreviewText), "*** ")
 	if b.streamingPatchMemoValid && b.streamingPatchPreviewVersion == b.patchPreviewVersion &&
 		(b.streamingPatchFromPreview || b.streamingPatchArgsLen == len(argsJSON)) {
-		return b.streamingPatchText, b.streamingPatchLineStarts
+		return streamingApplyPatchPreview{
+			patch:          b.streamingPatchText,
+			lineStarts:     b.streamingPatchLineStarts,
+			lineStates:     b.streamingPatchLineStates,
+			lineBoundaries: b.streamingPatchLineBoundaries,
+			lineRowOffsets: b.streamingPatchLineRowOffsets,
+		}
 	}
 
 	patch := ""
@@ -71,12 +98,21 @@ func (b *Block) streamingApplyPatchPreviewData() (string, []int) {
 	patch = strings.TrimSpace(patch)
 
 	var lineStarts []int
+	var lineStates []applyPatchPreviewState
+	var lineBoundaries []bool
+	var lineRowOffsets []int
 	if patch != "" {
-		appendOnly := b.streamingPatchMemoValid && strings.HasPrefix(patch, b.streamingPatchText)
+		appendOnly := b.streamingPatchMemoValid && len(b.streamingPatchLineStates) > 0 &&
+			strings.HasPrefix(patch, b.streamingPatchText)
 		if appendOnly {
 			lineStarts = b.streamingPatchLineStarts
+			lineStates = b.streamingPatchLineStates
+			lineBoundaries = b.streamingPatchLineBoundaries
+			lineRowOffsets = b.streamingPatchLineRowOffsets
 		} else {
 			lineStarts = []int{0}
+			lineStates = []applyPatchPreviewState{{}}
+			lineRowOffsets = []int{0}
 		}
 		scanFrom := 0
 		if appendOnly {
@@ -87,6 +123,40 @@ func (b *Block) streamingApplyPatchPreviewData() (string, []int) {
 				lineStarts = append(lineStarts, i+1)
 			}
 		}
+		// Fold the per-line rule states. An append-only growth refolds from
+		// the previous last line's own pre-state: that line grows with the
+		// stream, and its classification can flip while it completes — a
+		// marker's colon or a @@ header only arrives with later fragments.
+		// Rows above it never change — a row's state is a function of the
+		// rows above it — so their entries stand. Boundaries and row offsets
+		// start from the same point: a line that turns into a section header
+		// gains its separator row only on the refold.
+		foldFrom := 0
+		if appendOnly {
+			foldFrom = len(lineStates) - 1
+		}
+		state := lineStates[foldFrom]
+		lineStates = lineStates[:foldFrom+1]
+		lineBoundaries = lineBoundaries[:min(foldFrom, len(lineBoundaries))]
+		lineRowOffsets = lineRowOffsets[:min(foldFrom+1, len(lineRowOffsets))]
+		for i := foldFrom; i < len(lineStarts); i++ {
+			end := len(patch)
+			if i+1 < len(lineStarts) {
+				end = lineStarts[i+1] - 1
+			}
+			if i > foldFrom {
+				lineStates = append(lineStates, state)
+			}
+			line := patch[lineStarts[i]:end]
+			boundary := applyPatchPreviewBoundary(line, state)
+			lineBoundaries = append(lineBoundaries, boundary)
+			rows := 1
+			if boundary {
+				rows++
+			}
+			lineRowOffsets = append(lineRowOffsets, lineRowOffsets[i]+rows)
+			state.advance(line)
+		}
 	}
 	b.streamingPatchPreviewVersion = b.patchPreviewVersion
 	b.streamingPatchArgsLen = len(argsJSON)
@@ -94,7 +164,16 @@ func (b *Block) streamingApplyPatchPreviewData() (string, []int) {
 	b.streamingPatchMemoValid = true
 	b.streamingPatchText = patch
 	b.streamingPatchLineStarts = lineStarts
-	return patch, lineStarts
+	b.streamingPatchLineStates = lineStates
+	b.streamingPatchLineBoundaries = lineBoundaries
+	b.streamingPatchLineRowOffsets = lineRowOffsets
+	return streamingApplyPatchPreview{
+		patch:          patch,
+		lineStarts:     lineStarts,
+		lineStates:     lineStates,
+		lineBoundaries: lineBoundaries,
+		lineRowOffsets: lineRowOffsets,
+	}
 }
 
 func (b *Block) streamingApplyPatchLineCount(width int) int {
@@ -128,15 +207,15 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 		headerLine,
 	}
 	bodyLines = b.appendApplyPatchTargetLines(bodyLines, targets, cardWidth-4)
-	patch, lineStarts := b.streamingApplyPatchPreviewData()
+	preview := b.streamingApplyPatchPreviewData()
 	// Mirror the cold render (renderFileDiffCall): a patch whose targets only
 	// delete or move/rename files has no line change to preview, so the
 	// "Requested patch" section is suppressed there too. Args that are not yet
 	// parseable leave targets empty and keep the transient preview.
 	if applyPatchOnlyMoveOrDeleteTargets(targets) {
-		patch, lineStarts = "", nil
+		preview = streamingApplyPatchPreview{}
 	}
-	if patch != "" {
+	if preview.patch != "" {
 		bodyLines = append(bodyLines, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Requested patch"))
 	}
 	diagnosticBody := b.appendToolArgDiagnostics(append([]string(nil), bodyLines...), max(cardWidth-4, 10))
@@ -151,18 +230,26 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 	frame := newPrewrappedCardFrame(blockStyle, cardWidth, toolCardBg, cardRailPrefix("tool", b.Focused))
 	contentStart := frame.marginTop + frame.padTop
 	patchStart := contentStart + len(fixedLines)
-	tailStart := patchStart + len(lineStarts)
+	patchRows := 0
+	if n := len(preview.lineRowOffsets); n > 0 {
+		patchRows = preview.lineRowOffsets[n-1]
+	}
+	tailStart := patchStart + patchRows
 	total := tailStart + len(tailLines) + frame.padBottom + frame.marginBottom
 	return streamingApplyPatchCardLayout{
-		frame:      frame,
-		fixedLines: fixedLines,
-		tailLines:  tailLines,
-		patch:      patch,
-		lineStarts: lineStarts,
-		patchWidth: cardWidth - 4,
-		syntaxPath: syntaxPath,
-		patchStart: patchStart,
-		totalLines: total,
+		frame:          frame,
+		fixedLines:     fixedLines,
+		tailLines:      tailLines,
+		patch:          preview.patch,
+		lineStarts:     preview.lineStarts,
+		patchStates:    preview.lineStates,
+		lineBoundaries: preview.lineBoundaries,
+		lineRowOffsets: preview.lineRowOffsets,
+		patchWidth:     cardWidth - 4,
+		syntaxPath:     syntaxPath,
+		patchStart:     patchStart,
+		patchRows:      patchRows,
+		totalLines:     total,
 	}
 }
 
@@ -189,7 +276,7 @@ func (b *Block) renderStreamingApplyPatchRange(width int, spinnerFrame string, s
 	}
 	out := make([]string, 0, end-start)
 	contentStart := layout.frame.marginTop + layout.frame.padTop
-	patchEnd := layout.patchStart + len(layout.lineStarts)
+	patchEnd := layout.patchStart + layout.patchRows
 	tailStart := patchEnd
 	tailEnd := tailStart + len(layout.tailLines)
 	padBottomEnd := tailEnd + layout.frame.padBottom
@@ -205,7 +292,17 @@ func (b *Block) renderStreamingApplyPatchRange(width int, spinnerFrame string, s
 			out = append(out, layout.frame.blankWrapped)
 		case lineIndex >= layout.patchStart:
 			if lineIndex < patchEnd {
-				patchLineIndex := lineIndex - layout.patchStart
+				rowIndex := lineIndex - layout.patchStart
+				// A boundary line owns two rows: the separator and the header.
+				// Find the patch line whose row range contains rowIndex.
+				patchLineIndex := sort.Search(len(layout.lineRowOffsets)-1, func(i int) bool {
+					return layout.lineRowOffsets[i+1] > rowIndex
+				})
+				rowInLine := rowIndex - layout.lineRowOffsets[patchLineIndex]
+				if rowInLine == 0 && layout.lineBoundaries[patchLineIndex] {
+					out = append(out, layout.renderBodyLine(applyPatchDiffSeparator(layout.patchWidth)))
+					continue
+				}
 				lineStart := layout.lineStarts[patchLineIndex]
 				lineEnd := len(layout.patch)
 				if patchLineIndex+1 < len(layout.lineStarts) {

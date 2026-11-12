@@ -762,6 +762,7 @@ func (b *Block) clearApplyPatchPreviewMemo() {
 	b.previewRenderedHL = nil
 	b.previewRenderedHLPath = ""
 	b.previewRenderedLines = nil
+	b.previewRenderedBoundaries = nil
 	b.clearStreamingApplyPatchRangeMemo()
 }
 
@@ -831,22 +832,70 @@ func (b *Block) appendApplyPatchPreviewLines(patch string, width int, hl *syntax
 	if b.previewRenderedWidth == width && b.previewRenderedPatch != "" &&
 		b.previewRenderedHL == hl && b.previewRenderedHLPath == hlPath &&
 		len(b.previewRenderedLines) > 0 && len(lines) >= len(b.previewRenderedLines) &&
+		len(b.previewRenderedBoundaries) == len(b.previewRenderedLines) &&
 		strings.HasPrefix(patch, b.previewRenderedPatch) {
 		reuse = len(b.previewRenderedLines) - 1
 	}
-	out := make([]string, 0, len(lines))
+	// The memo keeps one entry per patch line, without separator rows: the
+	// reuse key counts patch lines, and interleaving rows here would make
+	// len(previewRenderedLines) drift from len(lines). Separators are inserted
+	// when the rendered rows are returned.
+	content := make([]string, 0, len(lines))
+	boundaries := make([]bool, 0, len(lines))
+	var state applyPatchPreviewState
 	if reuse > 0 {
-		out = append(out, b.previewRenderedLines[:reuse]...)
+		content = append(content, b.previewRenderedLines[:reuse]...)
+		boundaries = append(boundaries, b.previewRenderedBoundaries[:reuse]...)
+		// The reused lines stand as rendered; fold their rows so the
+		// re-rendered tail starts from the state they left behind.
+		for _, line := range lines[:reuse] {
+			state.advance(line)
+		}
 	}
 	for _, line := range lines[reuse:] {
-		out = append(out, renderApplyPatchPreviewLine(line, width, hl))
+		boundaries = append(boundaries, applyPatchPreviewBoundary(line, state))
+		content = append(content, renderApplyPatchPreviewLine(line, width, hl))
+		state.advance(line)
 	}
 	b.previewRenderedPatch = patch
 	b.previewRenderedWidth = width
 	b.previewRenderedHL = hl
 	b.previewRenderedHLPath = hlPath
-	b.previewRenderedLines = out
-	return out
+	b.previewRenderedLines = content
+	b.previewRenderedBoundaries = boundaries
+	return applyPatchPreviewRows(content, boundaries, width)
+}
+
+// applyPatchPreviewBoundary reports whether a separator row precedes line.
+// The applied-diff view draws a standalone rule above every file section and
+// hunk except the first of each, and the preview uses the same placement so
+// the card does not change its section language once the result lands.
+func applyPatchPreviewBoundary(line string, state applyPatchPreviewState) bool {
+	if strings.HasPrefix(line, "@@") {
+		return state.seenHunk
+	}
+	return state.seenFileOp && isApplyPatchFileSectionMarker(line)
+}
+
+// applyPatchPreviewRows interleaves the standalone separator rows with the
+// rendered patch lines. Separators stay out of the content memo so the reuse
+// key remains one entry per patch line; building the returned slice here also
+// keeps the cold render and the streaming range path on the same row layout.
+func applyPatchPreviewRows(content []string, boundaries []bool, width int) []string {
+	separators := 0
+	for _, boundary := range boundaries {
+		if boundary {
+			separators++
+		}
+	}
+	rows := make([]string, 0, len(content)+separators)
+	for i, line := range content {
+		if boundaries[i] {
+			rows = append(rows, applyPatchDiffSeparator(width))
+		}
+		rows = append(rows, line)
+	}
+	return rows
 }
 
 func renderApplyPatchPreviewLine(line string, width int, hl *syntax.Highlighter) string {
@@ -862,17 +911,33 @@ func renderApplyPatchPreviewLine(line string, width int, hl *syntax.Highlighter)
 	case strings.HasPrefix(line, "@@"):
 		return renderApplyPatchPreviewHunkHeader(line, width)
 	case strings.HasPrefix(line, "***"):
-		header := truncateApplyPatchDisplayLine(line, width)
-		styled := currentStyles.ToolResultStyle.Render(header)
-		// A file operation opens a new section just like a hunk header does.
-		// Begin/End Patch and Move to are not file boundaries: Move to renames
-		// the Update File before it, so a rule there would split one operation.
-		if isApplyPatchFileSectionMarker(line) {
-			styled += applyPatchPreviewRule(header, width)
-		}
-		return "    " + styled
+		return "    " + currentStyles.ToolResultStyle.Render(truncateApplyPatchDisplayLine(line, width))
 	default:
 		return "    " + currentStyles.DimStyle.Render(truncateApplyPatchDisplayLine(line, width))
+	}
+}
+
+// applyPatchPreviewState folds the patch rows rendered above the current one.
+// A preview separator separates content: it is inserted above a file operation
+// other than the patch's first, or above a hunk other than its file's first —
+// the same placement the applied-diff view uses, whose separators sit between
+// sections and never before the first of either. Rendering each row with the
+// state accumulated before it keeps a row's boundary a function of the rows
+// above it, so the streaming render memos stay prefix-reusable.
+type applyPatchPreviewState struct {
+	seenFileOp bool
+	seenHunk   bool
+}
+
+// advance folds one patch row into the state: callers render a row with the
+// state as it stood before it, then advance with the row itself.
+func (s *applyPatchPreviewState) advance(line string) {
+	switch {
+	case isApplyPatchFileSectionMarker(line):
+		s.seenFileOp = true
+		s.seenHunk = false
+	case strings.HasPrefix(line, "@@"):
+		s.seenHunk = true
 	}
 }
 
@@ -890,27 +955,14 @@ func isApplyPatchFileSectionMarker(line string) bool {
 	return false
 }
 
-// applyPatchPreviewRule fills the rest of a patch header row with the same dim
-// rule the applied-diff view draws at file and hunk boundaries. It stays on the
-// header row: the streaming preview maps one patch line to one screen line, so
-// a standalone rule would break that mapping and the per-line render memo.
-// The body remains independently highlighted; this is only a visual boundary.
-func applyPatchPreviewRule(header string, width int) string {
-	headerWidth := terminaltext.Width(header)
-	if headerWidth >= width {
-		return ""
-	}
-	return currentStyles.DimStyle.Render(strings.Repeat("─", width-headerWidth))
-}
-
 func renderApplyPatchPreviewHunkHeader(line string, width int) string {
-	header := truncateApplyPatchDisplayLine(line, width)
-	return "    " + currentStyles.ToolResultExpandedStyle.Render(header) + applyPatchPreviewRule(header, width)
+	return "    " + currentStyles.ToolResultExpandedStyle.Render(truncateApplyPatchDisplayLine(line, width))
 }
 
-// applyPatchDiffSeparator renders a standalone full-width dim rule for applied
-// diff hunk/file boundaries, matching the inline rule in
-// renderApplyPatchPreviewHunkHeader. Width is the content width (cardWidth-4).
+// applyPatchDiffSeparator renders the standalone full-width dim rule shared by
+// the applied diff and the requested-patch preview. Both insert it above a
+// section header, so a card keeps the same section language before and after
+// the result lands. Width is the content width (cardWidth-4).
 func applyPatchDiffSeparator(width int) string {
 	return "    " + currentStyles.DimStyle.Render(strings.Repeat("─", max(width, 1)))
 }
@@ -1042,11 +1094,11 @@ func (b *Block) applyPatchTargets() []tools.ApplyPatchDisplayTarget {
 		return nil
 	}
 	if b.toolArgumentsAreReceiving() {
-		patch, _ := b.streamingApplyPatchPreviewData()
+		preview := b.streamingApplyPatchPreviewData()
 		// Incomplete input has paths for the live header, but cannot yet have
 		// authoritative operation totals. Avoid canonicalizing and parsing the
 		// entire growing patch on every layout pass.
-		if !strings.HasSuffix(strings.TrimSpace(patch), "*** End Patch") {
+		if !strings.HasSuffix(strings.TrimSpace(preview.patch), "*** End Patch") {
 			return nil
 		}
 	}
