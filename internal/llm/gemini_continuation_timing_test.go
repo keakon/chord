@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/contextdiag"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -228,5 +231,67 @@ func TestGeminiContinuationCancelledDuringPublicationKeepsBillingOnly(t *testing
 	}
 	if receipt.Usage == nil || receipt.Usage.OutputTokens != 5 || receipt.RequestNs != 0 || receipt.FirstOutputNs != 0 {
 		t.Fatalf("cancelled publication receipt=%+v, want billing without timing", receipt)
+	}
+}
+
+func TestGeminiTerminalDrainWithoutCompleteUsageDropsThroughput(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		usage      string
+		usageState string
+		output     int
+	}{
+		{name: "missing", usageState: contextdiag.Missing},
+		{name: "partial", usage: `,"usageMetadata":{"candidatesTokenCount":5}`, usageState: contextdiag.Partial, output: 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg := NewProviderConfig("provider", config.ProviderConfig{
+					Type:   config.ProviderTypeGenerateContent,
+					APIURL: "https://generativelanguage.googleapis.com/v1beta",
+					Models: map[string]config.ModelConfig{"test-model": {
+						Compat: &config.ModelCompatConfig{GenerateContent: &config.GenerateContentCompatConfig{AutomaticContinuation: new(true)}},
+						Limit:  config.ModelLimit{Context: 8192, Output: 1024},
+					}},
+				}, []string{"test-key"})
+				provider, err := NewGeminiProviderWithClient(cfg, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+					time.Sleep(100 * time.Millisecond)
+					reader, writer := io.Pipe()
+					go func() {
+						defer writer.Close()
+						_, _ = io.WriteString(writer, `data: {"candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}]`+tc.usage+"}\n\n")
+						<-req.Context().Done()
+						_ = writer.CloseWithError(req.Context().Err())
+					}()
+					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Request: req, Body: reader}, nil
+				})}, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				client := NewClient(cfg, provider, "test-model", 1024, "")
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				var receipts []ContinuationUsage
+				start := time.Now()
+				resp, err := client.CompleteStreamWithOptions(ctx, []message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, func(message.StreamDelta) {}, CompleteStreamOptions{
+					OnContinuationUsage: func(receipt ContinuationUsage) { receipts = append(receipts, receipt) },
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resp.Content != "hello" || !resp.UsageReported || resp.Usage.OutputTokens != tc.output {
+					t.Fatalf("response = %+v, want completed text and only confirmed token counts", resp)
+				}
+				if elapsed := time.Since(start); elapsed != 100*time.Millisecond+TerminalDrainChunkTimeout {
+					t.Fatalf("elapsed = %v, want return after terminal drain", elapsed)
+				}
+				if len(receipts) != 1 || receipts[0].UsageState != tc.usageState || receipts[0].RequestNs != 0 {
+					t.Fatalf("receipts = %+v, want %s usage without throughput timing", receipts, tc.usageState)
+				}
+				if receipts[0].FirstOutputNs != int64(100*time.Millisecond) {
+					t.Fatalf("first output = %v, want measured 100ms latency", time.Duration(receipts[0].FirstOutputNs))
+				}
+			})
+		})
 	}
 }

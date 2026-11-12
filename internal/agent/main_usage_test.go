@@ -101,6 +101,43 @@ func TestRecordUsageCarriesRequestTiming(t *testing.T) {
 	}
 }
 
+func TestRecordUsageWithoutOutputDoesNotChangeThroughput(t *testing.T) {
+	for _, agentID := range []string{identity.MainAgentID, "worker-1"} {
+		for _, tc := range []struct {
+			name  string
+			usage *message.TokenUsage
+		}{
+			{name: "missing"},
+			{name: "empty", usage: &message.TokenUsage{}},
+			{name: "input only", usage: &message.TokenUsage{InputTokens: 100}},
+		} {
+			t.Run(agentID+"/"+tc.name, func(t *testing.T) {
+				tracker := analytics.NewUsageTracker()
+				a := &MainAgent{}
+				a.SetUsageEventSink(tracker.AddUsageEvent)
+				attr := usageAttribution{AgentID: agentID, Purpose: analytics.UsagePurposeChat, RunningModelRef: "provider/model-1"}
+				timing := usageTiming{RequestNs: int64(time.Second), FirstOutputNs: int64(100 * time.Millisecond)}
+
+				a.recordUsage(attr, tc.usage, config.ServiceTierStandard, nil, timing)
+				ms := tracker.SessionStatsForAgent(agentID).ByModel[attr.RunningModelRef]
+				if ms.ThroughputTokens != 0 || ms.ThroughputNs != 0 || ms.ThroughputSamples != 0 {
+					t.Fatalf("speed without output = %+v, want no throughput sample", ms)
+				}
+				if ms.Calls != 1 || ms.FirstOutputSamples != 1 {
+					t.Fatalf("stats = %+v, want the real call and measured latency retained", ms)
+				}
+
+				a.recordUsage(attr, &message.TokenUsage{InputTokens: 100, OutputTokens: 50}, config.ServiceTierStandard, nil, timing)
+				a.recordUsage(attr, tc.usage, config.ServiceTierStandard, nil, timing)
+				ms = tracker.SessionStatsForAgent(agentID).ByModel[attr.RunningModelRef]
+				if ms.ThroughputTokens != 50 || ms.ThroughputNs != int64(time.Second) || ms.ThroughputSamples != 1 {
+					t.Fatalf("speed after missing usage = %+v, want the measured sample unchanged", ms)
+				}
+			})
+		}
+	}
+}
+
 func TestResponseUsageTimingFromResponse(t *testing.T) {
 	if got := responseUsageTiming(nil); got != (usageTiming{}) {
 		t.Fatalf("nil response timing = %+v, want zero", got)

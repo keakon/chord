@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
@@ -188,5 +190,54 @@ func TestFocusedTokenUsageCoversEveryAttemptWhileLive(t *testing.T) {
 	}
 	if parked := a.GetTokenUsage(); parked != live {
 		t.Fatalf("parked focused usage = %#v, want the live reading %#v unchanged by parking", parked, live)
+	}
+}
+
+func TestFocusedModelSpeedCoversEveryAttemptWhileLiveAndParked(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	sub := newControllableTestSubAgent(t, a, "task-speed")
+	sub.setState(SubAgentStateCompleted, "done")
+	a.syncTaskRecordFromSub(sub, "")
+	record := a.taskRecordByTaskID(sub.taskID)
+	record.InstanceHistory = []string{"worker-earlier", sub.instanceID}
+	a.setTaskRecords(map[string]*DurableTaskRecord{sub.taskID: record})
+
+	const modelRef = "provider/model-1@high"
+	for _, sample := range []struct {
+		agentID string
+		output  int64
+		elapsed time.Duration
+	}{
+		{identity.MainAgentID, 900, time.Second},
+		{"other-worker", 700, time.Second},
+		{"worker-earlier", 100, time.Second},
+		{sub.instanceID, 300, 3 * time.Second},
+	} {
+		a.usageTracker.AddUsageEvent(analytics.UsageEvent{
+			AgentID:         sample.agentID,
+			Purpose:         analytics.UsagePurposeChat,
+			RunningModelRef: modelRef,
+			UsageRaw:        analytics.UsageSnapshot{OutputTokens: sample.output},
+			RequestNs:       int64(sample.elapsed),
+			FirstOutputNs:   int64(200 * time.Millisecond),
+		})
+	}
+	a.SwitchFocus(sub.instanceID)
+	live := a.GetSidebarUsageStats()
+	ms := live.ByModel[modelRef]
+	if ms == nil || ms.ThroughputTokens != 400 || ms.ThroughputNs != int64(4*time.Second) || ms.ThroughputSamples != 2 ||
+		ms.FirstOutputTotalNs != int64(400*time.Millisecond) || ms.FirstOutputSamples != 2 {
+		t.Fatalf("live worker model = %+v, want speed samples from both task instances", ms)
+	}
+	if !a.parkSubAgent(sub.instanceID) {
+		t.Fatal("parkSubAgent() = false")
+	}
+	if parked := a.GetSidebarUsageStats(); !reflect.DeepEqual(parked, live) {
+		t.Fatalf("parked stats = %+v, want live stats %+v", parked, live)
+	}
+	a.SwitchFocus(identity.MainAgentID)
+	if main := a.GetSidebarUsageStats().ByModel[modelRef]; main == nil || main.ThroughputTokens != 900 || main.ThroughputSamples != 1 {
+		t.Fatalf("main model = %+v, want only the main agent sample", main)
 	}
 }

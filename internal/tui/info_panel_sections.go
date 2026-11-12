@@ -99,7 +99,7 @@ func (m *Model) buildInfoPanelBackendBlock(lineW int) string {
 	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 }
 
-func (m *Model) buildInfoPanelModelBlock(lineW int) string {
+func (m *Model) buildInfoPanelModelBlock(lineW int, stats analytics.SessionStats) string {
 	modelState := m.focusedModelState()
 	if strings.TrimSpace(modelState.Backend) != "" {
 		// The external CLI picks and calls its own model; the BACKEND section
@@ -141,6 +141,9 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 	if tierLine := m.renderInfoPanelServiceTierLine(lineW); tierLine != "" {
 		modelLines = append(modelLines, tierLine)
 	}
+	if speedLine := renderModelSpeedLine(lineW, stats, modelState.DisplayRef); speedLine != "" {
+		modelLines = append(modelLines, speedLine)
+	}
 	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(modelLines))
 }
 
@@ -167,7 +170,7 @@ func keyPoolHealthSeverity(healthy, total int) keyPoolSeverity {
 	}
 }
 
-func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
+func (m *Model) buildInfoPanelUsageBlock(width, lineW int, stats analytics.SessionStats) string {
 	if m.focusedModelState().Backend != "" {
 		// Context and token usage belong to a model Chord sent requests to.
 		return ""
@@ -205,7 +208,6 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 		msgCount = reduction.CurrentMessages
 	}
 
-	stats := m.agent.GetSidebarUsageStats()
 	usageLines := []string{currentStyles.InfoPanelLineBg.Width(lineW).Render(currentStyles.InfoPanelTitle.Render("USAGE"))}
 	if current > 0 || limit > 0 {
 		gauge := m.renderContextGauge(width-6, percent, reminder, threshold)
@@ -251,9 +253,6 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 		}
 		if callsLine := renderUsageCallsLine(lineW, stats); callsLine != "" {
 			usageLines = append(usageLines, callsLine)
-		}
-		if speedLine := renderUsageSpeedLine(lineW, stats); speedLine != "" {
-			usageLines = append(usageLines, speedLine)
 		}
 		if costLine := renderUsageCostLine(lineW, stats); costLine != "" {
 			usageLines = append(usageLines, costLine)
@@ -921,24 +920,12 @@ func renderUsageCallsLine(lineW int, stats analytics.SessionStats) string {
 	return renderUsageCacheDetailLine(lineW, "Calls", ansi.StringWidth(usageDetailLabelWidth), currentStyles.InfoPanelValue.Render(strconv.FormatInt(stats.LLMCalls, 10)))
 }
 
-// renderUsageSpeedLine renders the session-wide average output throughput
-// behind the Calls row: a settled aggregate over the same main-chat samples
-// as the /stats Models tok/s column, refreshed only as requests settle.
-func renderUsageSpeedLine(lineW int, stats analytics.SessionStats) string {
-	var tokens, requestNs int64
-	samples := int64(0)
-	for _, ms := range stats.ByModel {
-		if ms == nil {
-			continue
-		}
-		tokens += ms.ThroughputTokens
-		requestNs += ms.ThroughputNs
-		samples += ms.ThroughputSamples
-	}
-	if samples <= 0 {
+func renderModelSpeedLine(lineW int, stats analytics.SessionStats, modelRef string) string {
+	ms := stats.ByModel[modelRef]
+	if ms == nil || ms.ThroughputSamples <= 0 {
 		return ""
 	}
-	return renderUsageCacheDetailLine(lineW, "tok/s", ansi.StringWidth(usageDetailLabelWidth), currentStyles.InfoPanelValue.Render(formatUsageThroughput(tokens, requestNs)))
+	return renderInfoPanelKVLine(lineW, "tok/s", currentStyles.InfoPanelValue.Render(formatUsageThroughput(ms.ThroughputTokens, ms.ThroughputNs)))
 }
 
 func renderUsageCostLine(lineW int, stats analytics.SessionStats) string {

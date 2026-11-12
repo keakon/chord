@@ -22,12 +22,12 @@ type ModelStats struct {
 	CacheWriteTokens int64   `json:"cache_write_tokens"`
 	ReasoningTokens  int64   `json:"reasoning_tokens"`
 	EstimatedCost    float64 `json:"estimated_cost"`
-	// Throughput samples fold only successful main-conversation chat
-	// requests with client-measured request timing (see
-	// usageContribution.isThroughputSample). ThroughputTokens is the output
-	// token sum over those samples — deliberately independent of the
-	// all-purpose OutputTokens accumulator, which spans every agent and
-	// purpose. tok/s = ThroughputTokens ÷ ThroughputNs is a duration-weighted
+	// Throughput samples fold successful chat requests with client-measured
+	// timing. Session-wide model stats include only main-agent samples;
+	// per-agent and per-task model stats include their own samples.
+	// ThroughputTokens is the output token sum over those samples,
+	// independent of OutputTokens, which includes every purpose within
+	// the aggregate's scope. tok/s = ThroughputTokens ÷ ThroughputNs is a duration-weighted
 	// rate; persistence and restore fold sums, never rates.
 	ThroughputTokens  int64 `json:"throughput_tokens,omitzero"`
 	ThroughputNs      int64 `json:"throughput_ns,omitzero"`
@@ -153,24 +153,11 @@ type usageContribution struct {
 	firstOutputNs int64
 }
 
-// isMainChatSpeedSampleGate reports whether a billed LLM call may fold into
-// the per-model throughput and first-output columns: only main-conversation
-// chat requests carry client-measured timing (the LLM client stamps it
-// exactly when an attempt completed successfully), so auxiliary purposes,
-// sub-agent traffic, and pre-timing historical events are excluded at the
-// aggregation entry. The session tracker and the ledger summary fold share
-// this gate so the two accumulation paths cannot drift.
-func isMainChatSpeedSampleGate(purpose, agentID string) bool {
-	return purpose == UsagePurposeChat && normalizeAgentID(agentID) == identity.MainAgentID
-}
-
 // isSpeedSampleEligible reports whether the contribution may fold into the
-// per-model throughput and first-output columns: only main-conversation
-// chat requests carry timing (the LLM client stamps it exactly when an
-// attempt completed successfully), so auxiliary purposes, sub-agent
-// traffic, and pre-timing events are excluded at the aggregation entry.
+// throughput and first-output columns. Auxiliary calls are excluded even
+// when they use the same model as a conversation.
 func (c usageContribution) isSpeedSampleEligible() bool {
-	return isMainChatSpeedSampleGate(c.purpose, c.agentID)
+	return c.purpose == UsagePurposeChat
 }
 
 // isThroughputSample reports eligibility plus a usable numerator: output
@@ -231,9 +218,8 @@ func (s *SessionStats) applyUsage(contribution usageContribution) {
 	s.ReasoningTokens += raw.ReasoningTokens
 	s.LLMCalls++
 	s.EstimatedCost += cost
-	addModelUsage(s.ByModel, contribution)
-
 	agentID := normalizeAgentID(contribution.agentID)
+	addModelUsage(s.ByModel, contribution, agentID == identity.MainAgentID)
 	addAgentUsage(s.ByAgent, agentID, contribution)
 
 	// Every non-main call lands in exactly one billing partition. The task ID
@@ -256,7 +242,7 @@ func (s *SessionStats) applyUsage(contribution usageContribution) {
 	addAgentUsageStats(s.Untracked, contribution)
 }
 
-func addModelUsage(group map[string]*ModelStats, contribution usageContribution) {
+func addModelUsage(group map[string]*ModelStats, contribution usageContribution, includeSpeed bool) {
 	if group == nil {
 		return
 	}
@@ -272,12 +258,12 @@ func addModelUsage(group map[string]*ModelStats, contribution usageContribution)
 	ms.CacheWriteTokens += contribution.billing.CacheWriteTokens
 	ms.ReasoningTokens += contribution.raw.ReasoningTokens
 	ms.EstimatedCost += contribution.cost
-	if contribution.isThroughputSample() {
+	if includeSpeed && contribution.isThroughputSample() {
 		ms.ThroughputTokens += contribution.raw.OutputTokens
 		ms.ThroughputNs += contribution.requestNs
 		ms.ThroughputSamples++
 	}
-	if contribution.isFirstOutputSample() {
+	if includeSpeed && contribution.isFirstOutputSample() {
 		ms.FirstOutputTotalNs += contribution.firstOutputNs
 		ms.FirstOutputSamples++
 	}
@@ -309,7 +295,7 @@ func addAgentUsageStats(as *AgentStats, contribution usageContribution) {
 	as.ReasoningTokens += contribution.raw.ReasoningTokens
 	as.LLMCalls++
 	as.EstimatedCost += contribution.cost
-	addModelUsage(as.ByModel, contribution)
+	addModelUsage(as.ByModel, contribution, true)
 }
 
 // AddUsageEvent applies one persisted usage event to the in-memory tracker.

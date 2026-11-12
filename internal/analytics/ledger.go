@@ -74,8 +74,8 @@ type UsageAggregate struct {
 	ProviderTotalTokens int64   `json:"provider_total_tokens,omitzero"`
 	BillingTotalTokens  int64   `json:"billing_total_tokens,omitzero"`
 	TotalCost           float64 `json:"total_cost"`
-	// Throughput and first-output sample sums fold only main-conversation
-	// chat requests with client-measured timing (see isMainChatSpeedSampleGate).
+	// Throughput and first-output sums fold only main-agent chat requests
+	// with measured timing, consistently across every summary grouping.
 	// ThroughputTokens is the output token sum over throughput samples —
 	// deliberately independent of OutputTokens, which spans every agent and
 	// purpose. tok/s = ThroughputTokens ÷ ThroughputNs is a duration-weighted
@@ -1112,44 +1112,47 @@ func applyUsageEvent(summary *SessionUsageSummary, event UsageEvent) {
 		return
 	}
 
-	addUsageAggregate(&summary.UsageTotal, event)
-	addUsageAggregate(summaryGroup(summary.ByProvider, event.Provider), event)
-	addUsageAggregate(summaryGroup(summary.ByModelRef, usageModelKey(event)), event)
-	addUsageAggregate(summaryGroup(summary.ByAgent, normalizeAgentID(event.AgentID)), event)
-	addUsageAggregate(summaryGroup(summary.ByPurpose, usageKeyOrUnknown(event.Purpose)), event)
+	contribution := eventContribution(event)
+	contribution.agentID = normalizeAgentID(contribution.agentID)
+	addUsageAggregate(&summary.UsageTotal, contribution)
+	addUsageAggregate(summaryGroup(summary.ByProvider, event.Provider), contribution)
+	addUsageAggregate(summaryGroup(summary.ByModelRef, contribution.model), contribution)
+	addUsageAggregate(summaryGroup(summary.ByAgent, contribution.agentID), contribution)
+	addUsageAggregate(summaryGroup(summary.ByPurpose, usageKeyOrUnknown(event.Purpose)), contribution)
 	dateKey := usageKeyOrUnknown(event.LocalDate)
-	addUsageAggregate(summaryGroup(summary.ByDate, dateKey), event)
-	addUsageAggregate(summaryNestedGroup(summary.ByDateModelRef, dateKey, usageModelKey(event)), event)
-	addUsageAggregate(summaryNestedGroup(summary.ByDateAgent, dateKey, normalizeAgentID(event.AgentID)), event)
+	addUsageAggregate(summaryGroup(summary.ByDate, dateKey), contribution)
+	addUsageAggregate(summaryNestedGroup(summary.ByDateModelRef, dateKey, contribution.model), contribution)
+	addUsageAggregate(summaryNestedGroup(summary.ByDateAgent, dateKey, contribution.agentID), contribution)
 }
 
-func addUsageAggregate(dst *UsageAggregate, event UsageEvent) {
+func addUsageAggregate(dst *UsageAggregate, contribution usageContribution) {
 	if dst == nil {
 		return
 	}
 	dst.LLMCalls++
-	billing := event.BillingUsage
+	billing := contribution.billing
 	dst.InputTokens += billing.InputTokens
-	dst.OutputTokens += event.UsageRaw.OutputTokens
+	dst.OutputTokens += contribution.raw.OutputTokens
 	dst.CacheReadTokens += billing.CacheReadTokens
 	dst.CacheWriteTokens += billing.CacheWriteTokens
-	dst.ReasoningTokens += event.UsageRaw.ReasoningTokens
+	dst.ReasoningTokens += contribution.raw.ReasoningTokens
 	// ProviderTotalTokens preserves the provider-style prompt/output total:
 	// cache reads are part of the provider input count, while cache writes are
 	// an additional billing bucket rather than part of that top-level count.
-	dst.ProviderTotalTokens += billing.InputTokens + billing.CacheReadTokens + event.UsageRaw.OutputTokens
+	dst.ProviderTotalTokens += billing.InputTokens + billing.CacheReadTokens + contribution.raw.OutputTokens
 	dst.BillingTotalTokens += billing.BillingTotalTokens
-	dst.TotalCost += event.Cost.TotalCost
-	if isMainChatSpeedSampleGate(event.Purpose, event.AgentID) {
-		if event.RequestNs > 0 && event.UsageRaw.OutputTokens > 0 {
-			dst.ThroughputTokens += event.UsageRaw.OutputTokens
-			dst.ThroughputNs += event.RequestNs
-			dst.ThroughputSamples++
-		}
-		if event.FirstOutputNs > 0 {
-			dst.FirstOutputTotalNs += event.FirstOutputNs
-			dst.FirstOutputSamples++
-		}
+	dst.TotalCost += contribution.cost
+	if contribution.agentID != identity.MainAgentID {
+		return
+	}
+	if contribution.isThroughputSample() {
+		dst.ThroughputTokens += contribution.raw.OutputTokens
+		dst.ThroughputNs += contribution.requestNs
+		dst.ThroughputSamples++
+	}
+	if contribution.isFirstOutputSample() {
+		dst.FirstOutputTotalNs += contribution.firstOutputNs
+		dst.FirstOutputSamples++
 	}
 }
 

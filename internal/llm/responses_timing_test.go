@@ -86,3 +86,51 @@ func TestResponsesPhysicalRequestTiming(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesTerminalDrainReturnsWithoutUsage(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := NewProviderConfig("provider", config.ProviderConfig{
+			Type:   config.ProviderTypeResponses,
+			APIURL: "https://example.invalid/v1/responses",
+			Models: map[string]config.ModelConfig{"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+		}, []string{"test-key"})
+		provider, err := NewResponsesProviderWithClient(cfg, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			time.Sleep(100 * time.Millisecond)
+			reader, writer := io.Pipe()
+			go func() {
+				defer writer.Close()
+				_, _ = io.WriteString(writer,
+					"data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"item-1\",\"call_id\":\"call-1\",\"name\":\"lookup\"}}\n\n"+
+						"data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"{\\\"q\\\":\\\"example\\\"}\"}\n\n"+
+						"data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"item-1\",\"call_id\":\"call-1\",\"name\":\"lookup\",\"status\":\"completed\"}}\n\n")
+				<-req.Context().Done()
+				_ = writer.CloseWithError(req.Context().Err())
+			}()
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Request: req, Body: reader}, nil
+		})}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		client := NewClient(cfg, provider, "test-model", 1024, "")
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		start := time.Now()
+		resp, err := client.CompleteStream(ctx, []message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, func(message.StreamDelta) {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StopReason != "tool_calls" || len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != "lookup" {
+			t.Fatalf("response = %+v, want the completed tool call", resp)
+		}
+		if resp.Usage != nil {
+			t.Fatalf("usage = %+v, want no fabricated token counts", resp.Usage)
+		}
+		wantDuration := 100*time.Millisecond + TerminalDrainChunkTimeout
+		if elapsed := time.Since(start); elapsed != wantDuration || resp.RequestNs != int64(wantDuration) {
+			t.Fatalf("elapsed/request = %v/%v, want terminal drain return after %v", elapsed, time.Duration(resp.RequestNs), wantDuration)
+		}
+		if resp.FirstOutputNs != int64(100*time.Millisecond) {
+			t.Fatalf("first output = %v, want measured 100ms latency", time.Duration(resp.FirstOutputNs))
+		}
+	})
+}

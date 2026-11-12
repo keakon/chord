@@ -147,6 +147,14 @@ func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIn
 	appendSep()
 	appendFloat6(stats.EstimatedCost)
 	appendSep()
+	if speed := stats.ByModel[modelState.DisplayRef]; speed != nil {
+		appendInt64(speed.ThroughputTokens)
+		appendSep()
+		appendInt64(speed.ThroughputNs)
+		appendSep()
+		appendInt64(speed.ThroughputSamples)
+	}
+	appendSep()
 
 	// Wall-clock TIME section buckets
 	walltime := m.agent.GetSidebarWalltimeStats()
@@ -366,12 +374,13 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 			m.recordInfoPanelSectionHitBox(section, block)
 		}
 
+		stats := m.agent.GetSidebarUsageStats()
 		appendBlock("", m.buildInfoPanelBackendBlock(lineW))
-		appendBlock("", m.buildInfoPanelModelBlock(lineW))
+		appendBlock("", m.buildInfoPanelModelBlock(lineW, stats))
 		if snap := m.focusedModelState().RateLimit; snap != nil {
 			appendBlock("", m.renderRateLimitBlock(snap, lineW))
 		}
-		appendBlock("", m.buildInfoPanelUsageBlock(width, lineW))
+		appendBlock("", m.buildInfoPanelUsageBlock(width, lineW, stats))
 		appendBlock("", m.buildInfoPanelTimeBlock(lineW))
 		appendBlock(infoPanelSectionLSP, m.buildInfoPanelLSPBlock(lineW, integrations))
 		appendBlock(infoPanelSectionMCP, m.buildInfoPanelMCPBlock(lineW, integrations))

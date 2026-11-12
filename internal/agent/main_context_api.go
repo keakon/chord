@@ -111,6 +111,11 @@ func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord, liveInstanceID str
 			agg.CacheWriteTokens += modelStats.CacheWriteTokens
 			agg.ReasoningTokens += modelStats.ReasoningTokens
 			agg.EstimatedCost += modelStats.EstimatedCost
+			agg.ThroughputTokens += modelStats.ThroughputTokens
+			agg.ThroughputNs += modelStats.ThroughputNs
+			agg.ThroughputSamples += modelStats.ThroughputSamples
+			agg.FirstOutputTotalNs += modelStats.FirstOutputTotalNs
+			agg.FirstOutputSamples += modelStats.FirstOutputSamples
 		}
 	}
 	return out
