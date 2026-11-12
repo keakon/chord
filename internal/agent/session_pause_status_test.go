@@ -71,16 +71,23 @@ func TestSessionPausePublishesBlockerChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Finish()
+	// Input-queue persistence the loop started on its own can still be in
+	// flight and add a transient input_queue blocker; only the tool
+	// activities are under test here.
 	status, err := a.BeginSessionPause(t.Context(), SessionPauseRequest{Identity: testPauseIdentity(a)})
-	if err != nil || status.BlockerCount != 2 {
+	if err != nil || len(toolPauseBlockers(status)) != 2 {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 	first.Finish()
 	a.sendEvent(Event{Type: eventSessionPauseWake})
 	collectAgentEventsUntil(t, a.Events(), func(events []AgentEvent) bool {
 		for _, event := range events {
-			if update, ok := event.(SessionTransferEvent); ok && update.Status.State == recovery.SessionPauseDraining && update.Status.BlockerCount == 1 {
-				if len(update.Status.Blockers) != 1 || update.Status.Blockers[0].OwnerTaskID != "task-2" {
+			update, ok := event.(SessionTransferEvent)
+			if !ok || update.Status.State != recovery.SessionPauseDraining {
+				continue
+			}
+			if tools := toolPauseBlockers(update.Status); len(tools) == 1 {
+				if tools[0].OwnerTaskID != "task-2" {
 					t.Fatalf("blockers=%+v", update.Status.Blockers)
 				}
 				return true
@@ -91,4 +98,14 @@ func TestSessionPausePublishesBlockerChanges(t *testing.T) {
 	second.Finish()
 	a.sendEvent(Event{Type: eventSessionPauseWake})
 	waitPauseState(t, a, recovery.SessionPauseSaved)
+}
+
+func toolPauseBlockers(status recovery.SessionPauseStatus) []recovery.SessionPauseBlocker {
+	var out []recovery.SessionPauseBlocker
+	for _, blocker := range status.Blockers {
+		if blocker.Kind == string(executiongate.Tool) {
+			out = append(out, blocker)
+		}
+	}
+	return out
 }
