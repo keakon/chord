@@ -819,7 +819,7 @@ var builtinToolsForAliasContract = []Tool{
 // regardless of whether the list stores a value or a pointer.
 func builtinToolTypeName(tool Tool) string {
 	t := reflect.TypeOf(tool)
-	for t != nil && t.Kind() == reflect.Ptr {
+	for t != nil && t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t == nil {
