@@ -149,7 +149,16 @@ type anthropicContent struct {
 	ToolUseID    string                `json:"tool_use_id,omitempty"` // tool_result: corresponding tool call ID
 	Content      any                   `json:"content,omitzero"`
 	Source       *anthropicImageSource `json:"source,omitzero"`
+	Tool         *anthropicInlineTool  `json:"tool,omitzero"` // tool_addition block: the tool being mounted
 	CacheControl *anthropicCacheCtrl   `json:"cache_control,omitzero"`
+}
+
+// anthropicInlineTool carries the tool a tool_addition block mounts. The
+// definition rides by value; the inline-tools beta also accepts reference
+// payloads, which Chord never emits.
+type anthropicInlineTool struct {
+	Type       string        `json:"type"` // always "tool_definition"
+	Definition anthropicTool `json:"definition"`
 }
 
 // anthropicImageSource is the base64 source block shared by image blocks and
@@ -244,6 +253,9 @@ func (a *AnthropicProvider) CompleteStream(
 
 		// Convert internal messages to Anthropic API format.
 		apiMessages, messageMap := convertMessagesWithMap(messages)
+		if err := validateAnthropicInlinePlacement(apiMessages); err != nil {
+			return nil, err
+		}
 		// Derive the latest boundary from this target's actual source surface.
 		// Fallback admission can replace messages without carrying main-request
 		// tuning hints, and subagents do not use the main-request assembler.
@@ -356,7 +368,7 @@ func (a *AnthropicProvider) CompleteStream(
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("x-app", "cli")
 
-	if betaHeader := anthropicBetaHeader(at, a.effectiveContextTokens(model)); betaHeader != "" {
+	if betaHeader := anthropicBetaHeader(at, a.effectiveContextTokens(model), hasMCPToolDeclarations(messages)); betaHeader != "" {
 		req.Header.Set("anthropic-beta", betaHeader)
 	}
 	setProviderLLMUserAgent(req.Header, a.provider, model)
@@ -624,7 +636,10 @@ func (a *AnthropicProvider) effectiveContextTokens(model string) int {
 // as having a 1M-token window, because that beta actually opts the request into
 // 1M context behavior on the official API (tier gated, distinct pricing above
 // 200K, and an error on unsupported models) rather than being a no-op.
-func anthropicBetaHeader(tuning AnthropicTuning, effectiveContext int) string {
+// inlineTools marks requests that render message-level tool declarations, whose
+// mid-conversation system messages the official API accepts only under the
+// inline-tools beta.
+func anthropicBetaHeader(tuning AnthropicTuning, effectiveContext int, inlineTools bool) string {
 	var betas []string
 
 	// claude-code-20250219 is the Claude Code agentic client identifier the
@@ -640,6 +655,10 @@ func anthropicBetaHeader(tuning AnthropicTuning, effectiveContext int) string {
 	// declares as having a 1M-token window.
 	if effectiveContext >= 1000000 {
 		betas = append(betas, "context-1m-2025-08-07")
+	}
+
+	if inlineTools {
+		betas = append(betas, AnthropicInlineToolsBeta)
 	}
 
 	if effectiveAnthropicThinkingType(tuning) == "enabled" && tuning.ThinkingBudget > 0 {
@@ -762,6 +781,29 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 		sourceIndex := i
 
 		switch msg.Role {
+		case message.RoleSystem:
+			// A message-level dynamic tool declaration renders as a
+			// mid-conversation system message whose content blocks carry the
+			// tool changes. Its position is anchored by the agent layer, so it
+			// converts without any projection decisions here. A declaration
+			// message with payload beyond the renderable mixture never reaches
+			// this converter — the per-target projection folds it into the
+			// top-level tools — so the defensive strip only bounds a gate bug.
+			if len(msg.MCPTools) == 0 {
+				log.Warnf("skipping system message without tool declarations in Anthropic history kind=%v", msg.Kind)
+				i++
+				continue
+			}
+			blocks, err := anthropicInlineDeclarationBlocks(msg)
+			if err != nil {
+				log.Warnf("dropping undeclared MCP declarations from Anthropic history: %v", err)
+				i++
+				continue
+			}
+			result = append(result, anthropicMessage{Role: string(message.RoleSystem), Content: blocks})
+			messageMap[sourceIndex] = anthropicMessageMapEntry{MessageIndex: len(result) - 1, BlockIndex: len(blocks) - 1, Valid: true}
+			i++
+
 		case "user":
 			if nativeContinuation >= 0 && sourceIndex > nativeContinuation && isAnthropicNativeOverlay(msg) && foldAnthropicNativeOverlay(result, anthropicNativeOverlayText(msg)) {
 				i++

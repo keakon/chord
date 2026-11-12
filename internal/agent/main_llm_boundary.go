@@ -33,8 +33,10 @@ func (a *MainAgent) mergeBoundaryRequestInputs(messages, inputMessages []message
 }
 
 // rebuildMainLLMRequestMessages reapplies the request-only projections and
-// admission pass after a boundary merged new transcript rows.
+// admission pass after a boundary merged new transcript rows. Declaration
+// emission runs after all boundary projections, including pressure notices.
 func (a *MainAgent) rebuildMainLLMRequestMessages(messages []message.Message) ([]message.Message, error) {
+	messages = a.releasePendingMCPMounts(messages)
 	messages = projectSkillDiscoveryMessages(messages, a.skillActivationView())
 	messages, err := projectDirectoryInstructionHistory(messages, a.directoryInstructions.Load())
 	if err != nil {

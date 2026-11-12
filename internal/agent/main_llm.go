@@ -656,8 +656,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	a.updatePreparedLLMRequestSurface(a.currentTurnID(), messages)
 
 	mountMode := a.mcpToolMountMode()
-	messages, fallbackMCPToolDefs, mountFellBack := a.mountRuntimeMCPTools(messages, mountMode)
-	messages = a.mountLoopDoneLateTool(messages, mountMode)
+	messages, fallbackMCPToolDefs, mountFellBack, mountReplayPositions := a.mountRuntimeMCPTools(messages, mountMode)
 	if mountFellBack {
 		a.activateMCPMountFallback()
 		a.emitToTUI(ToastEvent{
@@ -714,14 +713,26 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 		tailOverlayCount += overlayCount
 	}
 
+	// A first declaration retains its transient user tail for subsequent
+	// replay, so those hints no longer count as a disposable suffix.
+	messages = a.mountPendingRuntimeMCPDeclarations(messages, mountMode)
+	tailOverlayCount = trailingTurnOverlayCount(messages)
+
 	// Propagate prompt-cache placement as one-shot Anthropic hints. The stable
 	// boundary index is computed against the prepared surface before the
 	// key-file overlay and session-context reminder were inserted, so every
 	// overlay message inserted before the boundary is added back to map it
-	// onto the source message list supplied to the provider. Anthropic resolves
-	// both source indices after message merging.
+	// onto the source message list supplied to the provider. Declaration
+	// messages replayed ahead of the boundary shift it the same way.
+	// Anthropic resolves both source indices after message merging.
 	stableLen := a.consumePreparedStablePrefixLen()
-	metaPrefixCount += compactionFileContextPrefixCount(fileContextMessages, stableLen)
+	mountPrefixCount := 0
+	for _, position := range mountReplayPositions {
+		if position < stableLen {
+			mountPrefixCount++
+		}
+	}
+	metaPrefixCount += mountPrefixCount + compactionFileContextPrefixCount(fileContextMessages, stableLen+mountPrefixCount)
 	a.applyAnthropicCacheHints(stableLen, metaPrefixCount, len(messages)-tailOverlayCount)
 
 	// Emit early activity event so the TUI shows "connecting" immediately,
@@ -851,23 +862,31 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 		PrepareAttempt:  prepareDirectoryInstructionAttempt(a.directoryInstructions.Load(), requestSeq),
 		NativeTools:     a.nativeRequestPolicy(turn),
 		MCPDeclarations: a.effectiveRuntimeMCPDeclarations(),
-		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {
-			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback)
-			if err == nil && updatedMessages != nil {
-				messages = updatedMessages
-				observer.SetReduction(a.diagnosticReduction())
-				tailOverlayCount -= trailingTurnOverlayCount(requestMessages) - trailingTurnOverlayCount(updatedMessages)
+		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) (*llm.RequestSnapshot, error) {
+			requestMessages = a.releasePendingMCPMounts(requestMessages)
+			tailOverlayCount = trailingTurnOverlayCount(requestMessages)
+			updatedMessages, updateErr := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback)
+			if updateErr != nil {
+				return nil, updateErr
 			}
-			return updatedMessages, err
+			snapshot := a.finishMCPBoundaryRequest(updatedMessages)
+			messages = snapshot.Messages
+			observer.SetReduction(a.diagnosticReduction())
+			tailOverlayCount = trailingTurnOverlayCount(messages)
+			return snapshot, nil
 		},
-		BeforeRetryRound: func(retryCtx context.Context, requestMessages []message.Message) ([]message.Message, error) {
-			updatedMessages, err := a.updateMainLLMRequestBeforeRetryRound(retryCtx, turnID, requestMessages, tailOverlayCount)
-			if err == nil && updatedMessages != nil {
-				messages = updatedMessages
-				observer.SetReduction(a.diagnosticReduction())
-				tailOverlayCount -= trailingTurnOverlayCount(requestMessages) - trailingTurnOverlayCount(updatedMessages)
+		BeforeRetryRound: func(retryCtx context.Context, requestMessages []message.Message) (*llm.RequestSnapshot, error) {
+			requestMessages = a.releasePendingMCPMounts(requestMessages)
+			tailOverlayCount = trailingTurnOverlayCount(requestMessages)
+			updatedMessages, updateErr := a.updateMainLLMRequestBeforeRetryRound(retryCtx, turnID, requestMessages, tailOverlayCount)
+			if updateErr != nil {
+				return nil, updateErr
 			}
-			return updatedMessages, err
+			snapshot := a.finishMCPBoundaryRequest(updatedMessages)
+			messages = snapshot.Messages
+			observer.SetReduction(a.diagnosticReduction())
+			tailOverlayCount = trailingTurnOverlayCount(messages)
+			return snapshot, nil
 		},
 	}
 	resp, err := llmClient.CompleteStreamWithOptions(llm.WithResponsesTurnState(requestCtx, a.currentTurnResponsesState()), messages, toolDefs, callback, requestOptions)

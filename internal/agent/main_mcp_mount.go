@@ -2,11 +2,13 @@ package agent
 
 import (
 	"crypto/sha256"
+	"slices"
 	"sort"
 	"sync"
 
 	"github.com/keakon/chord/internal/agent/requestshape"
 	"github.com/keakon/chord/internal/jsonx"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	toolpkg "github.com/keakon/chord/internal/tools"
@@ -18,10 +20,11 @@ const (
 	mcpMountFullInjection mcpToolMountMode = iota
 	mcpMountKimiDynamic
 	mcpMountResponsesAdditionalTools
+	mcpMountAnthropicInlineTools
 )
 
 func (m mcpToolMountMode) cacheFriendly() bool {
-	return m == mcpMountKimiDynamic || m == mcpMountResponsesAdditionalTools
+	return m != mcpMountFullInjection
 }
 
 // mcpToolMountMode selects the dynamic mount shape accepted by the currently
@@ -38,6 +41,9 @@ func (a *MainAgent) mcpToolMountMode() mcpToolMountMode {
 	client, _, selectedRef, _ := a.llmSnapshot()
 	if client == nil {
 		return mcpMountFullInjection
+	}
+	if client.SupportsAnthropicInlineTools(selectedRef) {
+		return mcpMountAnthropicInlineTools
 	}
 	if client.SupportsKimiDynamicTools(selectedRef) {
 		return mcpMountKimiDynamic
@@ -96,6 +102,13 @@ func (a *MainAgent) mountDoneForLoopEntry() {
 	a.markRuntimeSurfaceDirty()
 }
 
+// loopDoneLateMountDefinition returns done's definition while a loop's
+// late-mounted done is currently effective: armed for late mount, the loop
+// still authorizes exit, the role still permits it, and the frozen tool
+// surface does not already carry it. Any failed condition clears the late
+// mount — the declaration snapshot stays anchored in history (prefix
+// stability), but done leaves the current effective declaration set, so
+// folding targets stop advertising it and the execution gate denies calls.
 func (a *MainAgent) loopDoneLateMountDefinition() []message.ToolDefinition {
 	if a == nil || !a.loopDoneLateMount.Load() {
 		return nil
@@ -110,18 +123,6 @@ func (a *MainAgent) loopDoneLateMountDefinition() []message.ToolDefinition {
 		return nil
 	}
 	return llmToolDefinitionsFromVisibleTools([]toolpkg.Tool{tool})
-}
-
-func (a *MainAgent) mountLoopDoneLateTool(messages []message.Message, mode mcpToolMountMode) []message.Message {
-	if !mode.cacheFriendly() {
-		a.clearLoopDoneLateMount()
-		return messages
-	}
-	defs := a.loopDoneLateMountDefinition()
-	if len(defs) == 0 {
-		return messages
-	}
-	return append(messages, message.NewSystemToolsMessage(defs))
 }
 
 type manualMCPTool interface {
@@ -178,10 +179,16 @@ func (s *mcpToolMountState) topLevelManualLocked(manual []toolpkg.Tool) map[stri
 	return s.topLevelManual
 }
 
-// declaredRuntimeMCPToolDefsLocked returns the definitions of manual MCP tools
-// that must be declared incrementally: everything visible except the top-level
-// baseline. Callers must hold s.mu via the owning agent's mount state.
-func (a *MainAgent) declaredRuntimeMCPToolDefsLocked() []message.ToolDefinition {
+// declaredRuntimeMCPToolDefsLocked returns the definitions of the currently
+// effective incremental declarations: manual MCP tools outside the top-level
+// baseline, plus the done definitions the caller precomputed with
+// loopDoneLateMountDefinition. This is the set the request advertises through
+// message-level declarations, the set folding targets receive in their
+// top-level tools, and the set the native-request tool validation accepts
+// calls against. Callers must hold s.mu via the owning agent's mount state;
+// doneDefs must be computed before taking that mutex, because its conditions
+// read the frozen tool surface, which falls back to this state under the lock.
+func (a *MainAgent) declaredRuntimeMCPToolDefsLocked(doneDefs []message.ToolDefinition) []message.ToolDefinition {
 	_, manual := splitVisibleLLMTools(a.mainVisibleLLMTools())
 	baseline := a.mcpMountState.topLevelManualLocked(manual)
 	if len(baseline) > 0 {
@@ -193,17 +200,20 @@ func (a *MainAgent) declaredRuntimeMCPToolDefsLocked() []message.ToolDefinition 
 		}
 		manual = declared
 	}
-	return llmToolDefinitionsFromVisibleTools(manual)
+	return append(llmToolDefinitionsFromVisibleTools(manual), doneDefs...)
 }
 
-// effectiveRuntimeMCPDeclarations returns the request's current incremental
-// MCP tool set for targets that fold dynamic declarations into their top-level
-// tools. It is a point-in-time snapshot: tools disabled after this call stay
-// disabled in later requests because the set is re-read per request.
+// effectiveRuntimeMCPDeclarations returns the request's currently effective
+// incremental declaration set for targets that fold dynamic declarations into
+// their top-level tools. It is a point-in-time snapshot: tools disabled after
+// this call stay disabled in later requests because the set is re-read per
+// request, and anchored declarations that are no longer effective stay out of
+// the set even while their messages still replay in history.
 func (a *MainAgent) effectiveRuntimeMCPDeclarations() []message.ToolDefinition {
+	doneDefs := a.loopDoneLateMountDefinition()
 	a.mcpMountState.mu.Lock()
 	defer a.mcpMountState.mu.Unlock()
-	return a.declaredRuntimeMCPToolDefsLocked()
+	return a.declaredRuntimeMCPToolDefsLocked(doneDefs)
 }
 
 type mcpMountAnchor struct {
@@ -212,8 +222,9 @@ type mcpMountAnchor struct {
 }
 
 type mcpMountSnapshot struct {
-	anchor mcpMountAnchor
-	tools  []message.ToolDefinition
+	anchor   mcpMountAnchor
+	tools    []message.ToolDefinition
+	overlays []message.Message
 }
 
 type mcpToolMountState struct {
@@ -278,14 +289,20 @@ func (a *MainAgent) effectiveMCPMountIsFullInjection() bool {
 }
 
 // mountRuntimeMCPTools replays every previously emitted declaration at its
-// original request position, then appends only newly discovered/changed tool
-// schemas at the current conversation tail. If request reduction makes an old
-// anchor unresolvable, it falls back to ordinary top-level injection rather
-// than moving a declaration behind historical tool calls.
-func (a *MainAgent) mountRuntimeMCPTools(messages []message.Message, mode mcpToolMountMode) ([]message.Message, []message.ToolDefinition, bool) {
+// original request position. It never emits new declarations: first emission
+// happens in mountPendingRuntimeMCPDeclarations once the request's transient
+// tail is assembled. If request reduction makes an old anchor
+// unresolvable, it falls back to ordinary top-level injection rather than
+// moving a declaration behind historical tool calls. The returned positions
+// are source-relative indices for every replayed hint and declaration, so
+// prompt-cache boundary hints can compensate the mid-list shift.
+func (a *MainAgent) mountRuntimeMCPTools(messages []message.Message, mode mcpToolMountMode) ([]message.Message, []message.ToolDefinition, bool, []int) {
 	if !mode.cacheFriendly() {
-		return messages, nil, false
+		return messages, nil, false, nil
 	}
+	// Done's definition conditions read the frozen tool surface, which falls
+	// back to the mount state under the lock: precompute before locking.
+	doneDefs := a.loopDoneLateMountDefinition()
 	state := &a.mcpMountState
 	state.mu.Lock()
 	defer state.mu.Unlock()
@@ -295,19 +312,21 @@ func (a *MainAgent) mountRuntimeMCPTools(messages []message.Message, mode mcpToo
 		state.known = nil
 		state.fallback = false
 	}
-	active := a.declaredRuntimeMCPToolDefsLocked()
+	source, indices := mcpMountSource(messages)
+	shapes := state.incrementalMessageShapes(source)
+	state.rollbackUnrespondedDeclarations(source, shapes)
 	if state.fallback {
 		// Once fallback is sticky the rebuilt frozen surface already carries
 		// every manual MCP tool (stableVisibleLLMTools returns the full list),
-		// so returning defs here would duplicate them in the request.
-		return messages, nil, false
+		// so only the late-mounted done still needs top-level defs here.
+		return messages, doneDefs, false, nil
 	}
+	active := a.declaredRuntimeMCPToolDefsLocked(doneDefs)
 
-	// A tool this run has never declared gets its first declaration at the
-	// conversation tail. If the history already calls it — declared by an
-	// earlier run whose anchors were reset (a model switch, or a restored or
-	// compacted history) — that declaration would land behind its own calls,
-	// so fall back to top-level injection instead.
+	// A tool this run has never declared cannot be declared legally when the
+	// history already calls it — declared by an earlier run whose anchors were
+	// reset (a model switch, or a restored or compacted history) — so fall
+	// back to top-level injection instead of anchoring behind its own calls.
 	undeclared := make(map[string]struct{}, len(active))
 	for _, def := range active {
 		name := toolpkg.NormalizeName(def.Name)
@@ -317,59 +336,186 @@ func (a *MainAgent) mountRuntimeMCPTools(messages []message.Message, mode mcpToo
 	}
 	if len(undeclared) > 0 && hasHistoricalMCPToolCall(messages, undeclared) {
 		state.fallback = true
-		return messages, active, true
+		return messages, active, true, nil
 	}
-	shapes := state.incrementalMessageShapes(messages)
 
-	positions := make([]int, 0, len(state.snapshots)+1)
+	positions := make([]int, 0, len(state.snapshots))
+	emitted := make([]int, 0, len(state.snapshots))
 	lastPosition := 0
 	for _, snapshot := range state.snapshots {
 		position, ok := findMCPMountAnchor(shapes, snapshot.anchor)
 		if !ok || position < lastPosition {
 			state.fallback = true
-			return messages, active, true
+			return messages, active, true, nil
+		}
+		lastPosition = position
+		if position > 0 {
+			position = indices[position-1] + 1
 		}
 		positions = append(positions, position)
-		lastPosition = position
-	}
-
-	if state.known == nil {
-		state.known = make(map[string][sha256.Size]byte)
-	}
-	changed := make([]message.ToolDefinition, 0, len(active))
-	for _, def := range active {
-		name := toolpkg.NormalizeName(def.Name)
-		sig := toolDefinitionSignature(def)
-		if previous, ok := state.known[name]; ok && previous == sig {
-			continue
-		}
-		state.known[name] = sig
-		changed = append(changed, def)
-	}
-	if len(changed) > 0 {
-		snapshot := mcpMountSnapshot{
-			anchor: newMCPMountAnchor(shapes),
-			tools:  append([]message.ToolDefinition(nil), changed...),
-		}
-		state.snapshots = append(state.snapshots, snapshot)
-		positions = append(positions, len(messages))
 	}
 	if len(state.snapshots) == 0 {
-		return messages, nil, false
+		return messages, nil, false, nil
 	}
 
 	out := make([]message.Message, 0, len(messages)+len(state.snapshots))
 	snapshotIndex := 0
 	for position := 0; position <= len(messages); position++ {
 		for snapshotIndex < len(state.snapshots) && positions[snapshotIndex] == position {
-			out = append(out, message.NewSystemToolsMessage(state.snapshots[snapshotIndex].tools))
+			snapshot := state.snapshots[snapshotIndex]
+			out = append(out, snapshot.overlays...)
+			for range snapshot.overlays {
+				emitted = append(emitted, position)
+			}
+			out = append(out, message.NewSystemToolsMessage(snapshot.tools))
+			emitted = append(emitted, position)
 			snapshotIndex++
 		}
 		if position < len(messages) {
 			out = append(out, messages[position])
 		}
 	}
-	return out, nil, false
+	return out, nil, false, emitted
+}
+
+// rollbackUnrespondedDeclarations drops anchored declaration snapshots no
+// model response ever followed. A declaration whose
+// request produced no durable assistant output (terminal failure, fully
+// rolled-back attempt) leaves nothing after it on the server side: replaying
+// it ahead of later user input would place a mid-conversation system group
+// where the wire contract requires an assistant, and no thinking exists that
+// could still bind to it. The tools re-declare at the next legal tail.
+// Callers must hold the mount state mutex; shapes must cover messages.
+func (s *mcpToolMountState) rollbackUnrespondedDeclarations(messages []message.Message, shapes []requestshape.Shape) {
+	for len(s.snapshots) > 0 {
+		last := len(s.snapshots) - 1
+		position, ok := findMCPMountAnchor(shapes, s.snapshots[last].anchor)
+		if !ok || respondedAfter(messages, position) {
+			return
+		}
+		s.snapshots = s.snapshots[:last]
+		s.known = make(map[string][sha256.Size]byte)
+		for _, snapshot := range s.snapshots {
+			for _, def := range snapshot.tools {
+				s.known[toolpkg.NormalizeName(def.Name)] = toolDefinitionSignature(def)
+			}
+		}
+	}
+}
+
+// respondedAfter reports whether any durable assistant output follows the
+// source position, which pins the declarations anchored at or before it.
+func respondedAfter(messages []message.Message, position int) bool {
+	for i := max(position, 0); i < len(messages); i++ {
+		if messages[i].Role == message.RoleAssistant && !trailingOverlayKind(messages[i].Kind) {
+			return true
+		}
+	}
+	return false
+}
+
+// mountPendingRuntimeMCPDeclarations first-emits declaration snapshots that
+// are still waiting for a legal anchor position. A transient user tail becomes
+// part of the declaration snapshot: the next response binds to both, so replay
+// must retain the original hints before the declaration. An assistant prefill
+// or pending native turn cannot admit a new declaration yet.
+func (a *MainAgent) mountPendingRuntimeMCPDeclarations(messages []message.Message, mode mcpToolMountMode) []message.Message {
+	if !mode.cacheFriendly() {
+		return messages
+	}
+	// Precompute done's definitions outside the lock; see mountRuntimeMCPTools.
+	doneDefs := a.loopDoneLateMountDefinition()
+	state := &a.mcpMountState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.mode != mode || state.fallback {
+		return messages
+	}
+	active := a.declaredRuntimeMCPToolDefsLocked(doneDefs)
+	if len(active) == 0 {
+		return messages
+	}
+	if state.known == nil {
+		state.known = make(map[string][sha256.Size]byte)
+	}
+	source, _ := mcpMountSource(messages)
+	shapes := state.incrementalMessageShapes(source)
+	pending := make([]message.ToolDefinition, 0, len(active))
+	for _, def := range active {
+		name := toolpkg.NormalizeName(def.Name)
+		sig := toolDefinitionSignature(def)
+		if previous, ok := state.known[name]; ok && previous == sig {
+			continue
+		}
+		pending = append(pending, def)
+	}
+	// A deferred emission leaves the tools unknown so the next request
+	// boundary re-evaluates them from scratch.
+	if len(pending) == 0 || !mountEmissionAllowed(messages, mode) {
+		return messages
+	}
+	for _, def := range pending {
+		state.known[toolpkg.NormalizeName(def.Name)] = toolDefinitionSignature(def)
+	}
+	tail := messages[len(messages)-trailingTurnOverlayCount(messages):]
+	overlays := make([]message.Message, 0, len(tail))
+	for _, msg := range tail {
+		// File snapshots have their own permission-checked replay owner.
+		// Retaining a second copy here would bypass its refresh/invalidation.
+		if !isCompactionFileSnapshot(msg) {
+			overlays = append(overlays, msg)
+		}
+	}
+	state.snapshots = append(state.snapshots, mcpMountSnapshot{
+		anchor:   newMCPMountAnchor(shapes),
+		tools:    slices.Clone(pending),
+		overlays: overlays,
+	})
+	return append(messages, message.NewSystemToolsMessage(pending))
+}
+
+// mcpMountSource uses the same anchor space before and after request projection.
+// The indices translate an anchor back into the supplied message list.
+func mcpMountSource(messages []message.Message) ([]message.Message, []int) {
+	out := make([]message.Message, 0, len(messages))
+	indices := make([]int, 0, len(messages))
+	for i := range messages {
+		msg := &messages[i]
+		if msg.Role == message.RoleSystem && len(msg.MCPTools) > 0 {
+			continue
+		}
+		if trailingOverlayKind(msg.Kind) || msg.DiagnosticSource == message.DiagnosticSourceInstructions ||
+			msg.Kind == message.KindDirectoryInstructionProjection {
+			continue
+		}
+		out = append(out, *msg)
+		indices = append(indices, i)
+	}
+	return out, indices
+}
+
+// trailingOverlayKind reports the request-only message kinds that ride the
+// transient tail: turn overlays (runtime hints, pressure notices, compaction
+// file snapshots) and the truncated-thinking replay prefix.
+func trailingOverlayKind(kind string) bool {
+	switch kind {
+	case message.KindTurnOverlay, message.KindThinkingReplayPrefix:
+		return true
+	}
+	return false
+}
+
+func mountEmissionAllowed(messages []message.Message, mode mcpToolMountMode) bool {
+	if len(messages) == 0 || llm.PendingAnthropicNativeTurn(messages) {
+		return false
+	}
+	for i := len(messages) - 1; i >= 0 && trailingOverlayKind(messages[i].Kind); i-- {
+		if messages[i].Role != message.RoleUser {
+			return false
+		}
+	}
+	last := messages[len(messages)-1]
+	return mode != mcpMountAnthropicInlineTools || last.Role == message.RoleUser || last.Role == message.RoleTool
 }
 
 const mcpMountAnchorWindow = 3

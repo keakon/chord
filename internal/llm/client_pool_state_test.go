@@ -149,7 +149,7 @@ func TestClientBeforeFallbackReceivesResolvedFallbackTarget(t *testing.T) {
 		nil,
 		nil,
 		CompleteStreamOptions{
-			BeforeFallback: func(_ context.Context, _ []message.Message, target FallbackModel) ([]message.Message, error) {
+			BeforeFallback: func(_ context.Context, _ []message.Message, target FallbackModel) (*RequestSnapshot, error) {
 				sawFallback = append(sawFallback, target)
 				return nil, nil
 			},

@@ -240,7 +240,7 @@ func fallbackNarrowsRequestBudget(fallbackContextLimit, fallbackInputLimit, prim
 
 func trailingTurnOverlayCount(messages []message.Message) int {
 	n := 0
-	for i := len(messages) - 1; i >= 0 && messages[i].Kind == message.KindTurnOverlay; i-- {
+	for i := len(messages) - 1; i >= 0 && trailingOverlayKind(messages[i].Kind); i-- {
 		n++
 	}
 	return n

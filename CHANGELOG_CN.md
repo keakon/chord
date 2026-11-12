@@ -21,6 +21,7 @@
 - 新增只读的压缩历史浏览器：输入模式或普通模式下按 `Alt+←`，打开最近的压缩前快照。`Alt+←` / `Alt+→` 前后切换快照，向右越过最新快照恢复实时会话和草稿。默认也接受 `Alt+b` / `Alt+f`，支持把 Option+← / Option+→ 编码为这两个按键的终端。历史使用普通消息卡片，保留原侧栏和底部状态栏，隐藏消息输入框，支持搜索、文本选择和复制。状态栏显示历史位置和 Esc 提示；空间足够时还会显示快照详情和实时会话状态。浏览期间，实时任务和已有请求的计时照常运行，发送消息、回答请求等实时操作被拦截，对话框在返回后显示。压缩摘要可直接打开其引用的归档，或显示来源列表并标明不可用的快照。大快照和终端缩放按有界批次处理，保留阅读位置并保持输入响应。
 - `/stats` 在会话范围新增 Tasks 视图：可分别查看每个委派任务自身的调用次数、token 与估算费用，不再依附执行它的 agent 维度。main 行涵盖整个 session，任务跨 attempt 与恢复累计，缺少任务身份的调用归入 untracked。外部 Claude Code 任务单列一组，展示 CLI 自报的累计 token 与费用；该报告可能包含嵌套 agent，不与 Chord 估算合计，CLI 尚未报告费用时显示 `unknown`。
 - `chord doctor skills` 新增 `--agent <name>` 参数，报告所选角色的权限基线、按运行时优先级排列的技能目录，以及模型实际会收到什么：按名加载的 allow/ask/deny、`Available Skills` 条目的状态、模型能否自行加载、条件 `paths` 状态、提供 metadata 的 sidecar，以及三档分开的体积（`SKILL.md` 源文件、解析正文、截断前的渲染结果）。基线是角色自身的规则，因此 worker 的行不等于 worker 运行时的实际权限，外部 backend 角色报 `not_applicable`；角色名不存在时以退出码 `2` 失败。
+- 为 Anthropic Messages 目标新增消息级动态 MCP 工具挂载。开启 `compat.anthropic.mcp_inline_tools` 的模型把运行时 manual MCP 工具声明挂成固定位置的对话中段 `role: system` 消息，内容块按值携带 `tool_addition` 工具定义（`inline-tools` beta，请求发送 `anthropic-beta: inline-tools-2026-09-15` 头），会话中途启用 MCP server 时顶层 `tools` 数组与 prompt cache 前缀保持稳定。挂载形态跟随选中的目标：不接受该形态的池成员收到的请求会把声明并入其顶层 `tools` 数组。开关在所有场景默认关闭，借用官方 catalog 配方的自定义端点也不例外——只为官方 API 和验证过会透传对话中段 system 消息的网关开启。
 
 ### 改进
 

@@ -4,12 +4,14 @@ import "github.com/keakon/chord/internal/message"
 
 // targetAcceptsMCPDeclarations reports whether the target renders request-level
 // dynamic MCP declarations in the shape its backend accepts: a role:system
-// tools message on the Chat Completions wire (mcp_system_tools_message) or an
+// tools message on the Chat Completions wire (mcp_system_tools_message), an
 // input[type="additional_tools"] item on the Responses wire
-// (mcp_additional_tools). Targets that return false must receive the declared
-// tools inlined into the top-level tools array instead.
+// (mcp_additional_tools), or a mid-conversation role:system message carrying
+// tool_addition blocks on the Anthropic Messages wire (inline-tools beta).
+// Targets that return false must receive the declared tools inlined into the
+// top-level tools array instead.
 func targetAcceptsMCPDeclarations(target FallbackModel) bool {
-	return kimiDynamicTargetSupported(target) || responsesAdditionalToolsTargetSupported(target)
+	return kimiDynamicTargetSupported(target) || responsesAdditionalToolsTargetSupported(target) || anthropicInlineTargetSupported(target)
 }
 
 // inlineMCPToolDeclarations folds the request's current dynamic MCP

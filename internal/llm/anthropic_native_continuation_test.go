@@ -148,7 +148,7 @@ func TestAnthropicNativeContinuationAdmission(t *testing.T) {
 			policy := &NativeToolPolicy{Begin: func(context.Context, NativeRequestRecord) (string, error) { begins++; return "request-1", nil }}
 			ctx := context.WithValue(t.Context(), nativePolicyContextKey{}, policy)
 			cfg := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
-			_, err := completeWithNativeTools(ctx, nil, cfg, "", "test-model", "", history, nil, 1024, RequestTuning{}, config.ServiceTierStandard, nil)
+			_, err := completeWithNativeTools(ctx, nil, cfg, "", "test-model", "", history, nil, nil, 1024, RequestTuning{}, config.ServiceTierStandard, nil)
 			if !IsNativeToolError(err) || begins != 0 {
 				t.Fatalf("unsafe input reached authorization/dispatch: begins=%d err=%v", begins, err)
 			}

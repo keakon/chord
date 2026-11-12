@@ -1348,8 +1348,9 @@ mcp:
   - `/mcp disable <server>`
   - `/mcp status`
 - Agent 运行中也可以执行 `/mcp enable|disable`。当前在途的请求继续使用启动时的工具表面；下一次 LLM 请求（包括自动重试 / 恢复请求）才会应用新的执行状态。
-- 默认情况下，下一次请求会重建顶层 MCP 工具表面，因此已有提示词缓存可能无法命中。模型显式开启 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 后，Chord 会把工具声明挂在固定的对话位置，并在后续请求里原位回放。禁用 server 只会拦截执行，不删除已经发出的声明，因此前缀保持稳定。所有改写对话前缀或更换选中模型的边界——上下文压缩、会话恢复、fork、切换模型——都会重置声明锚点：重建后的工具表面把当前已启用的全部 manual MCP 工具放进顶层 `tools` 数组（此时提示词缓存本来就是冷的），边界之后的新启用继续走动态声明。某个工具在历史里已有调用、但当前运行里还没声明过时，请求同样会退回顶层工具，免得它的声明落到自己的调用之后；在边界时被禁用、之后又重新启用的 server 就属于这种情况。重建本身不发提示；之后改写顶层表面的 `/mcp enable|disable` 要等新工具表面被某个请求装载过一次，才会提示缓存可能未命中。
+- 默认情况下，下一次请求会重建顶层 MCP 工具表面，因此已有提示词缓存可能无法命中。模型显式开启 `compat.chat_completions.mcp_system_tools_message`、`compat.responses.mcp_additional_tools` 或 `compat.anthropic.mcp_inline_tools` 后，Chord 会把工具声明挂在固定的对话位置，并在后续请求里原位回放。禁用 server 只会拦截执行，不删除已经发出的声明，因此前缀保持稳定。所有改写对话前缀或更换选中模型的边界——上下文压缩、会话恢复、fork、切换模型——都会重置声明锚点：重建后的工具表面把当前已启用的全部 manual MCP 工具放进顶层 `tools` 数组（此时提示词缓存本来就是冷的），边界之后的新启用继续走动态声明。某个工具在历史里已有调用、但当前运行里还没声明过时，请求同样会退回顶层工具，免得它的声明落到自己的调用之后；在边界时被禁用、之后又重新启用的 server 就属于这种情况。重建本身不发提示；之后改写顶层表面的 `/mcp enable|disable` 要等新工具表面被某个请求装载过一次，才会提示缓存可能未命中。
 - manual server 的启用 / 禁用意图会随会话保存：`/mcp enable` 写入该意图，`/mcp disable` 清除它；之后 resume 该会话（包括重启后 resume）时会重新连接上次处于启用状态的 manual server。连接失败不会清除意图，server 会保持「enabled (unavailable)」状态，方便之后重试，而不是悄悄退回禁用。
+- 服务端原生工具仍在续跑，或模型仍在续写预填的 assistant 消息时，动态声明会等到续跑结束再挂载。重试或切换备用模型前，Chord 会同时刷新对话输入与当前启用的工具集合。
 
 ### 工具并发执行
 
@@ -1678,6 +1679,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.chat_completions.requires_tool_result_name` | bool | `false` — 对要求 tool result 消息同时携带 `name` 和 `tool_call_id` 的网关，回填配对的工具名。 |
 | `compat.chat_completions.requires_assistant_after_tool_result` | bool | `false` — 对不接受 tool result 后直接跟 user 消息的网关，在中间插入一条合成 assistant 消息。 |
 | `compat.chat_completions.mcp_system_tools_message` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `role: system` 消息，消息只带 `tools`、不带 `content`，不改写顶层 `tools`。只为已确认接受 Kimi 兼容动态工具形态的模型开启。挂载形态跟随当前选中的目标；请求最终落到不接受该形态的池成员时，Chord 会把声明并入该请求的顶层 `tools` 数组。 |
+| `compat.anthropic.mcp_inline_tools` | bool | `false` — 把运行时 manual MCP schema 挂成对话中段固定位置的 `role: system` 消息，内容块按值携带 `tool_addition` 工具定义（Anthropic `inline-tools` beta），不改写顶层 `tools`。只为已验证接受对话中段 system 消息的端点开启——官方 Anthropic Messages API，以及确认会透传的网关；多数第三方 Anthropic 兼容网关会拒绝或忽略这类消息。请求携带声明时 Chord 会发送 `anthropic-beta: inline-tools-2026-09-15` 头；不接受该形态的池成员收到的请求会把声明并入其顶层 `tools` 数组。 |
 | `compat.chat_completions.keep_reasoning_effort` | bool | `false` — 本轮回放的 assistant tool-call 消息没有 `reasoning_content` 时，仍保留 `reasoning_effort` 与 reasoning 请求覆盖项。默认行为下 Chord 会把缺少 reasoning content 判定为该后端无法回放 reasoning，在本回合后续请求中剥离这些控制项；对接受 reasoning 控制、但没有 reasoning 回放契约的后端（例如走 Chat Completions 线路的 Grok）开启。它只保留请求侧控制项，不会为校验回放历史的后端（带 tools 的 DeepSeek、Kimi K3、Qwen `preserve_thinking`）补上 reasoning content。 |
 | `compat.generate_content.automatic_continuation` | bool | 仅用于原生 `generate-content`；默认关闭，模型 > provider > 目录，显式 `false` 关闭继承的续传。 |
 | `compat.generate_content.single_request_output_limit` | int | 正整数，单位为 token；未启用原生续传时额外限制单请求输出预算，启用后不限制整链预算。与开关分别继承，未设置不添加上限。 |
@@ -1712,6 +1714,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.generate_content.single_request_output_limit` | int | 正整数，单位为 token；未启用原生续传时额外限制单请求输出预算，启用后不限制整链预算。与开关分别继承，未设置不添加上限。 |
 | `compat.chat_completions.native_thinking` | string | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.responses.mcp_additional_tools` | bool | 模型级覆盖项；provider 默认值见上表。 |
+| `compat.anthropic.mcp_inline_tools` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.hosted_tools` | list | 模型级列表，替换上表描述的 provider 默认值。 |
 | `compat.apply_patch.enabled` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.apply_patch.freeform` | bool | 模型级覆盖项；provider 默认值见上表。 |

@@ -44,11 +44,11 @@ func TestToolDiscoveryProjectionRunsAfterFallbackBoundary(t *testing.T) {
 	client.SetStreamRetryRounds(1)
 	original, replacement := history("call-1"), history("call-2")
 	_, err := client.CompleteStreamWithOptions(t.Context(), original, nil, nil, CompleteStreamOptions{
-		BeforeFallback: func(_ context.Context, messages []message.Message, _ FallbackModel) ([]message.Message, error) {
+		BeforeFallback: func(_ context.Context, messages []message.Message, _ FallbackModel) (*RequestSnapshot, error) {
 			if !strings.Contains(messages[2].Content, `"definition"`) {
 				t.Error("fallback received an already projected history")
 			}
-			return replacement, nil
+			return &RequestSnapshot{Messages: replacement}, nil
 		},
 	})
 	if err != nil {

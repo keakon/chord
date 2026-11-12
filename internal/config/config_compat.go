@@ -15,6 +15,7 @@ type ModelCompatConfig struct {
 	RequestOverrides    *RequestOverridesConfig          `json:"request_overrides,omitzero" yaml:"request_overrides,omitempty"`
 	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitzero" yaml:"chat_completions,omitempty"`
 	Responses           *ResponsesCompatConfig           `json:"responses,omitzero" yaml:"responses,omitempty"`
+	Anthropic           *AnthropicCompatConfig           `json:"anthropic,omitzero" yaml:"anthropic,omitempty"`
 	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitzero" yaml:"apply_patch,omitempty"`
 	HostedTools         *[]string                        `json:"hosted_tools,omitzero" yaml:"hosted_tools,omitempty"`
 }
@@ -31,8 +32,21 @@ type ProviderCompatConfig struct {
 	Usage               *UsageCompatConfig               `json:"usage,omitzero" yaml:"usage,omitempty"`
 	Responses           *ResponsesCompatConfig           `json:"responses,omitzero" yaml:"responses,omitempty"`
 	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitzero" yaml:"chat_completions,omitempty"`
+	Anthropic           *AnthropicCompatConfig           `json:"anthropic,omitzero" yaml:"anthropic,omitempty"`
 	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitzero" yaml:"apply_patch,omitempty"`
 	HostedTools         *[]string                        `json:"hosted_tools,omitzero" yaml:"hosted_tools,omitempty"`
+}
+
+// AnthropicCompatConfig controls which optional Messages-API request shapes
+// Chord emits for a provider.
+type AnthropicCompatConfig struct {
+	// MCPInlineTools mounts runtime MCP function definitions through
+	// mid-conversation role:system messages carrying tool_addition blocks
+	// (inline-tools beta) instead of the top-level tools array. Default false:
+	// only enable it for official Anthropic API models that accept the
+	// inline-tools beta, or gateways verified to forward it — most compatible
+	// gateways do not recognize mid-conversation system messages.
+	MCPInlineTools *bool `json:"mcp_inline_tools,omitzero" yaml:"mcp_inline_tools,omitempty"`
 }
 
 // ApplyPatchCompatConfig controls the apply_patch tool surface and wire shape.

@@ -614,6 +614,36 @@ func (p *ProviderConfig) ChatCompletionsCompat(modelID string) *config.ChatCompl
 	return merged
 }
 
+// AnthropicCompat resolves provider defaults with model-level overrides for
+// the Messages-API request shapes.
+func (p *ProviderConfig) AnthropicCompat(modelID string) *config.AnthropicCompatConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var providerCfg *config.AnthropicCompatConfig
+	if p.compat != nil {
+		providerCfg = p.compat.Anthropic
+	}
+	var modelCfg *config.AnthropicCompatConfig
+	if model, ok := p.models[modelID]; ok && model.Compat != nil {
+		modelCfg = model.Compat.Anthropic
+	}
+	if providerCfg == nil && modelCfg == nil {
+		return nil
+	}
+	if modelCfg == nil {
+		return providerCfg
+	}
+	if providerCfg == nil {
+		return modelCfg
+	}
+	merged := &config.AnthropicCompatConfig{}
+	*merged = *providerCfg
+	if modelCfg.MCPInlineTools != nil {
+		merged.MCPInlineTools = modelCfg.MCPInlineTools
+	}
+	return merged
+}
+
 // UsageCompat returns provider-specific usage-field semantic overrides.
 func (p *ProviderConfig) UsageCompat() *config.UsageCompatConfig {
 	p.mu.Lock()

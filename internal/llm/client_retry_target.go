@@ -209,8 +209,14 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 	// has to receive a legal standard request: fold the declarations into the
 	// top-level tools array for this target only. The selected target decides
 	// the mount shape; every other pool member sees the same tool set in the
-	// shape it accepts, so mixed pools do not force a top-level rebuild.
+	// shape it accepts, so mixed pools do not force a top-level rebuild. An
+	// Anthropic inline target whose declaration messages carry payload beyond
+	// the text-plus-tool-change mixture the wire accepts folds the same way:
+	// per-message payload decides the shape, not the target's family.
 	inlineMCPDeclarations := !targetAcceptsMCPDeclarations(poolTarget)
+	if anthropicInlineTargetSupported(poolTarget) && !anthropicInlineDeclarationsRenderable(targetMessages) {
+		inlineMCPDeclarations = true
+	}
 	if inlineMCPDeclarations {
 		targetMessages, tools = inlineMCPToolDeclarations(targetMessages, tools, mcpDeclarations)
 	}
@@ -384,6 +390,7 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 			systemPrompt,
 			targetMessages,
 			tools,
+			mcpDeclarations,
 			effectiveMaxTokens,
 			requestTuning,
 			t.serviceTier,

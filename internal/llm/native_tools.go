@@ -61,7 +61,7 @@ func (e *NativeToolError) Unwrap() error { return e.Cause }
 
 func IsNativeToolError(err error) bool { _, ok := errors.AsType[*NativeToolError](err); return ok }
 
-func completeWithNativeTools(ctx context.Context, impl Provider, provider *ProviderConfig, key, model, system string, messages []message.Message, defs []message.ToolDefinition, maxTokens int, tuning RequestTuning, serviceTier config.ServiceTier, cb StreamCallback) (_ *message.Response, retErr error) {
+func completeWithNativeTools(ctx context.Context, impl Provider, provider *ProviderConfig, key, model, system string, messages []message.Message, defs []message.ToolDefinition, mcpDeclarations []message.ToolDefinition, maxTokens int, tuning RequestTuning, serviceTier config.ServiceTier, cb StreamCallback) (_ *message.Response, retErr error) {
 	if err := validateNativeClientToolReplay(messages); err != nil {
 		return nil, &NativeToolError{Cause: err}
 	}
@@ -120,6 +120,18 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 	defs = slices.DeleteFunc(slices.Clone(defs), func(def message.ToolDefinition) bool {
 		return def.Name == authorization.Tool || slices.Contains(request.additionalTools, def.Name)
 	})
+	// Client tools advertised through message-level declarations never appear
+	// in the top-level defs of a target that renders them, but the model can
+	// call them all the same: the callable client tool set is the wire defs
+	// (native-covered tools already hidden) unioned with the request's
+	// currently effective declarations. A call to a hidden native-covered tool
+	// stays an error exactly as before.
+	effectiveDefs := defs
+	if len(mcpDeclarations) > 0 {
+		effectiveDefs = make([]message.ToolDefinition, 0, len(defs)+len(mcpDeclarations))
+		effectiveDefs = append(effectiveDefs, defs...)
+		effectiveDefs = append(effectiveDefs, mcpDeclarations...)
+	}
 	history := &message.NativeToolHistory{Authorization: authorization, Target: target, Protocol: provider.Type(), APIURL: provider.APIURL()}
 	defer func() {
 		if failure, ok := errors.AsType[*NativeToolError](retErr); ok && len(history.RequestIDs) > 0 && !executiongate.IsPaused(retErr) {
@@ -187,7 +199,7 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 				if call.ID == "" || call.Name == "" || !json.Valid(call.Args) {
 					callErr = fmt.Errorf("native response contains malformed client tool calls")
 				}
-				if !slices.ContainsFunc(defs, func(def message.ToolDefinition) bool { return def.Name == call.Name }) {
+				if !slices.ContainsFunc(effectiveDefs, func(def message.ToolDefinition) bool { return def.Name == call.Name }) {
 					callErr = fmt.Errorf("native response called an unavailable client tool")
 				}
 			}

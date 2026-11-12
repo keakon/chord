@@ -22,12 +22,12 @@ func TestCompleteStreamBeforeRetryRoundRunsBeforeNextRound(t *testing.T) {
 	queued := message.Message{Role: "user", Content: "queued during cooldown"}
 	calls := 0
 	resp, err := c.CompleteStreamWithOptions(context.Background(), initial, nil, nil, CompleteStreamOptions{
-		BeforeRetryRound: func(_ context.Context, messages []message.Message) ([]message.Message, error) {
+		BeforeRetryRound: func(_ context.Context, messages []message.Message) (*RequestSnapshot, error) {
 			calls++
 			if len(messages) != 1 || messages[0].Content != "first" {
 				t.Errorf("retry boundary messages = %#v, want the original request", messages)
 			}
-			return append(messages, queued), nil
+			return &RequestSnapshot{Messages: append(messages, queued)}, nil
 		},
 	})
 	if err != nil {
@@ -58,9 +58,9 @@ func TestCompleteStreamBeforeRetryRoundSkipsKeyRotation(t *testing.T) {
 
 	calls := 0
 	resp, err := c.CompleteStreamWithOptions(context.Background(), []message.Message{{Role: "user", Content: "first"}}, nil, nil, CompleteStreamOptions{
-		BeforeRetryRound: func(_ context.Context, messages []message.Message) ([]message.Message, error) {
+		BeforeRetryRound: func(_ context.Context, messages []message.Message) (*RequestSnapshot, error) {
 			calls++
-			return messages, nil
+			return &RequestSnapshot{Messages: messages}, nil
 		},
 	})
 	if err != nil {

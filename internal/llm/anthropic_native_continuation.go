@@ -32,6 +32,15 @@ func anthropicNativeContinuationIndex(messages []message.Message) int {
 	return -1
 }
 
+// PendingAnthropicNativeTurn reports whether the conversation tail ends in an
+// Anthropic native turn that is still waiting for its client tool results.
+// While the continuation window is open, a request may only carry the paired
+// results and turn overlays, so callers must defer independent input —
+// including message-level tool declarations — until the turn completes.
+func PendingAnthropicNativeTurn(messages []message.Message) bool {
+	return anthropicNativeContinuationIndex(messages) >= 0
+}
+
 func validateAnthropicNativeContinuation(messages []message.Message) error {
 	index := anthropicNativeContinuationIndex(messages)
 	if index < 0 {

@@ -18,7 +18,7 @@ import (
 )
 
 func TestAnthropicBetaHeaderDefaultAndThinking(t *testing.T) {
-	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 1024}, 200000)
+	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 1024}, 200000, false)
 	want := "claude-code-20250219,interleaved-thinking-2025-05-14"
 	if got != want {
 		t.Fatalf("anthropicBetaHeader() = %q, want %q", got, want)
@@ -194,7 +194,7 @@ func TestAnthropicProvider_AuthSchemeBearerUsesAuthorizationHeader(t *testing.T)
 }
 
 func TestAnthropicBetaHeaderAdaptiveDoesNotInjectInterleaved(t *testing.T) {
-	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "adaptive"}, 200000)
+	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "adaptive"}, 200000, false)
 	want := "claude-code-20250219"
 	if got != want {
 		t.Fatalf("anthropicBetaHeader() = %q, want %q", got, want)
@@ -202,17 +202,17 @@ func TestAnthropicBetaHeaderAdaptiveDoesNotInjectInterleaved(t *testing.T) {
 }
 
 func TestAnthropicBetaHeaderEffortOnlyWhenConfigured(t *testing.T) {
-	if got := anthropicBetaHeader(AnthropicTuning{}, 200000); strings.Contains(got, "effort-2025-11-24") {
+	if got := anthropicBetaHeader(AnthropicTuning{}, 200000, false); strings.Contains(got, "effort-2025-11-24") {
 		t.Fatalf("anthropicBetaHeader() = %q, should not inject effort without a configured level", got)
 	}
-	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "adaptive", ThinkingEffort: "high"}, 200000)
+	got := anthropicBetaHeader(AnthropicTuning{ThinkingType: "adaptive", ThinkingEffort: "high"}, 200000, false)
 	if !strings.Contains(got, "effort-2025-11-24") {
 		t.Fatalf("anthropicBetaHeader() = %q, want effort beta when ThinkingEffort is set", got)
 	}
 }
 
 func TestAnthropicBetaHeaderDoesNotDefaultStructuredOutputs(t *testing.T) {
-	got := anthropicBetaHeader(AnthropicTuning{}, 200000)
+	got := anthropicBetaHeader(AnthropicTuning{}, 200000, false)
 	if strings.Contains(got, "structured-outputs-2025-12-15") {
 		t.Fatalf("anthropicBetaHeader() = %q, should not inject structured outputs without output_format", got)
 	}
@@ -220,16 +220,16 @@ func TestAnthropicBetaHeaderDoesNotDefaultStructuredOutputs(t *testing.T) {
 
 func TestAnthropicBetaHeaderContext1MOnlyForMillionTokenModels(t *testing.T) {
 	// Below the 1M window: no context-1m beta.
-	if got := anthropicBetaHeader(AnthropicTuning{}, 200000); strings.Contains(got, "context-1m-2025-08-07") {
+	if got := anthropicBetaHeader(AnthropicTuning{}, 200000, false); strings.Contains(got, "context-1m-2025-08-07") {
 		t.Fatalf("anthropicBetaHeader(200K) = %q, should not inject context-1m", got)
 	}
 	// Exactly 1M: opt in.
-	got := anthropicBetaHeader(AnthropicTuning{}, 1000000)
+	got := anthropicBetaHeader(AnthropicTuning{}, 1000000, false)
 	if !strings.Contains(got, "context-1m-2025-08-07") {
 		t.Fatalf("anthropicBetaHeader(1M) = %q, want context-1m", got)
 	}
 	// Unknown/zero limit: stay conservative and omit it.
-	if got := anthropicBetaHeader(AnthropicTuning{}, 0); strings.Contains(got, "context-1m-2025-08-07") {
+	if got := anthropicBetaHeader(AnthropicTuning{}, 0, false); strings.Contains(got, "context-1m-2025-08-07") {
 		t.Fatalf("anthropicBetaHeader(0) = %q, should not inject context-1m", got)
 	}
 }

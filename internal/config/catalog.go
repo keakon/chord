@@ -227,6 +227,7 @@ func customCatalogProfile(provider ProviderConfig, facts modelcatalog.ModelFacts
 	selected := customCatalogBinding(protocol, facts.ID)
 	if selected != nil {
 		profile := modelcatalog.MergeConfigProfiles(facts.Profile, selected.Profile)
+		stripCatalogBorrowedInlineTools(profile)
 		if selected.Responses != nil {
 			data, err := jsonx.Marshal(selected.Responses)
 			if err != nil {
@@ -241,12 +242,37 @@ func customCatalogProfile(provider ProviderConfig, facts modelcatalog.ModelFacts
 		return selected.Variants, profile, nil
 	}
 	if facts.Connection != nil && InferProviderTypeFromAPIURL(facts.Connection.RequestURL) == protocol {
-		return nil, modelcatalog.MergeConfigProfiles(facts.Profile, nil), nil
+		profile := modelcatalog.MergeConfigProfiles(facts.Profile, nil)
+		stripCatalogBorrowedInlineTools(profile)
+		return nil, profile, nil
 	}
 	if facts.Profile != nil && facts.Profile.Compaction != nil {
 		return nil, &modelcatalog.ConfigProfile{Compaction: facts.Profile.Compaction, Sources: facts.Profile.Sources}, nil
 	}
 	return nil, nil, nil
+}
+
+// stripCatalogBorrowedInlineTools removes the inline-tools claim an official
+// recipe carries, so a custom endpoint bound to the same catalog model keeps
+// the opt-in default. Borrowing transfers verified official-API behavior, and
+// third-party Anthropic-compatible gateways generally do not recognize
+// mid-conversation system messages; a verified gateway enables the flag
+// explicitly at the provider or model layer. The profile is a fresh merge
+// result owned by the caller, so mutation stays local.
+func stripCatalogBorrowedInlineTools(profile *modelcatalog.ConfigProfile) {
+	if profile == nil || len(profile.Compat) == 0 {
+		return
+	}
+	anthropic, ok := profile.Compat["anthropic"].(map[string]any)
+	if !ok {
+		return
+	}
+	if _, ok := anthropic["mcp_inline_tools"]; ok {
+		delete(anthropic, "mcp_inline_tools")
+		if len(anthropic) == 0 {
+			delete(profile.Compat, "anthropic")
+		}
+	}
 }
 
 func customCatalogBinding(protocol, modelID string) *modelcatalog.Binding {

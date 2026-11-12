@@ -245,9 +245,9 @@ func TestDiagnosticRetryKeysFallbackAndFrozenReduction(t *testing.T) {
 				opts.Diagnostics = collector.BeginRequest(0, 0)
 				opts.Diagnostics.SetReduction(contextdiag.Reduction{State: contextdiag.Observed, Before: 20, After: 10})
 			}
-			opts.BeforeFallback = func(_ context.Context, msgs []message.Message, _ FallbackModel) ([]message.Message, error) {
+			opts.BeforeFallback = func(_ context.Context, msgs []message.Message, _ FallbackModel) (*RequestSnapshot, error) {
 				opts.Diagnostics.SetReduction(contextdiag.Reduction{State: contextdiag.Observed, Before: 20, After: 5})
-				return msgs, nil
+				return &RequestSnapshot{Messages: msgs}, nil
 			}
 			response, err := client.CompleteStreamWithOptions(context.Background(), []message.Message{{Role: message.RoleUser, Content: "sample"}}, nil, func(message.StreamDelta) {}, opts)
 			if err != nil || response.Content != "sample" {

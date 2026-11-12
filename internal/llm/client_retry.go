@@ -103,8 +103,8 @@ func (c *Client) completeStreamWithRetry(
 	status *CallStatus,
 	startRoutingGeneration uint64,
 	routingChangedCh <-chan struct{},
-	beforeFallback func(context.Context, []message.Message, FallbackModel) ([]message.Message, error),
-	beforeRetryRound func(context.Context, []message.Message) ([]message.Message, error),
+	beforeFallback func(context.Context, []message.Message, FallbackModel) (*RequestSnapshot, error),
+	beforeRetryRound func(context.Context, []message.Message) (*RequestSnapshot, error),
 	prepareAttempt func(context.Context, RequestAttempt) (context.Context, error),
 ) (resp *message.Response, err error) {
 	var lastErr error
@@ -354,21 +354,25 @@ func (c *Client) completeStreamWithRetry(
 			c.noteAttemptModelRef(t.displayRef())
 			if !retryRoundPrepared && round > 0 && beforeRetryRound != nil {
 				retryRoundPrepared = true
-				updatedMessages, hookErr := beforeRetryRound(ctx, messages)
+				snapshot, hookErr := beforeRetryRound(ctx, messages)
 				if hookErr != nil {
 					return nil, fmt.Errorf("update request before retry round: %w", hookErr)
 				}
-				if updatedMessages != nil {
-					messages = updatedMessages
+				if snapshot != nil {
+					messages, mcpDeclarations = snapshot.Messages, snapshot.MCPDeclarations
+					t.tuning.Anthropic.CacheBoundary = AnthropicCacheBoundary{}
+					t.tuning.Anthropic.CacheLatestBoundary = AnthropicCacheBoundary{}
 				}
 			}
 			if t.isFallback && beforeFallback != nil {
-				updatedMessages, err := beforeFallback(ctx, messages, t.fallbackModel())
+				snapshot, err := beforeFallback(ctx, messages, t.fallbackModel())
 				if err != nil {
 					return nil, fmt.Errorf("update request before fallback: %w", err)
 				}
-				if updatedMessages != nil {
-					messages = updatedMessages
+				if snapshot != nil {
+					messages, mcpDeclarations = snapshot.Messages, snapshot.MCPDeclarations
+					t.tuning.Anthropic.CacheBoundary = AnthropicCacheBoundary{}
+					t.tuning.Anthropic.CacheLatestBoundary = AnthropicCacheBoundary{}
 				}
 			}
 			targetResult, updatedLastInputTokens, targetErr := c.completeStreamTarget(streamTargetAttempt{

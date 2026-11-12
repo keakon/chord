@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/keakon/chord/internal/modelcatalog"
 )
 
 func TestThinkingToolcallCompatConfig_Defaults(t *testing.T) {
@@ -631,4 +633,119 @@ func TestMergeProjectConfigHostedToolsExplicitEmpty(t *testing.T) {
 	if len(*base.Providers["sample"].Compat.HostedTools) != 1 {
 		t.Fatal("merge mutated base")
 	}
+}
+
+func TestConfigYAML_AnthropicCompatMCPInlineTools(t *testing.T) {
+	const raw = `
+providers:
+  anthropic-main:
+    type: "messages"
+    compat:
+      anthropic:
+        mcp_inline_tools: true
+    models:
+      claude-sonnet:
+        compat:
+          anthropic:
+            mcp_inline_tools: false
+`
+
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("yaml unmarshal failed: %v", err)
+	}
+
+	provider, ok := cfg.Providers["anthropic-main"]
+	if !ok {
+		t.Fatal("provider anthropic-main not found")
+	}
+	if provider.Compat == nil || provider.Compat.Anthropic == nil || provider.Compat.Anthropic.MCPInlineTools == nil || !*provider.Compat.Anthropic.MCPInlineTools {
+		t.Fatal("expected providers.anthropic-main.compat.anthropic.mcp_inline_tools=true")
+	}
+	model, ok := provider.Models["claude-sonnet"]
+	if !ok {
+		t.Fatal("model claude-sonnet not found")
+	}
+	if model.Compat == nil || model.Compat.Anthropic == nil || model.Compat.Anthropic.MCPInlineTools == nil || *model.Compat.Anthropic.MCPInlineTools {
+		t.Fatal("expected the model-level explicit false to survive parsing")
+	}
+}
+
+// Catalog compat materializes into the model below explicit provider settings.
+// The inline-tools switch follows that chain: a catalog claim applies only
+// where neither the provider nor the model sets the leaf.
+func TestPrepareCatalogCompatDefaultsAnthropicInlineToolsPriority(t *testing.T) {
+	catalog := func() *ModelConfig {
+		return &ModelConfig{Compat: &ModelCompatConfig{
+			Anthropic: &AnthropicCompatConfig{MCPInlineTools: new(true)},
+		}}
+	}
+
+	t.Run("catalog claim materializes without overrides", func(t *testing.T) {
+		defaults := catalog()
+		if err := prepareCatalogCompatDefaults(defaults, nil, nil); err != nil {
+			t.Fatalf("prepareCatalogCompatDefaults: %v", err)
+		}
+		if defaults.Compat == nil || defaults.Compat.Anthropic == nil || defaults.Compat.Anthropic.MCPInlineTools == nil || !*defaults.Compat.Anthropic.MCPInlineTools {
+			t.Fatalf("catalog claim lost: %#v", defaults.Compat)
+		}
+	})
+
+	t.Run("explicit provider false wins over the catalog", func(t *testing.T) {
+		defaults := catalog()
+		provider := &ProviderCompatConfig{Anthropic: &AnthropicCompatConfig{MCPInlineTools: new(false)}}
+		if err := prepareCatalogCompatDefaults(defaults, provider, nil); err != nil {
+			t.Fatalf("prepareCatalogCompatDefaults: %v", err)
+		}
+		if defaults.Compat != nil && defaults.Compat.Anthropic != nil && defaults.Compat.Anthropic.MCPInlineTools != nil {
+			t.Fatalf("catalog leaf survived a provider-level setting: %#v", defaults.Compat.Anthropic)
+		}
+	})
+
+	t.Run("explicit model false wins over the catalog", func(t *testing.T) {
+		defaults := catalog()
+		model := &ModelCompatConfig{Anthropic: &AnthropicCompatConfig{MCPInlineTools: new(false)}}
+		if err := prepareCatalogCompatDefaults(defaults, nil, model); err != nil {
+			t.Fatalf("prepareCatalogCompatDefaults: %v", err)
+		}
+		if defaults.Compat == nil || defaults.Compat.Anthropic == nil || defaults.Compat.Anthropic.MCPInlineTools == nil || *defaults.Compat.Anthropic.MCPInlineTools {
+			t.Fatalf("model-level false did not win: %#v", defaults.Compat)
+		}
+	})
+}
+
+func TestStripCatalogBorrowedInlineTools(t *testing.T) {
+	t.Run("strips the borrowed claim and drops the empty map", func(t *testing.T) {
+		profile := &modelcatalog.ConfigProfile{Compat: map[string]any{
+			"anthropic": map[string]any{"mcp_inline_tools": true},
+		}}
+		stripCatalogBorrowedInlineTools(profile)
+		if _, ok := profile.Compat["anthropic"]; ok {
+			t.Fatalf("empty anthropic compat map kept: %#v", profile.Compat)
+		}
+	})
+
+	t.Run("keeps other anthropic leaves", func(t *testing.T) {
+		profile := &modelcatalog.ConfigProfile{Compat: map[string]any{
+			"anthropic": map[string]any{"mcp_inline_tools": true, "other_leaf": "kept"},
+		}}
+		stripCatalogBorrowedInlineTools(profile)
+		anthropic := profile.Compat["anthropic"].(map[string]any)
+		if _, ok := anthropic["mcp_inline_tools"]; ok {
+			t.Fatalf("borrowed claim kept: %#v", anthropic)
+		}
+		if anthropic["other_leaf"] != "kept" {
+			t.Fatalf("unrelated leaf dropped: %#v", anthropic)
+		}
+	})
+
+	t.Run("leaves other compat sections alone", func(t *testing.T) {
+		profile := &modelcatalog.ConfigProfile{Compat: map[string]any{
+			"responses": map[string]any{"send_prompt_cache_breakpoint": true},
+		}}
+		stripCatalogBorrowedInlineTools(profile)
+		if profile.Compat["responses"] == nil {
+			t.Fatalf("unrelated compat section dropped: %#v", profile.Compat)
+		}
+	})
 }

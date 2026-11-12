@@ -176,6 +176,13 @@ type CallStatus struct {
 	ServiceTier         config.ServiceTier
 }
 
+// RequestSnapshot keeps the projected messages and currently callable dynamic
+// tools together when a request boundary absorbs new input or tool changes.
+type RequestSnapshot struct {
+	Messages        []message.Message
+	MCPDeclarations []message.ToolDefinition
+}
+
 // CompleteStreamOptions controls request-boundary behavior for a streaming
 // completion. BeforeFallback, when set, is called after the current target has
 // failed and immediately before a fallback target is attempted. It receives
@@ -191,8 +198,8 @@ type CompleteStreamOptions struct {
 	Diagnostics         *RequestDiagnostics
 	PrepareAttempt      func(context.Context, RequestAttempt) (context.Context, error)
 	NativeTools         *NativeToolPolicy
-	BeforeFallback      func(context.Context, []message.Message, FallbackModel) ([]message.Message, error)
-	BeforeRetryRound    func(context.Context, []message.Message) ([]message.Message, error)
+	BeforeFallback      func(context.Context, []message.Message, FallbackModel) (*RequestSnapshot, error)
+	BeforeRetryRound    func(context.Context, []message.Message) (*RequestSnapshot, error)
 	// MCPDeclarations is the request's currently effective incremental MCP
 	// tool set. A target that cannot accept the dynamic declaration shape
 	// inlines exactly this set into its top-level tools instead of replaying
@@ -526,6 +533,27 @@ func kimiDynamicTargetSupported(target FallbackModel) bool {
 	}
 	cc := target.ProviderConfig.ChatCompletionsCompat(target.ModelID)
 	return cc != nil && compatBool(cc.MCPSystemToolsMessage, false)
+}
+
+// SupportsAnthropicInlineTools reports whether the selected Anthropic Messages
+// target explicitly accepts message-level dynamic tool declarations through
+// mid-conversation system messages (inline-tools beta).
+func (c *Client) SupportsAnthropicInlineTools(modelRef string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	target, ok := c.modelPoolTargetForRefLocked(modelRef)
+	return ok && anthropicInlineTargetSupported(target)
+}
+
+func anthropicInlineTargetSupported(target FallbackModel) bool {
+	if target.ProviderConfig == nil || providerWireFamily(target.ProviderConfig) != modelcompat.WireFamilyAnthropic {
+		return false
+	}
+	ac := target.ProviderConfig.AnthropicCompat(target.ModelID)
+	return ac != nil && compatBool(ac.MCPInlineTools, false)
 }
 
 // AllPoolTargetsSupportAssistantPrefillContinuation reports whether every
