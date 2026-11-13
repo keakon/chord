@@ -1,8 +1,8 @@
 {
-  "version": "2026-11-11.1",
+  "version": "2026-11-13.1",
   "source": {
     "repository": "https://github.com/keakon/chord-models",
-    "revision": "v2026-11-11.1"
+    "revision": "v2026-11-13.1"
   },
   "endpoints": [
     {
@@ -995,6 +995,17 @@
         "medium",
         "high"
       ],
+      "cost": {
+        "input_per_million": 0.75,
+        "output_per_million": 3.75,
+        "currency": "USD",
+        "checked": "2026-11-13",
+        "source": {
+          "url": "https://aistudio.google.com/docs/pricing",
+          "checked": "2026-11-13"
+        },
+        "notes": "Standard paid-tier USD rates through December 31, 2026: input (cache miss) $0.75, output (including thinking tokens) $3.75, implicit cache hits $0.075/MTok, and cache storage $0.50 per million tokens per hour. From January 1, 2027 these double ($1.50 input, $7.50 output, $0.15 cache hits, $1.00 storage). No separate cache-write price is listed; a rate-limited Free tier is available."
+      },
       "sources": [
         {
           "url": "https://ai.google.dev/gemini-api/docs/models/gemini-3.6-flash",
@@ -1003,6 +1014,10 @@
         {
           "url": "https://ai.google.dev/gemini-api/docs/generate-content/thinking",
           "checked": "2026-10-04"
+        },
+        {
+          "url": "https://aistudio.google.com/docs/pricing",
+          "checked": "2026-11-13"
         }
       ]
     },
@@ -1135,12 +1150,12 @@
         "input_per_million": 4,
         "output_per_million": 20,
         "currency": "USD",
-        "checked": "2026-10-14",
+        "checked": "2026-11-13",
         "source": {
           "url": "https://ai.google.dev/gemini-api/docs/pricing",
-          "checked": "2026-10-14"
+          "checked": "2026-11-13"
         },
-        "notes": "Standard paid-tier USD API rates for uncached input and output (including thinking), effective December 1, 2026. Introductory rates through November 30, 2026 are $2 input and $10 output per million tokens. Implicit cache hits receive a 95% input discount; explicit caching and the Free tier are not supported. Batch, Flex and Priority rates differ."
+        "notes": "Standard paid-tier USD API rates for uncached input and output (including thinking), effective December 1, 2026. Introductory rates through November 30, 2026 are $2 input and $10 output per million tokens, with implicit cache hits at $0.10/MTok through that date and $0.20/MTok afterwards. Explicit caching and the Free tier are not supported; the pricing page lists no separate cache-write or storage fee. Batch, Flex and Priority rates differ."
       },
       "sources": [
         {
@@ -1255,6 +1270,124 @@
           {
             "url": "https://ai.google.dev/gemini-api/docs/generate-content/latest-model",
             "checked": "2026-11-11"
+          }
+        ]
+      }
+    },
+    {
+      "id": "google/gemini-4-hydrogen",
+      "released": "2026-11-12",
+      "coding_sources": [
+        {
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-hydrogen/",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://deepmind.google/models/model-cards/gemini-4-hydrogen/",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://deepmind.google/models/gemini/",
+          "checked": "2026-11-13"
+        }
+      ],
+      "connection": {
+        "request_url": "https://generativelanguage.googleapis.com/v1beta/",
+        "wire_model_id": "gemini-4-hydrogen",
+        "env_var": "GEMINI_API_KEY",
+        "sources": [
+          {
+            "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-hydrogen",
+            "checked": "2026-11-13"
+          },
+          {
+            "url": "https://aistudio.google.com/docs/text-generation?generate-content=true",
+            "checked": "2026-11-13"
+          }
+        ]
+      },
+      "context": 1048576,
+      "output": 1048576,
+      "input_modalities": [
+        "text",
+        "image",
+        "video",
+        "audio",
+        "pdf"
+      ],
+      "reasoning_options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "cost": {
+        "input_per_million": 1.5,
+        "output_per_million": 7.5,
+        "currency": "USD",
+        "checked": "2026-11-13",
+        "source": {
+          "url": "https://ai.google.dev/gemini-api/docs/pricing",
+          "checked": "2026-11-13"
+        },
+        "notes": "Standard paid-tier USD API rates, flat across the entire 1,048,576-token context window with no long-context surcharge or promotional tier. Output includes thinking tokens. Implicit cache hits are $0.075/MTok for prompts of at least 4,096 tokens; the pricing page lists no separate cache-write or storage fee, and explicit caching is unsupported. A rate-limited Free tier is available; Batch, Flex and Priority rates differ and grounding is billed per query."
+      },
+      "sources": [
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-hydrogen?generate-content=true",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://aistudio.google.com/docs/text-generation?generate-content=true",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/generate-content/thinking",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/generate-content/long-decode",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/caching",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://aistudio.google.com/docs/document-processing?generate-content=true",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/pricing",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-hydrogen/",
+          "checked": "2026-11-13"
+        },
+        {
+          "url": "https://deepmind.google/models/model-cards/gemini-4-hydrogen/",
+          "checked": "2026-11-13"
+        }
+      ],
+      "config_profile": {
+        "model": {
+          "thinking": {
+            "level": "high"
+          }
+        },
+        "sources": [
+          {
+            "url": "https://ai.google.dev/gemini-api/docs/generate-content/thinking",
+            "checked": "2026-11-13"
+          },
+          {
+            "url": "https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen",
+            "checked": "2026-11-13"
           }
         ]
       }
@@ -3120,6 +3253,26 @@
           {
             "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-carbon",
             "checked": "2026-11-11"
+          }
+        ]
+      }
+    },
+    {
+      "endpoint": "gemini",
+      "wire_model_id": "gemini-4-hydrogen",
+      "model_id": "google/gemini-4-hydrogen",
+      "limit": {
+        "output": 65536
+      },
+      "config_profile": {
+        "sources": [
+          {
+            "url": "https://ai.google.dev/gemini-api/docs/generate-content/long-decode",
+            "checked": "2026-11-13"
+          },
+          {
+            "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-hydrogen?generate-content=true",
+            "checked": "2026-11-13"
           }
         ]
       }
