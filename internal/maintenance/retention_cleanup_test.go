@@ -45,6 +45,42 @@ func TestCleanupLLMDumpsPreservesOpenTempFile(t *testing.T) {
 	}
 }
 
+func TestCleanupLLMDumpsDoesNotFollowDirectorySymlink(t *testing.T) {
+	loc := testLocator(t)
+	project, err := loc.EnsureProject(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := filepath.Join(project.ProjectSessionsDir, "20260427153042123")
+	dumpsDir := filepath.Join(sessionDir, "dumps")
+	if err := os.MkdirAll(dumpsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	externalDump := filepath.Join(outside, "old.json")
+	if err := os.WriteFile(externalDump, []byte("external"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(externalDump, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dumpsDir, "llm")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	result, err := CleanupLLMDumps(loc, CleanupOptions{Yes: true, OlderThan: 24 * time.Hour, Now: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Deleted) != 0 || len(result.Skipped) != 1 {
+		t.Fatalf("cleanup result = %#v, want symlink skipped", result)
+	}
+	if _, err := os.Stat(externalDump); err != nil {
+		t.Fatalf("external dump must be preserved: %v", err)
+	}
+}
+
 func TestCleanupSessionsSkipsInvalidActivityFile(t *testing.T) {
 	loc := testLocator(t)
 	dir := filepath.Join(loc.SessionsRoot, "project", "session")

@@ -266,12 +266,20 @@ func CleanupLLMDumps(locator *config.PathLocator, opts CleanupOptions) (*Cleanup
 	}
 	res := &CleanupResult{DryRun: !opts.Yes}
 	cutoff := cutoffTime(opts)
-	projectDirs, err := os.ReadDir(locator.SessionsRoot)
+	sessionsRoot, err := os.OpenRoot(locator.SessionsRoot)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return res, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("open sessions root: %w", err)
+	}
+	defer sessionsRoot.Close()
+	projectDirs, err := readDirectoryEntries(sessionsRoot)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return res, nil
+		}
+		return nil, fmt.Errorf("read sessions root: %w", err)
 	}
 	for _, projectEntry := range projectDirs {
 		if err := ctxErr(opts.Ctx); err != nil {
@@ -281,75 +289,125 @@ func CleanupLLMDumps(locator *config.PathLocator, opts CleanupOptions) (*Cleanup
 			continue
 		}
 		projectDir := filepath.Join(locator.SessionsRoot, projectEntry.Name())
-		sessionEntries, err := os.ReadDir(projectDir)
+		projectRoot, err := openDirectoryRoot(sessionsRoot, projectEntry.Name())
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			return nil, err
+			return nil, fmt.Errorf("open project sessions directory: %w", err)
+		}
+		sessionEntries, err := readDirectoryEntries(projectRoot)
+		if err != nil {
+			_ = projectRoot.Close()
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("read project sessions directory: %w", err)
 		}
 		for _, sessionEntry := range sessionEntries {
 			if err := ctxErr(opts.Ctx); err != nil {
+				_ = projectRoot.Close()
 				return res, err
 			}
 			if !sessionEntry.IsDir() {
 				continue
 			}
 			sessionDir := filepath.Join(projectDir, sessionEntry.Name())
-			dumpsDir := filepath.Join(sessionDir, "dumps", "llm")
-			dumpEntries, err := os.ReadDir(dumpsDir)
-			if err != nil {
-				if os.IsNotExist(err) {
-					continue
-				}
+			err := cleanupSessionLLMDumps(projectRoot, sessionEntry.Name(), sessionDir, cutoff, res)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
 				res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: err.Error()})
-				continue
-			}
-			locked, err := recovery.SessionLockActive(sessionDir)
-			if err != nil {
-				res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: "lock check failed: " + err.Error()})
-				continue
-			}
-			if locked {
-				// An active session may be appending dumps right now.
-				res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: "session is locked"})
-				continue
-			}
-			for _, f := range dumpEntries {
-				if f.IsDir() {
-					continue
-				}
-				name := f.Name()
-				if !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".tmp-") {
-					continue
-				}
-				path := filepath.Join(dumpsDir, name)
-				cand := CleanupCandidate{Path: path, Kind: "llm dump"}
-				info, err := f.Info()
-				if err != nil {
-					cand.Skip = "stat failed: " + err.Error()
-					res.Candidates = append(res.Candidates, cand)
-					res.Skipped = append(res.Skipped, cand)
-					continue
-				}
-				if !info.Mode().IsRegular() || cutoff != nil && info.ModTime().After(*cutoff) {
-					continue
-				}
-				cand.Bytes = info.Size()
-				res.Candidates = append(res.Candidates, cand)
-				if res.DryRun {
-					continue
-				}
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-					cand.Skip = err.Error()
-					res.Skipped = append(res.Skipped, cand)
-					continue
-				}
-				res.Deleted = append(res.Deleted, cand)
 			}
 		}
+		_ = projectRoot.Close()
 	}
 	return res, nil
+}
+
+func cleanupSessionLLMDumps(projectRoot *os.Root, sessionName, sessionDir string, cutoff *time.Time, res *CleanupResult) error {
+	sessionRoot, err := openDirectoryRoot(projectRoot, sessionName)
+	if err != nil {
+		return fmt.Errorf("open session directory: %w", err)
+	}
+	defer sessionRoot.Close()
+
+	dumpsRoot, err := openDirectoryRoot(sessionRoot, "dumps")
+	if err != nil {
+		return fmt.Errorf("open dumps directory: %w", err)
+	}
+	defer dumpsRoot.Close()
+	llmRoot, err := openDirectoryRoot(dumpsRoot, "llm")
+	if err != nil {
+		return fmt.Errorf("open LLM dump directory: %w", err)
+	}
+	defer llmRoot.Close()
+
+	dumpEntries, err := readDirectoryEntries(llmRoot)
+	if err != nil {
+		return fmt.Errorf("read LLM dump directory: %w", err)
+	}
+	locked, err := recovery.SessionLockActive(sessionDir)
+	if err != nil {
+		res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: "lock check failed: " + err.Error()})
+		return nil
+	}
+	if locked {
+		// An active session may be appending dumps right now.
+		res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: "session is locked"})
+		return nil
+	}
+	for _, f := range dumpEntries {
+		if f.IsDir() {
+			continue
+		}
+		name := f.Name()
+		if !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".tmp-") {
+			continue
+		}
+		path := filepath.Join(sessionDir, "dumps", "llm", name)
+		cand := CleanupCandidate{Path: path, Kind: "llm dump"}
+		info, err := f.Info()
+		if err != nil {
+			cand.Skip = "stat failed: " + err.Error()
+			res.Candidates = append(res.Candidates, cand)
+			res.Skipped = append(res.Skipped, cand)
+			continue
+		}
+		if !info.Mode().IsRegular() || cutoff != nil && info.ModTime().After(*cutoff) {
+			continue
+		}
+		cand.Bytes = info.Size()
+		res.Candidates = append(res.Candidates, cand)
+		if res.DryRun {
+			continue
+		}
+		if err := llmRoot.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			cand.Skip = err.Error()
+			res.Skipped = append(res.Skipped, cand)
+			continue
+		}
+		res.Deleted = append(res.Deleted, cand)
+	}
+	return nil
+}
+
+func openDirectoryRoot(root *os.Root, name string) (*os.Root, error) {
+	info, err := root.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a real directory: %w", name, fs.ErrInvalid)
+	}
+	return root.OpenRoot(name)
+}
+
+func readDirectoryEntries(root *os.Root) ([]os.DirEntry, error) {
+	dir, err := root.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	return dir.ReadDir(-1)
 }
 
 func cleanupChildren(root, kind string, opts CleanupOptions) (*CleanupResult, error) {
