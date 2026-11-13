@@ -311,6 +311,19 @@ func TestBuildStartupSkillListingDetailedReportsTheEntryLimit(t *testing.T) {
 	}
 }
 
+func TestBuildStartupSkillListingEscapesOmittedSkillNames(t *testing.T) {
+	entries := make([]SkillListingEntry, SkillListingMaxEntries+1)
+	for i := range SkillListingMaxEntries {
+		entries[i] = SkillListingEntry{Name: fmt.Sprintf("sample-%02d", i)}
+	}
+	entries[SkillListingMaxEntries] = SkillListingEntry{Name: "<tag>content</tag>"}
+
+	listing := BuildStartupSkillListing(entries, "")
+	if strings.Contains(listing, "<tag>") || !strings.Contains(listing, `\u003ctag\u003econtent\u003c/tag\u003e`) {
+		t.Fatalf("omitted skill name was not prompt-escaped: %q", listing)
+	}
+}
+
 func TestBuildStartupSkillListingDetailedReportsTheByteBudget(t *testing.T) {
 	// Long descriptions exhaust the section budget well before the entry cap.
 	entries := make([]SkillListingEntry, 40)

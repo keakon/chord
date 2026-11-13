@@ -202,7 +202,7 @@ func BuildStartupSkillListingDetailed(entries []SkillListingEntry, header string
 		slices.Sort(omitted)
 		names, _ := jsonx.Marshal(omitted)
 		body.WriteString("Additional available skill names: ")
-		body.Write(names)
+		body.Write(jsonx.EscapeForPrompt(names))
 		body.WriteByte('\n')
 	}
 	rendered.Text = body.String()
