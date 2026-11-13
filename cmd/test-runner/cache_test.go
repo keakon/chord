@@ -4,7 +4,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -156,5 +158,71 @@ func TestTrimSkippedDiagnosticReportsRegisteredUsers(t *testing.T) {
 	trimBuildCache(cache, &diagnostics)
 	if output := diagnostics.String(); strings.Contains(output, "skipped") {
 		t.Fatalf("unexpected skip diagnostic without registered users: %s", output)
+	}
+}
+
+func TestCacheStatusIsReadOnlyAndReportsRunState(t *testing.T) {
+	base := t.TempDir()
+	cacheRoot := filepath.Join(base, "cache")
+	cache, err := buildcache.Open(cacheRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := newRun(base, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer run.lock.Close()
+	if err := cache.Begin(run.id); err != nil {
+		t.Fatal(err)
+	}
+	defer cache.End(run.id)
+
+	var output bytes.Buffer
+	if code := runCacheCommandAt(cacheStatusCommand, cacheRoot, base, &output, &output); code != 0 {
+		t.Fatalf("cache status exit = %d: %s", code, output.String())
+	}
+	if !strings.Contains(output.String(), "Usage records: 1") || !strings.Contains(output.String(), "run=active") {
+		t.Fatalf("status omitted live run state: %s", output.String())
+	}
+}
+
+func TestCacheStatusDoesNotCreateMissingCache(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing-cache")
+	var output bytes.Buffer
+	if code := runCacheCommandAt(cacheStatusCommand, root, t.TempDir(), &output, &output); code != 0 {
+		t.Fatalf("cache status exit = %d: %s", code, output.String())
+	}
+	if !strings.Contains(output.String(), "not initialized") {
+		t.Fatalf("missing cache status = %s", output.String())
+	}
+	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("status created cache directory: %v", err)
+	}
+}
+
+func TestExplicitCacheTrimPreservesCacheWithRegisteredUser(t *testing.T) {
+	base := t.TempDir()
+	cacheRoot := filepath.Join(base, "cache")
+	cache, err := buildcache.Open(cacheRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.Repeat("a", 32)
+	if err := cache.Begin(id); err != nil {
+		t.Fatal(err)
+	}
+	defer cache.End(id)
+	entry := largeCacheEntry(t, base)
+
+	var output bytes.Buffer
+	if code := runCacheCommandAt(cacheTrimCommand, cacheRoot, base, &output, &output); code != 0 {
+		t.Fatalf("cache trim exit = %d: %s", code, output.String())
+	}
+	if !strings.Contains(output.String(), "may still have live owners") {
+		t.Fatalf("missing safe-skip diagnostic: %s", output.String())
+	}
+	if _, err := os.Stat(entry); err != nil {
+		t.Fatalf("explicit trim deleted active cache entry: %v", err)
 	}
 }

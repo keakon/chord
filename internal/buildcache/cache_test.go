@@ -228,6 +228,59 @@ func TestTrimDefersWhileRegistryLocked(t *testing.T) {
 	}
 }
 
+func TestInspectIsReadOnlyAndReportsLogicalSize(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "cache")
+	c, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := fixture(t, c, 1, 17, time.Now())
+	bootID := systemBootID()
+	writeRecord(t, c, strings.Repeat("a", 32), userRecord{BootID: bootID})
+	if bootID != "" {
+		writeRecord(t, c, strings.Repeat("b", 32), userRecord{BootID: bootID + "-previous"})
+	}
+
+	status, err := c.Inspect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantUsers := 1
+	if bootID != "" {
+		wantUsers++
+	}
+	if !status.Scanned || status.LogicalBytes != 17 || !status.Approximate || status.RegistryAvailable || len(status.Users) != wantUsers {
+		t.Fatalf("inspection: %+v", status)
+	}
+	if bootID == "" {
+		if status.Users[0].Boot != BootUnknown || status.Users[0].RecordOK {
+			t.Fatalf("unavailable boot identity was trusted: %+v", status.Users[0])
+		}
+	} else if status.Users[0].Boot != BootCurrent || !status.Users[0].RecordOK || status.Users[1].Boot != BootPrevious || !status.Users[1].RecordOK {
+		t.Fatalf("boot state classification: %+v", status.Users)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("inspection changed cache entry: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".lock")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("inspection created registry lock: %v", err)
+	}
+}
+
+func TestInspectReportsRegistryBusyWithoutScanning(t *testing.T) {
+	c := newCache(t)
+	lock, err := c.lock(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+
+	status, err := c.Inspect()
+	if err != nil || !status.RegistryBusy || status.Scanned {
+		t.Fatalf("inspection while registry is locked: %+v, %v", status, err)
+	}
+}
+
 func TestTrimCountsExecutableDirectoriesByLastUse(t *testing.T) {
 	c := newCache(t)
 	now := time.Now()

@@ -203,6 +203,10 @@ the budget. Fuzz corpora, tool installations, and the separate module download
 cache (`GOMODCACHE`) are left alone. The cache is on disk; the RAM disk holds only
 the shared work root and the run directories.
 
+At startup, the runner also removes usage records proven to belong to a previous
+system boot. It scans the cache at that point only when such records were found
+and no current or unverified users remain.
+
 Usage records survive a killed runner. Its supervisor releases them only after
 proving command cleanup and then attempts cache eviction, even if the runner
 has exited. An unproven cleanup retains its record under
@@ -213,8 +217,14 @@ On macOS and Linux, usage records include the system boot identifier. Cleanup
 removes records from a different boot before checking whether the cache is idle.
 Records with a missing or unreadable boot identifier remain protected regardless
 of their age.
-Investigate the retained run before removing its usage record; an exited runner
-alone does not prove its descendants have stopped.
+Run `bash scripts/run_tests.sh --cache-status` to inspect logical cache size,
+record boot state and age, and associated run cleanup evidence. The size is
+approximate while registered or unverified users may still be writing. This
+read-only command does not probe or create the test temporary directory.
+`bash scripts/run_tests.sh --cache-trim` explicitly applies the same idle-only
+policy; it does not remove current or unverified usage records or evict cache
+entries while any such record remains. An exited runner alone does not prove
+its descendants have stopped.
 Do not point unrelated commands at this managed cache: they would bypass the
 usage registry. The wrapper overrides `GOCACHE` and disables `GOCACHEPROG` for
 its command tree. Existing default-cache data is left untouched.

@@ -18,6 +18,7 @@
 #
 # Usage:
 #   scripts/test_tmpdir.sh            # print the directory to use
+#   scripts/test_tmpdir.sh --existing # print an existing configured directory without probing or creating one
 #   scripts/test_tmpdir.sh --destroy  # tear down the macOS RAM disk this may create
 #   scripts/test_tmpdir.sh --release DIR  # eject DIR if it is a private RAM disk
 
@@ -48,6 +49,32 @@ usable() {
 	fi
 	rm -f "${probe}"
 	return "${ok}"
+}
+
+existing_tmpdir() {
+	local dir repo_root conf configured
+	if [[ -n "${CHORD_TEST_TMPDIR:-}" && -d "${CHORD_TEST_TMPDIR}" && -r "${CHORD_TEST_TMPDIR}" && -x "${CHORD_TEST_TMPDIR}" ]]; then
+		printf '%s\n' "${CHORD_TEST_TMPDIR}"
+		return 0
+	fi
+	repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+	conf="${repo_root}/.chord/test-tmpdir"
+	if [[ -f "${conf}" ]]; then
+		configured="$(grep -vE '^[[:space:]]*(#|$)' "${conf}" | head -n1 | tr -d '[:space:]' || true)"
+		if [[ -n "${configured}" && -d "${configured}" && -r "${configured}" && -x "${configured}" ]]; then
+			printf '%s\n' "${configured}"
+			return 0
+		fi
+	fi
+	case "$(uname -s)" in
+		Linux)
+			[[ -d /dev/shm && -r /dev/shm && -x /dev/shm ]] && printf '%s\n' /dev/shm
+			;;
+		Darwin)
+			[[ -d "${mount_point}" && -r "${mount_point}" && -x "${mount_point}" ]] && printf '%s\n' "${mount_point}"
+			;;
+	esac
+	return 0
 }
 
 # retry_capture runs "$@" until it exits zero and prints only that run's
@@ -290,6 +317,10 @@ resolve_darwin_tmpdir() {
 
 main() {
 	case "${1:-}" in
+		--existing)
+			existing_tmpdir
+			return
+			;;
 		--destroy)
 			destroy_owned_ram_disk
 			return

@@ -4,6 +4,7 @@ package buildcache
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,13 +25,14 @@ var defaultPolicy = policy{high: 8 << 30, low: 6 << 30}
 // Result reports logical bytes of Go cache entries, including executable
 // directories but excluding tools, fuzz corpora and metadata.
 type Result struct {
-	Scanned    bool
-	Before     int64
-	After      int64
-	Removed    int
-	Users      int
-	Reaped     int // stale ownership records removed before scanning
-	OverBudget bool
+	Scanned      bool
+	Before       int64
+	After        int64
+	Removed      int
+	Users        int
+	Reaped       int // stale ownership records removed before scanning
+	OverBudget   bool
+	RegistryBusy bool
 }
 
 type entry struct {
@@ -42,44 +44,12 @@ type entry struct {
 
 func (c *Cache) trim(p policy) (Result, error) {
 	result := Result{Scanned: true}
-	var entries []entry
-	for i := range 256 {
-		dir := filepath.Join(c.Dir(), fmt.Sprintf("%02x", i))
-		info, err := os.Lstat(dir)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return result, fmt.Errorf("inspect cache bucket: %w", err)
-		}
-		if !info.IsDir() {
-			continue
-		}
-		files, err := os.ReadDir(dir)
-		if err != nil {
-			return result, fmt.Errorf("read cache bucket: %w", err)
-		}
-		for _, file := range files {
-			if !cacheName(file.Name()) || !strings.HasPrefix(file.Name(), info.Name()) {
-				continue
-			}
-			stat, err := file.Info()
-			if err != nil {
-				return result, fmt.Errorf("inspect cache entry: %w", err)
-			}
-			path := filepath.Join(dir, file.Name())
-			size, ok, err := cacheEntrySize(path, stat)
-			if err != nil {
-				return result, err
-			}
-			if !ok {
-				continue
-			}
-			result.Before += size
-			entries = append(entries, entry{path, size, stat.ModTime(), stat.IsDir()})
-		}
+	entries, total, err := c.scan()
+	if err != nil {
+		return result, err
 	}
-	result.After = result.Before
+	result.Before = total
+	result.After = total
 	if result.Before <= p.high {
 		return result, nil
 	}
@@ -109,6 +79,56 @@ func (c *Cache) trim(p policy) (Result, error) {
 	return result, nil
 }
 
+func (c *Cache) scan() ([]entry, int64, error) {
+	var entries []entry
+	for i := range 256 {
+		dir := filepath.Join(c.Dir(), fmt.Sprintf("%02x", i))
+		info, err := os.Lstat(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, 0, fmt.Errorf("inspect cache bucket: %w", err)
+		}
+		if !info.IsDir() {
+			continue
+		}
+		files, err := os.ReadDir(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, 0, fmt.Errorf("read cache bucket: %w", err)
+		}
+		for _, file := range files {
+			if !cacheName(file.Name()) || !strings.HasPrefix(file.Name(), info.Name()) {
+				continue
+			}
+			stat, err := file.Info()
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return nil, 0, fmt.Errorf("inspect cache entry: %w", err)
+			}
+			path := filepath.Join(dir, file.Name())
+			size, ok, err := cacheEntrySize(path, stat)
+			if err != nil {
+				return nil, 0, err
+			}
+			if !ok {
+				continue
+			}
+			entries = append(entries, entry{path, size, stat.ModTime(), stat.IsDir()})
+		}
+	}
+	var total int64
+	for _, file := range entries {
+		total += file.size
+	}
+	return entries, total, nil
+}
+
 func cacheEntrySize(path string, info os.FileInfo) (int64, bool, error) {
 	if info.Mode().IsRegular() {
 		return info.Size(), true, nil
@@ -119,6 +139,9 @@ func cacheEntrySize(path string, info os.FileInfo) (int64, bool, error) {
 	// Go stores an executable as a single regular file inside its output-ID
 	// directory. Other shapes are not ours to remove.
 	files, err := os.ReadDir(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, false, nil
+	}
 	if err != nil {
 		return 0, false, fmt.Errorf("read cached executable: %w", err)
 	}
@@ -126,6 +149,9 @@ func cacheEntrySize(path string, info os.FileInfo) (int64, bool, error) {
 		return 0, false, nil
 	}
 	executable, err := files[0].Info()
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, false, nil
+	}
 	if err != nil {
 		return 0, false, fmt.Errorf("inspect cached executable: %w", err)
 	}

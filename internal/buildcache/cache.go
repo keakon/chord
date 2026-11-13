@@ -27,16 +27,36 @@ func Open(root string) (*Cache, error) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("create build cache: %w", err)
 		}
+	}
+	if err := validateDirectories(root); err != nil {
+		return nil, err
+	}
+	return &Cache{root: root}, nil
+}
+
+// OpenExisting opens a cache without creating or changing any files.
+func OpenExisting(root string) (*Cache, error) {
+	if !filepath.IsAbs(root) {
+		return nil, fmt.Errorf("build cache path must be absolute: %s", root)
+	}
+	if err := validateDirectories(root); err != nil {
+		return nil, err
+	}
+	return &Cache{root: root}, nil
+}
+
+func validateDirectories(root string) error {
+	for _, dir := range []string{root, filepath.Join(root, "go-build"), filepath.Join(root, "users")} {
 		info, err := os.Lstat(dir)
 		if err != nil {
-			return nil, fmt.Errorf("inspect build cache: %w", err)
+			return fmt.Errorf("inspect build cache: %w", err)
 		}
 		stat, ok := info.Sys().(*syscall.Stat_t)
 		if !info.IsDir() || info.Mode().Perm()&0o077 != 0 || !ok || stat.Uid != uint32(os.Getuid()) {
-			return nil, fmt.Errorf("build cache directory is not private: %s", dir)
+			return fmt.Errorf("build cache directory is not private: %s", dir)
 		}
 	}
-	return &Cache{root: root}, nil
+	return nil
 }
 
 func (c *Cache) Dir() string { return filepath.Join(c.root, "go-build") }
@@ -127,7 +147,7 @@ func (c *Cache) lock(nonblocking bool) (*os.File, error) {
 func (c *Cache) Trim() (Result, error) {
 	lock, err := c.lock(true)
 	if errors.Is(err, syscall.EWOULDBLOCK) {
-		return Result{}, nil
+		return Result{RegistryBusy: true}, nil
 	}
 	if err != nil {
 		return Result{}, err
@@ -141,6 +161,31 @@ func (c *Cache) Trim() (Result, error) {
 		return Result{Users: live, Reaped: reaped}, nil
 	}
 	result, err := c.trim(defaultPolicy)
+	result.Reaped = reaped
+	return result, err
+}
+
+// TrimPreviousBoot reaps provably stale usage records and scans the cache
+// only when at least one such record was found.
+func (c *Cache) TrimPreviousBoot() (Result, error) {
+	return c.trimPreviousBoot(systemBootID())
+}
+
+func (c *Cache) trimPreviousBoot(bootID string) (Result, error) {
+	lock, err := c.lock(true)
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		return Result{RegistryBusy: true}, nil
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	defer lock.Close()
+	live, reaped, err := c.reapUsers(bootID)
+	result := Result{Users: live, Reaped: reaped}
+	if err != nil || reaped == 0 || live > 0 {
+		return result, err
+	}
+	result, err = c.trim(defaultPolicy)
 	result.Reaped = reaped
 	return result, err
 }

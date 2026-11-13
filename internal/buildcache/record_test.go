@@ -5,6 +5,7 @@ package buildcache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -163,5 +164,46 @@ func TestTrimReapsPreviousBootBeforeEviction(t *testing.T) {
 	}
 	if !result.Scanned || result.Reaped != 1 || result.Users != 0 || result.Removed != 1 || result.After != 0 {
 		t.Fatalf("previous boot prevented idle eviction: %+v", result)
+	}
+}
+
+func TestTrimPreviousBootScansOnlyAfterReapingARecord(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		records    []userRecord
+		bootID     string
+		wantUsers  int
+		wantReaped int
+		wantScan   bool
+	}{
+		{name: "current owner", records: []userRecord{{BootID: "current"}}, bootID: "current", wantUsers: 1},
+		{name: "unknown boot", records: []userRecord{{}}, bootID: "current", wantUsers: 1},
+		{name: "unknown current boot", records: []userRecord{{BootID: "previous"}}, wantUsers: 1},
+		{name: "previous owner with current owner", records: []userRecord{{BootID: "previous"}, {BootID: "current"}}, bootID: "current", wantUsers: 1, wantReaped: 1},
+		{name: "only previous owner", records: []userRecord{{BootID: "previous"}}, bootID: "current", wantReaped: 1, wantScan: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newCache(t)
+			fixture(t, c, 1, 9<<30, time.Now())
+			for i, record := range tc.records {
+				writeRecord(t, c, strings.Repeat(string(rune('a'+i)), 32), record)
+			}
+			result, err := c.trimPreviousBoot(tc.bootID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Users != tc.wantUsers || result.Reaped != tc.wantReaped || result.Scanned != tc.wantScan {
+				t.Fatalf("trim previous boot: %+v", result)
+			}
+			if tc.wantScan && (result.Removed != 1 || result.After != 0) {
+				t.Fatalf("stale-only trim: %+v", result)
+			}
+			if !tc.wantScan {
+				cacheEntry := filepath.Join(c.Dir(), "00", fmt.Sprintf("%064x-d", 1))
+				if _, err := os.Stat(cacheEntry); err != nil {
+					t.Fatalf("cache changed without reaping a stale record: %v", err)
+				}
+			}
+		})
 	}
 }

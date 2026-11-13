@@ -33,6 +33,9 @@ func main() {
 }
 
 func runMain(args []string, executable string) int {
+	if len(args) > 0 && (args[0] == cacheStatusCommand || args[0] == cacheTrimCommand) {
+		return runCacheCommand(args[0], args[1:], os.Stdout, os.Stderr)
+	}
 	defaultTemp := len(args) > 0 && args[0] == "--default-temp"
 	if defaultTemp {
 		args = args[1:]
@@ -88,6 +91,12 @@ func runCommand(base, cacheRoot, executable string, args []string, signals <-cha
 	if err != nil {
 		fmt.Fprintln(stderr, "test-runner:", err)
 		return 1, run.remove() == nil
+	}
+	result, err := cache.TrimPreviousBoot()
+	if err != nil {
+		reportCacheTrimResult(result, err, stderr)
+	} else if result.Reaped > 0 {
+		reportCacheTrimResult(result, nil, stderr)
 	}
 	if err := cache.Begin(run.id); err != nil {
 		fmt.Fprintln(stderr, "test-runner:", err)
@@ -248,9 +257,15 @@ func testEnvironment(work, cacheDir string) []string {
 
 func trimBuildCache(cache *buildcache.Cache, diagnostics io.Writer) {
 	result, err := cache.Trim()
+	reportCacheTrimResult(result, err, diagnostics)
+}
+
+func reportCacheTrimResult(result buildcache.Result, err error, diagnostics io.Writer) {
 	switch {
 	case err != nil:
 		fmt.Fprintln(diagnostics, "test-runner: cache cleanup deferred:", err)
+	case result.RegistryBusy:
+		return
 	case result.Users > 0:
 		fmt.Fprintf(diagnostics, "test-runner: cache trim skipped: %d registered cache user(s)\n", result.Users)
 	case result.Removed > 0:
