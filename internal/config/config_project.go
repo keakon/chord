@@ -82,6 +82,7 @@ var projectScopedTopLevelKeys = map[string]bool{
 	"desktop_notification":            true,
 	"desktop_notification_foreground": true,
 	"prevent_sleep":                   true,
+	"progress_reminder":               true,
 	"keymap":                          true,
 	"commands":                        true,
 	"ime_switch_target":               true,

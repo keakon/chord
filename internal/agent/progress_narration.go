@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 )
@@ -15,6 +16,20 @@ const (
 	progressNoticeRounds   = 10
 	progressNoticeText     = "Before continuing with more tools, briefly tell the user what is known or still unresolved and what comes next, then continue the task. Thinking output does not replace this update. If the task is complete, give the final result instead."
 )
+
+// effectiveProgressReminder resolves the opt-in switch with the same
+// project-over-global precedence as other runtime settings. An unset value
+// leaves automatic reminders disabled: a reminder injects a system-reminder
+// into the request and appends a durable runtime user row to the transcript.
+func effectiveProgressReminder(global, project *config.Config) bool {
+	if project != nil && project.ProgressReminder != nil {
+		return *project.ProgressReminder
+	}
+	if global != nil && global.ProgressReminder != nil {
+		return *global.ProgressReminder
+	}
+	return false
+}
 
 // progressNarration belongs only to a main turn. Tool settlement, streaming,
 // request dispatch, and interaction waits access it from different goroutines.
@@ -138,6 +153,12 @@ func (p *progressNarration) stagedForDispatch() bool {
 }
 
 func (a *MainAgent) buildProgressNoticeOverlay() (message.Message, bool) {
+	// Single generation gate: staged state is what later confirms the durable
+	// row, the TUI card, and the headless event. Never staging keeps all four
+	// off without touching restore paths that read existing transcript rows.
+	if !a.progressReminderEnabled {
+		return message.Message{}, false
+	}
 	turn := a.currentTurn()
 	if turn == nil || turn.progress == nil || turn.Ctx.Err() != nil || a.sessionExecutionPaused() || !turn.progress.stage(time.Now()) {
 		return message.Message{}, false

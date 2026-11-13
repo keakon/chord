@@ -978,6 +978,18 @@ prevent_sleep: true
 - `ime_switch_target`：进入 Normal 模式时通过 `im-select`（Windows 为 `im-select.exe`）切换到指定输入法，回到 Insert 模式时恢复。常用于让快捷键在英文键盘布局下工作。
 - `prevent_sleep`：Agent 工作期间申请阻止运行主机休眠，所有 Agent 空闲一秒后释放；TUI、headless、ACP 均适用。默认 `false`，首次运行向导默认 No。支持 macOS、Linux（依赖本地 logind/GNOME 服务）和 Windows，实际覆盖受服务可用性和设备策略限制，不请求保持显示器点亮，也不控制远程客户端或 WSL 宿主机电源。详见[平台说明](platforms_CN.md#prevent_sleep)。
 
+## 进度提醒
+
+自动生成的 `PROGRESS REMINDER`（进度提醒）**默认关闭**。需要时在 `config.yaml`（全局或项目级）显式开启：
+
+```yaml
+progress_reminder: true
+```
+
+开启后，主代理连续 5 分钟的有效工作、累计 10 个完整工具调用轮次且没有正文输出时，Chord 会提醒它简述已知结论、未解决问题和下一步。等待确认或回答问题的时间不计入间隔。提醒以 `<system-reminder>` 注入下一次请求，并写成一条持久的运行时 user 消息，折叠卡片和 headless 的 `progress_notice` 事件都由这条消息驱动；同一段无正文的工具链最多提醒一次，模型输出正文后重新计时。5 分钟与 10 轮是内置阈值，暂不可配置。
+
+该开关只控制生成：开启期间保存的会话，关闭后仍会恢复已有的提醒卡片。headless 客户端仍可订阅 `progress_notice`，但开关关闭时不会推送事件。修改配置后需要重启 Chord 生效。
+
 ## 快捷键映射（keymap）
 
 可通过 `keymap` 块覆盖默认键位绑定（Action 名采用 lower snake_case，完整列表见[快捷键速查与自定义](./keybindings_CN.md)）。
@@ -1632,6 +1644,7 @@ maintenance:
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
 | `desktop_notification`  | bool                  | `false`                         | global / project         | 启用本地 TUI 终端通知；Chord 按终端自动选择 OSC 9 或 OSC 777，并在每次通知时附一声终端铃声（BEL）（不支持的终端通常会忽略该序列；见[平台说明](./platforms_CN.md#desktop_notification终端通知)）。 |
 | `desktop_notification_foreground` | bool | `true` | global / project | TUI 聚焦时是否发送本地终端通知（转义序列和铃声一起）；设为 `false` 后仅在终端失焦时通知。 |
+| `progress_reminder`     | bool                  | `false`                         | global / project         | 长工具链里按需开启 `PROGRESS REMINDER` 进度提醒，默认关闭。见[进度提醒](#进度提醒)。 |
 | `prevent_sleep`         | bool                  | `false`                         | global / project         | Agent 工作期间申请阻止 macOS/Linux/Windows 主机休眠，受平台条件限制。                                              |
 | `keymap`                | `map[action][]key`    | 见 [快捷键：Action 名速查](./keybindings_CN.md#action-名速查) | global / project | 覆盖键位绑定。Action 名采用 lower snake_case。                                                                       |
 | `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制：自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。 |

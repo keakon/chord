@@ -99,8 +99,12 @@ type MainAgent struct {
 	// Permission system: ruleset from active agent config with overlay support.
 	globalConfig  *config.Config
 	projectConfig *config.Config
-	ruleset       permission.Ruleset  // merged ruleset (base + overlays)
-	overlay       *permission.Overlay // layered permission rules
+	// progressReminderEnabled snapshots the opt-in config at construction so a
+	// turn never changes behavior mid-flight. It gates generation only: rows
+	// already in a session are still restored into cards.
+	progressReminderEnabled bool
+	ruleset                 permission.Ruleset  // merged ruleset (base + overlays)
+	overlay                 *permission.Overlay // layered permission rules
 	// YOLO keeps the role's capability set frozen and only lifts in-scope
 	// confirmation and call-level friction: execution decisions evaluate
 	// executionRuleset (see main_yolo.go), every model-visible surface keeps

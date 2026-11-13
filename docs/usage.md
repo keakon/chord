@@ -31,7 +31,7 @@ Tool cards show terminal-safe previews. File paths inside the session working di
 
 `write`, `edit`, `apply_patch`, `todo_write`, `delete` and `handoff` cards are always expanded, so their body (file content, diff, todo list, error detail or plan path) is what you see, and they carry no disclosure marker. `read`, `grep`, `glob`, successful `shell` output and generic tool calls fold. `yy` copies the complete card content either way.
 
-During long tool-call chains without a written progress update, Chord can remind the main agent to summarize its findings and next action. The `PROGRESS REMINDER` card starts folded; expand it to read the reminder. The agent's progress update appears as ordinary assistant text. Waiting for your confirmation or an answer does not count toward the reminder interval.
+Progress reminders are off by default. Set `progress_reminder: true` in `config.yaml` (see [Progress reminders](./configuration.md#progress-reminders)) to have Chord nudge the main agent for a written update during long tool-call chains without assistant text. Once enabled, the `PROGRESS REMINDER` card starts folded (expand it to read the reminder), the agent's progress update appears as ordinary assistant text, and waiting for your confirmation or an answer does not count toward the reminder interval.
 
 When Chord is running in the background, the terminal title shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle. Focusing the terminal clears the marker; ordinary tab/window focus changes do not re-add it unless new background work later completes.
 

@@ -31,7 +31,12 @@ type Config struct {
 	DesktopNotificationForeground *bool `json:"desktop_notification_foreground,omitzero" yaml:"desktop_notification_foreground,omitempty"`
 	// PreventSleep requests host sleep prevention during agent work on macOS, Linux, and Windows.
 	// Defaults to false; applies to TUI, headless, and ACP. Platform services and policies limit coverage. YAML: prevent_sleep: true
-	PreventSleep        *bool                       `json:"prevent_sleep,omitzero" yaml:"prevent_sleep,omitempty"`
+	PreventSleep *bool `json:"prevent_sleep,omitzero" yaml:"prevent_sleep,omitempty"`
+	// ProgressReminder enables automatic progress reminders during long tool-call
+	// chains. Nil (unset) defaults to false: a reminder injects a system-reminder
+	// into the request and appends a durable runtime user row to the transcript,
+	// so it must be opted into. YAML: progress_reminder: true
+	ProgressReminder    *bool                       `json:"progress_reminder,omitzero" yaml:"progress_reminder,omitempty"`
 	KeyMap              KeyMapConfig                `json:"keymap,omitempty" yaml:"keymap,omitempty"`                       // custom key bindings (snake_case action → key list)
 	Commands            map[string]string           `json:"commands,omitempty" yaml:"commands,omitempty"`                   // custom slash commands: "/cmd" → text to send as message
 	IMESwitchTarget     string                      `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"` // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform

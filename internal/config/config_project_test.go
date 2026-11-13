@@ -836,6 +836,29 @@ func TestProjectWhitelistCoversAllConfigKeys(t *testing.T) {
 	}
 }
 
+// TestProgressReminderConfigOptIn verifies the switch decodes, defaults to
+// unset (disabled), and stays overridable at the project layer.
+func TestProgressReminderConfigOptIn(t *testing.T) {
+	cfg, logs := loadConfigFromPathAndCaptureLog(t, "progress_reminder: true\n")
+	if cfg == nil || cfg.ProgressReminder == nil || !*cfg.ProgressReminder {
+		t.Fatalf("progress_reminder did not decode: %+v", cfg)
+	}
+	if strings.Contains(logs, "progress_reminder") {
+		t.Fatalf("a known key was dropped or warned about: %q", logs)
+	}
+	if DefaultConfig().ProgressReminder != nil {
+		t.Fatal("progress_reminder must default to unset (disabled)")
+	}
+	base := &Config{ProgressReminder: new(true)}
+	merged, err := mergeConfigOverrideData(base, []byte("progress_reminder: false\n"), "project.yaml", nil)
+	if err != nil {
+		t.Fatalf("mergeConfigOverrideData: %v", err)
+	}
+	if merged.ProgressReminder == nil || *merged.ProgressReminder {
+		t.Fatal("an explicit project false must override a global true")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Orchestration load-time validation and project-merge semantics.
 //

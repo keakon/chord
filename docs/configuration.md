@@ -1203,6 +1203,29 @@ prevent_sleep: true
   want command keys to use an English keyboard layout.
 - `prevent_sleep`: requests sleep prevention on the host running agent work in TUI, headless, and ACP; releases it after all agents are idle for one second. Defaults to `false`, and the setup wizard defaults to No. Supports macOS, Linux (local logind/GNOME services), and Windows, subject to service availability and device policy. It does not keep the display on or control remote client/WSL host power. See [platform support](platforms.md#prevent_sleep) for coverage and limits.
 
+## Progress reminders
+
+Automatic `PROGRESS REMINDER` prompts are **off by default**. Enable them in
+`config.yaml` (global or project level):
+
+```yaml
+progress_reminder: true
+```
+
+When enabled, five minutes of active work and ten complete tool-call rounds
+without assistant text make Chord ask the main agent to report what is known,
+what is unresolved, and what comes next. Time spent waiting for your confirmation
+or an answer does not count toward the interval. The reminder enters the next
+request as a `<system-reminder>` and is persisted as a durable runtime user row,
+which drives the folded card and the `progress_notice` headless event. A single
+text-free chain receives at most one reminder; assistant text restarts the
+interval. The five-minute interval and ten-round threshold are built-in.
+
+This setting gates generation only: sessions saved while it was enabled still
+restore their existing cards after it is turned off. The `progress_notice`
+subscription stays available to headless clients, but no event is sent unless
+the setting is on. Changing the value requires restarting Chord.
+
 ## Keymap
 
 You can override default keybindings under the `keymap` block (actions use lower snake_case; see [Keybindings](./keybindings.md) for the full action list).
@@ -1902,6 +1925,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |
 | `desktop_notification`  | bool                  | `false`                          | global / project         | Enable local-TUI terminal notifications; Chord auto-selects OSC 9 or OSC 777 by terminal and pairs each notification with a terminal bell (BEL). (Unsupported terminals ignore the sequence; see [Platforms](./platforms.md#desktop_notification-terminal-notifications).) |
 | `desktop_notification_foreground` | bool | `true` | global / project | Send local-TUI terminal notifications (escape sequence and bell) while the terminal is focused. Set to `false` for background-only notifications. |
+| `progress_reminder`     | bool                  | `false`                          | global / project         | Opt-in `PROGRESS REMINDER` prompts during long tool-call chains. See [Progress reminders](#progress-reminders). |
 | `prevent_sleep`         | bool                  | `false`                          | global / project         | Request host sleep prevention during agent work on macOS/Linux/Windows; platform limits apply.                                         |
 | `keymap`                | `map[action][]key`    | see [Keybindings](./keybindings.md#action-name-reference) | global / project | Override key bindings. Action names use lower snake_case.                                                                |
 | `commands`              | `map[/cmd]text`       | empty                            | global / project         | Custom slash commands; `"/cmd"` → text inserted as a user message. See [Customization: Custom slash commands](./customization.md#custom-slash-commands). |

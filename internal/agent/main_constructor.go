@@ -91,6 +91,7 @@ func NewMainAgent(
 		invokedSkills:           make(map[string]*skill.Meta),
 		globalConfig:            globalCfg,
 		projectConfig:           projectCfg,
+		progressReminderEnabled: effectiveProgressReminder(globalCfg, projectCfg),
 		eventCh:                 make(chan Event, 256),
 		eventWakeCh:             make(chan struct{}, 1),
 		eventSpaceCh:            make(chan struct{}, 1),

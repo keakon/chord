@@ -14,6 +14,68 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+func TestEffectiveProgressReminderRequiresOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		global  *config.Config
+		project *config.Config
+		want    bool
+	}{
+		{"unset", nil, nil, false},
+		{"empty configs", &config.Config{}, &config.Config{}, false},
+		{"global enabled", &config.Config{ProgressReminder: new(true)}, nil, true},
+		{"project enabled", &config.Config{}, &config.Config{ProgressReminder: new(true)}, true},
+		{"project disables global", &config.Config{ProgressReminder: new(true)}, &config.Config{ProgressReminder: new(false)}, false},
+		{"global disabled", &config.Config{ProgressReminder: new(false)}, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveProgressReminder(tc.global, tc.project); got != tc.want {
+				t.Fatalf("effectiveProgressReminder = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProgressNoticeDisabledByDefault(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if a.progressReminderEnabled {
+		t.Fatal("an unconfigured agent must leave progress reminders off")
+	}
+	a.newTurn("")
+	a.turn.progress.since = time.Now().Add(-progressNoticeInterval)
+	a.turn.progress.rounds = progressNoticeRounds
+	if _, ok := a.buildProgressNoticeOverlay(); ok {
+		t.Fatal("a disabled agent staged a progress reminder")
+	}
+	if a.turn.progress.stagedForDispatch() {
+		t.Fatal("a disabled agent left a dispatch claim staged")
+	}
+	before := a.ctxMgr.MessageCount()
+	a.confirmProgressNotice(a.turn)
+	a.flushPersist()
+	if a.ctxMgr.MessageCount() != before {
+		t.Fatal("a disabled agent persisted a reminder row")
+	}
+	for _, evt := range drainAgentEvents(a.outputCh) {
+		if _, ok := evt.(ProgressNoticeEvent); ok {
+			t.Fatal("a disabled agent emitted a progress card")
+		}
+	}
+}
+
+func TestProgressNoticeOptInEnablesGeneration(t *testing.T) {
+	a := newTestMainAgentWithConfig(t, t.TempDir(), &config.Config{ProgressReminder: new(true)}, nil)
+	if !a.progressReminderEnabled {
+		t.Fatal("progress_reminder: true did not reach the agent")
+	}
+	a.newTurn("")
+	a.turn.progress.since = time.Now().Add(-progressNoticeInterval)
+	a.turn.progress.rounds = progressNoticeRounds
+	if _, ok := a.buildProgressNoticeOverlay(); !ok {
+		t.Fatal("an opted-in agent did not stage a progress reminder")
+	}
+}
+
 func TestProgressNarrationThresholds(t *testing.T) {
 	start := time.Unix(1000, 0)
 	for _, tc := range []struct {
@@ -100,9 +162,16 @@ func TestProgressNarrationOverlappingWaits(t *testing.T) {
 	}
 }
 
+// enableProgressReminder mirrors an explicit `progress_reminder: true` in
+// config.yaml for tests that exercise reminder generation.
+func enableProgressReminder(a *MainAgent) *MainAgent {
+	a.progressReminderEnabled = true
+	return a
+}
+
 func readyProgressAgent(t *testing.T) *MainAgent {
 	t.Helper()
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTestMainAgentWithConfig(t, t.TempDir(), &config.Config{ProgressReminder: new(true)}, nil)
 	a.newTurn("")
 	a.turn.progress.since = time.Now().Add(-progressNoticeInterval)
 	a.turn.progress.rounds = progressNoticeRounds
@@ -338,7 +407,7 @@ func TestProgressNarrationStreamingAndWaitBinding(t *testing.T) {
 }
 
 func TestProgressNoticeTravelsWithDispatchedRequest(t *testing.T) {
-	a := newReadyTestMainAgent(t)
+	a := enableProgressReminder(newReadyTestMainAgent(t))
 	a.newTurn("")
 	a.turn.progress.since = time.Now().Add(-progressNoticeInterval)
 	a.turn.progress.rounds = progressNoticeRounds
@@ -434,7 +503,7 @@ func TestProgressNoticeTravelsWithDispatchedRequest(t *testing.T) {
 }
 
 func TestProgressNoticeDispatchFromPreviousSessionIsIgnored(t *testing.T) {
-	a := newReadyTestMainAgent(t)
+	a := enableProgressReminder(newReadyTestMainAgent(t))
 	a.sessionEpoch = 2
 	a.newTurn("")
 	a.turn.progress.since = time.Now().Add(-progressNoticeInterval)

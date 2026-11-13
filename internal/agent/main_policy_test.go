@@ -583,6 +583,12 @@ func TestEnsureMainModelPolicyKeepsRateLimitSnapshotWithinSameProvider(t *testin
 }
 
 func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
+	return newTestMainAgentWithConfig(t, projectRoot, &config.Config{}, nil)
+}
+
+// newTestMainAgentWithConfig keeps the shared helper's wiring while letting a
+// test exercise constructor-time config snapshots.
+func newTestMainAgentWithConfig(t *testing.T, projectRoot string, globalCfg, projectCfg *config.Config) *MainAgent {
 	t.Helper()
 	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -598,8 +604,8 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		"test-model",
 		projectRoot,
 		projectRoot,
-		&config.Config{},
-		nil,
+		globalCfg,
+		projectCfg,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},
 		newAgentTestPathLocator(projectRoot),
 	)
