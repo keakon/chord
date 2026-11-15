@@ -324,6 +324,7 @@ Notes:
 - Signed Anthropic thinking is preserved. Other reasoning is omitted by default; use `--reasoning visible` to import it as plain text.
 - Claude and OpenCode imports preserve a nonblank source title for `/resume` and the terminal title. Without one, Chord uses the first user message. Preview the imported title with `--dry-run --json`.
 - Claude sidechain/sub-agent entries are excluded from the main session. Import warnings, skipped records, and conversion statistics are written to `import-report.json`.
+- Claude Code command wrappers and local-command output are filtered from user messages; command arguments, interruption markers, system reminders, and tool results are preserved. The import report counts removed text blocks and skipped records, and imports with no remaining messages are rejected.
 - You can import the same source conversation multiple times, for example to continue it with different models. Each import creates a separate Chord session by default. Use `--sid <id> --force` to replace an existing session.
 
 Common flags:

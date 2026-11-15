@@ -320,6 +320,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 - Anthropic 的签名思考内容会保留；其他推理内容默认省略，可用 `--reasoning visible` 作为普通文本导入。
 - 导入 Claude 和 OpenCode 会话时，Chord 会保留非空白的源标题，用于 `/resume` 列表和终端标题；没有源标题时使用首条用户消息。可用 `--dry-run --json` 预览导入标题。
 - Claude 的支线 / 子 Agent 记录不会进入主会话。导入警告、跳过记录和转换统计会写入 `import-report.json`。
+- Claude Code 的命令包装与本地命令输出会从用户消息中滤除；命令参数、中断标记、系统提醒和工具结果会保留。导入报告会统计滤除的文本块和跳过的源记录；滤除后没有剩余消息的导入会被拒绝。
 - 同一来源会话可以多次导入，例如分别用不同模型继续执行。每次导入默认创建独立的 Chord 会话；要替换已有会话，使用 `--sid <id> --force`。
 
 常用参数：
