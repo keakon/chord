@@ -362,6 +362,9 @@ func TestRunInitialSetupWizardSkipsIMEWhenUnsupported(t *testing.T) {
 func TestRunInitialSetupWizardCodexSkeletonSupportsAuthCommand(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	// The provider resolution behind the wizard carries the connect-level
+	// trust contract; run outside any checkout so no project inputs gate it.
+	t.Chdir(t.TempDir())
 
 	origLogin := runSetupCodexOAuthLoginFunc
 	defer func() { runSetupCodexOAuthLoginFunc = origLogin }()
@@ -416,7 +419,7 @@ func TestRunInitialSetupWizardCodexSkeletonSupportsAuthCommand(t *testing.T) {
 	if !loginCalled {
 		t.Fatal("expected Codex OAuth login to run during setup")
 	}
-	providerName, providerCfg, _, err := resolveAuthLoginProvider("codex", strings.NewReader(""), io.Discard)
+	providerName, providerCfg, _, err := resolveAuthLoginProvider(context.Background(), "codex", strings.NewReader(""), io.Discard)
 	if err != nil {
 		t.Fatalf("resolveAuthLoginProvider(codex): %v", err)
 	}

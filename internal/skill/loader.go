@@ -21,21 +21,22 @@ import (
 
 // Meta represents discovered skill metadata without loading the full body.
 type Meta struct {
-	pathDescriptor *PathDescriptor // immutable catalog cache, never agent activation state
-	Name           string          // from frontmatter
-	Description    string          // from frontmatter
-	Location       string          // absolute path to SKILL.md
-	RootDir        string          // absolute path to the skill directory
-	Discovered     bool            // true when present in the current metadata index
-	Invoked        bool            // true when loaded via the Skill tool in the current session
-	WhenToUse      string          // optional: guidance for when to use this skill
-	ArgsHint       string          // optional: hint for skill arguments
-	Context        string          // optional: "inline" (default) or "fork"
-	Model          string          // optional: override model for fork context
-	Effort         string          // optional: effort level for fork context
-	AllowedTools   []string        // optional: tool allowlist for fork context
-	Paths          []string        // optional: conditional activation glob patterns
-	Resources      []string        // optional: files relative to the skill root the body depends on
+	pathDescriptor  *PathDescriptor // immutable catalog cache, never agent activation state
+	Name            string          // from frontmatter
+	Description     string          // from frontmatter
+	Location        string          // absolute path to SKILL.md
+	RootDir         string          // absolute path to the skill directory
+	DeclarationPath string          // absolute discovery path before resolving symlinks
+	Discovered      bool            // true when present in the current metadata index
+	Invoked         bool            // true when loaded via the Skill tool in the current session
+	WhenToUse       string          // optional: guidance for when to use this skill
+	ArgsHint        string          // optional: hint for skill arguments
+	Context         string          // optional: "inline" (default) or "fork"
+	Model           string          // optional: override model for fork context
+	Effort          string          // optional: effort level for fork context
+	AllowedTools    []string        // optional: tool allowlist for fork context
+	Paths           []string        // optional: conditional activation glob patterns
+	Resources       []string        // optional: files relative to the skill root the body depends on
 	// SidecarSource names the sidecar file that contributed to this metadata
 	// ("chord.yaml" or "agent.yaml"). It is empty when the SKILL.md
 	// frontmatter is the only source. The sidecar never overrides the name
@@ -152,6 +153,7 @@ func metaFromFrontmatter(path string, fm frontmatter) (*Meta, error) {
 	if err != nil {
 		absPath = path
 	}
+	declarationPath := absPath
 	if real, err := filepath.EvalSymlinks(absPath); err == nil {
 		absPath = real
 	}
@@ -162,6 +164,7 @@ func metaFromFrontmatter(path string, fm frontmatter) (*Meta, error) {
 		Description:            fm.Description,
 		Location:               absPath,
 		RootDir:                rootDir,
+		DeclarationPath:        declarationPath,
 		WhenToUse:              fm.WhenToUse,
 		ArgsHint:               fm.ArgsHint,
 		Context:                normalizeContext(fm.Context),

@@ -87,9 +87,14 @@ type AppContext struct {
 	MainAgent        *agent.MainAgent
 	// ACPMode is set when this process serves the Agent Client Protocol.
 	// Question has no client bridge there, so the tool fails instead of waiting.
-	ACPMode                bool
-	LoadedSkills           []*skill.Meta
-	LoadedCommands         []*command.Definition
+	ACPMode        bool
+	LoadedSkills   []*skill.Meta
+	LoadedCommands []*command.Definition
+	// TrustPlan records the project trust gate decision for this startup:
+	// whether the project layer applies, under which authorization, and the
+	// notice to surface when it was skipped. It also drives the skill-dir
+	// filtering on worktree switches.
+	TrustPlan              *projectTrustPlan
 	LogWriter              *rotatingLogFile
 	StderrRedirect         *stderrRedirect
 	logCtx                 logContext
@@ -124,14 +129,19 @@ func (ac *AppContext) GetOrCreateProvider(provName string, cfg config.ProviderCo
 	return ac.ProviderCache.getOrCreate(provName, cfg, apiKeys)
 }
 
-// startupConfigIssues formats the diagnostics already collected during loading.
+// startupConfigIssues formats the diagnostics already collected during loading,
+// plus the project trust notice when the project layer was skipped despite
+// project inputs.
 func startupConfigIssues(plan *initAppStartupPlan) []string {
 	if plan == nil {
 		return nil
 	}
-	issues := make([]string, 0, len(plan.Diagnostics))
+	issues := make([]string, 0, len(plan.Diagnostics)+1)
 	for _, diagnostic := range plan.Diagnostics {
 		issues = append(issues, diagnostic.String())
+	}
+	if plan.TrustPlan != nil && plan.TrustPlan.Notice != "" {
+		issues = append(issues, plan.TrustPlan.Notice)
 	}
 	return issues
 }
@@ -152,6 +162,9 @@ type initAppStartupPlan struct {
 	ProjectConfig     *config.Config
 	Config            *config.Config
 	ProjectConfigPath string
+	// TrustPlan is the project trust gate decision; nil-safe consumers treat
+	// a nil plan as "no project inputs, nothing gated".
+	TrustPlan         *projectTrustPlan
 	Diagnostics       []config.Diagnostic
 	CatalogAdvisories []string
 	// CatalogConfigLogLines carries the compact profile recommendation lines
@@ -164,7 +177,12 @@ type initAppStartupPlan struct {
 // runtime. contentRoot anchors project content, control-plane configuration, and
 // machine state; workDir is the checkout this session works in. Both must be
 // canonical absolute paths.
-func planInitAppStartup(contentRoot, workDir string) (*initAppStartupPlan, error) {
+//
+// The project trust gate runs inside this function and upholds the startup
+// invariant: static discovery (reads and hashes only) → authorization →
+// application of the project layer. Nothing project-declared runs before the
+// gate decides.
+func planInitAppStartup(contentRoot, workDir string, trustGate *projectTrustGate) (*initAppStartupPlan, error) {
 	if strings.TrimSpace(contentRoot) == "" {
 		return nil, fmt.Errorf("content root is empty")
 	}
@@ -178,8 +196,19 @@ func planInitAppStartup(contentRoot, workDir string) (*initAppStartupPlan, error
 	if err != nil {
 		return nil, wrapConfigLoadError("resolve config path", err)
 	}
+	globalData, err := os.ReadFile(globalPath)
+	if os.IsNotExist(err) {
+		return nil, initialSetupRequiredError()
+	}
+	if err != nil {
+		return nil, wrapConfigLoadError("read global config", err)
+	}
 	projectConfigPath := config.ProjectConfigPath(contentRoot)
-	resolved, err := config.LoadResolvedConfig(globalPath, projectConfigPath)
+	trustPlan, projectData, err := trustGate.resolve(globalPath, contentRoot, workDir)
+	if err != nil {
+		return nil, err
+	}
+	resolved, err := config.LoadResolvedConfigData(globalPath, globalData, projectConfigPath, projectData)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -220,6 +249,7 @@ func planInitAppStartup(contentRoot, workDir string) (*initAppStartupPlan, error
 		ProjectConfig:         projectCfg,
 		Config:                cfg,
 		ProjectConfigPath:     projectConfigPath,
+		TrustPlan:             trustPlan,
 		Diagnostics:           resolved.Diagnostics,
 		CatalogAdvisories:     append(config.CatalogFreshnessAdvisories(cfg), config.CatalogConfigAdvisoryMessages(catalogRecommendations)...),
 		CatalogConfigLogLines: catalogLogLines,
@@ -238,6 +268,13 @@ func applyInitAppStartupPlan(ac *AppContext, plan *initAppStartupPlan) {
 	ac.GlobalCfg = plan.GlobalConfig
 	ac.ProjectCfg = plan.ProjectConfig
 	ac.Cfg = plan.Config
+	ac.TrustPlan = plan.TrustPlan
+}
+
+// projectLayerApplied reports whether the startup trust gate authorized the
+// project layer (config, agents, commands, skills).
+func (ac *AppContext) projectLayerApplied() bool {
+	return ac != nil && ac.TrustPlan != nil && ac.TrustPlan.ApplyProject
 }
 
 type initialLLMSetup struct {
@@ -466,7 +503,10 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		return nil, fmt.Errorf("get working directory: %w", err)
 	}
 	contentRoot := resolveContentRoot(ac.Ctx, workDir)
-	startupPlan, err := planInitAppStartup(contentRoot, workDir)
+	trustGate := newProjectTrustGate(projectTrustPolicyForStartup(mode))
+	trustGate.preflight = sessionOpts.ProjectTrustDecision
+	trustGate.allowTrustOncePreflightPrompt = mode == "local"
+	startupPlan, err := planInitAppStartup(contentRoot, workDir, trustGate)
 	if err != nil {
 		ac.Cancel()
 		return nil, err
@@ -529,11 +569,28 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		log.Warnf("config: %s", line)
 	}
 
+	// The project trust gate decided whether the project layer applies. When
+	// it applies, re-verify the disclosed declaration files before anything
+	// below reads them from disk — under a stored authorization and under a
+	// one-shot trust alike, what applies must be what was disclosed. The
+	// project config itself merges from the discovery snapshot bytes.
+	if startupPlan.TrustPlan != nil && startupPlan.TrustPlan.ApplyProject {
+		if err := verifyProjectTrustInputs(startupPlan.TrustPlan.Inputs, contentRoot, workDir); err != nil {
+			ac.cleanup()
+			return nil, err
+		}
+	}
+
 	// Resolve agent configs once and reuse the result for both default-model
 	// selection and MainAgent setup. Agent definitions are control-plane
-	// configuration, so they come from the content root only.
+	// configuration, so they come from the content root only — and only when
+	// the trust gate applied the project layer.
+	projectAgentsDir := ""
+	if ac.projectLayerApplied() {
+		projectAgentsDir = filepath.Join(contentRoot, ".chord", "agents")
+	}
 	agentConfigs, agentConfigsErr := config.ResolveAgentConfigs(
-		filepath.Join(contentRoot, ".chord", "agents"),
+		projectAgentsDir,
 		filepath.Join(pathLocator.ConfigHome, "agents"),
 	)
 
@@ -788,6 +845,17 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.MainAgent.SetStartupSkippedLockedSessions(ac.StartupSkippedLockedSessions)
 	ac.MainAgent.SetStartupConfigIssues(startupConfigIssues(startupPlan))
 	ac.MainAgent.SetStartupCatalogAdvisories(startupPlan.CatalogAdvisories)
+	// When the project layer applies — under a stored authorization or a
+	// one-shot trust — dynamic skill loads re-verify the skill's declaration
+	// files against the startup-discovered input set before its body is read
+	// from disk.
+	if startupPlan.TrustPlan != nil && startupPlan.TrustPlan.ApplyProject {
+		trustState := "authorized"
+		if !startupPlan.TrustPlan.Authorized {
+			trustState = "trusted for this run"
+		}
+		ac.MainAgent.SetProjectSkillTrustVerifier(newProjectSkillTrustVerifier(startupPlan.TrustPlan.Inputs, trustState))
+	}
 	ac.MainAgent.SetSessionArtifactsDirFunc(func() string {
 		if ac == nil || strings.TrimSpace(ac.SessionDir) == "" {
 			return ""

@@ -37,6 +37,12 @@ func newHeadlessCmd() *cobra.Command {
 In headless mode, chord communicates via JSON lines over stdin/stdout,
 suitable for integration with external tools or gateways.
 
+Project-level configuration (.chord in the working directory) applies only
+when it is authorized. Without an authorization, startup fails with an
+actionable diagnostic; pass --skip-project-config to ignore the project
+layer, or --trust-project-config to trust it for this run only (never
+persisted).
+
 After startup, chord emits a "ready" event. The gateway can then send a
 "subscribe" command to select which event types it wants to receive.
 If no subscribe command is sent, all event types are forwarded.
@@ -57,6 +63,11 @@ Main role control commands:
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			prevTrustDecision := flagWorktreeTrustDecision
+			defer func() { flagWorktreeTrustDecision = prevTrustDecision }()
+			if err := projectTrustFlagOverridesError(); err != nil {
+				return err
+			}
 			if (flagGatewayInstance != "" || flagGatewayTransferID != "") && !flagGatewayManaged || flagGatewayManaged && flagGatewayInstance == "" {
 				return fmt.Errorf("invalid_request: gateway-managed requires --gateway-instance")
 			}
@@ -71,15 +82,17 @@ Main role control commands:
 					return fmt.Errorf("change to session-dir %q: %w", flagHeadlessDir, err)
 				}
 			}
+			var trustDecision *projectTrustDecision
 			if cmd.Flags().Changed("worktree") {
 				wtCtx := cmd.Context()
 				if wtCtx == nil {
 					wtCtx = context.Background()
 				}
-				info, err := prepareStartupWorktree(wtCtx, flagHeadlessWorktree, flagHeadlessResetBranch)
+				info, decision, err := prepareStartupWorktree(wtCtx, flagHeadlessWorktree, flagHeadlessResetBranch, "headless")
 				if err != nil {
 					return err
 				}
+				trustDecision = decision
 				flagWorktreeStartupInfo = info
 				flagWorktreeStartupMeta = worktreeMetaForInfo(info)
 				flagWorktreeStartupReason = recovery.WorktreeSwitchCreate
@@ -123,13 +136,19 @@ Main role control commands:
 					if err := os.Chdir(workDir); err != nil {
 						return fmt.Errorf("restore_failed: enter saved working directory: %w", err)
 					}
-				} else if info := resumeSessionWorktree(wtCtx, flagResumeSession); info != nil {
-					if err := os.Chdir(info.Path); err != nil {
-						return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
+				} else {
+					info, decision := resumeSessionWorktree(wtCtx, flagResumeSession, "headless")
+					if decision != nil {
+						trustDecision = decision
 					}
-					flagWorktreeStartupInfo = info
-					flagWorktreeStartupMeta = worktreeMetaForInfo(info)
-					flagWorktreeStartupReason = recovery.WorktreeSwitchResume
+					if info != nil {
+						if err := os.Chdir(info.Path); err != nil {
+							return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
+						}
+						flagWorktreeStartupInfo = info
+						flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+						flagWorktreeStartupReason = recovery.WorktreeSwitchResume
+					}
 				}
 			}
 			if flagWorktreeStartupInfo == nil && flagContinueSession && flagResumeSession == "" {
@@ -141,16 +160,26 @@ Main role control commands:
 				if wtCtx == nil {
 					wtCtx = context.Background()
 				}
-				startup, info, err := resolveContinueStartup(wtCtx)
+				startup, info, decision, err := resolveContinueStartup(wtCtx, "headless")
 				if err != nil {
 					return err
+				}
+				if decision != nil {
+					trustDecision = decision
 				}
 				flagStartupPlan = &startup
 				switch {
 				case startup.SessionDir == "":
 					// No session could be claimed, so a fresh one is created: bind
 					// it to the launch checkout like a plain startup does.
-					if cwdInfo := startupWorktreeFromCwd(wtCtx); cwdInfo != nil {
+					if info == nil {
+						var detectionDecision *projectTrustDecision
+						info, detectionDecision = startupWorktreeFromCwd(wtCtx, "headless")
+						if detectionDecision != nil {
+							trustDecision = detectionDecision
+						}
+					}
+					if cwdInfo := info; cwdInfo != nil {
 						flagWorktreeStartupInfo = cwdInfo
 						flagWorktreeStartupMeta = worktreeMetaForInfo(cwdInfo)
 						flagWorktreeStartupReason = recovery.WorktreeSwitchStartup
@@ -171,12 +200,17 @@ Main role control commands:
 				if wtCtx == nil {
 					wtCtx = context.Background()
 				}
-				if info := startupWorktreeFromCwd(wtCtx); info != nil {
+				info, decision := startupWorktreeFromCwd(wtCtx, "headless")
+				if decision != nil {
+					trustDecision = decision
+				}
+				if info != nil {
 					flagWorktreeStartupInfo = info
 					flagWorktreeStartupMeta = worktreeMetaForInfo(info)
 					flagWorktreeStartupReason = recovery.WorktreeSwitchStartup
 				}
 			}
+			flagWorktreeTrustDecision = trustDecision
 			return runHeadless(cmd, nil)
 		},
 	}
@@ -190,6 +224,8 @@ Main role control commands:
 	cmd.Flags().StringVarP(&flagHeadlessWorktree, "worktree", "w", "", "Create or enter a chord-managed git worktree by name (auto-named when empty); sessions are shared by every checkout of the repository")
 	cmd.Flags().Lookup("worktree").NoOptDefVal = ""
 	cmd.Flags().BoolVar(&flagHeadlessResetBranch, "reset-branch", false, "Reset an existing branch that no worktree has checked out to HEAD instead of refusing to recreate it (only with --worktree)")
+	cmd.Flags().BoolVar(&flagSkipProjectConfig, "skip-project-config", false, "Ignore this directory's project-level configuration (.chord) for this run")
+	cmd.Flags().BoolVar(&flagTrustProjectConfig, "trust-project-config", false, "Apply this directory's project-level configuration for this run without saving an authorization")
 
 	return cmd
 }
@@ -281,11 +317,12 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 	}
 
 	ac, err := deps.initApp(false, "headless", sessionStartupOptions{
-		ContinueLatest:   flagContinueSession,
-		ResumeID:         flagResumeSession,
-		ExpectedTransfer: flagTakeoverExpectedIdentity,
-		NewSessionMeta:   flagWorktreeStartupMeta,
-		Plan:             flagStartupPlan,
+		ContinueLatest:       flagContinueSession,
+		ResumeID:             flagResumeSession,
+		ExpectedTransfer:     flagTakeoverExpectedIdentity,
+		NewSessionMeta:       flagWorktreeStartupMeta,
+		Plan:                 flagStartupPlan,
+		ProjectTrustDecision: flagWorktreeTrustDecision,
 	})
 	if err != nil {
 		return err

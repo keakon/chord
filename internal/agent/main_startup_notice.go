@@ -85,3 +85,14 @@ func (a *MainAgent) consumeStartupWorkDirNotice() string {
 	a.startupWorkDirNotice = ""
 	return notice
 }
+
+// NotifyRuntimeToast surfaces a one-off user-visible notice after the event
+// loop is already running, for example a worktree switch that had to skip
+// skill directories the project authorization does not cover. Best-effort:
+// the toast may be dropped when the UI channel is full.
+func (a *MainAgent) NotifyRuntimeToast(text, level string) {
+	if a == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	a.emitToTUI(ToastEvent{Message: text, Level: level})
+}

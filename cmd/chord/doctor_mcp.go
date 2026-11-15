@@ -66,7 +66,7 @@ func newDoctorMCPCmd() *cobra.Command {
 			serverName = args[0]
 		}
 		started := time.Now()
-		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, serverName)
+		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, serverName, connect)
 		if err != nil {
 			return mcpCommandError(err, 2)
 		}
@@ -200,6 +200,8 @@ func newDoctorMCPCmd() *cobra.Command {
 	cmd.Flags().StringVar(&agentName, "agent", "", "Select an agent definition and its visible servers")
 	cmd.Flags().BoolVar(&connect, "connect", false, "Connect and discover tools; may refresh saved credentials, never opens a browser")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print a structured diagnostic report")
+	cmd.Flags().BoolVar(&flagSkipProjectConfig, "skip-project-config", false, "Ignore this directory's project-level configuration (.chord) for this run")
+	cmd.Flags().BoolVar(&flagTrustProjectConfig, "trust-project-config", false, "Apply this directory's project-level configuration for this run without saving an authorization")
 	return cmd
 }
 

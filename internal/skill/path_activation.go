@@ -121,6 +121,12 @@ func SnapshotCatalog(catalog []*Meta) []*Meta {
 			continue
 		}
 		copyMeta := *meta
+		if copyMeta.DeclarationPath == "" {
+			copyMeta.DeclarationPath = meta.Location
+		}
+		if declaration, err := filepath.Abs(copyMeta.DeclarationPath); err == nil {
+			copyMeta.DeclarationPath = filepath.Clean(declaration)
+		}
 		if location, err := filepath.Abs(meta.Location); err == nil {
 			if real, err := filepath.EvalSymlinks(location); err == nil {
 				location = real

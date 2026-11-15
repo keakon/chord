@@ -15,28 +15,60 @@ import (
 // loadMCPCommandConfig resolves only configuration, visibility and repository
 // identity. It never creates an agent, LLM client, or MCP subprocess. The
 // returned directory is the state dir that roots the MCP credential store.
-func loadMCPCommandConfig(ctx context.Context, agentName, serverName string) ([]mcp.Target, string, error) {
+// connect selects the stricter trust contract: offline inspection may read
+// the project layer for display, while a connect applies it only under an
+// authorization or an explicit CLI override.
+func loadMCPCommandConfig(ctx context.Context, agentName, serverName string, connect bool) ([]mcp.Target, string, error) {
+	if err := projectTrustFlagOverridesError(); err != nil {
+		return nil, "", err
+	}
 	root, err := os.Getwd()
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve working directory: %w", err)
 	}
 	root = resolveContentRoot(ctx, root)
-	cfg, err := config.LoadConfig()
-	if errors.Is(err, os.ErrNotExist) {
-		cfg = config.DefaultConfig()
-	} else if err != nil {
-		return nil, "", fmt.Errorf("load config: %w", err)
-	}
-	if _, merged, err := config.MergeProjectConfig(cfg, config.ProjectConfigPath(root)); err != nil {
-		return nil, "", fmt.Errorf("load project config: %w", err)
-	} else if merged != nil {
-		cfg = merged
+	skipProject := flagSkipProjectConfig
+	var cfg *config.Config
+	if connect {
+		globalPath, err := config.ConfigPath()
+		if err != nil {
+			return nil, "", wrapConfigLoadError("resolve config path", err)
+		}
+		globalData, err := os.ReadFile(globalPath)
+		if errors.Is(err, os.ErrNotExist) {
+			globalData = nil
+		} else if err != nil {
+			return nil, "", wrapConfigLoadError("read global config", err)
+		}
+		resolved, _, err := resolveProjectConfigForUse(ctx, root, "headless", globalPath, globalData)
+		if err != nil {
+			return nil, "", err
+		}
+		cfg = resolved.Config
+	} else {
+		cfg, err = config.LoadConfig()
+		if errors.Is(err, os.ErrNotExist) {
+			cfg = config.DefaultConfig()
+		} else if err != nil {
+			return nil, "", fmt.Errorf("load config: %w", err)
+		}
+		if !skipProject {
+			if _, merged, err := config.MergeProjectConfig(cfg, config.ProjectConfigPath(root)); err != nil {
+				return nil, "", fmt.Errorf("load project config: %w", err)
+			} else if merged != nil {
+				cfg = merged
+			}
+		}
 	}
 	paths, err := config.ResolvePathLocator(cfg, config.PathOptions{})
 	if err != nil {
 		return nil, "", err
 	}
-	agents, err := config.ResolveAgentConfigs(filepath.Join(root, ".chord", "agents"), filepath.Join(paths.ConfigHome, "agents"))
+	projectAgentsDir := ""
+	if !skipProject {
+		projectAgentsDir = filepath.Join(root, ".chord", "agents")
+	}
+	agents, err := config.ResolveAgentConfigs(projectAgentsDir, filepath.Join(paths.ConfigHome, "agents"))
 	if err != nil {
 		return nil, "", err
 	}

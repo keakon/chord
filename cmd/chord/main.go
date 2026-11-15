@@ -43,6 +43,12 @@ var (
 	flagForkHistory     string
 	flagWorktree        string
 	flagYolo            bool
+	// Project trust gate overrides. --skip-project-config ignores the
+	// project layer for this run; --trust-project-config applies the current
+	// project configuration for this run only and never persists an
+	// authorization.
+	flagSkipProjectConfig  bool
+	flagTrustProjectConfig bool
 
 	// Path policy overrides (CLI > env > config.yaml paths.* > XDG defaults).
 	// These map to CHORD_* env vars so internal config/path resolvers stay centralized.
@@ -179,6 +185,10 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().Lookup("worktree").NoOptDefVal = ""
 	rootCmd.Flags().BoolVar(&flagWorktreeResetBranch, "reset-branch", false,
 		"Reset an existing branch that no worktree has checked out to HEAD instead of refusing to recreate it (only with --worktree)")
+	rootCmd.Flags().BoolVar(&flagSkipProjectConfig, "skip-project-config", false,
+		"Ignore this directory's project-level configuration (.chord) for this run")
+	rootCmd.Flags().BoolVar(&flagTrustProjectConfig, "trust-project-config", false,
+		"Apply this directory's project-level configuration for this run without saving an authorization")
 
 	rootCmd.AddCommand(newMCPCmd(), newTakeoverCmd(), newAuthCmd(), newConfigCmd(), newHeadlessCmd(), newACPCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd(), newSessionsCmd(), newExternalSupervisorCmd())
 	return rootCmd
@@ -210,6 +220,11 @@ func main() {
 // runRoot is the main execution path for TUI mode. In local mode, the TUI
 // runs in-process with the MainAgent — no IPC, no socket, no server spawn.
 func runRoot(cmd *cobra.Command, _ []string) error {
+	prevTrustDecision := flagWorktreeTrustDecision
+	defer func() { flagWorktreeTrustDecision = prevTrustDecision }()
+	if err := projectTrustFlagOverridesError(); err != nil {
+		return err
+	}
 	if err := prepareRootTakeover(cmd); err != nil {
 		return err
 	}
@@ -256,14 +271,18 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Content root and working directory.
+	trustDecision := flagWorktreeTrustDecision
 	if plan.PrepareWorktree {
 		wtCtx := cmd.Context()
 		if wtCtx == nil {
 			wtCtx = context.Background()
 		}
-		info, err := prepareStartupWorktree(wtCtx, plan.WorktreeName, flagWorktreeResetBranch)
+		info, decision, err := prepareStartupWorktree(wtCtx, plan.WorktreeName, flagWorktreeResetBranch, "local")
 		if err != nil {
 			return err
+		}
+		if decision != nil {
+			trustDecision = decision
 		}
 		flagWorktreeStartupInfo = info
 		flagWorktreeStartupMeta = worktreeMetaForInfo(info)
@@ -297,14 +316,20 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 			if err := os.Chdir(savedWorkDir); err != nil {
 				return fmt.Errorf("restore_failed: enter paused working directory: %w", err)
 			}
-		} else if info := resumeSessionWorktree(wtCtx, id); info != nil {
-			fmt.Fprintf(os.Stderr, "Resuming session %s in worktree %s (%s)\n", id, info.Name, info.Branch)
-			if err := os.Chdir(info.Path); err != nil {
-				return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
+		} else {
+			info, decision := resumeSessionWorktree(wtCtx, id, "local")
+			if decision != nil {
+				trustDecision = decision
 			}
-			flagWorktreeStartupInfo = info
-			flagWorktreeStartupMeta = worktreeMetaForInfo(info)
-			flagWorktreeStartupReason = recovery.WorktreeSwitchResume
+			if info != nil {
+				fmt.Fprintf(os.Stderr, "Resuming session %s in worktree %s (%s)\n", id, info.Name, info.Branch)
+				if err := os.Chdir(info.Path); err != nil {
+					return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
+				}
+				flagWorktreeStartupInfo = info
+				flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+				flagWorktreeStartupReason = recovery.WorktreeSwitchResume
+			}
 		}
 	} else if plan.SessionOptions.ContinueLatest {
 		// --continue opens an existing session, so the checkout to work in is
@@ -316,16 +341,26 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		if wtCtx == nil {
 			wtCtx = context.Background()
 		}
-		startup, info, err := resolveContinueStartup(wtCtx)
+		startup, info, decision, err := resolveContinueStartup(wtCtx, "local")
 		if err != nil {
 			return err
+		}
+		if decision != nil {
+			trustDecision = decision
 		}
 		plan.SessionOptions.Plan = &startup
 		switch {
 		case startup.SessionDir == "":
 			// No session could be claimed, so a fresh one is created: bind it to
 			// the launch checkout exactly like a plain startup does.
-			if cwdInfo := startupWorktreeFromCwd(wtCtx); cwdInfo != nil {
+			if info == nil {
+				var detectionDecision *projectTrustDecision
+				info, detectionDecision = startupWorktreeFromCwd(wtCtx, "local")
+				if detectionDecision != nil {
+					trustDecision = detectionDecision
+				}
+			}
+			if cwdInfo := info; cwdInfo != nil {
 				plan.SessionOptions.NewSessionMeta = worktreeMetaForInfo(cwdInfo)
 				flagWorktreeStartupInfo = cwdInfo
 				flagWorktreeStartupMeta = plan.SessionOptions.NewSessionMeta
@@ -348,13 +383,18 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		if wtCtx == nil {
 			wtCtx = context.Background()
 		}
-		if info := startupWorktreeFromCwd(wtCtx); info != nil {
+		info, decision := startupWorktreeFromCwd(wtCtx, "local")
+		if decision != nil {
+			trustDecision = decision
+		}
+		if info != nil {
 			flagWorktreeStartupInfo = info
 			flagWorktreeStartupMeta = worktreeMetaForInfo(info)
 			flagWorktreeStartupReason = recovery.WorktreeSwitchStartup
 			plan.SessionOptions.NewSessionMeta = flagWorktreeStartupMeta
 		}
 	}
+	plan.SessionOptions.ProjectTrustDecision = trustDecision
 
 	// pprof: enabled only when CHORD_PPROF_PORT is set (e.g. "6060").
 	// It always binds to 127.0.0.1 for local-only diagnostics.

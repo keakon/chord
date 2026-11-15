@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
@@ -155,6 +156,7 @@ func TestResolveContentRootBareRepositoryUsesWorkDir(t *testing.T) {
 // TestStartupWorktreeConfigUsesProjectRootOverride covers the worktree.root knob
 // being read from the project config while the global branch prefix survives.
 func TestStartupWorktreeConfigUsesProjectRootOverride(t *testing.T) {
+	setProjectTrustFlagsForTest(t, false, true)
 	withTestStateDir(t)
 	repo := setupStartupRepo(t)
 	writeStartupTestConfig(t, "worktree:\n  branch_prefix: global/\n  root: global-wt\n")
@@ -166,7 +168,7 @@ func TestStartupWorktreeConfigUsesProjectRootOverride(t *testing.T) {
 	}
 	chdirForTest(t, repo)
 
-	wc, err := startupWorktreeConfig()
+	wc, _, err := startupWorktreeConfig("local")
 	if err != nil {
 		t.Fatalf("startupWorktreeConfig: %v", err)
 	}
@@ -175,6 +177,28 @@ func TestStartupWorktreeConfigUsesProjectRootOverride(t *testing.T) {
 	}
 	if wc.BranchPrefix != "global/" {
 		t.Errorf("worktree.branch_prefix = %q, want the global value to survive the merge", wc.BranchPrefix)
+	}
+}
+
+func TestPrepareStartupWorktreeRejectsUntrustedProjectRoot(t *testing.T) {
+	setProjectTrustFlagsForTest(t, false, false)
+	withTestStateDir(t)
+	repo := setupStartupRepo(t)
+	writeStartupTestConfig(t, "worktree:\n  root: global-wt\n")
+	if err := os.MkdirAll(filepath.Join(repo, ".chord"), 0o755); err != nil {
+		t.Fatalf("mkdir project .chord: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".chord", "config.yaml"), []byte("worktree:\n  root: untrusted-wt\n"), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	chdirForTest(t, repo)
+
+	_, _, err := prepareStartupWorktree(context.Background(), "feat-untrusted", false, "headless")
+	if err == nil || !strings.Contains(err.Error(), "project") {
+		t.Fatalf("prepareStartupWorktree error = %v, want project trust rejection", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(repo, "untrusted-wt")); !os.IsNotExist(statErr) {
+		t.Fatalf("untrusted project root was created: stat error = %v", statErr)
 	}
 }
 

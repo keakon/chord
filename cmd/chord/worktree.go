@@ -27,8 +27,9 @@ import (
 // Held as package-level vars to match the existing flagContinueSession /
 // flagResumeSession pattern.
 var (
-	flagWorktreeStartupInfo *worktree.Info
-	flagWorktreeStartupMeta *recovery.SessionMeta
+	flagWorktreeStartupInfo   *worktree.Info
+	flagWorktreeStartupMeta   *recovery.SessionMeta
+	flagWorktreeTrustDecision *projectTrustDecision
 
 	// flagWorktreeResetBranch lets --worktree reset a leftover branch that no
 	// worktree has checked out. Without it Create refuses to recreate the
@@ -94,6 +95,7 @@ func newWorktreeCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&continueLatest, "continue", "c", false, "Continue the latest non-empty session in this worktree")
 	cmd.Flags().StringVarP(&resumeID, "resume", "r", "", "Resume a specific session ID in this worktree")
 	cmd.Flags().BoolVar(&resetBranch, "reset-branch", false, "Reset an existing branch that no worktree has checked out to HEAD instead of refusing to recreate it")
+	registerProjectTrustOverrideFlags(cmd)
 	cmd.AddCommand(newWorktreeListCmd(), newWorktreeRemoveCmd(), newWorktreeFinishCmd())
 	return cmd
 }
@@ -103,7 +105,7 @@ func runWorktreeSessionEntry(cmd *cobra.Command, name string, continueLatest boo
 	if cmd != nil && cmd.Context() != nil {
 		ctx = cmd.Context()
 	}
-	info, err := prepareStartupWorktree(ctx, name, resetBranch)
+	info, decision, err := prepareStartupWorktree(ctx, name, resetBranch, "local")
 	if err != nil {
 		return err
 	}
@@ -112,15 +114,18 @@ func runWorktreeSessionEntry(cmd *cobra.Command, name string, continueLatest boo
 	prevResume := flagResumeSession
 	prevInfo := flagWorktreeStartupInfo
 	prevMeta := flagWorktreeStartupMeta
+	prevTrustDecision := flagWorktreeTrustDecision
 	flagContinueSession = continueLatest
 	flagResumeSession = resumeID
 	flagWorktreeStartupInfo = info
 	flagWorktreeStartupMeta = worktreeMetaForInfo(info)
+	flagWorktreeTrustDecision = decision
 	defer func() {
 		flagContinueSession = prevContinue
 		flagResumeSession = prevResume
 		flagWorktreeStartupInfo = prevInfo
 		flagWorktreeStartupMeta = prevMeta
+		flagWorktreeTrustDecision = prevTrustDecision
 	}()
 
 	if runner == nil {
@@ -154,7 +159,7 @@ func newWorktreeListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			branchPrefix, err := startupBranchPrefix()
+			branchPrefix, _, err := startupBranchPrefix("local")
 			if err != nil {
 				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
 			}
@@ -367,7 +372,7 @@ func newWorktreeRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			branchPrefix, err := startupBranchPrefix()
+			branchPrefix, _, err := startupBranchPrefix("local")
 			if err != nil {
 				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
 			}
@@ -421,7 +426,7 @@ func newWorktreeFinishCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			branchPrefix, err := startupBranchPrefix()
+			branchPrefix, _, err := startupBranchPrefix("local")
 			if err != nil {
 				return fmt.Errorf("resolve worktree branch_prefix: %w", err)
 			}

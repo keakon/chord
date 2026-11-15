@@ -184,6 +184,11 @@ type LoadOptions struct {
 	ProjectCfgPath string            // absolute path to project config.yaml
 	GlobalCfg      map[string]string // global config.yaml commands
 	GlobalCfgPath  string            // absolute path to global config.yaml
+	// SkipProjectFiles leaves out both project layers (the .chord/commands
+	// directory scan and the project config.yaml commands). The project
+	// trust gate sets it when the project configuration is not authorized;
+	// ProjectCfg is nil then already, but the directory scan would still run.
+	SkipProjectFiles bool
 }
 
 // Load scans all four layers, merges them, and returns the final definitions.
@@ -191,17 +196,21 @@ type LoadOptions struct {
 func Load(opts LoadOptions) ([]*Definition, []string) {
 	var allWarnings []string
 
-	projectMDDir := filepath.Join(opts.ContentRoot, ".chord", "commands")
 	globalMDDir := filepath.Join(opts.ConfigHome, "commands")
-
-	projectMD, w := scanMDDir(projectMDDir, "project-md")
-	allWarnings = append(allWarnings, w...)
 	globalMD, w := scanMDDir(globalMDDir, "global-md")
 	allWarnings = append(allWarnings, w...)
-
-	projectYAML, w := fromYAML(opts.ProjectCfg, opts.ProjectCfgPath, "project-yaml")
-	allWarnings = append(allWarnings, w...)
 	globalYAML, w := fromYAML(opts.GlobalCfg, opts.GlobalCfgPath, "global-yaml")
+	allWarnings = append(allWarnings, w...)
+	if opts.SkipProjectFiles {
+		merged, w := Merge(globalMD, globalYAML)
+		allWarnings = append(allWarnings, w...)
+		return merged, allWarnings
+	}
+
+	projectMDDir := filepath.Join(opts.ContentRoot, ".chord", "commands")
+	projectMD, w := scanMDDir(projectMDDir, "project-md")
+	allWarnings = append(allWarnings, w...)
+	projectYAML, w := fromYAML(opts.ProjectCfg, opts.ProjectCfgPath, "project-yaml")
 	allWarnings = append(allWarnings, w...)
 
 	merged, w := Merge(projectMD, globalMD, projectYAML, globalYAML)

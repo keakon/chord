@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -67,7 +68,7 @@ func TestDoctorConfigExplainResolvedAndOrdinary(t *testing.T) {
 		t.Fatalf("%s %v", output, err)
 	}
 	var plain bytes.Buffer
-	err = runDoctorConfig(doctorConfigOptions{Out: &plain, QueryRequested: true, Model: "sample/model-1", Field: "limit.input"})
+	err = runDoctorConfig(context.Background(), doctorConfigOptions{Out: &plain, QueryRequested: true, Model: "sample/model-1", Field: "limit.input"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestDoctorConfigExplainKeepsFullValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err := runDoctorConfig(doctorConfigOptions{Out: &out, JSON: true, QueryRequested: true, Model: "sample/model-1", Field: "reasoning.effort"})
+	err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out, JSON: true, QueryRequested: true, Model: "sample/model-1", Field: "reasoning.effort"})
 	var report doctorConfigReport
 	if json.Unmarshal(out.Bytes(), &report) != nil {
 		t.Fatalf("not pure JSON: %s", out.String())
@@ -122,7 +123,7 @@ func TestDoctorConfigExplainLoadFailures(t *testing.T) {
 				}
 			}
 			var out bytes.Buffer
-			err := runDoctorConfig(doctorConfigOptions{Out: &out, JSON: true, QueryRequested: true, Model: "sample/model-1", Field: "limit.input"})
+			err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out, JSON: true, QueryRequested: true, Model: "sample/model-1", Field: "limit.input"})
 			var report doctorConfigReport
 			if json.Unmarshal(out.Bytes(), &report) != nil || err == nil || report.Query.Error.Code != doctorQueryLoadFailed || report.Query.Result != nil || len(report.Errors) == 0 || report.OK {
 				t.Fatalf("%s %v", out.String(), err)

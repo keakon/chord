@@ -106,7 +106,7 @@ func TestWorktreeSessionsShareRepositoryKey(t *testing.T) {
 		t.Fatalf("resolveContentRoot from worktree = %s, want %s", contentRoot, repo)
 	}
 
-	plan, err := planInitAppStartup(contentRoot, workDir)
+	plan, err := planInitAppStartup(contentRoot, workDir, trustOnceGate())
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
@@ -129,6 +129,7 @@ func TestWorktreeSessionsShareRepositoryKey(t *testing.T) {
 }
 
 func TestStartupBranchPrefixUsesProjectOverride(t *testing.T) {
+	setProjectTrustFlagsForTest(t, false, true)
 	withTestStateDir(t)
 	repo := setupStartupRepo(t)
 	configHome := t.TempDir()
@@ -144,7 +145,7 @@ func TestStartupBranchPrefixUsesProjectOverride(t *testing.T) {
 	}
 	chdirForTest(t, repo)
 
-	got, err := startupBranchPrefix()
+	got, _, err := startupBranchPrefix("local")
 	if err != nil {
 		t.Fatalf("startupBranchPrefix: %v", err)
 	}
@@ -158,7 +159,7 @@ func prepareStartupWorktreeForTest(t *testing.T, ctx context.Context, name strin
 	var info *worktree.Info
 	output, err := captureStderr(t, func() error {
 		var createErr error
-		info, createErr = prepareStartupWorktree(ctx, name, false)
+		info, _, createErr = prepareStartupWorktree(ctx, name, false, "local")
 		return createErr
 	})
 	if err != nil {
@@ -226,7 +227,7 @@ func TestPrepareStartupWorktree_InvalidSlug(t *testing.T) {
 	withTestStateDir(t)
 	chdirForTest(t, repo)
 
-	_, err := prepareStartupWorktree(context.Background(), "bad/name", false)
+	_, _, err := prepareStartupWorktree(context.Background(), "bad/name", false, "local")
 	if err == nil || !strings.Contains(err.Error(), "forbidden") {
 		t.Errorf("expected slug validation error, got %v", err)
 	}
@@ -243,7 +244,7 @@ func TestPrepareStartupWorktree_FailsOnBadGlobalConfig(t *testing.T) {
 		t.Fatalf("write malformed config: %v", err)
 	}
 
-	_, err := prepareStartupWorktree(context.Background(), "feat-bad-config", false)
+	_, _, err := prepareStartupWorktree(context.Background(), "feat-bad-config", false, "local")
 	if err == nil {
 		t.Fatal("prepareStartupWorktree should fail for malformed global config")
 	}
@@ -466,7 +467,7 @@ func TestStartupWorktreeFromCwdBindsCheckout(t *testing.T) {
 	// is exactly the manual `cd <checkout>` case.
 	info := prepareStartupWorktreeForTest(t, context.Background(), "feat-startup")
 
-	got := startupWorktreeFromCwd(context.Background())
+	got, _ := startupWorktreeFromCwd(context.Background(), "local")
 	if got == nil || got.Name != info.Name || got.Path != info.Path {
 		t.Fatalf("startupWorktreeFromCwd = %+v, want the checkout just entered %+v", got, info)
 	}
@@ -479,13 +480,13 @@ func TestStartupWorktreeFromCwdBindsCheckout(t *testing.T) {
 		t.Fatalf("mkdir nested: %v", err)
 	}
 	chdirForTest(t, nested)
-	got = startupWorktreeFromCwd(context.Background())
+	got, _ = startupWorktreeFromCwd(context.Background(), "local")
 	if got == nil || got.Path != info.Path {
 		t.Fatalf("startupWorktreeFromCwd from a subdirectory = %+v, want %s", got, info.Path)
 	}
 
 	chdirForTest(t, repo)
-	if got := startupWorktreeFromCwd(context.Background()); got != nil {
+	if got, _ := startupWorktreeFromCwd(context.Background(), "local"); got != nil {
 		t.Fatalf("startupWorktreeFromCwd in the main checkout = %+v, want nil", got)
 	}
 }
@@ -545,7 +546,7 @@ func TestResolveContinueStartupEntersRecordedWorktree(t *testing.T) {
 		t.Fatalf("save session meta: %v", err)
 	}
 
-	plan, wt, err := resolveContinueStartup(context.Background())
+	plan, wt, _, err := resolveContinueStartup(context.Background(), "local")
 	if err != nil {
 		t.Fatalf("resolveContinueStartup: %v", err)
 	}
@@ -568,7 +569,7 @@ func TestResolveContinueStartupKeepsLaunchDirWithoutCheckout(t *testing.T) {
 	const sid = "01HXXCONTINUE0000002"
 	sessionDir, _ := newContinueStartupSession(t, "feat-continue-plain", sid)
 
-	plan, wt, err := resolveContinueStartup(context.Background())
+	plan, wt, _, err := resolveContinueStartup(context.Background(), "local")
 	if err != nil {
 		t.Fatalf("resolveContinueStartup: %v", err)
 	}
@@ -605,7 +606,7 @@ func TestResolveContinueStartupDropsGoneCheckout(t *testing.T) {
 	var wt *worktree.Info
 	var resolveErr error
 	warning, err := captureStderr(t, func() error {
-		plan, wt, resolveErr = resolveContinueStartup(context.Background())
+		plan, wt, _, resolveErr = resolveContinueStartup(context.Background(), "local")
 		return resolveErr
 	})
 	if err != nil {
@@ -647,7 +648,7 @@ func TestResolveContinueStartupAdoptsLaunchCheckoutWithoutARecord(t *testing.T) 
 	sessionDir, info := newContinueStartupSession(t, "feat-continue-launch", sid)
 	chdirForTest(t, info.Path)
 
-	plan, wt, err := resolveContinueStartup(context.Background())
+	plan, wt, _, err := resolveContinueStartup(context.Background(), "local")
 	if err != nil {
 		t.Fatalf("resolveContinueStartup: %v", err)
 	}
@@ -672,13 +673,13 @@ func TestResumeSessionWorktreeAdoptsLaunchCheckoutWithoutARecord(t *testing.T) {
 	_, info := newContinueStartupSession(t, "feat-resume-launch", sid)
 	chdirForTest(t, info.Path)
 
-	got := resumeSessionWorktree(context.Background(), sid)
+	got, _ := resumeSessionWorktree(context.Background(), sid, "local")
 	if got == nil || got.Name != info.Name || got.Path != info.Path {
 		t.Fatalf("--resume = %+v, want the checkout chord was launched inside name=%s path=%s", got, info.Name, info.Path)
 	}
 
 	chdirForTest(t, info.RepoRoot)
-	if got := resumeSessionWorktree(context.Background(), sid); got != nil {
+	if got, _ := resumeSessionWorktree(context.Background(), sid, "local"); got != nil {
 		t.Fatalf("--resume bound checkout %+v for a main-checkout launch", got)
 	}
 }
@@ -696,7 +697,7 @@ func TestWorktreeCommandsRequireGit(t *testing.T) {
 	if err := requireWorktreeGit(); !errors.Is(err, worktree.ErrGitUnavailable) {
 		t.Fatalf("requireWorktreeGit error = %v, want ErrGitUnavailable", err)
 	}
-	if _, err := prepareStartupWorktree(context.Background(), "feat-nogit", false); !errors.Is(err, worktree.ErrGitUnavailable) {
+	if _, _, err := prepareStartupWorktree(context.Background(), "feat-nogit", false, "local"); !errors.Is(err, worktree.ErrGitUnavailable) {
 		t.Fatalf("prepareStartupWorktree error = %v, want ErrGitUnavailable", err)
 	}
 	listCmd := newWorktreeCmd()
@@ -728,7 +729,7 @@ func TestResumeSessionWorktreePrefersRecordedCheckout(t *testing.T) {
 	}
 	chdirForTest(t, launched.Path)
 
-	got := resumeSessionWorktree(context.Background(), sid)
+	got, _ := resumeSessionWorktree(context.Background(), sid, "local")
 	if got == nil || got.Path != recorded.Path {
 		t.Fatalf("--resume = %+v, want the recorded checkout %s", got, recorded.Path)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -27,7 +28,7 @@ func TestKeymapCLI(t *testing.T) {
 				t.Fatal(err)
 			}
 			chdirForTest(t, projectRoot)
-			plan, err := planInitAppStartup(projectRoot, projectRoot)
+			plan, err := planInitAppStartup(projectRoot, projectRoot, trustOnceGate())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -56,7 +57,7 @@ func TestKeymapCLI(t *testing.T) {
 			}
 			for _, jsonOutput := range []bool{false, true} {
 				var out bytes.Buffer
-				err := runDoctorConfig(doctorConfigOptions{Out: &out, JSON: jsonOutput})
+				err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out, JSON: jsonOutput})
 				if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
 					t.Fatalf("doctor error = %v, want exit 2", err)
 				}
@@ -85,7 +86,7 @@ func TestDoctorKeymapDisabledAndDefaultsAreValid(t *testing.T) {
 			setupDoctorConfigHome(t, content)
 			t.Chdir(t.TempDir())
 			var out bytes.Buffer
-			if err := runDoctorConfig(doctorConfigOptions{Out: &out}); err != nil {
+			if err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out}); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(out.String(), "config OK") || strings.Contains(out.String(), "keymap.") {
@@ -99,7 +100,7 @@ func TestDoctorKeymapShadowingWarnsWithoutRejectingBindings(t *testing.T) {
 	setupDoctorConfigHome(t, "keymap:\n  quit: [ctrl+c]\n")
 	t.Chdir(t.TempDir())
 	var out bytes.Buffer
-	if err := runDoctorConfig(doctorConfigOptions{Out: &out, JSON: true}); err != nil {
+	if err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out, JSON: true}); err != nil {
 		t.Fatal(err)
 	}
 	var report doctorConfigReport

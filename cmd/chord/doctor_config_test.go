@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -26,7 +27,7 @@ func TestRunDoctorConfigOK(t *testing.T) {
 	t.Chdir(t.TempDir()) // no project config
 
 	var out bytes.Buffer
-	if err := runDoctorConfig(doctorConfigOptions{Out: &out}); err != nil {
+	if err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out}); err != nil {
 		t.Fatalf("runDoctorConfig: %v", err)
 	}
 	if !strings.Contains(out.String(), "config OK") {
@@ -40,7 +41,7 @@ func TestRunDoctorConfigWarningsDoNotFail(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
-	if err := runDoctorConfig(doctorConfigOptions{Out: &out}); err != nil {
+	if err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out}); err != nil {
 		t.Fatalf("runDoctorConfig: %v", err)
 	}
 	for _, want := range []string{"warning:", "native_thinking: gemini-3", "config OK"} {
@@ -55,7 +56,7 @@ func TestRunDoctorConfigReportsAllIssues(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
-	err := runDoctorConfig(doctorConfigOptions{Out: &out})
+	err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out})
 	exitErr, ok := errors.AsType[cliExitError](err)
 	if !ok || exitErr.code != 2 {
 		t.Fatalf("err = %v, want exit 2", err)
@@ -79,7 +80,7 @@ func TestRunDoctorConfigChecksProjectConfig(t *testing.T) {
 	t.Chdir(projectRoot)
 
 	var out bytes.Buffer
-	err := runDoctorConfig(doctorConfigOptions{Out: &out})
+	err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out})
 	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
 		t.Fatalf("err = %v, want exit 2", err)
 	}
@@ -93,7 +94,7 @@ func TestRunDoctorConfigJSON(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
-	err := runDoctorConfig(doctorConfigOptions{Out: &out, JSON: true})
+	err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out, JSON: true})
 	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
 		t.Fatalf("err = %v, want exit 2", err)
 	}
@@ -114,7 +115,7 @@ func TestRunDoctorConfigMissingGlobal(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
-	err := runDoctorConfig(doctorConfigOptions{Out: &out})
+	err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out})
 	if err == nil || err.Error() != initialSetupRequiredMessage {
 		t.Fatalf("err = %v, want initial setup required", err)
 	}
@@ -127,7 +128,7 @@ func TestRunDoctorConfigReportsCatalog(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
-	if err := runDoctorConfig(doctorConfigOptions{Out: &out}); err != nil {
+	if err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out}); err != nil {
 		t.Fatalf("runDoctorConfig: %v", err)
 	}
 	if !strings.Contains(out.String(), "model catalog: "+modelcatalog.Version()) {
@@ -135,7 +136,7 @@ func TestRunDoctorConfigReportsCatalog(t *testing.T) {
 	}
 
 	var jsonOut bytes.Buffer
-	if err := runDoctorConfig(doctorConfigOptions{Out: &jsonOut, JSON: true}); err != nil {
+	if err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &jsonOut, JSON: true}); err != nil {
 		t.Fatalf("runDoctorConfig JSON: %v", err)
 	}
 	var report doctorConfigReport
@@ -180,7 +181,7 @@ func TestRunDoctorConfigBrokenPoolRef(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
-	err := runDoctorConfig(doctorConfigOptions{Out: &out})
+	err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out})
 	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
 		t.Fatalf("err = %v, want exit 2", err)
 	}
@@ -198,7 +199,7 @@ func TestRunDoctorConfigBrokenPoolRefJSON(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
-	err := runDoctorConfig(doctorConfigOptions{Out: &out, JSON: true})
+	err := runDoctorConfig(context.Background(), doctorConfigOptions{Out: &out, JSON: true})
 	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
 		t.Fatalf("err = %v, want exit 2", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -89,7 +90,7 @@ func writeDoctorResponsesSSE(t *testing.T, w http.ResponseWriter) {
 
 func TestLoadDoctorModelsRuntimeConfigMissingConfigReturnsInitialSetupError(t *testing.T) {
 	t.Setenv("CHORD_CONFIG_HOME", t.TempDir())
-	cfg, err := loadDoctorModelsRuntimeConfig()
+	cfg, err := loadDoctorModelsRuntimeConfig(context.Background())
 	if err == nil {
 		t.Fatal("expected missing-config error")
 	}
@@ -806,6 +807,7 @@ func TestRunDoctorModelsCanceledSkipsRemainingTargets(t *testing.T) {
 }
 
 func TestRunDoctorModelsReadsProjectModelPoolConfig(t *testing.T) {
+	setProjectTrustFlagsForTest(t, false, true)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		writeDoctorChatCompletionSSE(t, w)
@@ -848,6 +850,7 @@ func TestRunDoctorModelsReadsProjectModelPoolConfig(t *testing.T) {
 }
 
 func TestRunDoctorModelsAppliesProjectProviderOverride(t *testing.T) {
+	setProjectTrustFlagsForTest(t, false, true)
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -891,7 +894,45 @@ func TestRunDoctorModelsAppliesProjectProviderOverride(t *testing.T) {
 	}
 }
 
+func TestRunDoctorModelsRequiresProjectTrustBeforeUsingProjectProvider(t *testing.T) {
+	setProjectTrustFlagsForTest(t, false, false)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		defer r.Body.Close()
+		writeDoctorChatCompletionSSE(t, w)
+	}))
+	defer server.Close()
+
+	setupDoctorModelsConfigHome(t, "providers:\n"+
+		"  local:\n"+
+		"    type: chat-completions\n"+
+		"    api_url: http://127.0.0.1:1/v1/chat/completions\n"+
+		"    models:\n"+
+		"      gpt:\n"+
+		"        limit:\n"+
+		"          context: 1000\n"+
+		"          output: 128\n", "local:\n  - test-key\n")
+	projectRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(projectRoot, ".chord"), 0o755); err != nil {
+		t.Fatalf("mkdir .chord: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, ".chord", "config.yaml"), []byte("providers:\n  local:\n    api_url: "+server.URL+"/v1/chat/completions\n"), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	t.Chdir(projectRoot)
+
+	err := runDoctorModels(t.Context(), doctorModelsOptions{ModelRef: "local/gpt", Timeout: time.Second, Out: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "project config") {
+		t.Fatalf("runDoctorModels error = %v, want project trust rejection", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("requests = %d, want no provider request before project trust", requests.Load())
+	}
+}
+
 func TestRunDoctorModelsUsesOnlyCurrentWorkingDirectoryProjectConfig(t *testing.T) {
+	setProjectTrustFlagsForTest(t, false, true)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		writeDoctorChatCompletionSSE(t, w)

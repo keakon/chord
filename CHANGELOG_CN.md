@@ -18,6 +18,7 @@
 - `chord import --json` 的顶层键改为 snake_case（`project_root`、`session_id`、`session_dir`、`messages`、`report`），不再使用 Go 字段名（`ProjectRoot`、`SessionID`、`SessionDir`、`Messages`、`Report`），与嵌套 `report` 对象内部及 Chord 其他机器可读输出的键名风格一致。消费该 JSON 输出的脚本需要改用新键名。
 - 外部 JSON 输入现在会拒绝 MCP 服务端响应、`headless` 输入命令和大部分 LLM 流式事件中的重复对象成员与非法 UTF-8（也可能跳过受影响的事件）。工具参数、转发头等原始负载仍保留原始字节。MCP 服务端实现与 `headless` 集成方需要输出无重复对象成员的合法 UTF-8 JSON。
 - YOLO 模式不再绕过角色能力限制。开启后，主代理的 `ask` 规则无需确认即可放行，已允许工具上的调用级 `deny` 也会解除；工具级与通配 `deny`、白名单之外的调用、委派代理类型或技能的拒绝规则，以及没有匹配授权规则的调用仍会被拒绝，因此只读角色仍保持只读。切换 YOLO 不再改变模型可见的工具表面。显式 `compact_context` 的 `ask` 会放行，状态文件重载也走同一权限检查。此前依赖 YOLO 在受限角色下写入的配置，需要调整权限规则或切换角色。
+- 项目级配置与能力声明现在需要授权后才会生效。在存在项目来源（`config.yaml`、`.chord/agents/`、`.chord/commands/`、项目 skills）的目录里启动时，Chord 会列出它们声明的内容——MCP server、hooks、LSP server、provider、agent、命令、skill 及其关键目标——并询问一次；授权按内容绑定这批声明文件，文件变化后（包括 linked worktree 里新发现的 skill 目录）会重新询问。`chord headless`、ACP、`chord mcp login` 以及 `chord auth` 的 provider 登录与刷新流程，遇到未授权的项目层会拒绝应用并退出，同时给出处理说明。先在交互式 TUI 里授权一次，或用 `--skip-project-config` 让单次运行忽略项目层，或用 `--trust-project-config` 在不保存授权的情况下应用当前文件。`chord doctor config` 可查看记录状态，`chord doctor config --revoke-project-trust` 撤销授权。门禁覆盖配置声明的内容；`AGENTS.md` 指令与项目记忆仍只作参考。
 
 ### 新功能
 

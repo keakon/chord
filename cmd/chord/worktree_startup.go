@@ -50,42 +50,44 @@ func startupPathLocator() (*config.PathLocator, error) {
 // the content root: inside a linked worktree the branch's own
 // .chord/config.yaml must not change the prefix or root out from under the
 // CLI management commands.
-func startupWorktreeConfig() (config.WorktreeConfig, error) {
+func startupWorktreeConfig(mode string) (config.WorktreeConfig, *projectTrustDecision, error) {
 	var wc config.WorktreeConfig
-	cfg, err := config.LoadConfig()
+	globalPath, err := config.ConfigPath()
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return wc, nil
-		}
-		return wc, err
+		return wc, nil, err
 	}
-	if cfg == nil {
-		return wc, nil
+	globalData, err := os.ReadFile(globalPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return wc, nil, nil
 	}
-	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
-		contentRoot := resolveContentRoot(context.Background(), cwd)
-		if strings.TrimSpace(contentRoot) == "" {
-			contentRoot = cwd
-		}
-		_, mergedCfg, mergeErr := config.MergeProjectConfig(cfg, config.ProjectConfigPath(contentRoot))
-		if mergeErr != nil {
-			return wc, mergeErr
-		}
-		cfg = mergedCfg
+	if err != nil {
+		return wc, nil, wrapConfigLoadError("read global config", err)
 	}
-	return cfg.Worktree, nil
+	cwd, err := os.Getwd()
+	if err != nil {
+		return wc, nil, fmt.Errorf("get working directory: %w", err)
+	}
+	resolved, decision, err := resolveProjectConfigForUse(context.Background(), cwd, mode, globalPath, globalData)
+	if err != nil {
+		return wc, nil, err
+	}
+	if resolved.Config == nil {
+		return wc, decision, nil
+	}
+	return resolved.Config.Worktree, decision, nil
 }
 
 // startupBranchPrefix returns the normalized worktree branch prefix from
 // config.yaml (`worktree.branch_prefix`), falling back to the default "chord/"
 // when unset. Invalid config values are logged by the loader and treated as
 // unset.
-func startupBranchPrefix() (string, error) {
-	wc, err := startupWorktreeConfig()
+func startupBranchPrefix(mode string) (string, *projectTrustDecision, error) {
+	wc, decision, err := startupWorktreeConfig(mode)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return worktree.NormalizeBranchPrefix(wc.BranchPrefix)
+	prefix, err := worktree.NormalizeBranchPrefix(wc.BranchPrefix)
+	return prefix, decision, err
 }
 
 // startupWorktreeFromCwd returns the chord-managed worktree the process was
@@ -98,25 +100,25 @@ func startupBranchPrefix() (string, error) {
 // The worktree root is the binding even when chord was launched from a
 // subdirectory: the active checkout is the checkout, and that is what a resumed
 // session and the removal guard need. The process keeps its own directory.
-func startupWorktreeFromCwd(ctx context.Context) *worktree.Info {
+func startupWorktreeFromCwd(ctx context.Context, mode string) (*worktree.Info, *projectTrustDecision) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	contentRoot := resolveContentRoot(ctx, cwd)
 	if strings.TrimSpace(contentRoot) == "" {
 		contentRoot = cwd
 	}
-	branchPrefix, err := startupBranchPrefix()
+	branchPrefix, decision, err := startupBranchPrefix(mode)
 	if err != nil {
 		log.Warnf("resolve worktree branch_prefix for startup detection failed error=%v", err)
-		return nil
+		return nil, decision
 	}
 	info, err := worktree.ResolveContaining(ctx, contentRoot, cwd, branchPrefix)
 	if err != nil {
-		return nil
+		return nil, decision
 	}
-	return info
+	return info, decision
 }
 
 // prepareStartupWorktree creates or reuses a chord-managed worktree for
@@ -126,32 +128,32 @@ func startupWorktreeFromCwd(ctx context.Context) *worktree.Info {
 // sessionStartupOptions.NewSessionMeta so new sessions remember their
 // worktree provenance. resetBranch allows resetting a leftover branch of a
 // removed worktree; without it such a branch is refused.
-func prepareStartupWorktree(ctx context.Context, name string, resetBranch bool) (*worktree.Info, error) {
+func prepareStartupWorktree(ctx context.Context, name string, resetBranch bool, mode string) (*worktree.Info, *projectTrustDecision, error) {
 	if err := requireWorktreeGit(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = worktree.GenerateAutoSlug(time.Now())
 	}
 	if err := worktree.ValidateSlug(name); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pl, err := startupPathLocator()
 	if err != nil {
-		return nil, fmt.Errorf("resolve storage paths: %w", err)
+		return nil, nil, fmt.Errorf("resolve storage paths: %w", err)
 	}
-	wc, err := startupWorktreeConfig()
+	wc, decision, err := startupWorktreeConfig(mode)
 	if err != nil {
-		return nil, fmt.Errorf("resolve worktree config: %w", err)
+		return nil, nil, fmt.Errorf("resolve worktree config: %w", err)
 	}
 	branchPrefix, err := worktree.NormalizeBranchPrefix(wc.BranchPrefix)
 	if err != nil {
-		return nil, fmt.Errorf("resolve worktree branch_prefix: %w", err)
+		return nil, decision, fmt.Errorf("resolve worktree branch_prefix: %w", err)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("get working directory: %w", err)
+		return nil, decision, fmt.Errorf("get working directory: %w", err)
 	}
 	info, err := worktree.Create(ctx, worktree.CreateOptions{
 		Name:         name,
@@ -165,7 +167,7 @@ func prepareStartupWorktree(ctx context.Context, name string, resetBranch bool) 
 		Owner: &worktree.Owner{Kind: worktree.OwnerKindCLI, CreatedAt: time.Now().UTC()},
 	})
 	if err != nil {
-		return nil, err
+		return nil, decision, err
 	}
 
 	if err := worktree.RegisterInIndex(pl, info); err != nil {
@@ -173,9 +175,9 @@ func prepareStartupWorktree(ctx context.Context, name string, resetBranch bool) 
 	}
 	printWorktreeStartupSummary(info)
 	if err := os.Chdir(info.Path); err != nil {
-		return info, fmt.Errorf("chdir to worktree: %w", err)
+		return info, decision, fmt.Errorf("chdir to worktree: %w", err)
 	}
-	return info, nil
+	return info, decision, nil
 }
 
 // printWorktreeStartupSummary emits a short stderr block on first
@@ -289,28 +291,28 @@ func resolveSessionInProject(ctx context.Context, pl *config.PathLocator, conten
 // launches, unknown sessions, and sessions of another repository, so the
 // caller keeps its current directory and lets the normal startup report the
 // mismatch.
-func resumeSessionWorktree(ctx context.Context, sid string) *worktree.Info {
+func resumeSessionWorktree(ctx context.Context, sid, mode string) (*worktree.Info, *projectTrustDecision) {
 	sid = strings.TrimSpace(sid)
 	if sid == "" {
-		return nil
+		return nil, nil
 	}
 	pl, err := startupPathLocator()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	contentRoot := resolveContentRoot(ctx, cwd)
 	projectPL, err := pl.LocateProject(contentRoot)
 	if err != nil || !sessionExistsInProject(pl, projectPL.ProjectKey, sid) {
-		return nil
+		return nil, nil
 	}
 	if info := worktreeLocationForSession(ctx, pl, projectPL.ProjectKey, sid, contentRoot); info != nil {
-		return info
+		return info, nil
 	}
-	return startupWorktreeFromCwd(ctx)
+	return startupWorktreeFromCwd(ctx, mode)
 }
 
 // worktreeLocationForSession returns the chord-managed worktree recorded in
@@ -397,31 +399,32 @@ func recordWorktreeResumeFallback(sessionDir string, meta *recovery.SessionMeta,
 // in, and without recording it another process could not see this session as
 // a holder of that checkout. Only a main-checkout launch binds nothing, which
 // matches --resume; the caller then keeps its launch directory.
-func resolveContinueStartup(ctx context.Context) (sessionStartupPlan, *worktree.Info, error) {
+func resolveContinueStartup(ctx context.Context, mode string) (sessionStartupPlan, *worktree.Info, *projectTrustDecision, error) {
 	pl, err := startupPathLocator()
 	if err != nil {
-		return sessionStartupPlan{}, nil, fmt.Errorf("resolve storage paths: %w", err)
+		return sessionStartupPlan{}, nil, nil, fmt.Errorf("resolve storage paths: %w", err)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return sessionStartupPlan{}, nil, fmt.Errorf("cwd: %w", err)
+		return sessionStartupPlan{}, nil, nil, fmt.Errorf("cwd: %w", err)
 	}
 	contentRoot := resolveContentRoot(ctx, cwd)
 	projectPL, err := pl.LocateProject(contentRoot)
 	if err != nil {
-		return sessionStartupPlan{}, nil, fmt.Errorf("locate project: %w", err)
+		return sessionStartupPlan{}, nil, nil, fmt.Errorf("locate project: %w", err)
 	}
 	plan, taken, err := planContinueSessionStartup(projectPL.ProjectSessionsDir)
 	if err != nil {
-		return sessionStartupPlan{}, nil, err
+		return sessionStartupPlan{}, nil, nil, err
 	}
 	if !taken {
-		return plan, nil, nil
+		return plan, nil, nil, nil
 	}
 	if info := worktreeLocationForSession(ctx, pl, projectPL.ProjectKey, filepath.Base(plan.SessionDir), contentRoot); info != nil {
-		return plan, info, nil
+		return plan, info, nil, nil
 	}
-	return plan, startupWorktreeFromCwd(ctx), nil
+	info, decision := startupWorktreeFromCwd(ctx, mode)
+	return plan, info, decision, nil
 }
 
 // sessionExistsInProject reports whether <stateDir>/sessions/<key>/<sid>/main.jsonl

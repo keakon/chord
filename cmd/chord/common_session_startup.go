@@ -32,6 +32,9 @@ type sessionStartupOptions struct {
 	// candidates and could not claim one, so the fresh session it fell through
 	// to is planned here.
 	Plan *sessionStartupPlan
+	// ProjectTrustDecision carries a preflight decision made before worktree
+	// setup so initApp does not prompt twice or broaden one-run trust.
+	ProjectTrustDecision *projectTrustDecision
 }
 
 type sessionStartupPlan struct {

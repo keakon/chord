@@ -266,7 +266,7 @@ func TestResumeHintCommand_DetectsWorktreeFromWorkDir(t *testing.T) {
 	var info *worktree.Info
 	worktreeOutput, err := captureStderr(t, func() error {
 		var createErr error
-		info, createErr = prepareStartupWorktree(context.Background(), "feat-auth", false)
+		info, _, createErr = prepareStartupWorktree(context.Background(), "feat-auth", false, "local")
 		return createErr
 	})
 	if err != nil {

@@ -23,7 +23,7 @@ func TestPlanInitAppStartupResolvesStorageAndProjectPaths(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	plan, err := planInitAppStartup(contentRoot, workDir)
+	plan, err := planInitAppStartup(contentRoot, workDir, trustOnceGate())
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestPlanInitAppStartupReturnsSessionPathError(t *testing.T) {
 		t.Fatalf("write sessions-file: %v", err)
 	}
 
-	plan, err := planInitAppStartup(projectRoot, projectRoot)
+	plan, err := planInitAppStartup(projectRoot, projectRoot, trustOnceGate())
 	if plan != nil {
 		t.Fatalf("plan = %+v, want nil", plan)
 	}
@@ -83,7 +83,7 @@ model_pools:
 		t.Fatalf("write global config: %v", err)
 	}
 	root := t.TempDir()
-	plan, err := planInitAppStartup(root, root)
+	plan, err := planInitAppStartup(root, root, trustOnceGate())
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
@@ -125,7 +125,7 @@ model_pools:
 		t.Fatalf("write global config: %v", err)
 	}
 	root := t.TempDir()
-	plan, err := planInitAppStartup(root, root)
+	plan, err := planInitAppStartup(root, root, trustOnceGate())
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}

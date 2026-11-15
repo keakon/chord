@@ -54,7 +54,7 @@ func TestMCPCommandConfigUsesStateDir(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	t.Setenv("CHORD_STATE_DIR", stateDir)
 	for _, serverName := range []string{"", "sample"} {
-		targets, got, err := loadMCPCommandConfig(t.Context(), "", serverName)
+		targets, got, err := loadMCPCommandConfig(t.Context(), "", serverName, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -189,14 +189,14 @@ func TestMCPCommandVisibilityAndAgentOwnership(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "explorer.yaml"), []byte("name: explorer\npermission:\n  '*': deny\n  'mcp_private_*': allow\nmcp:\n  private:\n    url: https://private.example.invalid/mcp\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	targets, _, err := loadMCPCommandConfig(t.Context(), "explorer", "")
+	targets, _, err := loadMCPCommandConfig(t.Context(), "explorer", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(targets) != 1 || targets[0].Ref.Owner != "agent:explorer" || targets[0].Ref.ServerName != "private" {
 		t.Fatalf("visible targets = %+v", targets)
 	}
-	if _, _, err := loadMCPCommandConfig(t.Context(), "explorer", "shared"); err == nil {
+	if _, _, err := loadMCPCommandConfig(t.Context(), "explorer", "shared", false); err == nil {
 		t.Fatal("hidden inherited server resolved")
 	}
 }
@@ -224,12 +224,12 @@ func TestMCPCommandLinkedWorktreeUsesSharedProjectConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(repo)
-	mainTargets, _, err := loadMCPCommandConfig(t.Context(), "explorer", "")
+	mainTargets, _, err := loadMCPCommandConfig(t.Context(), "explorer", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(linked)
-	linkedTargets, _, err := loadMCPCommandConfig(t.Context(), "explorer", "")
+	linkedTargets, _, err := loadMCPCommandConfig(t.Context(), "explorer", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,6 +239,51 @@ func TestMCPCommandLinkedWorktreeUsesSharedProjectConfiguration(t *testing.T) {
 	for i := range mainTargets {
 		if mainTargets[i].Ref != linkedTargets[i].Ref || mainTargets[i].TargetID != linkedTargets[i].TargetID || mainTargets[i].ProfileID != linkedTargets[i].ProfileID {
 			t.Fatalf("linked worktree resolved different configuration or credential identity: main=%+v linked=%+v", mainTargets[i].Ref, linkedTargets[i].Ref)
+		}
+	}
+}
+
+func TestMCPConnectRequiresProjectTrust(t *testing.T) {
+	t.Chdir(t.TempDir())
+	setupDoctorConfigHome(t, "")
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".chord"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".chord", "config.yaml"), []byte("mcp:\n  remote:\n    url: https://example.invalid/mcp\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	// Offline inspection stays available without an authorization.
+	if _, _, err := loadMCPCommandConfig(t.Context(), "", "", false); err != nil {
+		t.Fatalf("offline inspection must work without authorization: %v", err)
+	}
+
+	// A connect is a connection operation and must refuse unauthorized
+	// project inputs.
+	_, _, err := loadMCPCommandConfig(t.Context(), "", "", true)
+	if err == nil || !strings.Contains(err.Error(), "not authorized") {
+		t.Fatalf("connect without authorization must fail, got %v", err)
+	}
+
+	// The explicit trust override allows the connect for this run.
+	flagSkipProjectConfig, flagTrustProjectConfig = false, true
+	t.Cleanup(func() { flagSkipProjectConfig, flagTrustProjectConfig = false, false })
+	if _, _, err := loadMCPCommandConfig(t.Context(), "", "", true); err != nil {
+		t.Fatalf("connect with --trust-project-config must proceed: %v", err)
+	}
+
+	// --skip-project-config applies no project layer and connects global
+	// targets only.
+	flagSkipProjectConfig, flagTrustProjectConfig = true, false
+	targets, _, err := loadMCPCommandConfig(t.Context(), "", "", true)
+	if err != nil {
+		t.Fatalf("connect with --skip-project-config must proceed: %v", err)
+	}
+	for _, target := range targets {
+		if target.Ref.ServerName == "remote" {
+			t.Fatalf("skipped project layer must not expose project servers: %v", targets)
 		}
 	}
 }

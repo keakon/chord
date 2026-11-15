@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/modelcatalog"
+	"github.com/keakon/chord/internal/trust"
 )
 
 type doctorConfigOptions struct {
@@ -18,6 +20,7 @@ type doctorConfigOptions struct {
 	Model          string
 	Field          string
 	QueryRequested bool
+	RevokeTrust    bool
 }
 
 type doctorConfigFileReport struct {
@@ -34,10 +37,27 @@ type doctorConfigCatalogReport struct {
 	CacheDetail      string                      `json:"cache_detail,omitempty"`
 }
 
+type doctorConfigTrustSource struct {
+	File  string   `json:"file"`
+	Items []string `json:"items,omitempty"`
+}
+
+type doctorConfigTrustReport struct {
+	ContentRoot string                    `json:"content_root"`
+	State       string                    `json:"state"`
+	Fingerprint string                    `json:"fingerprint,omitempty"`
+	GrantedAt   string                    `json:"granted_at,omitempty"`
+	StorePath   string                    `json:"store_path,omitempty"`
+	Sources     []doctorConfigTrustSource `json:"sources,omitempty"`
+}
+
 type doctorConfigReport struct {
 	Query   *doctorConfigQuery        `json:"query,omitzero"`
 	Files   []doctorConfigFileReport  `json:"files"`
 	Catalog doctorConfigCatalogReport `json:"catalog"`
+	// ProjectTrust describes whether this directory's project-level
+	// configuration is authorized, and the sources the gate discovered.
+	ProjectTrust *doctorConfigTrustReport `json:"project_trust,omitzero"`
 	// Errors are problems of the effective config the runtime would start
 	// with, such as model pool references that do not resolve. They fail the
 	// command exactly like file issues.
@@ -60,26 +80,35 @@ The running application ignores invalid optional values and reports them at
 startup. Structural errors block the action using the affected model or pool.
 Any problem makes the command exit with status 2.
 
-Warnings flag settings that load as written but are unlikely to behave as
+	Warnings flag settings that load as written but are unlikely to behave as
 intended (for example a thinking block a chat-completions gateway never
-receives); they are listed without changing the exit status.`,
+receives); they are listed without changing the exit status.
+
+The report also shows whether this directory's project-level configuration
+(.chord) is authorized to apply, with the sources the trust gate discovered.
+Pass --revoke-project-trust to drop the recorded authorization for the
+current project.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			opts.Out = cmd.OutOrStdout()
 			opts.QueryRequested = cmd.Flags().Changed("model") || cmd.Flags().Changed("field")
-			return runDoctorConfig(opts)
+			return runDoctorConfig(cmd.Context(), opts)
 		},
 	}
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "Write a JSON report")
 	cmd.Flags().StringVar(&opts.Model, "model", "", "Explain a base model (provider/model; requires --field)")
 	cmd.Flags().StringVar(&opts.Field, "field", "", "Explain reasoning.effort, thinking.type, limit.context, limit.input, or limit.output (requires --model)")
+	cmd.Flags().BoolVar(&opts.RevokeTrust, "revoke-project-trust", false, "Revoke the recorded project configuration authorization for the current project and exit")
 	return cmd
 }
 
-func runDoctorConfig(opts doctorConfigOptions) error {
+func runDoctorConfig(cmdCtx context.Context, opts doctorConfigOptions) error {
 	out := opts.Out
 	if out == nil {
 		out = os.Stdout
+	}
+	if opts.RevokeTrust {
+		return runDoctorConfigRevokeTrust(cmdCtx, out, opts.JSON)
 	}
 	report := doctorConfigReport{Files: []doctorConfigFileReport{}}
 	var canonicalRef string
@@ -163,6 +192,24 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 	}
 	if status := modelcatalog.CurrentCacheStatus(); status.Detail != "" {
 		report.Catalog.CacheDetail = status.Detail
+	}
+
+	// Project trust status: whether this directory's project-level
+	// configuration is authorized to apply. Discovery is read-only; it never
+	// applies the layer it inspects.
+	if status, err := inspectProjectTrustForDoctor(cmdCtx); err != nil {
+		report.Warnings = append(report.Warnings, fmt.Sprintf("project trust status unavailable: %v", err))
+	} else {
+		report.ProjectTrust = &doctorConfigTrustReport{
+			ContentRoot: status.ContentRoot,
+			State:       status.State,
+			Fingerprint: status.Fingerprint,
+			GrantedAt:   status.GrantedAt,
+			StorePath:   status.StorePath,
+		}
+		for _, source := range status.Sources {
+			report.ProjectTrust.Sources = append(report.ProjectTrust.Sources, doctorConfigTrustSource{File: source.File, Items: source.Items})
+		}
 	}
 
 	report.OK = true
@@ -259,10 +306,80 @@ func writeDoctorConfigReport(out io.Writer, asJSON bool, report doctorConfigRepo
 		for _, warning := range report.Warnings {
 			fmt.Fprintf(out, "warning: %s\n", warning)
 		}
+		if report.ProjectTrust != nil {
+			fmt.Fprintf(out, "project configuration trust: %s\n", report.ProjectTrust.State)
+			if report.ProjectTrust.Fingerprint != "" {
+				fmt.Fprintf(out, "  fingerprint: %s", report.ProjectTrust.Fingerprint)
+				if report.ProjectTrust.GrantedAt != "" {
+					fmt.Fprintf(out, " (granted %s)", report.ProjectTrust.GrantedAt)
+				}
+				fmt.Fprintln(out)
+			}
+			for _, source := range report.ProjectTrust.Sources {
+				fmt.Fprintf(out, "  %s\n", source.File)
+				for _, item := range source.Items {
+					fmt.Fprintf(out, "    - %s\n", item)
+				}
+			}
+		}
 		if report.OK {
 			fmt.Fprintln(out, "config OK")
 		}
 	}
 
+	return nil
+}
+
+// inspectProjectTrustForDoctor anchors the trust inspection at the content
+// root the runtime would resolve from the current directory.
+func inspectProjectTrustForDoctor(cmdCtx context.Context) (*projectTrustStatus, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("resolve working directory: %w", err)
+	}
+	contentRoot := resolveContentRoot(cmdCtx, cwd)
+	globalPath, err := config.ConfigPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve config path: %w", err)
+	}
+	return inspectProjectTrustStatus(contentRoot, cwd, globalPath)
+}
+
+// runDoctorConfigRevokeTrust drops the recorded project configuration
+// authorization for the current project. It is a management action, not a
+// diagnostic: it exits 0 whether or not a record existed.
+func runDoctorConfigRevokeTrust(cmdCtx context.Context, out io.Writer, asJSON bool) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return cliExitError{code: 2, err: fmt.Errorf("resolve working directory: %w", err)}
+	}
+	contentRoot := resolveContentRoot(cmdCtx, cwd)
+	globalPath, err := config.ConfigPath()
+	if err != nil {
+		return cliExitError{code: 2, err: fmt.Errorf("resolve config path: %w", err)}
+	}
+	storePath, _, _, err := loadProjectTrustRecord(globalPath, contentRoot)
+	if err != nil {
+		return cliExitError{code: 2, err: err}
+	}
+	removed, err := trust.Revoke(storePath, canonicalProjectTrustRoot(contentRoot))
+	if err != nil {
+		return cliExitError{code: 2, err: fmt.Errorf("revoke project trust: %w", err)}
+	}
+	if asJSON {
+		result := struct {
+			ContentRoot string `json:"content_root"`
+			Revoked     bool   `json:"revoked"`
+		}{ContentRoot: contentRoot, Revoked: removed}
+		if err := jsonx.Encode(out, result); err != nil {
+			return cliExitError{code: 2, err: fmt.Errorf("write JSON report: %w", err)}
+		}
+		return nil
+	}
+	if removed {
+		fmt.Fprintf(out, "Revoked the project configuration authorization for %s.\n", contentRoot)
+	} else {
+		fmt.Fprintf(out, "No project configuration authorization is recorded for %s.\n", contentRoot)
+	}
 	return nil
 }

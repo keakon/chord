@@ -95,6 +95,11 @@ type MainAgent struct {
 	// before the event loop started (the recorded worktree was gone). It is
 	// reported once as a toast, like the config issues above.
 	startupWorkDirNotice string
+	// projectSkillTrustVerifier re-checks a skill's declaration files against
+	// the authorized project input set right before its body is loaded from
+	// disk, so a file that changed after authorization never reaches a turn.
+	// Nil when the project layer is not applied under an authorization.
+	projectSkillTrustVerifier ProjectSkillTrustVerifier
 
 	// Permission system: ruleset from active agent config with overlay support.
 	globalConfig  *config.Config

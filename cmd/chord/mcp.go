@@ -16,6 +16,7 @@ import (
 func newMCPCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "mcp", Short: "Inspect and authorize MCP connections"}
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return mcpCommandError(err, 2) })
+	registerProjectTrustOverrideFlags(cmd)
 	cmd.AddCommand(newMCPListCmd(), newMCPLoginCmd(), newMCPLogoutCmd())
 	return cmd
 }
@@ -33,7 +34,7 @@ func newMCPListCmd() *cobra.Command {
 	var agentName string
 	var jsonOutput bool
 	cmd := &cobra.Command{Use: "list", Short: "List visible MCP servers and saved credential status (offline)", Args: mcpCommandArgs(0), RunE: func(cmd *cobra.Command, _ []string) error {
-		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, "")
+		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, "", false)
 		if err != nil {
 			return mcpCommandError(err, 2)
 		}
@@ -105,7 +106,7 @@ func newMCPLoginCmd() *cobra.Command {
 	var agentName string
 	var noBrowser, reauth bool
 	cmd := &cobra.Command{Use: "login <server>", Short: "Authorize an HTTP MCP server on this host", Args: mcpCommandArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, args[0])
+		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, args[0], true)
 		if err != nil {
 			return mcpCommandError(err, 2)
 		}
@@ -152,7 +153,7 @@ func newMCPLoginCmd() *cobra.Command {
 func newMCPLogoutCmd() *cobra.Command {
 	var agentName string
 	cmd := &cobra.Command{Use: "logout <server>", Short: "Remove a saved MCP login from this host", Args: mcpCommandArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, args[0])
+		targets, stateDir, err := loadMCPCommandConfig(cmd.Context(), agentName, args[0], false)
 		if err != nil {
 			return mcpCommandError(err, 2)
 		}

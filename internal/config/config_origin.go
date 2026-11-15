@@ -640,12 +640,36 @@ type ResolvedConfig struct {
 // materialization to the resulting snapshot. A missing global config yields a diagnostic and an empty index
 // rather than an error or the first-run wizard; surfacing is up to callers.
 func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*ResolvedConfig, error) {
+	globalData, readErr := os.ReadFile(globalPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return nil, fmt.Errorf("read config %s: %w", globalPath, readErr)
+	}
+	if os.IsNotExist(readErr) {
+		globalData = nil
+	}
+	var projectData []byte
+	if projectPath != "" {
+		projectData, readErr = os.ReadFile(projectPath)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return nil, fmt.Errorf("read config %s: %w", projectPath, readErr)
+		}
+		if os.IsNotExist(readErr) {
+			projectData = nil
+		}
+	}
+	return LoadResolvedConfigData(globalPath, globalData, projectPath, projectData, extraRefs...)
+}
+
+// LoadResolvedConfigData is LoadResolvedConfig with explicit layer data: nil
+// globalData means the global file is missing, nil projectData means no
+// project layer is applied. Callers that gate the project layer on trust
+// read the project file themselves and pass only the authorized snapshot,
+// so the applied bytes are exactly the disclosed and hashed ones.
+func LoadResolvedConfigData(globalPath string, globalData []byte, projectPath string, projectData []byte, extraRefs ...string) (*ResolvedConfig, error) {
 	rc := &ResolvedConfig{ExplainEvidence: newConfigExplainEvidence(globalPath, projectPath)}
 	var keymapLayers []keymapLayer
 
-	globalData, err := os.ReadFile(globalPath)
-	switch {
-	case err == nil:
+	if globalData != nil {
 		keymap, inspectErr := inspectKeymapLayer(globalPath, globalData, OriginLayerGlobal)
 		if inspectErr != nil {
 			return nil, inspectErr
@@ -656,13 +680,14 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 			return nil, serr
 		}
 		rc.ExplainEvidence.collect(ConfigLayer{Layer: OriginLayerGlobal, File: globalPath, Data: globalData}, globalCleaned, drops)
-		rc.Global, err = loadConfigData(globalPath, globalData, true, &rc.Diagnostics)
-		if err != nil {
-			return nil, err
+		var loadErr error
+		rc.Global, loadErr = loadConfigData(globalPath, globalData, true, &rc.Diagnostics)
+		if loadErr != nil {
+			return nil, loadErr
 		}
 		rc.addIndexLayer(ConfigLayer{Layer: OriginLayerGlobal, File: globalPath, Data: globalCleaned})
 		rc.addKeymapLayer(keymap)
-	case os.IsNotExist(err):
+	} else {
 		rc.Diagnostics = append(rc.Diagnostics, Diagnostic{
 			Severity:  DiagnosticSeverityWarning,
 			File:      globalPath,
@@ -670,64 +695,55 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 			Continues: true,
 			Fallback:  "built-in defaults",
 		})
-		err = nil
-	default:
-		return nil, fmt.Errorf("read config %s: %w", globalPath, err)
 	}
 
-	if projectPath != "" {
-		projectData, readErr := os.ReadFile(projectPath)
-		switch {
-		case readErr == nil:
-			keymap, inspectErr := inspectKeymapLayer(projectPath, projectData, OriginLayerProject)
-			if inspectErr != nil {
-				return nil, inspectErr
-			}
-			keymapLayers = append(keymapLayers, keymap)
-			projectMap, err := decodeConfigOverrideMap(projectData)
-			if err != nil {
-				return nil, fmt.Errorf("parse config %s: %w", projectPath, err)
-			}
-			unsupported := unsupportedProjectTopLevelKeys(projectMap)
-			for _, key := range unsupported {
-				appendLoadDiagnostic(&rc.Diagnostics, projectPath, key, fmt.Sprintf("field %q is not supported in project config", key), "field ignored")
-			}
-			cleaned, drops, serr := stripTypeInvalidOverride(projectPath, projectData)
-			if serr != nil {
-				return nil, serr
-			}
-			for _, drop := range drops {
-				if slices.Contains(unsupported, strings.Join(drop.Segments, ".")) {
-					continue
-				}
-				log.Warnf("config %s: ignoring invalid value: %s", projectPath, strings.Join(drop.Segments, "."))
-				rc.Diagnostics = append(rc.Diagnostics, Diagnostic{
-					Severity:     DiagnosticSeverityWarning,
-					File:         projectPath,
-					Path:         strings.Join(drop.Segments, "."),
-					PathSegments: slices.Clone(drop.Segments),
-					Message:      "ignoring invalid value: " + strings.Join(drop.Segments, "."),
-					Continues:    true,
-					Fallback:     "inherited global/default value",
-				})
-			}
-			rc.ExplainEvidence.collect(ConfigLayer{Layer: OriginLayerProject, File: projectPath, Data: projectData}, cleaned, drops)
-			rc.Project, err = loadConfigData(projectPath, cleaned, false, nil)
-			if err != nil {
-				return nil, err
-			}
-			rc.Config, err = mergeConfigOverrideData(rc.Global, cleaned, projectPath, &rc.Diagnostics)
-			if err != nil {
-				return nil, err
-			}
-			rc.addIndexLayer(ConfigLayer{Layer: OriginLayerProject, File: projectPath, Data: cleaned})
-			rc.addKeymapLayer(keymap)
-		case os.IsNotExist(readErr):
-			rc.Config = rc.Global
-			readErr = nil
-		default:
-			return nil, fmt.Errorf("read config %s: %w", projectPath, readErr)
+	if projectPath != "" && projectData != nil {
+		keymap, inspectErr := inspectKeymapLayer(projectPath, projectData, OriginLayerProject)
+		if inspectErr != nil {
+			return nil, inspectErr
 		}
+		keymapLayers = append(keymapLayers, keymap)
+		projectMap, err := decodeConfigOverrideMap(projectData)
+		if err != nil {
+			return nil, fmt.Errorf("parse config %s: %w", projectPath, err)
+		}
+		unsupported := unsupportedProjectTopLevelKeys(projectMap)
+		for _, key := range unsupported {
+			appendLoadDiagnostic(&rc.Diagnostics, projectPath, key, fmt.Sprintf("field %q is not supported in project config", key), "field ignored")
+		}
+		cleaned, drops, serr := stripTypeInvalidOverride(projectPath, projectData)
+		if serr != nil {
+			return nil, serr
+		}
+		for _, drop := range drops {
+			if slices.Contains(unsupported, strings.Join(drop.Segments, ".")) {
+				continue
+			}
+			log.Warnf("config %s: ignoring invalid value: %s", projectPath, strings.Join(drop.Segments, "."))
+			rc.Diagnostics = append(rc.Diagnostics, Diagnostic{
+				Severity:     DiagnosticSeverityWarning,
+				File:         projectPath,
+				Path:         strings.Join(drop.Segments, "."),
+				PathSegments: slices.Clone(drop.Segments),
+				Message:      "ignoring invalid value: " + strings.Join(drop.Segments, "."),
+				Continues:    true,
+				Fallback:     "inherited global/default value",
+			})
+		}
+		rc.ExplainEvidence.collect(ConfigLayer{Layer: OriginLayerProject, File: projectPath, Data: projectData}, cleaned, drops)
+		var projectLoadErr error
+		rc.Project, projectLoadErr = loadConfigData(projectPath, cleaned, false, nil)
+		if projectLoadErr != nil {
+			return nil, projectLoadErr
+		}
+		rc.Config, projectLoadErr = mergeConfigOverrideData(rc.Global, cleaned, projectPath, &rc.Diagnostics)
+		if projectLoadErr != nil {
+			return nil, projectLoadErr
+		}
+		rc.addIndexLayer(ConfigLayer{Layer: OriginLayerProject, File: projectPath, Data: cleaned})
+		rc.addKeymapLayer(keymap)
+	} else {
+		rc.Config = rc.Global
 	}
 	if rc.Config == nil {
 		rc.Config = rc.Global

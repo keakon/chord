@@ -478,7 +478,7 @@ func TestInitAppFailsOnMalformedProjectConfig(t *testing.T) {
 	}
 	chdirForTest(t, projectRoot)
 
-	if _, err := planInitAppStartup(projectRoot, projectRoot); err == nil {
+	if _, err := planInitAppStartup(projectRoot, projectRoot, trustOnceGate()); err == nil {
 		t.Fatal("planInitAppStartup should fail for malformed project config")
 	} else if !strings.Contains(err.Error(), "parse config") {
 		t.Fatalf("err = %v, want a config parse error", err)
@@ -496,7 +496,7 @@ func TestCollectStartupConfigIssuesReportsIgnoredProblems(t *testing.T) {
 	projectRoot := t.TempDir()
 	chdirForTest(t, projectRoot)
 
-	plan, err := planInitAppStartup(projectRoot, projectRoot)
+	plan, err := planInitAppStartup(projectRoot, projectRoot, trustOnceGate())
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestCollectStartupConfigIssuesSkipsMissingProjectFile(t *testing.T) {
 	projectRoot := t.TempDir()
 	chdirForTest(t, projectRoot)
 
-	plan, err := planInitAppStartup(projectRoot, projectRoot)
+	plan, err := planInitAppStartup(projectRoot, projectRoot, trustOnceGate())
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
@@ -532,6 +532,7 @@ func TestSkillLoadDirsIncludesAgentsSkillsByDefault(t *testing.T) {
 		WorkDir:     projectRoot,
 		ConfigHome:  chordHome,
 		Cfg:         &config.Config{},
+		TrustPlan:   authorizedProjectTrustPlan(),
 	}
 
 	got := skillLoadDirs(ac)
@@ -550,6 +551,41 @@ func TestSkillLoadDirsIncludesAgentsSkillsByDefault(t *testing.T) {
 	}
 }
 
+func TestInitialSkillLoadDirsExcludeUncoveredProjectDeclarations(t *testing.T) {
+	projectRoot := t.TempDir()
+	alpha := filepath.Join(projectRoot, ".chord", "skills", "alpha", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(alpha), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(alpha, []byte("---\nname: alpha\ndescription: alpha helper\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	discovery, err := discoverProjectTrust(projectRoot, projectRoot)
+	if err != nil {
+		t.Fatalf("discover trusted project inputs: %v", err)
+	}
+	beta := filepath.Join(projectRoot, ".chord", "skills", "beta", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(beta), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(beta, []byte("---\nname: beta\ndescription: beta helper\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ac := &AppContext{
+		ContentRoot: projectRoot,
+		WorkDir:     projectRoot,
+		ConfigHome:  t.TempDir(),
+		Cfg:         &config.Config{},
+		TrustPlan:   &projectTrustPlan{ApplyProject: true, Authorized: true, Inputs: discovery.Inputs},
+	}
+
+	for _, dir := range skillLoadDirs(ac) {
+		if dir == filepath.Join(projectRoot, ".chord", "skills") {
+			t.Fatalf("initial skill scan includes directory with an uncovered declaration: %v", dir)
+		}
+	}
+}
+
 func TestSkillLoadDirsAppendsConfiguredPathsAfterDefaults(t *testing.T) {
 	projectRoot := t.TempDir()
 	chordHome := t.TempDir()
@@ -562,6 +598,7 @@ func TestSkillLoadDirsAppendsConfiguredPathsAfterDefaults(t *testing.T) {
 		Cfg: &config.Config{Skills: config.SkillsConfig{
 			Paths: []string{globalExtra, projectExtra},
 		}},
+		TrustPlan: authorizedProjectTrustPlan(),
 	}
 
 	got := skillLoadDirs(ac)
@@ -610,6 +647,7 @@ func TestSkillLoadDirsForWorkDirInsertsChainBeforeHome(t *testing.T) {
 		WorkDir:     projectRoot,
 		ConfigHome:  chordHome,
 		Cfg:         &config.Config{},
+		TrustPlan:   authorizedProjectTrustPlan(),
 	}
 	got := skillLoadDirsForWorkDir(ac, workDir)
 	want := []string{
@@ -645,6 +683,7 @@ func TestSkillLoadDirsPrefersCheckoutOverContentRoot(t *testing.T) {
 		WorkDir:     workDir,
 		ConfigHome:  t.TempDir(),
 		Cfg:         &config.Config{},
+		TrustPlan:   authorizedProjectTrustPlan(),
 	}
 
 	// The checkout's own skill dirs come first, then its .agents/skills chain
@@ -789,7 +828,7 @@ model_pools:
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	plan, err := planInitAppStartup(root, root)
+	plan, err := planInitAppStartup(root, root, trustOnceGate())
 	if err != nil {
 		t.Fatal(err)
 	}

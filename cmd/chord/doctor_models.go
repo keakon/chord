@@ -173,6 +173,7 @@ only when you explicitly want extra retry rounds for transient failures.`,
 			return runDoctorModels(cmd.Context(), opts)
 		},
 	}
+	registerProjectTrustOverrideFlags(cmd)
 	cmd.Flags().StringVar(&opts.Provider, "provider", "", "Provider name to test")
 	cmd.Flags().StringVar(&opts.ModelRef, "model", "", "Model reference to test (provider/model[@variant], or model[@variant] with --provider)")
 	cmd.Flags().StringVar(&opts.Pool, "pool", "", "Model pool name to test")
@@ -206,7 +207,7 @@ func runDoctorModels(parentCtx context.Context, opts doctorModelsOptions) error 
 		}
 		extraRefs = append(extraRefs, base)
 	}
-	runtimeCfg, err := loadDoctorModelsRuntimeConfig(extraRefs...)
+	runtimeCfg, err := loadDoctorModelsRuntimeConfig(parentCtx, extraRefs...)
 	if err != nil {
 		return cliExitError{code: 2, err: err}
 	}
@@ -306,35 +307,41 @@ type orderedModelPool struct {
 	Refs []string
 }
 
-func loadDoctorModelsRuntimeConfig(extraRefs ...string) (*doctorModelsRuntimeConfig, error) {
+func loadDoctorModelsRuntimeConfig(ctx context.Context, extraRefs ...string) (*doctorModelsRuntimeConfig, error) {
 	globalPath, err := config.ConfigPath()
 	if err != nil {
 		return nil, wrapConfigLoadError("resolve config path", err)
+	}
+	globalData, err := os.ReadFile(globalPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, initialSetupRequiredError()
+		}
+		return nil, wrapConfigLoadError("read config", err)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("get working directory: %w", err)
 	}
-	projectConfigPath := config.ProjectConfigPath(cwd)
-	resolved, err := config.LoadResolvedConfig(globalPath, projectConfigPath, extraRefs...)
+	contentRoot := resolveContentRoot(ctx, cwd)
+	projectConfigPath := config.ProjectConfigPath(contentRoot)
+	resolved, projectData, err := resolveProjectConfigForUse(ctx, cwd, "headless", globalPath, globalData, extraRefs...)
 	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
+		return nil, err
 	}
 	if resolved.Global == nil {
 		return nil, initialSetupRequiredError()
 	}
 	cfg := resolved.Config
 	poolOrder := []string(nil)
-	if cfgPath, pathErr := config.ConfigPath(); pathErr == nil {
-		if pools, orderErr := orderedModelPoolsFromPath(cfgPath); orderErr == nil {
-			poolOrder = appendPoolOrder(poolOrder, pools)
-		} else {
-			return nil, fmt.Errorf("read model_pools order: %w", orderErr)
-		}
+	if pools, orderErr := orderedModelPoolsFromData(globalPath, globalData); orderErr == nil {
+		poolOrder = appendPoolOrder(poolOrder, pools)
+	} else {
+		return nil, fmt.Errorf("read model_pools order: %w", orderErr)
 	}
 
-	if resolved.Project != nil {
-		if pools, orderErr := orderedModelPoolsFromPath(projectConfigPath); orderErr == nil {
+	if resolved.Project != nil && projectData != nil && projectData.Plan != nil && projectData.Plan.ApplyProject {
+		if pools, orderErr := orderedModelPoolsFromData(projectConfigPath, projectData.ConfigData); orderErr == nil {
 			poolOrder = appendPoolOrder(poolOrder, pools)
 		} else {
 			return nil, fmt.Errorf("read model_pools order: %w", orderErr)
@@ -374,6 +381,10 @@ func orderedModelPoolsFromPath(path string) ([]orderedModelPool, error) {
 		}
 		return nil, err
 	}
+	return orderedModelPoolsFromData(path, data)
+}
+
+func orderedModelPoolsFromData(path string, data []byte) ([]orderedModelPool, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		log.Warnf("config %s: ignoring invalid model_pools: %v", path, err)

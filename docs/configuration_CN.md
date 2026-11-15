@@ -778,6 +778,16 @@ HTTP，确保最终 JSON patch 生效。
 
 常见用途：调整项目特有权限规则、配置该项目的 LSP / MCP / Hooks / Skills。
 
+### 项目配置信任门禁
+
+项目级配置属于仓库内容，Chord 只有在你于该目录内授权之后才会应用它。在项目声明的任何东西运行之前，Chord 会先发现所有来源——`config.yaml`、`.chord/agents/`、`.chord/commands/` 和项目 skills——列出它们会做什么（MCP server、hooks、LSP server、provider、agent、命令和 skill 及其关键目标），然后询问。拒绝、取消或关闭提示，都会让 Chord 在不带项目层的情况下启动。
+
+授权会把当次批准的内容记录下来。记录按内容绑定这批声明文件：新增、删除或修改其中任何一个，都会在项目层应用前重新询问。在 linked worktree 或子目录里启动时，只有同一批文件仍然生效才复用授权；那里新出现的 skill 目录未经授权不会进入 skill 清单。
+
+非交互入口（`chord headless`、ACP、`chord mcp login`，以及 `chord auth` 的 provider 登录与刷新流程）遇到未授权的项目层会拒绝应用并退出，同时给出处理说明。加 `--skip-project-config` 可以让这一次运行忽略项目层，加 `--trust-project-config` 可以在不保存授权的情况下应用当前文件。
+
+`chord doctor config` 会显示授权状态、发现的来源和指纹；`chord doctor config --revoke-project-trust` 撤销当前项目已记录的授权。门禁覆盖的是配置声明的内容，而不是仓库里的所有东西：会被执行的脚本、依赖和普通源码不在授权范围内，`AGENTS.md` 的目录指令和项目记忆也只作参考、不参与门禁。
+
 ## Provider 请求压缩
 
 Provider 级别的 `compress` 选择上游 HTTP 请求体的压缩编码：`gzip`、`zstd` 或 `off`。不配置时按 provider preset 自己的选择走——`preset: codex` 像 Codex 客户端一样发送 `zstd` 压缩的请求体，其他 preset 按原文发送。它和上下文管理（compaction / reduction）是两回事：只影响请求传输编码，不会总结或移除对话历史。

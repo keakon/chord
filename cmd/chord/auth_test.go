@@ -110,6 +110,10 @@ func TestLoadAuthLoginProvidersIncludesProjectOverrides(t *testing.T) {
 	configHome := t.TempDir()
 	projectRoot := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	// The login provider list carries the connect-level trust contract, so the
+	// project layer merges only under an explicit one-run trust here.
+	flagSkipProjectConfig, flagTrustProjectConfig = false, true
+	t.Cleanup(func() { flagSkipProjectConfig, flagTrustProjectConfig = false, false })
 
 	globalConfigPath := filepath.Join(configHome, "config.yaml")
 	if err := os.WriteFile(globalConfigPath, []byte(`providers:
@@ -157,7 +161,7 @@ proxy: socks5://project-proxy.example:1080
 		t.Fatalf("Chdir(projectRoot): %v", err)
 	}
 
-	providers, proxy, err := loadAuthLoginProviders()
+	providers, proxy, err := loadAuthLoginProviders(t.Context())
 	if err != nil {
 		t.Fatalf("loadAuthLoginProviders: %v", err)
 	}
@@ -177,6 +181,8 @@ func TestLoadAuthLoginProvidersUsesOnlyCurrentWorkingDirectoryProjectConfig(t *t
 	projectRoot := t.TempDir()
 	nested := filepath.Join(projectRoot, "nested", "child")
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	flagSkipProjectConfig, flagTrustProjectConfig = false, true
+	t.Cleanup(func() { flagSkipProjectConfig, flagTrustProjectConfig = false, false })
 
 	globalConfigPath := filepath.Join(configHome, "config.yaml")
 	if err := os.WriteFile(globalConfigPath, []byte(`providers:
@@ -241,7 +247,7 @@ providers:
 		t.Fatalf("Chdir(nested): %v", err)
 	}
 
-	providers, proxy, err := loadAuthLoginProviders()
+	providers, proxy, err := loadAuthLoginProviders(t.Context())
 	if err != nil {
 		t.Fatalf("loadAuthLoginProviders: %v", err)
 	}
@@ -258,7 +264,7 @@ providers:
 
 func TestLoadAuthLoginProvidersMissingConfigReturnsInitialSetupError(t *testing.T) {
 	t.Setenv("CHORD_CONFIG_HOME", t.TempDir())
-	providers, proxy, err := loadAuthLoginProviders()
+	providers, proxy, err := loadAuthLoginProviders(t.Context())
 	if err == nil {
 		t.Fatalf("expected missing-config error")
 	}
@@ -780,6 +786,10 @@ func TestValidateRefreshedCodexOAuthCredentialUsesExistingAccountID(t *testing.T
 func TestRunAuthRefreshRejectsNonCodexProvider(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	// Stay out of any checkout: the refresh flow carries the connect-level
+	// trust contract, so a working directory with unauthorized project inputs
+	// would refuse before the provider is even validated.
+	t.Chdir(t.TempDir())
 	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(`providers:
   openai:
     type: chat-completions

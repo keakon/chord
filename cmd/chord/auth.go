@@ -95,6 +95,7 @@ func newAuthCmd() *cobra.Command {
 		RunE:  runAuthLogin,
 	}
 	bindAuthLoginFlags(cmd)
+	registerProjectTrustOverrideFlags(cmd)
 	cmd.AddCommand(newAuthStateCmd())
 	cmd.AddCommand(newAuthRefreshCmd())
 	return cmd
@@ -121,7 +122,7 @@ func runAuthRefresh(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("provider name is empty")
 	}
 
-	providers, globalProxy, err := loadAuthLoginProviders()
+	providers, globalProxy, err := loadAuthLoginProviders(cmd.Context())
 	if err != nil {
 		return err
 	}
@@ -489,7 +490,7 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	providerName, providerCfg, globalProxy, err := resolveAuthLoginProvider(preferred, os.Stdin, os.Stderr)
+	providerName, providerCfg, globalProxy, err := resolveAuthLoginProvider(cmd.Context(), preferred, os.Stdin, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -752,7 +753,7 @@ func resolveAuthLoginProviderName(commandPath string, flagValue string, args []s
 	return flagValue, nil
 }
 
-func loadAuthLoginProviders() (map[string]config.ProviderConfig, string, error) {
+func loadAuthLoginProviders(ctx context.Context) (map[string]config.ProviderConfig, string, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return nil, "", wrapConfigLoadError("load global config", err)
@@ -760,11 +761,21 @@ func loadAuthLoginProviders() (map[string]config.ProviderConfig, string, error) 
 	effectiveCfg := cfg
 
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
-		_, mergedCfg, mergeErr := config.MergeProjectConfig(cfg, config.ProjectConfigPath(cwd))
-		if mergeErr != nil {
-			return nil, "", fmt.Errorf("load project config: %w", mergeErr)
+		globalPath, pathErr := config.ConfigPath()
+		if pathErr != nil {
+			return nil, "", wrapConfigLoadError("resolve config path", pathErr)
 		}
-		effectiveCfg = mergedCfg
+		globalData, readErr := os.ReadFile(globalPath)
+		if readErr != nil {
+			return nil, "", wrapConfigLoadError("read global config", readErr)
+		}
+		resolved, _, resolveErr := resolveProjectConfigForUse(ctx, cwd, "headless", globalPath, globalData)
+		if resolveErr != nil {
+			return nil, "", resolveErr
+		}
+		effectiveCfg = resolved.Config
+	} else if err := projectTrustFlagOverridesError(); err != nil {
+		return nil, "", err
 	}
 
 	allProviders := make(map[string]config.ProviderConfig, len(effectiveCfg.Providers))
@@ -824,11 +835,12 @@ func promptAuthLoginProvider(in io.Reader, out io.Writer, providers []string) (s
 }
 
 func resolveAuthLoginProvider(
+	ctx context.Context,
 	preferred string,
 	in io.Reader,
 	out io.Writer,
 ) (string, config.ProviderConfig, string, error) {
-	allProviders, globalProxy, err := loadAuthLoginProviders()
+	allProviders, globalProxy, err := loadAuthLoginProviders(ctx)
 	if err != nil {
 		return "", config.ProviderConfig{}, "", err
 	}

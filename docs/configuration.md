@@ -868,6 +868,38 @@ Common uses include:
 - Project-specific permission rules
 - Project-specific LSP / MCP / Hooks / Skills settings
 
+### Trust gate for project configuration
+
+Project-level configuration is repository content, so Chord applies it only
+after you authorize it in that directory. Before anything project-declared
+runs, Chord discovers every source — `config.yaml`, `.chord/agents/`,
+`.chord/commands/`, and project skills — shows what they would do (MCP
+servers, hooks, LSP servers, providers, agents, commands, and skills, with
+their key targets), and asks. Declining, cancelling, or closing the prompt
+starts Chord without the project layer.
+
+Authorizing records what was approved for the project. The record binds the
+declaration files by content: adding, removing, or changing any of them
+asks again before the layer applies. Restarting inside a linked worktree or
+subdirectory reuses the authorization only while the same files are in
+effect; new skill directories there stay out of the catalog until
+authorized.
+
+Non-interactive entries (`chord headless`, ACP, `chord mcp login`, and the
+provider login and refresh flows under `chord auth`) refuse to apply an
+unauthorized project layer and exit with instructions. Pass
+`--skip-project-config` to ignore the project layer for one run, or
+`--trust-project-config` to apply the current files without saving an
+authorization.
+
+`chord doctor config` shows the authorization status, the discovered
+sources, and the fingerprint; `chord doctor config
+--revoke-project-trust` drops the recorded authorization for the current
+project. The gate covers what the configuration declares, not everything a
+repository contains: executed scripts, dependencies, and ordinary source
+code are not part of the authorization, and `AGENTS.md` instructions and
+project memory stay guidance-only.
+
 ## Provider request compression
 
 Provider-level `compress` selects the encoding for upstream request

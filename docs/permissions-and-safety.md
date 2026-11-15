@@ -264,6 +264,14 @@ Path-reading tools reject restricted device paths such as `/dev/stdin`, `/dev/st
 - Do not put real secrets in example configs, scripts, or project repositories
 - Restrict `auth.yaml` permissions, for example `chmod 600 ~/.config/chord/auth.yaml`
 
+## Project configuration trust
+
+Project-level configuration and capability declarations — `.chord/config.yaml`, agent definitions, commands, and skills — are repository content, not user settings. Chord treats them as untrusted until you authorize them in that checkout: before anything they declare runs, Chord discovers the sources, shows what they would do (MCP servers, hooks, LSP servers, providers, agents, commands, and skills with their key targets), and asks. Declining or dismissing the prompt starts without the project layer.
+
+Authorization is bound to the declaration files by content: adding, removing, or changing any of them asks again. The record lives in your state directory; `chord doctor config` shows the status and `chord doctor config --revoke-project-trust` revokes it. Non-interactive entries (`chord headless`, ACP, `chord mcp login`, and the provider login and refresh flows under `chord auth`) refuse to apply an unauthorized project layer and exit with instructions; `--skip-project-config` and `--trust-project-config` provide one-run alternatives.
+
+The gate is a consent boundary, not a sandbox. It covers what the configuration declares, not everything a repository contains: scripts the configuration runs, dependencies, and ordinary source code are trusted once the repository is checked out, and `AGENTS.md` instructions and project memory remain guidance-only. See [Configuration: Trust gate for project configuration](./configuration.md#trust-gate-for-project-configuration) for the full behavior.
+
 ## Headless boundary
 
 `chord headless` is suitable as a lower-level control plane for bots/gateways, but it does not provide multi-tenant isolation, browser security boundaries, or complete permission hosting by itself.
