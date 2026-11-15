@@ -313,7 +313,11 @@ func CleanupLLMDumps(locator *config.PathLocator, opts CleanupOptions) (*Cleanup
 				continue
 			}
 			sessionDir := filepath.Join(projectDir, sessionEntry.Name())
-			err := cleanupSessionLLMDumps(projectRoot, sessionEntry.Name(), sessionDir, cutoff, res)
+			err := cleanupSessionLLMDumps(opts.Ctx, projectRoot, sessionEntry.Name(), sessionDir, cutoff, res)
+			if cancelErr := ctxErr(opts.Ctx); cancelErr != nil {
+				_ = projectRoot.Close()
+				return res, cancelErr
+			}
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
 				res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: err.Error()})
 			}
@@ -323,7 +327,7 @@ func CleanupLLMDumps(locator *config.PathLocator, opts CleanupOptions) (*Cleanup
 	return res, nil
 }
 
-func cleanupSessionLLMDumps(projectRoot *os.Root, sessionName, sessionDir string, cutoff *time.Time, res *CleanupResult) error {
+func cleanupSessionLLMDumps(ctx context.Context, projectRoot *os.Root, sessionName, sessionDir string, cutoff *time.Time, res *CleanupResult) error {
 	sessionRoot, err := openDirectoryRoot(projectRoot, sessionName)
 	if err != nil {
 		return fmt.Errorf("open session directory: %w", err)
@@ -340,22 +344,45 @@ func cleanupSessionLLMDumps(projectRoot *os.Root, sessionName, sessionDir string
 		return fmt.Errorf("open LLM dump directory: %w", err)
 	}
 	defer llmRoot.Close()
-
 	dumpEntries, err := readDirectoryEntries(llmRoot)
 	if err != nil {
 		return fmt.Errorf("read LLM dump directory: %w", err)
 	}
-	locked, err := recovery.SessionLockActive(sessionDir)
-	if err != nil {
-		res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: "lock check failed: " + err.Error()})
-		return nil
+	cleanup := func() error {
+		return cleanupLLMDumpFiles(ctx, llmRoot, dumpEntries, sessionDir, cutoff, res)
 	}
-	if locked {
-		// An active session may be appending dumps right now.
-		res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: "session is locked"})
-		return nil
+	if res.DryRun {
+		locked, err := recovery.SessionLockActive(sessionDir)
+		if err != nil {
+			return fmt.Errorf("check session lock: %w", err)
+		}
+		if locked {
+			res.Skipped = append(res.Skipped, CleanupCandidate{Path: sessionDir, Kind: "llm dumps", Skip: "session is locked"})
+			return nil
+		}
+		return cleanup()
 	}
+	return recovery.WithInactiveSession(sessionDir, func(lockedRoot *os.Root) error {
+		scanned, err := sessionRoot.Stat(".")
+		if err != nil {
+			return fmt.Errorf("stat scanned session directory: %w", err)
+		}
+		locked, err := lockedRoot.Stat(".")
+		if err != nil {
+			return fmt.Errorf("stat locked session directory: %w", err)
+		}
+		if !os.SameFile(scanned, locked) {
+			return fmt.Errorf("session directory was replaced: %w", fs.ErrNotExist)
+		}
+		return cleanup()
+	})
+}
+
+func cleanupLLMDumpFiles(ctx context.Context, llmRoot *os.Root, dumpEntries []os.DirEntry, sessionDir string, cutoff *time.Time, res *CleanupResult) error {
 	for _, f := range dumpEntries {
+		if err := ctxErr(ctx); err != nil {
+			return err
+		}
 		if f.IsDir() {
 			continue
 		}

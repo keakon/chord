@@ -1,7 +1,6 @@
 package recovery
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,18 +34,11 @@ func ValidResumeSessionID(id string) bool {
 // removes the directory by rename. Tombstones are already logically deleted
 // and are removed under the same guard without applying a retention cutoff.
 func DeleteSessionDir(dir string, cutoff *time.Time) error {
-	directory, err := acquireSessionDirectoryLock(dir)
+	directory, err := acquireInactiveSessionDirectoryLock(dir)
 	if err != nil {
 		return err
 	}
 	defer directory.Close()
-	owner, err := readSessionLock(directory.root)
-	if err == nil && isProcessAlive(owner.PID) {
-		return currentSessionLockedError(dir, filepath.Join(dir, sessionLockFile))
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read session owner before deletion: %w", err)
-	}
 	tombstone := dir
 	deleting := IsDeletingSessionDirName(filepath.Base(dir))
 	if !deleting && cutoff != nil {
