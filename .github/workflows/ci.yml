@@ -1,6 +1,12 @@
 name: ci
 
-on:
+"on":
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to validate"
+        required: true
+        type: string
   push:
     branches:
       - "**"
@@ -28,6 +34,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup Go
         id: setup-go
@@ -76,6 +84,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup Go
         id: setup-go
@@ -121,6 +131,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -137,6 +149,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -166,6 +180,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup Go
         id: setup-go
@@ -225,6 +241,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -268,6 +286,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -296,6 +316,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -339,6 +361,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Test release update and recovery
         run: ruby scripts/test_homebrew.rb
@@ -349,6 +373,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v6

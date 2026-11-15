@@ -1,6 +1,6 @@
 name: release
 
-on:
+"on":
   push:
     tags:
       - "v*"
@@ -12,18 +12,24 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    name: Create GitHub Release
+  resolve:
+    name: Resolve release commit
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.tag.outputs.sha }}
     # `push` to a v* tag runs on that tag. `workflow_dispatch` runs on main but
     # we release the explicitly requested tag, so verify it looks like a tag.
     if: ${{ github.event_name == 'push' || startsWith(inputs.tag, 'v') }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Resolve release tag
         id: tag
         shell: bash
@@ -31,16 +37,35 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
         run: |
+          set -euo pipefail
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+            tag="$INPUT_TAG"
           else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            tag="$GITHUB_REF_NAME"
           fi
+          git check-ref-format "refs/tags/${tag}"
+          sha="$(git rev-parse --verify --end-of-options "refs/tags/${tag}^{commit}")"
+          printf 'tag=%s\nsha=%s\n' "$tag" "$sha" >> "$GITHUB_OUTPUT"
 
+  ci:
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+
+  release:
+    name: Create GitHub Release
+    needs: [resolve, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ needs.resolve.outputs.tag }}
+    steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.tag.outputs.tag }}
+          ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -64,7 +89,7 @@ jobs:
       - name: Build release assets
         shell: bash
         env:
-          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
 
@@ -120,7 +145,7 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail

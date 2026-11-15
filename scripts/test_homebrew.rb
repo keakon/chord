@@ -215,3 +215,68 @@ jobs.each_value do |job|
   end
 end
 puts "PASS workflow dependencies, token isolation, and Bash syntax"
+
+release_workflow = YAML.load_file(File.join(ROOT, ".github/workflows/release.yml"))
+release_jobs = release_workflow.fetch("jobs")
+resolve = release_jobs.fetch("resolve")
+release_ci = release_jobs.fetch("ci")
+release_job = release_jobs.fetch("release")
+check(release_ci.fetch("needs") == "resolve", "CI must wait for release commit resolution")
+check(release_ci.fetch("uses") == "./.github/workflows/ci.yml", "release must reuse the full CI workflow")
+check(release_ci.fetch("with").fetch("ref") == "${{ needs.resolve.outputs.sha }}", "CI must check the resolved commit")
+check(release_job.fetch("needs").sort == %w[ci resolve], "release must wait for CI")
+release_checkout = release_job.fetch("steps").find { |step| step.fetch("uses", "").start_with?("actions/checkout@") }
+check(release_checkout.fetch("with").fetch("ref") == "${{ needs.resolve.outputs.sha }}",
+      "release build must use the checked commit")
+
+ci_workflow = YAML.load_file(File.join(ROOT, ".github/workflows/ci.yml"))
+check(ci_workflow.fetch("on").fetch("workflow_call").fetch("inputs").fetch("ref").fetch("required"),
+      "reusable CI must require a commit")
+ci_workflow.fetch("jobs").each do |name, job|
+  checkout = job.fetch("steps").find { |step| step.fetch("uses", "").start_with?("actions/checkout@") }
+  check(checkout.fetch("with").fetch("ref") == "${{ inputs.ref }}", "#{name}: CI checks the wrong commit")
+end
+
+release_jobs.each_value do |job|
+  job.fetch("steps", []).each do |step|
+    next unless step["run"]
+    _, error, status = Open3.capture3("bash", "-n", stdin_data: step.fetch("run"))
+    check(status.success?, error)
+  end
+end
+
+Dir.mktmpdir("chord-release-ref-") do |dir|
+  env = {
+    "GIT_CONFIG_GLOBAL" => File::NULL, "GIT_CONFIG_NOSYSTEM" => "1",
+    "GIT_AUTHOR_NAME" => "Test", "GIT_AUTHOR_EMAIL" => "test@example.invalid",
+    "GIT_COMMITTER_NAME" => "Test", "GIT_COMMITTER_EMAIL" => "test@example.invalid",
+  }
+  git(env, "init", "--initial-branch=main", dir)
+  git(env, "-C", dir, "commit", "--allow-empty", "-m", "release")
+  release_sha = git(env, "-C", dir, "rev-parse", "HEAD")
+  git(env, "-C", dir, "tag", "v0.1.0")
+  git(env, "-C", dir, "tag", "-a", "v0.1.1", "-m", "sample release")
+  git(env, "-C", dir, "commit", "--allow-empty", "-m", "later")
+  resolver = resolve.fetch("steps").find { |step| step["id"] == "tag" }.fetch("run")
+  [
+    ["workflow_dispatch", "v0.1.0", "main", true],
+    ["push", "", "v0.1.1", true],
+    ["workflow_dispatch", "v0.1.2", "main", false],
+    ["workflow_dispatch", "main", "main", false],
+    ["workflow_dispatch", "v0.1.0~1", "main", false],
+  ].each do |event, input_tag, ref_name, success|
+    output = File.join(dir, "output")
+    File.write(output, "")
+    _, error, status = Open3.capture3(env.merge("EVENT_NAME" => event, "INPUT_TAG" => input_tag,
+                                               "GITHUB_REF_NAME" => ref_name, "GITHUB_OUTPUT" => output),
+                                     "bash", "-euo", "pipefail", "-c", resolver, chdir: dir)
+    check(status.success? == success, "release ref resolution failed: #{error}")
+    if success
+      tag = event == "push" ? ref_name : input_tag
+      check(File.read(output) == "tag=#{tag}\nsha=#{release_sha}\n", "resolved main instead of the release tag")
+    else
+      check(File.read(output).empty?, "failed resolution emitted a release target")
+    end
+  end
+end
+puts "PASS release CI dependency and lightweight/annotated tag resolution"
