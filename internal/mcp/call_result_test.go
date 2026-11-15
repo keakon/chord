@@ -332,9 +332,10 @@ func (w *scriptedWriteCloser) Close() error { return nil }
 
 func newScriptedTransport(writer io.WriteCloser) *StdioTransport {
 	return &StdioTransport{
-		stdin:   writer,
-		pending: make(map[int]chan stdioReply),
-		done:    make(chan struct{}),
+		stdin:     writer,
+		pending:   make(map[int]chan stdioReply),
+		done:      make(chan struct{}),
+		writeGate: make(chan struct{}, 1),
 	}
 }
 

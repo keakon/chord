@@ -50,6 +50,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Cancelling an MCP stdio call while it waits for another stdin write now returns without sending the queued request. Other calls keep using the same server connection.
 - Multi-file `apply_patch` previews draw a full-width separator above every file section except the first and every hunk except its file's first, keeping `Add File` groups and long paths distinct. `Move to` stays unseparated because it renames the preceding Update. The same separators appear in live previews, failed-patch cards, and the `Requested patch` fallback.
 - In the permission rule picker, the selected rule row keeps its highlight across the whole line; the path and summary after the tool name no longer fall back to the dialog background.
 - During LLM connect/retry cycles the status bar activity lane no longer flip-flops between the retry and connecting glyphs, and its timer no longer resets on every reconnect: consecutive retries keep one elapsed timer from the start of the retry run and keep showing the retry state (counting down when a wait is scheduled) while attempts reconnect. Waiting for headers, streaming output, and terminal states still take over the lane immediately.

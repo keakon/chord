@@ -103,9 +103,8 @@ type StdioTransport struct {
 	closed       bool
 	readerExited bool
 
-	// writeMu serialises all writes to stdin so that concurrent Send and
-	// Notify calls cannot interleave bytes and corrupt JSON-RPC frames.
-	writeMu sync.Mutex
+	// writeGate serialises frames while allowing queued calls to cancel.
+	writeGate chan struct{}
 
 	// done is closed when the reader goroutine exits.
 	done chan struct{}
@@ -139,11 +138,12 @@ func NewStdioTransport(ctx context.Context, command string, args []string, env [
 	}
 
 	t := &StdioTransport{
-		cmd:     cmd,
-		stdin:   stdinPipe,
-		stdout:  stdoutPipe,
-		pending: make(map[int]chan stdioReply),
-		done:    make(chan struct{}),
+		cmd:       cmd,
+		stdin:     stdinPipe,
+		stdout:    stdoutPipe,
+		pending:   make(map[int]chan stdioReply),
+		done:      make(chan struct{}),
+		writeGate: make(chan struct{}, 1),
 	}
 
 	// Background reader: reads JSON-RPC responses from stdout and dispatches
@@ -233,16 +233,7 @@ func (t *StdioTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCR
 	}
 	data = append(data, '\n')
 
-	// A cancellation observed before the first byte is written proves the
-	// request was not sent. Anything after a successful write cannot.
-	if err := ctx.Err(); err != nil {
-		t.removePending(req.ID)
-		return JSONRPCResponse{}, newCallFailure(callNotSent, err)
-	}
-
-	t.writeMu.Lock()
-	written, writeErr := t.stdin.Write(data)
-	t.writeMu.Unlock()
+	written, writeErr := t.writeFrame(ctx, data)
 	if writeErr != nil || written != len(data) {
 		t.removePending(req.ID)
 		if written == 0 && writeErr != nil {
@@ -289,7 +280,7 @@ func (t *StdioTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCR
 }
 
 // Notify sends a JSON-RPC notification (fire-and-forget, no response).
-func (t *StdioTransport) Notify(_ context.Context, notif JSONRPCNotification) error {
+func (t *StdioTransport) Notify(ctx context.Context, notif JSONRPCNotification) error {
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()
@@ -303,9 +294,10 @@ func (t *StdioTransport) Notify(_ context.Context, notif JSONRPCNotification) er
 	}
 	data = append(data, '\n')
 
-	t.writeMu.Lock()
-	_, writeErr := t.stdin.Write(data)
-	t.writeMu.Unlock()
+	written, writeErr := t.writeFrame(ctx, data)
+	if writeErr == nil && written != len(data) {
+		writeErr = io.ErrShortWrite
+	}
 	if writeErr != nil {
 		return fmt.Errorf("mcp stdio: write notification: %w", writeErr)
 	}
