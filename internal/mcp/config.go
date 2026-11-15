@@ -22,6 +22,7 @@ func ServerConfigsFromConfig(mc config.MCPConfig) []ServerConfig {
 			AllowedTools: sc.AllowedTools,
 			Manual:       sc.Manual,
 			Deferred:     sc.Deferred,
+			TimeoutMs:    sc.TimeoutMs,
 		}))
 	}
 	return configs

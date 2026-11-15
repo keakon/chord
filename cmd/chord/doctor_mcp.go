@@ -13,6 +13,21 @@ import (
 	"github.com/keakon/chord/internal/mcp"
 )
 
+// mcpToolCallTimeoutLabel renders the effective per-server tool-call deadline:
+// the configured value when set, otherwise the transport preset for its type.
+func mcpToolCallTimeoutLabel(cfg mcp.ServerConfig) string {
+	if cfg.TimeoutMs != 0 {
+		if d, err := cfg.CallTimeout(); err == nil {
+			return fmt.Sprintf("%s (configured)", d)
+		}
+		return fmt.Sprintf("invalid (%dms)", cfg.TimeoutMs)
+	}
+	if cfg.URL != "" {
+		return "120s (http preset)"
+	}
+	return "unlimited (stdio)"
+}
+
 type doctorMCPReport struct {
 	SchemaVersion int               `json:"schema_version"`
 	Mode          string            `json:"mode"`
@@ -25,6 +40,7 @@ type doctorMCPTarget struct {
 	ControlNetworkMode       string                     `json:"control_network_mode,omitempty"`
 	ProxyEnvironmentDetected bool                       `json:"proxy_environment_detected,omitzero"`
 	Ref                      mcp.ServerRef              `json:"ref"`
+	ToolCallTimeout          string                     `json:"tool_call_timeout"`
 	Auth                     mcp.AuthState              `json:"auth"`
 	Operations               []mcp.OperationView        `json:"operations"`
 	Connection               mcp.ConnectionState        `json:"connection"`
@@ -64,17 +80,36 @@ func newDoctorMCPCmd() *cobra.Command {
 		for _, target := range targets {
 			checkStarted := time.Now()
 			entry := doctorMCPTarget{Ref: target.Ref, Operations: []mcp.OperationView{}, Connection: mcp.ConnectionIdle, Catalog: mcp.CatalogUnknown, ScopeRequirements: []mcp.ScopeRequirementView{}, OK: true}
+			entry.ToolCallTimeout = mcpToolCallTimeoutLabel(target.Config)
 			for _, stage := range []string{mcp.StageConfig, mcp.StageCredential, mcp.StageTransport, mcp.StageDiscovery, mcp.StageRefresh, mcp.StageInitialize, mcp.StageToolsList} {
 				entry.Stages = append(entry.Stages, mcp.ProbeStage{Stage: stage, State: mcp.ProbeSkipped})
 			}
-			entry.Stages[0] = mcp.ProbeStage{Stage: mcp.StageConfig, State: mcp.ProbeOK, StartedAt: checkStarted.UTC(), FinishedAt: time.Now().UTC()}
+			_, timeoutErr := target.Config.CallTimeout()
+			diagnostic := mcp.Diagnostic{}
+			if timeoutErr != nil {
+				entry.OK = false
+				exitCode = max(exitCode, 2)
+				diagnostic = mcp.Diagnostic{ErrorClass: mcp.ErrorProtocol, SuggestedAction: mcp.ActionCheckServerConfiguration}
+				entry.Stages[0] = mcp.ProbeStage{
+					Stage:           mcp.StageConfig,
+					State:           mcp.ProbeFailed,
+					StartedAt:       checkStarted.UTC(),
+					FinishedAt:      time.Now().UTC(),
+					ErrorClass:      mcp.ErrorProtocol,
+					SuggestedAction: mcp.ActionCheckServerConfiguration,
+				}
+			} else {
+				entry.Stages[0] = mcp.ProbeStage{Stage: mcp.StageConfig, State: mcp.ProbeOK, StartedAt: checkStarted.UTC(), FinishedAt: time.Now().UTC()}
+			}
 			missing := missingMCPHeaderEnvironment(target)
 			view, inspectErr := auth.Inspect(cmd.Context(), target)
 			entry.Auth = view.Auth
 			entry.ScopeRequirements = view.ScopeRequirements
 			credentialFinished := time.Now().UTC()
 			entry.Stages[1] = mcp.ProbeStage{Stage: mcp.StageCredential, State: mcp.ProbeOK, StartedAt: checkStarted.UTC(), FinishedAt: credentialFinished, DurationMS: time.Since(checkStarted).Milliseconds()}
-			diagnostic := view.Diagnostic
+			if timeoutErr == nil {
+				diagnostic = view.Diagnostic
+			}
 			if inspectErr != nil {
 				entry.OK = false
 				entry.Stages[1].State = mcp.ProbeFailed
@@ -104,7 +139,7 @@ func newDoctorMCPCmd() *cobra.Command {
 				entry.Stages[0].State = mcp.ProbeFailed
 				entry.Stages[0].ErrorClass = diagnostic.ErrorClass
 				entry.Stages[0].SuggestedAction = diagnostic.SuggestedAction
-			} else if connect {
+			} else if connect && timeoutErr == nil {
 				result := auth.Probe(cmd.Context(), target, mcp.ProbeOptions{UseSavedCredential: true, AllowRefresh: true})
 				entry.OK = result.OK
 				entry.Auth = result.Auth
@@ -140,7 +175,7 @@ func newDoctorMCPCmd() *cobra.Command {
 				if !entry.OK {
 					status = "failed"
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s/%s: %s; auth=%s; connection=%s; catalog=%s\n", entry.Ref.Owner, entry.Ref.ServerName, status, entry.Auth, entry.Connection, entry.Catalog)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s/%s: %s; auth=%s; connection=%s; catalog=%s; timeout=%s\n", entry.Ref.Owner, entry.Ref.ServerName, status, entry.Auth, entry.Connection, entry.Catalog, entry.ToolCallTimeout)
 				if entry.RedactedError != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "  %s", entry.RedactedError)
 					if entry.SuggestedAction != "" {

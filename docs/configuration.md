@@ -1618,6 +1618,19 @@ mcp:
 - The enabled/disabled intent for manual servers is saved with the session: `/mcp enable` persists it, `/mcp disable` clears it, and resuming the session (including after restart) reconnects the manual servers that were enabled when it was last active. A connection failure keeps the intent, so the server stays "enabled (unavailable)" and can be retried instead of silently returning to disabled.
 - Dynamic declarations wait until an active provider-native tool continuation or assistant prefill finishes. At retry and fallback boundaries, Chord refreshes both the conversation input and the currently enabled tools before sending the next request.
 
+### Tool-call timeout
+
+Each server can bound how long a single tool call waits for a result. Set `timeout_ms` to a per-server deadline in milliseconds:
+
+```yaml
+mcp:
+  browser:
+    command: /usr/local/bin/browser-mcp
+    timeout_ms: 300000
+```
+
+Without it, HTTP servers keep the 120-second transport default and stdio servers wait without a limit. The deadline stops the wait, not the server's work: a call that times out settles as an unknown outcome (the server may still finish later or have applied side effects), and the result tells the model to verify external state before retrying. `chord doctor mcp` shows each server's effective timeout and where it comes from. Values must be between 1 and 86400000 (24 hours).
+
 ### Concurrent tool execution
 
 Calls a model issues in one response are scheduled concurrently when their declared resources do not conflict. This includes MCP calls to the same server, edits to different files, and multiple `apply_patch` or `delete` calls whose targets do not overlap; calls that touch the same file or shared resource keep their model-response order. The regular tool-execution limit still bounds how many calls are in flight at once. If a concurrent call fails, the model receives the individual result and can decide whether to retry it, inspect the affected state first, or continue with the other results.

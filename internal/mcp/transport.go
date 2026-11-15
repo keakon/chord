@@ -102,6 +102,8 @@ type StdioTransport struct {
 	pending      map[int]chan stdioReply
 	closed       bool
 	readerExited bool
+	writeErr     error
+	writerDone   chan struct{}
 
 	// writeGate serialises frames while allowing queued calls to cancel.
 	writeGate chan struct{}
@@ -233,17 +235,16 @@ func (t *StdioTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCR
 	}
 	data = append(data, '\n')
 
-	written, writeErr := t.writeFrame(ctx, data)
-	if writeErr != nil || written != len(data) {
+	if writeErr := t.writeFrame(ctx, data); writeErr != nil {
 		t.removePending(req.ID)
-		if written == 0 && writeErr != nil {
-			return JSONRPCResponse{}, newCallFailure(callNotSent, fmt.Errorf("mcp stdio: write request: %w", writeErr))
+		select {
+		case reply := <-ch:
+			if reply.err == nil {
+				return reply.resp, nil
+			}
+		default:
 		}
-		cause := writeErr
-		if cause == nil {
-			cause = io.ErrShortWrite
-		}
-		return JSONRPCResponse{}, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp stdio: write request: %w", cause))
+		return JSONRPCResponse{}, fmt.Errorf("mcp stdio: write request: %w", writeErr)
 	}
 
 	// Wait for response or cancellation.
@@ -294,11 +295,7 @@ func (t *StdioTransport) Notify(ctx context.Context, notif JSONRPCNotification) 
 	}
 	data = append(data, '\n')
 
-	written, writeErr := t.writeFrame(ctx, data)
-	if writeErr == nil && written != len(data) {
-		writeErr = io.ErrShortWrite
-	}
-	if writeErr != nil {
+	if writeErr := t.writeFrame(ctx, data); writeErr != nil {
 		return fmt.Errorf("mcp stdio: write notification: %w", writeErr)
 	}
 	return nil
@@ -312,10 +309,17 @@ func (t *StdioTransport) Close() error {
 		return nil
 	}
 	t.closed = true
+	writerDone := t.writerDone
 	t.mu.Unlock()
 
 	// Close stdin to signal the child process.
 	t.stdin.Close()
+	if writerDone != nil {
+		select {
+		case <-writerDone:
+		case <-time.After(stdioKillGrace):
+		}
+	}
 
 	// Ask the child process group to terminate gracefully.
 	terminateStdioCommand(t.cmd, false)
@@ -369,6 +373,7 @@ type HTTPTransport struct {
 	url                  string
 	headers              map[string]string // extra headers sent with every request
 	client               *http.Client
+	toolCallTimeout      time.Duration
 	auth                 *AuthService
 	target               Target
 	expected             ExpectedIdentity
@@ -385,6 +390,7 @@ type HTTPTransport struct {
 type HTTPTransportOptions struct {
 	Endpoint             string
 	Client               *http.Client
+	ToolCallTimeout      time.Duration // applies only to tools/call; can outlast the 120s preset
 	Headers              map[string]string
 	AuthService          *AuthService
 	Target               Target
@@ -396,13 +402,17 @@ type HTTPTransportOptions struct {
 func NewHTTPTransport(opts HTTPTransportOptions) *HTTPTransport {
 	t := &HTTPTransport{
 		url: opts.Endpoint, headers: maps.Clone(opts.Headers),
-		auth: opts.AuthService, target: opts.Target.Snapshot(), expected: opts.ExpectedIdentity,
+		toolCallTimeout: opts.ToolCallTimeout,
+		auth:            opts.AuthService, target: opts.Target.Snapshot(), expected: opts.ExpectedIdentity,
 		connectionGeneration: opts.ConnectionGeneration,
-		client:               &http.Client{Timeout: 120 * time.Second},
 	}
 	if opts.Client != nil {
+		// The shared auth client is copied per transport so a per-server
+		// client settings cannot leak back into other servers' connections.
 		client := *opts.Client
 		t.client = &client
+	} else {
+		t.client = &http.Client{Timeout: 120 * time.Second}
 	}
 	t.client.CheckRedirect = t.checkRedirect
 	return t
@@ -582,6 +592,18 @@ func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCRe
 		return JSONRPCResponse{}, newCallFailure(callNotSent, newTransportFailure("mcp http: cannot encode request", SendNotSent, err))
 	}
 
+	client := t.client
+	if req.Method == "tools/call" && t.toolCallTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, t.toolCallTimeout)
+		defer cancel()
+		// The default 120-second client timeout applies to the handshake and
+		// discovery requests. A configured tools/call deadline may be longer,
+		// so use the request context as the sole deadline for this call.
+		copy := *t.client
+		copy.Timeout = 0
+		client = &copy
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(data))
 	if err != nil {
 		return JSONRPCResponse{}, newCallFailure(callNotSent, newTransportFailure("mcp http: invalid request", SendNotSent, err))
@@ -591,7 +613,7 @@ func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCRe
 		return JSONRPCResponse{}, newCallFailure(callNotSent, err)
 	}
 
-	httpResp, err := t.client.Do(httpReq)
+	httpResp, err := client.Do(httpReq)
 	if err != nil {
 		evidence := SendOutcomeUnknown
 		if httpResp != nil {

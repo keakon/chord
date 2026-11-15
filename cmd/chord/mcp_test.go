@@ -126,6 +126,32 @@ func TestMCPDoctorReportsMissingHeaderEnvironment(t *testing.T) {
 	}
 }
 
+func TestMCPDoctorOfflineRejectsInvalidToolCallTimeout(t *testing.T) {
+	t.Chdir(t.TempDir())
+	setupDoctorConfigHome(t, "mcp:\n  sample:\n    url: https://example.invalid/mcp\n    timeout_ms: -1\n")
+	var out bytes.Buffer
+	cmd := newDoctorMCPCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--json"})
+	err := cmd.Execute()
+	exitErr, ok := errors.AsType[cliExitError](err)
+	if !ok || exitErr.code != 2 {
+		t.Fatalf("invalid timeout error = %v", err)
+	}
+	var report doctorMCPReport
+	if decodeErr := json.NewDecoder(bytes.NewReader(out.Bytes())).Decode(&report); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if report.OK || len(report.Targets) != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+	entry := report.Targets[0]
+	if entry.OK || entry.Stages[0].State != "failed" || entry.RedactedError != string(mcp.ErrorProtocol) || entry.SuggestedAction != mcp.ActionCheckServerConfiguration {
+		t.Fatalf("target report = %+v", entry)
+	}
+}
+
 func TestMCPCommandsEmptyAndUnsupportedTargets(t *testing.T) {
 	t.Chdir(t.TempDir())
 	setupDoctorConfigHome(t, "{}\n")

@@ -88,6 +88,7 @@ type Client struct {
 	serverInfo       initializeResult
 	nextID           atomic.Int64
 	outputValidators atomic.Pointer[toolOutputValidators]
+	callTimeout      time.Duration // per-server tool-call deadline; 0 keeps the transport preset
 }
 
 // NewClientWithInfo creates a new MCP client with explicit application metadata
@@ -159,6 +160,14 @@ func (c *Client) Initialize(ctx context.Context) error {
 // It returns the concatenated text content plus any image content blocks
 // (decoded from base64) so the runtime can re-inject images into model context.
 func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMessage) (string, []message.ContentPart, error) {
+	// The configured per-server deadline stops the wait, not any work the
+	// server already started: after it fires there is no waiter for a late
+	// reply, so the call settles as outcome-unknown either way.
+	if c.callTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.callTimeout)
+		defer cancel()
+	}
 	// Bind validation to the directory visible when the call starts.
 	validators := c.outputValidators.Load()
 	// LLM arguments remain lenient here: schema validation only re-encodes
@@ -194,8 +203,8 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 	}
 
 	var result toolCallResult
-	if err := jsonv2.Unmarshal(resp.Result, &result); err != nil {
-		return "", nil, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err))
+	if decodeErr := jsonv2.Unmarshal(resp.Result, &result); decodeErr != nil {
+		return "", nil, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, decodeErr))
 	}
 	if result.Content == nil && (len(result.StructuredContent) == 0 || bytes.Equal(bytes.TrimSpace(result.StructuredContent), []byte("null"))) {
 		return "", nil, newCallFailure(callOutcomeUnknown, fmt.Errorf("mcp tools/call %s/%s: result requires content or structuredContent", c.name, toolName))
@@ -255,6 +264,7 @@ type ServerConfig struct {
 	AllowedTools []string          // optional allowlist of remote MCP tool names
 	Manual       bool              // when true, do not auto-connect on startup
 	Deferred     bool              // load individual schemas through tool_search
+	TimeoutMs    int               // per-server tool-call deadline in milliseconds; 0 keeps the transport preset
 }
 
 // ---------------------------------------------------------------------------
@@ -378,8 +388,30 @@ func filterToolDefsByAllowed(defs []MCPToolDef, allowed map[string]struct{}) []M
 	return out
 }
 
+// maxToolCallTimeoutMs bounds the per-server tool-call deadline so a
+// millisecond value cannot overflow the time.Duration conversion (24h ceiling).
+const maxToolCallTimeoutMs = 24 * 60 * 60 * 1000
+
+// CallTimeout converts the configured per-server tool-call timeout. Zero keeps
+// the transport preset (HTTP 120s, stdio unlimited); other values must fall
+// inside [1, maxToolCallTimeoutMs] so a typo can neither disable the deadline
+// silently nor overflow the duration conversion.
+func (cfg ServerConfig) CallTimeout() (time.Duration, error) {
+	if cfg.TimeoutMs == 0 {
+		return 0, nil
+	}
+	if cfg.TimeoutMs < 0 || cfg.TimeoutMs > maxToolCallTimeoutMs {
+		return 0, fmt.Errorf("mcp server %q: invalid timeout_ms %d: must be between 1 and %d", strings.TrimSpace(cfg.Name), cfg.TimeoutMs, maxToolCallTimeoutMs)
+	}
+	return time.Duration(cfg.TimeoutMs) * time.Millisecond, nil
+}
+
 // createClient builds a Client with the appropriate transport based on config.
 func createClient(ctx context.Context, cfg ServerConfig, info ClientInfo) (*Client, error) {
+	callTimeout, err := cfg.CallTimeout()
+	if err != nil {
+		return nil, err
+	}
 	if cfg.Command != "" {
 		if len(cfg.Headers) > 0 {
 			return nil, fmt.Errorf("mcp server %q: headers apply only to remote (url) servers; stdio servers receive no HTTP requests", strings.TrimSpace(cfg.Name))
@@ -388,7 +420,9 @@ func createClient(ctx context.Context, cfg ServerConfig, info ClientInfo) (*Clie
 		if err != nil {
 			return nil, err
 		}
-		return NewClientWithInfo(cfg.Name, transport, info), nil
+		client := NewClientWithInfo(cfg.Name, transport, info)
+		client.callTimeout = callTimeout
+		return client, nil
 	}
 
 	if cfg.URL != "" {
@@ -396,8 +430,10 @@ func createClient(ctx context.Context, cfg ServerConfig, info ClientInfo) (*Clie
 		if err != nil {
 			return nil, err
 		}
-		transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: cfg.URL, Headers: headers})
-		return NewClientWithInfo(cfg.Name, transport, info), nil
+		transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: cfg.URL, Headers: headers, ToolCallTimeout: callTimeout})
+		client := NewClientWithInfo(cfg.Name, transport, info)
+		client.callTimeout = callTimeout
+		return client, nil
 	}
 
 	return nil, fmt.Errorf("mcp server %q: %s", strings.TrimSpace(cfg.Name), missingServerTransportMessage)

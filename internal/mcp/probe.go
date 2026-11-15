@@ -140,6 +140,10 @@ func probeConnection(ctx context.Context, target Target, auth *AuthService, info
 		result.Report.stage(StageConfig, started, err)
 		return fail(err)
 	}
+	if _, err := target.Config.CallTimeout(); err != nil {
+		result.Report.stage(StageConfig, started, err)
+		return fail(err)
+	}
 	result.Report.stage(StageConfig, started, nil)
 	transportTarget := target.Snapshot()
 	if opts.Anonymous || !opts.UseSavedCredential {
@@ -318,9 +322,23 @@ func createTargetClient(ctx context.Context, target Target, auth *AuthService, i
 	if err != nil {
 		return nil, err
 	}
-	opts := HTTPTransportOptions{Endpoint: target.Config.URL, Headers: headers, AuthService: auth, Target: target, ExpectedIdentity: expected, ConnectionGeneration: generation}
+	callTimeout, err := target.Config.CallTimeout()
+	if err != nil {
+		return nil, err
+	}
+	opts := HTTPTransportOptions{
+		Endpoint:             target.Config.URL,
+		Headers:              headers,
+		ToolCallTimeout:      callTimeout,
+		AuthService:          auth,
+		Target:               target,
+		ExpectedIdentity:     expected,
+		ConnectionGeneration: generation,
+	}
 	if auth != nil {
 		opts.Client = auth.mcpHTTPClient
 	}
-	return NewClientWithInfo(target.Config.Name, NewHTTPTransport(opts), info), nil
+	client := NewClientWithInfo(target.Config.Name, NewHTTPTransport(opts), info)
+	client.callTimeout = callTimeout
+	return client, nil
 }

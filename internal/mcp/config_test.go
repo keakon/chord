@@ -23,6 +23,18 @@ func TestServerConfigsFromConfigCopiesAllowedTools(t *testing.T) {
 	}
 }
 
+func TestServerConfigsFromConfigCarriesTimeoutMs(t *testing.T) {
+	configs := ServerConfigsFromConfig(config.MCPConfig{
+		"search": {URL: "https://mcp.test/mcp", TimeoutMs: 45_000},
+	})
+	if len(configs) != 1 {
+		t.Fatalf("got %d configs, want 1", len(configs))
+	}
+	if configs[0].TimeoutMs != 45_000 {
+		t.Fatalf("TimeoutMs = %d, want 45000", configs[0].TimeoutMs)
+	}
+}
+
 func TestServerConfigsFromConfigCopiesHeaders(t *testing.T) {
 	headers := map[string]string{"x-api-key": "$MCP_API_KEY"}
 	configs := ServerConfigsFromConfig(config.MCPConfig{

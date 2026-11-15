@@ -34,6 +34,7 @@ type MCPServerConfig struct {
 	AllowedTools []string          `json:"allowed_tools,omitempty" yaml:"allowed_tools,omitempty"` // optional remote MCP tool allowlist
 	Manual       bool              `json:"manual,omitzero" yaml:"manual,omitempty"`                // when true, do not auto-start; must be enabled via /mcp or shortcut
 	Deferred     bool              `json:"deferred,omitzero" yaml:"deferred,omitempty"`            // expose schemas only after tool_search; connection/enable intent is unchanged
+	TimeoutMs    int               `json:"timeout_ms,omitzero" yaml:"timeout_ms,omitempty"`        // per-server tool-call deadline in milliseconds; 0 keeps the transport preset (HTTP 120s, stdio unlimited)
 }
 
 // MCPConfig holds MCP server configurations keyed by server name.

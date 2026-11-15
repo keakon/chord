@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"runtime"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -137,9 +140,97 @@ func TestStdioNotifyCancellationAndWriteFailures(t *testing.T) {
 				t.Fatal("cancelled notification was written")
 			}
 			writer.results = nil
-			if err := tr.Notify(t.Context(), JSONRPCNotification{JSONRPC: "2.0", Method: "notifications/initialized"}); err != nil {
-				t.Fatalf("writer gate leaked: %v", err)
+			err = tr.Notify(t.Context(), JSONRPCNotification{JSONRPC: "2.0", Method: "notifications/initialized"})
+			if tc.cancel && err != nil {
+				t.Fatalf("cancelled queue entry poisoned writer: %v", err)
+			}
+			if !tc.cancel && !errors.Is(err, tc.want) {
+				t.Fatalf("failed writer accepted another frame: %v", err)
 			}
 		})
+	}
+}
+
+func TestStdioBlockedWriteDeadlineAndFrameOwnership(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	tr := newScriptedTransport(writer)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := tr.Send(ctx, JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "tools/call", Params: strings.Repeat("x", 4<<20)})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		requireCallOutcome(t, err, callOutcomeUnknown)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("deadline error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked write ignored deadline")
+	}
+	ctx2, cancel2 := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel2()
+	_, err = tr.Send(ctx2, JSONRPCRequest{JSONRPC: "2.0", ID: 2, Method: "tools/call"})
+	requireCallOutcome(t, err, callNotSent)
+	tr.mu.Lock()
+	finished := tr.writerDone
+	pending := len(tr.pending)
+	tr.mu.Unlock()
+	if pending != 0 || len(tr.writeGate) != 1 {
+		t.Fatalf("pending=%d gate=%d after caller cancellation", pending, len(tr.writeGate))
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("pipe close did not release writer")
+	}
+	if len(tr.writeGate) != 0 {
+		t.Fatal("completed writer retained gate")
+	}
+}
+
+func TestStdioCloseReclaimsBlockedWriter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a POSIX shell")
+	}
+	tr, err := NewStdioTransport(t.Context(), "/bin/sh", []string{"-c", "sleep 30"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- tr.Notify(ctx, JSONRPCNotification{JSONRPC: "2.0", Method: "sample", Params: strings.Repeat("x", 4<<20)})
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Notify error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("notification ignored deadline")
+	}
+	tr.mu.Lock()
+	finished := tr.writerDone
+	tr.mu.Unlock()
+	if err := tr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("Close left a blocked writer")
 	}
 }
