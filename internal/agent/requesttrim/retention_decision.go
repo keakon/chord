@@ -84,10 +84,24 @@ type Decision struct {
 
 // RetentionDecision derives the decision for one tool result. verdict is the
 // classification that already ran, rule and reduced the rendering it produced
-// (both empty when the result was kept complete).
+// (both empty when the result was kept complete). EvictImages in the verdict
+// adds the parts side: evicted image payloads count as dropped, with their own
+// recovery route.
 func RetentionDecision(ctx Context, verdict Verdict, rule, reduced string) Decision {
 	decision := Decision{Reason: verdict.Reason}
 	if verdict.Class == None {
+		if verdict.EvictImages {
+			// Image-only eviction: the pixels are gone from the request and a
+			// re-load address is what remains — or nothing, when the image has
+			// no recovery route, which the ledger must surface as a loss.
+			decision.Level = retentionReference
+			if imagesRecoverable(ctx) {
+				decision.Recovery = retentionRecoveryRereadFile
+			} else {
+				decision.Recovery = retentionRecoveryUnavailable
+			}
+			return decision
+		}
 		decision.Level = RetentionFull
 		decision.Complete = true
 		decision.Recovery = retentionRecoveryNone
@@ -103,6 +117,16 @@ func RetentionDecision(ctx Context, verdict Verdict, rule, reduced string) Decis
 	}
 	decision.Level = retentionLevelFor(ctx, verdict.Class, rule, reduced, decision.ArtifactRef)
 	decision.Recovery = retentionRecoveryFor(ctx, verdict.Class, decision.ArtifactRef)
+	if verdict.EvictImages {
+		// The image route only helps while the pixels are on disk and the
+		// agent can load them; otherwise the eviction is a loss no matter what
+		// the string side kept, and the ledger must say so.
+		if !imagesRecoverable(ctx) {
+			decision.Recovery = retentionRecoveryUnavailable
+		} else if decision.Recovery != retentionRecoveryReadArtifact {
+			decision.Recovery = retentionRecoveryRereadFile
+		}
+	}
 	return decision
 }
 

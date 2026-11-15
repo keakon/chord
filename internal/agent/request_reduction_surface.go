@@ -81,7 +81,10 @@ func (a *MainAgent) setPreparedStablePrefixLen(n int) {
 
 // computeReducedToolResultIndices reports which tool-result positions had
 // their content changed by reduction. Used to freeze already-reduced messages
-// in incremental reduction so their marker content stays cache-stable.
+// in incremental reduction so their marker content stays cache-stable. Parts
+// count as reduction evidence too: an image eviction rewrites parts while
+// leaving Content untouched, and an unsynced index would make every later
+// request re-run the eviction scan on the message.
 func computeReducedToolResultIndices(original, prepared []message.Message) []bool {
 	n := len(prepared)
 	if n == 0 {
@@ -92,7 +95,8 @@ func computeReducedToolResultIndices(original, prepared []message.Message) []boo
 		if prepared[i].Role != message.RoleTool {
 			continue
 		}
-		if prepared[i].Content != original[i].Content || prepared[i].ToolDiff != original[i].ToolDiff {
+		if prepared[i].Content != original[i].Content || prepared[i].ToolDiff != original[i].ToolDiff ||
+			!message.ContentPartsEqual(prepared[i].Parts, original[i].Parts) {
 			reduced[i] = true
 		}
 	}

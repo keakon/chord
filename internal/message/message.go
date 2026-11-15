@@ -1,6 +1,7 @@
 package message
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -83,6 +84,28 @@ type ContentPart struct {
 // treat image and pdf parts identically.
 func (p ContentPart) IsBinary() bool {
 	return p.Type == ContentPartImage || p.Type == ContentPartPDF
+}
+
+// ContentPartsEqual reports whether two part lists carry identical content.
+// Data is compared by bytes, so a lazily resolved part (Data empty, ImagePath
+// set) differs from an in-memory copy holding the same bytes — callers
+// comparing request-surface projections against durable history compare the
+// same resolution state on both sides, which is the state that matters.
+func ContentPartsEqual(a, b []ContentPart) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		ap, bp := &a[i], &b[i]
+		if ap.Type != bp.Type || ap.ArtifactID != bp.ArtifactID || ap.Text != bp.Text ||
+			ap.DisplayText != bp.DisplayText || ap.InlineToken != bp.InlineToken ||
+			ap.MimeType != bp.MimeType || ap.ImagePath != bp.ImagePath ||
+			ap.FileName != bp.FileName || ap.DataBytes != bp.DataBytes ||
+			!bytes.Equal(ap.Data, bp.Data) {
+			return false
+		}
+	}
+	return true
 }
 
 // PayloadBytes reports the binary payload size of the part: the inline bytes

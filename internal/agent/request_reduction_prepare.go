@@ -158,6 +158,12 @@ type reductionProposal struct {
 	// superseded classifies as read-like, not repeated, so class alone
 	// cannot express this).
 	repeated bool
+	// evictImages marks proposals that replace the message's image parts with
+	// one text part carrying imageMarker. It can ride alongside a string
+	// reduction (reduced non-empty) or stand alone (reduced empty) — the
+	// verdict's two outcomes are independent.
+	evictImages bool
+	imageMarker string
 }
 
 // newReductionPass captures the reuse probes' inputs. Full scan preparation
@@ -185,7 +191,7 @@ func (rp *reductionPass) initializeScan() {
 
 	// Incremental reduction: freeze already-reduced tool results from the
 	// previous stable surface so their marker content stays cache-stable.
-	// Only the not-yet-reduced prefix and the new tail are re-examined.
+	// Text and images that have not been reduced still cross their own frontiers.
 	// Tool-definition changes invalidate the frozen surface (full re-reduction).
 	frozenPrefix, reducedIndices, frozenNextReviewAge, previousToolResults, boundary, enabled := a.incrementalReductionSurface(rp.prepared)
 	rp.incrementalEnabled = enabled
@@ -302,18 +308,32 @@ func (rp *reductionPass) tryReuseStableSurfaceBeforeScan() (reused []message.Mes
 	return reuse, true
 }
 
-func (rp *reductionPass) noteReduction(toolName, rule, original, reduced string) {
-	saved := len(original) - len(reduced)
+func (rp *reductionPass) noteReduction(toolName, rule string, original, reduced message.Message) {
+	saved := len(original.Content) - len(reduced.Content)
 	if saved <= 0 {
 		return
 	}
-	rp.stats.Messages++
-	rp.stats.Bytes += saved
-	beforeTokens := estimateMessageTokens(rp.a.ctxMgr, message.Message{Content: original})
-	afterTokens := estimateMessageTokens(rp.a.ctxMgr, message.Message{Content: reduced})
+	beforeTokens := estimateMessageTokens(rp.a.ctxMgr, original)
+	afterTokens := estimateMessageTokens(rp.a.ctxMgr, reduced)
 	tokensSaved := beforeTokens - afterTokens
-	if tokensSaved > 0 {
-		rp.stats.TokensSaved += tokensSaved
+	rp.recordReductionBucket(toolName, rule, saved, tokensSaved)
+}
+
+// noteImageReduction records one parts eviction. The savings live in the
+// evicted images' planning-token allowance, so the delta is estimated on
+// whole messages (parts included): a Content-only estimate would score image
+// evictions at zero and the amortization gate would never flush them.
+func (rp *reductionPass) noteImageReduction(toolName string, before, after message.Message) {
+	imagesDropped := requesttrim.ImagePayloadBytes(before.Parts) - requesttrim.ImagePayloadBytes(after.Parts)
+	beforeTokens := estimateMessageTokens(rp.a.ctxMgr, before)
+	afterTokens := estimateMessageTokens(rp.a.ctxMgr, after)
+	tokensSaved := beforeTokens - afterTokens
+	rp.recordReductionBucket(toolName, string(requesttrim.ImageOutput), int(imagesDropped), tokensSaved)
+}
+
+func (rp *reductionPass) recordReductionBucket(toolName, rule string, savedBytes, tokensSaved int) {
+	if rule == "" {
+		return
 	}
 	if rp.stats.ByToolAndRule == nil {
 		rp.stats.ByToolAndRule = make(map[string]ContextReductionBucket)
@@ -321,7 +341,7 @@ func (rp *reductionPass) noteReduction(toolName, rule, original, reduced string)
 	key := requesttrim.ToolNameOrUnknown(toolName) + "/" + rule
 	bucket := rp.stats.ByToolAndRule[key]
 	bucket.Messages++
-	bucket.Bytes += saved
+	bucket.Bytes += savedBytes
 	if tokensSaved > 0 {
 		bucket.TokensSaved += tokensSaved
 	}
@@ -389,6 +409,7 @@ func (rp *reductionPass) noteRecalledInput(key string) {
 // always free to apply.
 func (rp *reductionPass) collectReductionProposals() {
 	a := rp.a
+	imageRecoverable := a.MainToolVisible(tools.NameViewImage)
 	// Recover read revisions for discarded reads still present in the frozen
 	// prefix so the reread-same-revision over-compression split keeps working
 	// across requests. Key membership itself travels via DiscardedInputs: the
@@ -420,90 +441,6 @@ func (rp *reductionPass) collectReductionProposals() {
 		toolName := toolname.Normalize(meta.Name)
 		age := rp.requestAge[i]
 		validity := rp.readValidityByIndex[i]
-		if rp.incrementalEnabled && rp.frozenReducedIndices != nil && i < len(rp.frozenReducedIndices) && rp.frozenReducedIndices[i] {
-			if toolName != tools.NameRead || (!validity.Invalidated && !validity.Superseded) {
-				rp.noteSkip(contextReductionSkipFrozenReduced)
-				continue
-			}
-			// The frozen marker already carries the stale/superseded guidance,
-			// so re-rendering it would rewrite cached bytes without changing
-			// what the model can act on.
-			if readMarkerCarriesValidityGuidance(rp.prepared[i].Content) {
-				rp.noteSkip(contextReductionSkipFrozenReduced)
-				continue
-			}
-			ctx := requesttrim.Context{
-				ToolName:             toolName,
-				ToolCallID:           rp.prepared[i].ToolCallID,
-				Memo:                 &a.reductionMemo,
-				Meta:                 meta,
-				Content:              rp.messages[i].Content,
-				ToolStatus:           rp.messages[i].ToolStatus,
-				FileState:            rp.messages[i].FileState,
-				Age:                  age,
-				Policy:               rp.policy,
-				ToolResults:          rp.toolResults,
-				ReadInvalidated:      validity.Invalidated,
-				ReadSuperseded:       validity.Superseded,
-				ReadPriorContentLost: validity.PriorContentLost,
-				ArchiveDir:           a.sessionDir,
-			}
-			reduced, rule, ok := requesttrim.Render(requesttrim.ReadLike, ctx)
-			if ok {
-				rp.proposals = append(rp.proposals, reductionProposal{
-					index:      i,
-					class:      requesttrim.ReadLike,
-					toolName:   toolName,
-					rule:       rule,
-					reduced:    reduced,
-					decision:   requesttrim.RetentionDecision(ctx, requesttrim.ReducedVerdict(requesttrim.ReadLike), rule, reduced),
-					force:      true,
-					recallable: true,
-					repeated:   rp.repeated[i],
-				})
-				rp.semanticRefresh = true
-			}
-			continue
-		}
-		if rp.externalReadInvalidated[i] && toolName == tools.NameRead {
-			ctx := requesttrim.Context{
-				ToolName:    toolName,
-				ToolCallID:  rp.prepared[i].ToolCallID,
-				Memo:        &a.reductionMemo,
-				Meta:        meta,
-				Content:     rp.messages[i].Content,
-				ToolStatus:  rp.messages[i].ToolStatus,
-				FileState:   rp.messages[i].FileState,
-				Age:         age,
-				Policy:      rp.policy,
-				ToolResults: rp.toolResults,
-				// A mutating shell command or an out-of-band process replaced the
-				// file: nothing in the transcript holds the bytes this read saw,
-				// so the summary must carry an archive address.
-				ReadInvalidated:      true,
-				ReadPriorContentLost: true,
-				ArchiveDir:           a.sessionDir,
-			}
-			if reduced, rule, ok := requesttrim.Render(requesttrim.ReadLike, ctx); ok {
-				rp.proposals = append(rp.proposals, reductionProposal{
-					index:      i,
-					class:      requesttrim.ReadLike,
-					toolName:   toolName,
-					rule:       rule,
-					reduced:    reduced,
-					decision:   requesttrim.RetentionDecision(ctx, requesttrim.ReducedVerdict(requesttrim.ReadLike), rule, reduced),
-					recallable: true,
-					repeated:   rp.repeated[i],
-				})
-				rp.semanticRefresh = true
-			}
-			continue
-		}
-		if rp.incrementalEnabled && i < rp.frozenBoundary && toolName != tools.NameRead && !rp.repeated[i] && !rp.toolResultThresholdCrossed &&
-			i < len(rp.frozenNextReviewAge) && rp.frozenNextReviewAge[i] > age {
-			rp.noteSkip(contextReductionSkipDeferredReview)
-			continue
-		}
 		ctx := requesttrim.Context{
 			ToolName:              toolName,
 			ToolCallID:            rp.prepared[i].ToolCallID,
@@ -522,7 +459,62 @@ func (rp *reductionPass) collectReductionProposals() {
 			ReadPriorContentLost:  validity.PriorContentLost,
 			DiagnosticsSuperseded: rp.diagnosticsSuperseded[i],
 			ArchiveDir:            a.sessionDir,
+			Parts:                 reductionPartsForRequest(&rp.prepared[i]),
+			ImageRecoverable:      imageRecoverable,
 		}
+		if rp.incrementalEnabled && i < rp.frozenBoundary && toolResultTextReduced(rp.messages[i], rp.prepared[i]) {
+			rp.nextReviewAge[i] = requesttrim.NextImageReviewAge(ctx)
+			verdict := requesttrim.Classify(ctx)
+			if toolName != tools.NameRead || (!validity.Invalidated && !validity.Superseded) {
+				if !rp.proposeImageEviction(i, ctx, verdict) {
+					rp.noteSkip(contextReductionSkipFrozenReduced)
+				}
+				continue
+			}
+			// The frozen marker already carries the stale/superseded guidance,
+			// so re-rendering it would rewrite cached bytes without changing
+			// what the model can act on.
+			if readMarkerCarriesValidityGuidance(rp.prepared[i].Content) {
+				if !rp.proposeImageEviction(i, ctx, verdict) {
+					rp.noteSkip(contextReductionSkipFrozenReduced)
+				}
+				continue
+			}
+			ctx.Content = rp.messages[i].Content
+			reduced, rule, ok := requesttrim.Render(requesttrim.ReadLike, ctx)
+			if ok {
+				imageMarker := ""
+				if verdict.EvictImages {
+					imageMarker, _ = requesttrim.RenderImageEviction(ctx)
+				}
+				verdict.Class = requesttrim.ReadLike
+				rp.proposals = append(rp.proposals, reductionProposal{
+					index:       i,
+					class:       requesttrim.ReadLike,
+					toolName:    toolName,
+					rule:        rule,
+					reduced:     reduced,
+					decision:    requesttrim.RetentionDecision(ctx, verdict, rule, reduced),
+					force:       true,
+					recallable:  true,
+					repeated:    rp.repeated[i],
+					evictImages: imageMarker != "",
+					imageMarker: imageMarker,
+				})
+				rp.semanticRefresh = true
+			}
+			continue
+		}
+		if rp.externalReadInvalidated[i] && toolName == tools.NameRead {
+			rp.semanticRefresh = true
+		}
+		if rp.incrementalEnabled && i < rp.frozenBoundary && toolName != tools.NameRead && !rp.repeated[i] && !rp.toolResultThresholdCrossed &&
+			i < len(rp.frozenNextReviewAge) && rp.frozenNextReviewAge[i] > age {
+			rp.noteSkip(contextReductionSkipDeferredReview)
+			continue
+		}
+		rp.nextReviewAge[i] = requesttrim.NextReviewAge(ctx)
+		verdict := requesttrim.Classify(ctx)
 		inputKey := a.reductionMemo.ToolInputKey(rp.prepared[i].ToolCallID, meta)
 		// Recall protection applies to content-fetch shapes only (reads, web
 		// fetches, searches, read-only shell): re-running a mutating command
@@ -535,13 +527,16 @@ func (rp *reductionPass) collectReductionProposals() {
 		if contentFetch {
 			if _, recalled := rp.recalledInputs[inputKey]; recalled {
 				rp.noteSkip(contextReductionSkipRecalledInput)
-				rp.nextReviewAge[i] = 0
+				rp.nextReviewAge[i] = requesttrim.NextImageReviewAge(ctx)
+				rp.proposeImageEviction(i, ctx, verdict)
 				continue
 			}
 		}
-		verdict := requesttrim.Classify(ctx)
 		class := verdict.Class
 		if class == requesttrim.None {
+			if rp.proposeImageEviction(i, ctx, verdict) {
+				continue
+			}
 			rp.noteRetention(requesttrim.RetentionDecision(ctx, verdict, "", ""))
 			if ctx.ReadRetentionProtects() {
 				rp.stats.ProtectedReadTokens += estimateMessageTokens(a.ctxMgr, message.Message{Content: rp.prepared[i].Content})
@@ -585,13 +580,19 @@ func (rp *reductionPass) collectReductionProposals() {
 			if discardedID, dup := rp.discardedInputs[inputKey]; dup && discardedID != rp.prepared[i].ToolCallID {
 				rp.noteRecalledInput(inputKey)
 				rp.noteSkip(contextReductionSkipRecalledInput)
-				rp.nextReviewAge[i] = 0
+				rp.nextReviewAge[i] = requesttrim.NextImageReviewAge(ctx)
+				rp.proposeImageEviction(i, ctx, verdict)
 				continue
 			}
 		}
-		rp.nextReviewAge[i] = 0
 		reduced, rule, ok := requesttrim.Render(class, ctx)
-		if !ok {
+		imageMarker := ""
+		if verdict.EvictImages {
+			if marker, mok := requesttrim.RenderImageEviction(ctx); mok {
+				imageMarker = marker
+			}
+		}
+		if !ok && imageMarker == "" {
 			continue
 		}
 		decision := requesttrim.RetentionDecision(ctx, verdict, rule, reduced)
@@ -604,14 +605,16 @@ func (rp *reductionPass) collectReductionProposals() {
 		recallable := contentFetch || requesttrim.IsReadLike(toolName) ||
 			(toolName != tools.NameShell && requesttrim.LooksLikeSearchResult(ctx))
 		rp.proposals = append(rp.proposals, reductionProposal{
-			index:      i,
-			class:      class,
-			toolName:   toolName,
-			rule:       rule,
-			reduced:    reduced,
-			decision:   decision,
-			recallable: recallable,
-			repeated:   ctx.Repeated,
+			index:       i,
+			class:       class,
+			toolName:    toolName,
+			rule:        rule,
+			reduced:     reduced,
+			decision:    decision,
+			recallable:  recallable,
+			repeated:    ctx.Repeated,
+			evictImages: imageMarker != "",
+			imageMarker: imageMarker,
 		})
 		// ctx.Repeated (not class) guards the registry: a repeated read that is
 		// also invalidated/superseded classifies as read-like, but an identical
@@ -651,8 +654,15 @@ func (rp *reductionPass) decideBoundaryFlush() {
 		if earliestBoundary < 0 {
 			earliestBoundary = p.index
 		}
-		saved := estimateMessageTokens(rp.a.ctxMgr, message.Message{Content: rp.prepared[p.index].Content}) -
-			estimateMessageTokens(rp.a.ctxMgr, message.Message{Content: p.reduced})
+		// Both sides are estimated on the whole message (content AND parts).
+		// The old Content-only temporary message dropped the parts, so an
+		// image eviction — whose entire savings live in the parts' token
+		// allowance — scored zero and could never amortize the prefix rewrite;
+		// meanwhile the tail below was already measured with parts, making the
+		// two sides disagree about the same prefix.
+		applied := rp.proposalAppliedMessage(p)
+		saved := estimateMessageTokens(rp.a.ctxMgr, rp.prepared[p.index]) -
+			estimateMessageTokens(rp.a.ctxMgr, applied)
 		if saved > 0 {
 			pendingSaved += saved
 		}
@@ -688,12 +698,31 @@ func (rp *reductionPass) applyReductionProposals() {
 			meta := rp.callMeta[rp.prepared[p.index].ToolCallID]
 			recordDiscardedInputEvidence(rp.discardedInputs, rp.a.reductionMemo.ToolInputKey(rp.prepared[p.index].ToolCallID, meta), rp.prepared[p.index].ToolCallID)
 		}
-		original := rp.prepared[p.index].Content
-		rp.prepared[p.index].Content = p.reduced
-		if p.class != requesttrim.Diagnostics {
-			rp.prepared[p.index].ToolDiff = ""
+		original := rp.prepared[p.index]
+		textOnly := p
+		textOnly.evictImages = false
+		rp.applyProposal(&rp.prepared[p.index], textOnly)
+		if p.reduced != "" {
+			rp.noteReduction(p.toolName, p.rule, original, rp.prepared[p.index])
+			rp.nextReviewAge[p.index] = requesttrim.NextImageReviewAge(requesttrim.Context{
+				Parts: reductionPartsForRequest(&rp.prepared[p.index]), Policy: rp.policy,
+			})
 		}
-		rp.noteReduction(p.toolName, p.rule, original, rp.prepared[p.index].Content)
+		if p.evictImages {
+			beforeImage := rp.prepared[p.index]
+			imageOnly := p
+			imageOnly.reduced = ""
+			rp.applyProposal(&rp.prepared[p.index], imageOnly)
+			rp.noteImageReduction(p.toolName, beforeImage, rp.prepared[p.index])
+			ctx := requesttrim.Context{
+				Parts: reductionPartsForRequest(&rp.prepared[p.index]), Policy: rp.policy, Age: rp.requestAge[p.index],
+			}
+			if toolResultTextReduced(rp.messages[p.index], rp.prepared[p.index]) {
+				rp.nextReviewAge[p.index] = requesttrim.NextImageReviewAge(ctx)
+			} else {
+				rp.nextReviewAge[p.index] = requesttrim.NextReviewAge(ctx)
+			}
+		}
 		rp.noteRetention(p.decision)
 	}
 }
@@ -716,9 +745,7 @@ func (rp *reductionPass) finalize() []message.Message {
 	rp.stats.ArchiveReads, rp.stats.ArchiveReadFailures = requesttrim.ArtifactReadbackStats(rp.prepared, rp.callMeta, a.sessionDir)
 	rp.stats.TokensAfter = estimateMessagesTokens(a.ctxMgr, rp.prepared)
 	a.setCurrentRequestSurface(&rp.stats, rp.prepared)
-	if rp.stats.TokensSaved == 0 && rp.stats.TokensBefore > rp.stats.TokensAfter {
-		rp.stats.TokensSaved = rp.stats.TokensBefore - rp.stats.TokensAfter
-	}
+	rp.stats.TokensSaved = max(0, rp.stats.TokensBefore-rp.stats.TokensAfter)
 	if !rp.semanticRefresh && rp.wrapUpGraceActive && rp.stats.TokensSaved < rp.policy.MinIncrementalTokens {
 		// The grace suppresses *new* low-gain reductions; it must not undo
 		// the ones already frozen. Returning the raw messages here would

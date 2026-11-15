@@ -65,12 +65,13 @@ func (s *ContextReductionStats) setCurrentReductionSavings(original, reduced []m
 	s.Bytes = 0
 	limit := min(len(original), len(reduced))
 	for i := range limit {
-		saved := contextContributorBytes(original[i]) - contextContributorBytes(reduced[i])
-		if saved <= 0 {
-			continue
+		saved := ctxmgr.EstimateMessagesBytes(original[i:i+1]) - ctxmgr.EstimateMessagesBytes(reduced[i:i+1])
+		_, imagesBefore := message.ImagePartAccounting(original[i : i+1])
+		_, imagesAfter := message.ImagePartAccounting(reduced[i : i+1])
+		if saved > 0 || imagesBefore > imagesAfter {
+			s.Messages++
+			s.Bytes += max(0, saved)
 		}
-		s.Messages++
-		s.Bytes += saved
 	}
 }
 

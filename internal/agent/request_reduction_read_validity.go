@@ -195,7 +195,8 @@ func stableReductionSurfaceNeedsReview(surface stableReductionSurface, scan *req
 	repeated := scan.RepeatedOutputs()
 	validity := scan.ReadValidity()
 	for i := range boundary {
-		alreadyReduced := i < len(surface.ReducedIndices) && surface.ReducedIndices[i]
+		alreadyReduced := i < len(surface.ReducedIndices) && surface.ReducedIndices[i] &&
+			toolResultTextReduced(messages[i], surface.Messages[i])
 		// Repeated detection runs over the immutable original history, so a
 		// duplicated call flags its earlier index forever. Once that index is
 		// reduced to the repeated marker there is nothing left to review, and

@@ -120,6 +120,11 @@ const (
 	requestReductionListing     Class = "record_listing"
 	requestReductionSkill       Class = "skill_instruction"
 	requestReductionGeneric     Class = "generic_stale"
+	// ImageOutput names the parts-side rule: a tool result's image parts evicted
+	// by age. The agent's apply pass uses the name as the stats rule, and the
+	// string class above never claims it — image eviction is orthogonal to the
+	// content-shape rules and can fire alongside any of them.
+	ImageOutput Class = "image_output"
 )
 
 // Reduction rules name the rendering a class actually produced. Most are only
@@ -177,6 +182,16 @@ type Context struct {
 	// read the archive back by its stable relative address instead of losing
 	// the content to a generic marker.
 	ArchiveDir string
+	// Parts borrows the message's structured parts (never mutated). Only image
+	// parts are inspected, for the age-based eviction rule; nil or a nil-parts
+	// message means nothing to evict. Messages replayed from native tool
+	// history must not pass Parts here: their image surface is rehydrated by
+	// the native replay path, not carried by parts.
+	Parts []message.ContentPart
+	// ImageRecoverable reports that this agent can re-load an image part from
+	// its persisted path (the view_image tool is exposed). It only chooses the
+	// wording of the eviction marker; eviction itself never depends on it.
+	ImageRecoverable bool
 }
 
 // ReadRetentionProtects reports whether this successful read output must not
@@ -200,9 +215,14 @@ func (ctx Context) ReadRetentionProtects() bool {
 // which protection fired — and it travels with the class so no second pass has
 // to re-derive it from the same bytes. A hand-copied second pass is exactly how
 // the reported reason and the branch that actually fired drift apart.
+//
+// EvictImages is independent of Class: the parts rule may evict a result whose
+// string content stays complete (or vice versa), so callers must apply both
+// outcomes from one verdict rather than deriving one from the other.
 type Verdict struct {
-	Class  Class
-	Reason string
+	Class       Class
+	Reason      string
+	EvictImages bool
 }
 
 // protectedVerdict states that a named protection kept this result complete.
@@ -216,8 +236,23 @@ func ReducedVerdict(class Class) Verdict {
 }
 
 // Classify returns the verdict for one tool result: the class a
-// shape rule claimed, or the reason the result survived reduction.
+// shape rule claimed, or the reason the result survived reduction, plus
+// whether the result's image parts have aged out of the request.
+//
+// Image eviction is age-only by design: once a tool result is older than the
+// stale threshold, its image parts are evicted regardless of which protection
+// holds the string content, because the marker text — not the picture — is
+// what aged evidence needs, and a re-loadable address or a re-run of the
+// producing tool recovers the pixels.
 func Classify(ctx Context) Verdict {
+	verdict := classifyString(ctx)
+	verdict.EvictImages = ctx.Age >= ctx.Policy.StaleAgeTurns && hasImageParts(ctx.Parts)
+	return verdict
+}
+
+// classifyString is the content-shape classification: the class a string rule
+// claimed, or the reason the string content survived reduction.
+func classifyString(ctx Context) Verdict {
 	// An invalidated or superseded read must render its validity marker rather
 	// than stay as full content — stale file content is misleading at any age
 	// and at any size, and a superseded range is carried verbatim by the newer
@@ -409,6 +444,9 @@ func NextReviewAge(ctx Context) int {
 		if threshold > ctx.Age && (next == 0 || threshold < next) {
 			next = threshold
 		}
+	}
+	if imageAge := NextImageReviewAge(ctx); imageAge > 0 && (next == 0 || imageAge < next) {
+		next = imageAge
 	}
 	return next
 }

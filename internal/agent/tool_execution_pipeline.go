@@ -648,7 +648,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 
 	agentCtx = executiongate.WithLease(agentCtx, executionLease)
 	result, err := p.executeToolForCall(agentCtx, tc, &execResult)
-	execResult.Images = imageSink.Drain()
+	execResult.Images = p.normalizeToolResultImages(imageSink.Drain())
 	if err == nil {
 		execResult.DeliveredFiles = deliverySink.Drain()
 	}
@@ -867,7 +867,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	agentCtx = executiongate.WithLease(agentCtx, executionLease)
 	result, err := p.executeToolForCall(agentCtx, tc, &execResult)
-	execResult.Images = imageSink.Drain()
+	execResult.Images = p.normalizeToolResultImages(imageSink.Drain())
 	if err != nil && staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NameApplyPatch) {
 		err = wrapStaleEditError(err)
 	}

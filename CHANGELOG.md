@@ -33,6 +33,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Request-level reduction now drops image parts from stale tool results: once a tool result ages past the context-reduction stale threshold, its images are replaced by a short marker in model requests instead of being re-sent on every request. The marker carries the persisted file path and the `view_image` recall route when that tool is available to the agent, and otherwise states that the image cannot be re-loaded. Durable history, tool-result text, PDFs, and user-uploaded images stay untouched.
 - Requests that fail before reaching the provider (DNS resolution, dial, TLS verification) now use built-in exponential backoff starting at 1 second, doubling after consecutive failures with jitter, regardless of `retry_backoff`. It caps at 20 seconds; the final wait is the longer of this backoff and the configured backoff. This prevents rapid repeated probes under `retry_backoff: none`; failures with a server response still follow the configured backoff.
 - Reduced terminal rendering overhead and temporary allocations, with fewer background wakeups while idle.
 - Very long assistant replies now show their first screen faster: Chord renders the visible paragraph and heading groups directly instead of laying out the whole card first, falling back to a full render when height predictions drift.
