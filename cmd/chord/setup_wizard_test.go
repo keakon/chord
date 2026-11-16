@@ -835,7 +835,7 @@ func TestSelectChoiceBySingleKey(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			out := &bytes.Buffer{}
-			value, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader(tc.input)), out, prompt, allowed, '1', "Please choose one of the listed options.", true)
+			value, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader(tc.input)), out, prompt, allowed, '1', "Please choose one of the listed options.", true, nil)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("err = %v, want %v", err, tc.wantErr)
@@ -857,7 +857,7 @@ func TestSelectChoiceBySingleKey(t *testing.T) {
 
 func TestSelectChoiceBySingleKeyRepromptsOnInvalidKey(t *testing.T) {
 	out := &bytes.Buffer{}
-	_, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader("x")), out, "Provider [1]: ", map[byte]struct{}{'1': {}, '2': {}}, '1', "Please choose one of the listed options.", true)
+	_, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader("x")), out, "Provider [1]: ", map[byte]struct{}{'1': {}, '2': {}}, '1', "Please choose one of the listed options.", true, nil)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("err = %v, want EOF", err)
 	}
@@ -873,7 +873,7 @@ func TestSelectChoiceBySingleKeyNoDefault(t *testing.T) {
 	_, err := selectChoiceBySingleKey(
 		bufio.NewReader(strings.NewReader("\n")), out, "Choice: ",
 		map[byte]struct{}{'1': {}, '2': {}, '3': {}}, 0,
-		"Enter 1 to apply, 2 to skip.", false)
+		"Enter 1 to apply, 2 to skip.", false, nil)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("err = %v, want EOF", err)
 	}
@@ -887,7 +887,7 @@ func TestSelectChoiceBySingleKeyNoDefault(t *testing.T) {
 	value, err := selectChoiceBySingleKey(
 		bufio.NewReader(strings.NewReader("\x1b2")), out, "Choice: ",
 		map[byte]struct{}{'1': {}, '2': {}, '3': {}}, 0,
-		"Enter 1 to apply, 2 to skip.", false)
+		"Enter 1 to apply, 2 to skip.", false, nil)
 	if err != nil || value != "2" {
 		t.Fatalf("value/err = %q/%v, want 2/nil", value, err)
 	}

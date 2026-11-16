@@ -260,10 +260,7 @@ func (a *MainAgent) LoadSkill(name string) (*skill.Skill, error) {
 		if meta.Name != name {
 			continue
 		}
-		if err := a.verifyProjectSkillTrust(meta); err != nil {
-			return nil, err
-		}
-		return skill.LoadSkill(meta.Location)
+		return a.loadProjectSkill(meta)
 	}
 	return nil, fmt.Errorf("skill %q not found", name)
 }

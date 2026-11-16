@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/term"
@@ -734,7 +735,9 @@ func promptChoiceSingleKey(termIO *setupTerminal, prompt string, allowed []strin
 		if _, err := fmt.Fprint(out, rawPrompt); err != nil {
 			return "", err
 		}
-		return selectChoiceBySingleKey(reader, out, rawPrompt, allowedKeys, defaultChoice[0], invalidMessage, true)
+		return selectChoiceBySingleKey(reader, out, rawPrompt, allowedKeys, defaultChoice[0], invalidMessage, true, func(timeout time.Duration) (bool, error) {
+			return waitSetupInput(termIO.in, timeout)
+		})
 	})
 }
 
@@ -745,7 +748,7 @@ func promptChoiceSingleKey(termIO *setupTerminal, prompt string, allowed []strin
 // setup when escRestarts is true and is otherwise ignored; unhandled control
 // bytes are ignored; an invalid printable key reprompts. The remainder of a
 // pasted line is drained so it does not leak into the next prompt.
-func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string, allowed map[byte]struct{}, defaultChoice byte, invalidMessage string, escRestarts bool) (string, error) {
+func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string, allowed map[byte]struct{}, defaultChoice byte, invalidMessage string, escRestarts bool, wait func(time.Duration) (bool, error)) (string, error) {
 	for {
 		b, err := reader.ReadByte()
 		if err != nil {
@@ -764,13 +767,13 @@ func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string,
 			return "", errSingleKeyInterrupt
 		case 0x04: // Ctrl+D: EOF, matching line-mode behavior.
 			return "", io.EOF
-		case 0x1b: // ESC: swallow CSI/SS3 sequences (arrow keys); bare Esc is caller-defined.
-			if reader.Buffered() > 0 {
-				if seq, peekErr := reader.Peek(1); peekErr == nil && (seq[0] == '[' || seq[0] == 'O') {
-					_, _ = reader.ReadByte() // introducer
-					_, _ = reader.ReadByte() // final byte
-					continue
-				}
+		case 0x1b:
+			bare, err := consumeSetupEscape(reader, wait)
+			if err != nil {
+				return "", err
+			}
+			if !bare {
+				continue
 			}
 			if !escRestarts {
 				continue
@@ -780,6 +783,11 @@ func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string,
 		}
 		if b < 0x20 || b == 0x7f {
 			continue
+		}
+		if b >= 'A' && b <= 'Z' {
+			if _, ok := allowed[b+'a'-'A']; ok {
+				b += 'a' - 'A'
+			}
 		}
 		if _, ok := allowed[b]; ok {
 			drainPastedLineRemainder(reader)

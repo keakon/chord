@@ -126,7 +126,7 @@ func TestProjectTrustPromptShowsConfigDeclaration(t *testing.T) {
 	renderProjectTrustSources(&out, discovery.Sources)
 	renderProjectTrustConfig(&out, discovery.ConfigData)
 	text := out.String()
-	for _, want := range []string{"Project config declaration:", "command: sample-server", ".chord/config.yaml"} {
+	for _, want := range []string{"Project config declaration:", "command: '[hidden]'", ".chord/config.yaml"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("config declaration missing %q:\n%s", want, text)
 		}

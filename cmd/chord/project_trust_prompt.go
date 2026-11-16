@@ -50,7 +50,9 @@ func promptProjectTrustOnTerminal(termIO *setupTerminal, discovery *projectTrust
 			if _, err := fmt.Fprint(w, "Choice: "); err != nil {
 				return "", err
 			}
-			return selectChoiceBySingleKey(reader, w, "Choice: ", allowed, 0, invalidMessage, false)
+			return selectChoiceBySingleKey(reader, w, "Choice: ", allowed, 0, invalidMessage, false, func(timeout time.Duration) (bool, error) {
+				return waitSetupInput(termIO.in, timeout)
+			})
 		})
 		if handled {
 			if err != nil {
@@ -102,12 +104,12 @@ func promptProjectTrustOnTerminal(termIO *setupTerminal, discovery *projectTrust
 const projectTrustPreviewLimit = 4
 
 func renderProjectTrustAuthorization(out io.Writer, discovery *projectTrustDiscovery, contentRoot string) {
-	fmt.Fprintf(out, "Project configuration found in %s:\n", contentRoot)
+	fmt.Fprintf(out, "Project configuration found in %s:\n", projectTrustDisplayText(contentRoot))
 	total := 0
 	for _, source := range discovery.Sources {
 		for _, item := range source.Items {
 			if total < projectTrustPreviewLimit {
-				fmt.Fprintf(out, "  - %s\n", item)
+				fmt.Fprintf(out, "  - %s\n", projectTrustDisplayText(item))
 			}
 			total++
 		}
@@ -119,7 +121,7 @@ func renderProjectTrustAuthorization(out io.Writer, discovery *projectTrustDisco
 	if effects := projectTrustEffects(discovery.Sources); len(effects) > 0 {
 		fmt.Fprintln(out)
 		for _, effect := range effects {
-			fmt.Fprintf(out, "  - %s\n", effect)
+			fmt.Fprintf(out, "  - %s\n", projectTrustDisplayText(effect))
 		}
 	}
 
@@ -147,15 +149,15 @@ func projectTrustHasMoreDetails(discovery *projectTrustDiscovery) bool {
 	return total > projectTrustPreviewLimit
 }
 
-// renderProjectTrustConfig prints the project's config.yaml verbatim so the
-// inspect choice shows the actual declaration, not just a redacted summary.
+// renderProjectTrustConfig retains configuration structure while hiding
+// credentials and executable text before writing to the terminal.
 func renderProjectTrustConfig(out io.Writer, data []byte) {
 	if len(data) == 0 {
 		return
 	}
 	fmt.Fprintln(out, "Project config declaration:")
-	for line := range strings.SplitSeq(strings.TrimRight(string(data), "\n"), "\n") {
-		fmt.Fprintf(out, "    %s\n", line)
+	for line := range strings.SplitSeq(strings.TrimRight(redactedProjectConfig(data), "\n"), "\n") {
+		fmt.Fprintf(out, "    %s\n", projectTrustDisplayText(line))
 	}
 }
 
@@ -178,9 +180,9 @@ func projectTrustEffects(sources []projectTrustSource) []string {
 // doctor command reuses it for the authorization status view.
 func renderProjectTrustSources(out io.Writer, sources []projectTrustSource) {
 	for _, source := range sources {
-		fmt.Fprintf(out, "  %s\n", source.File)
+		fmt.Fprintf(out, "  %s\n", projectTrustDisplayText(source.File))
 		for _, item := range source.Items {
-			fmt.Fprintf(out, "    - %s\n", item)
+			fmt.Fprintf(out, "    - %s\n", projectTrustDisplayText(item))
 		}
 	}
 }

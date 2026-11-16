@@ -151,15 +151,26 @@ func TestStdioNotifyCancellationAndWriteFailures(t *testing.T) {
 	}
 }
 
-func TestStdioBlockedWriteDeadlineAndFrameOwnership(t *testing.T) {
+type startedWriteCloser struct {
+	io.WriteCloser
+	started chan struct{}
+}
+
+func (w startedWriteCloser) Write(data []byte) (int, error) {
+	close(w.started)
+	return w.WriteCloser.Write(data)
+}
+
+func TestStdioBlockedWriteCancellationAndFrameOwnership(t *testing.T) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer reader.Close()
 	defer writer.Close()
-	tr := newScriptedTransport(writer)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	started := make(chan struct{})
+	tr := newScriptedTransport(startedWriteCloser{WriteCloser: writer, started: started})
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
@@ -167,13 +178,19 @@ func TestStdioBlockedWriteDeadlineAndFrameOwnership(t *testing.T) {
 		done <- err
 	}()
 	select {
+	case <-started:
+		cancel()
+	case <-time.After(2 * time.Second):
+		t.Fatal("write did not start")
+	}
+	select {
 	case err := <-done:
 		requireCallOutcome(t, err, callOutcomeUnknown)
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("deadline error = %v", err)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancellation error = %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("blocked write ignored deadline")
+		t.Fatal("blocked write ignored cancellation")
 	}
 	ctx2, cancel2 := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel2()
@@ -208,19 +225,27 @@ func TestStdioCloseReclaimsBlockedWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tr.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	started := make(chan struct{})
+	tr.stdin = startedWriteCloser{WriteCloser: tr.stdin, started: started}
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
 		done <- tr.Notify(ctx, JSONRPCNotification{JSONRPC: "2.0", Method: "sample", Params: strings.Repeat("x", 4<<20)})
 	}()
 	select {
+	case <-started:
+		cancel()
+	case <-time.After(2 * time.Second):
+		t.Fatal("write did not start")
+	}
+	select {
 	case err := <-done:
-		if !errors.Is(err, context.DeadlineExceeded) {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("Notify error = %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("notification ignored deadline")
+		t.Fatal("notification ignored cancellation")
 	}
 	tr.mu.Lock()
 	finished := tr.writerDone
@@ -233,4 +258,42 @@ func TestStdioCloseReclaimsBlockedWriter(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Close left a blocked writer")
 	}
+}
+
+func TestStdioWritingDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started, release := make(chan struct{}), make(chan struct{})
+		writer := &scriptedWriteCloser{onWrite: func([]byte) {
+			close(started)
+			select {
+			case <-release:
+			case <-time.After(time.Second):
+				t.Error("writer was not released")
+			}
+		}}
+		tr := newScriptedTransport(writer)
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, err := tr.Send(ctx, JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "tools/call"})
+			done <- err
+		}()
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("write did not start")
+		}
+		select {
+		case err := <-done:
+			requireCallOutcome(t, err, callOutcomeUnknown)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("deadline error = %v", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("write did not respect deadline")
+		}
+		close(release)
+		synctest.Wait()
+	})
 }

@@ -31,10 +31,10 @@ const fingerprintDomain = "chord/project-trust/v1"
 type FileHash struct {
 	Path   string `json:"path,omitempty"`
 	SHA256 string `json:"sha256,omitempty"`
+	Target string `json:"target,omitempty"`
 }
 
-// Input is the declaration file set contributed by one source root. Roots
-// that contribute no files are dropped before persistence and hashing.
+// Input is the declaration file set contributed by one source root.
 type Input struct {
 	Root  string     `json:"root,omitempty"`
 	Files []FileHash `json:"files,omitempty"`
@@ -45,12 +45,11 @@ type Input struct {
 // roots sorted, files sorted by path, no duplicate roots or paths.
 type InputSet []Input
 
-// Normalize returns the canonical form of the set: roots without files
-// removed, entries sorted by root, file lists sorted by path.
+// Normalize sorts roots and declarations, retaining empty controlled roots.
 func (s InputSet) Normalize() InputSet {
 	out := make(InputSet, 0, len(s))
 	for _, input := range s {
-		if strings.TrimSpace(input.Root) == "" || len(input.Files) == 0 {
+		if strings.TrimSpace(input.Root) == "" {
 			continue
 		}
 		files := make([]FileHash, len(input.Files))
@@ -99,12 +98,12 @@ func (s InputSet) Covers(root string, files []FileHash) bool {
 		if input.Root != root {
 			continue
 		}
-		authorized := make(map[string]string, len(input.Files))
+		authorized := make(map[string]FileHash, len(input.Files))
 		for _, f := range input.Files {
-			authorized[f.Path] = f.SHA256
+			authorized[f.Path] = f
 		}
 		for _, f := range files {
-			if authorized[f.Path] != f.SHA256 {
+			if authorized[f.Path] != f {
 				return false
 			}
 		}
@@ -123,20 +122,6 @@ func HashFile(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// HashDirFiles hashes declaration files found under dir for the given
-// relative paths. relPaths must already be slash-separated relative paths.
-func HashDirFiles(dir string, relPaths []string) ([]FileHash, error) {
-	files := make([]FileHash, 0, len(relPaths))
-	for _, rel := range relPaths {
-		sum, err := HashFile(filepath.Join(dir, filepath.FromSlash(rel)))
-		if err != nil {
-			return nil, fmt.Errorf("hash %s: %w", rel, err)
-		}
-		files = append(files, FileHash{Path: rel, SHA256: sum})
-	}
-	return files, nil
-}
-
 // Verify re-hashes every file of the set and reports whether the content
 // on disk still matches the authorized fingerprint input. It is the
 // pre-apply re-check that keeps what the runtime loads identical to what
@@ -144,7 +129,18 @@ func HashDirFiles(dir string, relPaths []string) ([]FileHash, error) {
 func (s InputSet) Verify() error {
 	for _, input := range s {
 		for _, f := range input.Files {
-			sum, err := HashFile(filepath.Join(input.Root, filepath.FromSlash(f.Path)))
+			path := filepath.Join(input.Root, filepath.FromSlash(f.Path))
+			if f.Target != "" {
+				target, err := filepath.EvalSymlinks(path)
+				if err != nil {
+					return fmt.Errorf("resolve project file %s: %w", f.Path, err)
+				}
+				if target != f.Target {
+					return fmt.Errorf("project file %s changed target since authorization", f.Path)
+				}
+				path = target
+			}
+			sum, err := HashFile(path)
 			if err != nil {
 				return fmt.Errorf("project file %s: %w", f.Path, err)
 			}

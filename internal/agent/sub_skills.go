@@ -155,12 +155,7 @@ func (s *SubAgent) LoadSkill(name string) (*skill.Skill, error) {
 		if meta == nil || meta.Name != name {
 			continue
 		}
-		if s.parent != nil {
-			if err := s.parent.verifyProjectSkillTrust(meta); err != nil {
-				return nil, err
-			}
-		}
-		return skill.LoadSkill(meta.Location)
+		return s.parent.loadProjectSkill(meta)
 	}
 	return nil, fmt.Errorf("skill %q not found", name)
 }

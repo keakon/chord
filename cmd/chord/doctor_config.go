@@ -316,9 +316,9 @@ func writeDoctorConfigReport(out io.Writer, asJSON bool, report doctorConfigRepo
 				fmt.Fprintln(out)
 			}
 			for _, source := range report.ProjectTrust.Sources {
-				fmt.Fprintf(out, "  %s\n", source.File)
+				fmt.Fprintf(out, "  %s\n", projectTrustDisplayText(source.File))
 				for _, item := range source.Items {
-					fmt.Fprintf(out, "    - %s\n", item)
+					fmt.Fprintf(out, "    - %s\n", projectTrustDisplayText(item))
 				}
 			}
 		}

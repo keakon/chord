@@ -39,8 +39,9 @@ func TestInputSetFingerprintStableAndSensitive(t *testing.T) {
 		".chord/config.yaml":        "mcp: {}\n",
 		".chord/agents/review.yaml": "name: review\n",
 	})
-	if set.Fingerprint() != set.Fingerprint() {
-		t.Fatal("fingerprint is not deterministic")
+	reordered := InputSet{{Root: dir, Files: []FileHash{set[0].Files[1], set[0].Files[0]}}}
+	if set.Fingerprint() != reordered.Fingerprint() {
+		t.Fatal("declaration order changed the fingerprint")
 	}
 	if set.Empty() {
 		t.Fatal("non-empty set reported empty")
@@ -95,11 +96,11 @@ func TestInputSetNormalize(t *testing.T) {
 		{Root: "/a", Files: nil},
 		{Root: "", Files: []FileHash{{Path: "x", SHA256: "3"}}},
 	}.Normalize()
-	if len(set) != 1 || set[0].Root != "/b" {
-		t.Fatalf("empty and nameless roots must be dropped, got %+v", set)
+	if len(set) != 2 || set[0].Root != "/a" || set[1].Root != "/b" {
+		t.Fatalf("controlled empty roots must remain, got %+v", set)
 	}
-	if set[0].Files[0].Path != "a" || set[0].Files[1].Path != "z" {
-		t.Fatalf("files must be sorted by path, got %+v", set[0].Files)
+	if set[1].Files[0].Path != "a" || set[1].Files[1].Path != "z" {
+		t.Fatalf("files must be sorted by path, got %+v", set[1].Files)
 	}
 }
 

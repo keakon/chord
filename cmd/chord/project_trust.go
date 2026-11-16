@@ -331,30 +331,30 @@ func resolveProjectConfigForUse(ctx context.Context, workDir, mode, globalPath s
 	return resolved, &projectTrustDecision{ContentRoot: contentRoot, Plan: plan, ConfigData: projectData}, nil
 }
 
-// newProjectSkillTrustVerifier builds the runtime check for dynamic skill
-// loads: a skill whose declaration files were part of the startup-discovered
-// input set must still hash to the trusted values before its body is read
-// from disk. The discovery path preserves project ownership across symlinks.
-// Skills outside every covered root pass untouched. trustState completes the user-facing failure wording:
-// "authorized" under a stored authorization, "trusted for this run" under a
-// one-shot trust.
-func newProjectSkillTrustVerifier(inputs trust.InputSet, trustState string) agent.ProjectSkillTrustVerifier {
-	return func(meta *skill.Meta) error {
-		if meta == nil || inputs.Empty() {
-			return nil
-		}
+func newProjectSkillLoader(inputs trust.InputSet, trustState string) agent.ProjectSkillLoader {
+	return func(meta *skill.Meta) (*skill.Skill, error) {
 		declaration := meta.DeclarationPath
 		if declaration == "" {
 			declaration = meta.Location
 		}
+		var matched *trust.Input
 		for _, input := range inputs {
-			rel, ok := projectTrustRelativePath(input.Root, declaration)
-			if !ok {
-				continue
+			_, ok := projectTrustRelativePath(input.Root, declaration)
+			if ok && (matched == nil || len(input.Root) > len(matched.Root)) {
+				matched = &input
 			}
-			return verifySkillDeclarations(input, meta, rel, trustState)
 		}
-		return nil
+		if matched != nil {
+			snapshot, err := skill.ReadSnapshot(declaration)
+			if err != nil {
+				return nil, err
+			}
+			if err := verifySkillSnapshot(*matched, snapshot); err != nil {
+				return nil, fmt.Errorf("skill %q: declaration no longer matches the project configuration %s: %w; restart chord to review it", meta.Name, trustState, err)
+			}
+			return snapshot.Load()
+		}
+		return skill.LoadSkill(meta.Location)
 	}
 }
 
@@ -380,60 +380,41 @@ func projectTrustRelativePath(root, path string) (string, bool) {
 	}
 }
 
-func verifySkillDeclarations(input trust.Input, meta *skill.Meta, rel, trustState string) error {
-	authorized := make(map[string]string, len(input.Files))
+func verifySkillSnapshot(input trust.Input, snapshot *skill.Snapshot) error {
+	authorized := make(map[string]trust.FileHash, len(input.Files))
 	for _, f := range input.Files {
-		authorized[f.Path] = f.SHA256
+		authorized[f.Path] = f
 	}
-	declaration := filepath.Join(input.Root, filepath.FromSlash(rel))
-	resolved, err := filepath.EvalSymlinks(declaration)
-	if err != nil {
-		return fmt.Errorf("skill %q: resolve SKILL.md: %w", meta.Name, err)
-	}
-	if canonicalProjectTrustRoot(resolved) != canonicalProjectTrustRoot(meta.Location) {
-		return fmt.Errorf("skill %q: SKILL.md changed since the project configuration was %s; restart chord to review it", meta.Name, trustState)
-	}
-	if err := verifySkillDeclaration(input.Root, authorized, declaration, false); err != nil {
-		return fmt.Errorf("skill %q: declaration no longer matches the project configuration %s: %w; restart chord to review it", meta.Name, trustState, err)
-	}
-	for _, dir := range []string{filepath.Dir(declaration), filepath.Dir(resolved)} {
-		for _, name := range []string{"chord.yaml", "agent.yaml"} {
-			if err := verifySkillDeclaration(input.Root, authorized, filepath.Join(dir, name), true); err != nil {
-				return fmt.Errorf("skill %q: sidecar no longer matches the project configuration %s: %w; restart chord to review it", meta.Name, trustState, err)
-			}
+	for _, file := range snapshot.Files {
+		hash, err := skillDeclarationHash(input.Root, file)
+		if err != nil {
+			return err
+		}
+		expected, exists := authorized[hash.Path]
+		if file.Data == nil && !exists {
+			continue
+		}
+		if !exists || expected != hash {
+			return fmt.Errorf("declaration %s was added, removed or changed", hash.Path)
 		}
 	}
 	return nil
 }
 
-func verifySkillDeclaration(root string, authorized map[string]string, path string, optional bool) error {
-	rel, ok := pathutil.RelToBase(path, root)
+func skillDeclarationHash(root string, file skill.Declaration) (trust.FileHash, error) {
+	rel, ok := projectTrustRelativePath(root, file.Path)
+	var err error
 	if !ok {
-		return fmt.Errorf("declaration %s is outside the trusted root", path)
+		rel, err = filepath.Rel(root, file.Path)
 	}
-	rel = filepath.ToSlash(rel)
-	if _, err := os.Lstat(path); err != nil {
-		if optional && errors.Is(err, os.ErrNotExist) && authorized[rel] == "" {
-			return nil
-		}
-		return fmt.Errorf("read %s: %w", rel, err)
-	}
-	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return fmt.Errorf("resolve %s: %w", rel, err)
+		return trust.FileHash{}, fmt.Errorf("relativize skill declaration: %w", err)
 	}
-	targetRel, ok := pathutil.RelToBase(resolved, root)
-	if !ok {
-		return fmt.Errorf("declaration %s resolves outside the trusted root", rel)
+	hash := trust.FileHash{Path: filepath.ToSlash(rel), Target: file.Target}
+	if file.Data != nil {
+		hash.SHA256 = fmt.Sprintf("%x", sha256.Sum256(file.Data))
 	}
-	sum, err := trust.HashFile(path)
-	if err != nil {
-		return fmt.Errorf("hash %s: %w", rel, err)
-	}
-	if authorized[rel] != sum || authorized[filepath.ToSlash(targetRel)] != sum {
-		return fmt.Errorf("declaration %s was added or changed", rel)
-	}
-	return nil
+	return hash, nil
 }
 
 // filterSkillDirsByTrust keeps only the skill directories whose current
@@ -445,28 +426,13 @@ func filterSkillDirsByTrust(dirs []SkillDir, inputs trust.InputSet) (allowed []S
 			allowed = append(allowed, dir)
 			continue
 		}
-		declarations, err := listSkillDeclarationFiles(dir.Path)
+		files, _, err := discoverSkillDeclarations(dir)
 		if err != nil {
 			blocked = append(blocked, dir.Path)
 			continue
 		}
-		root := canonicalProjectTrustRoot(dir.Root)
-		files := make([]trust.FileHash, 0, len(declarations))
-		verified := true
-		for _, path := range declarations {
-			rel, relErr := filepath.Rel(dir.Root, path)
-			if relErr != nil {
-				verified = false
-				break
-			}
-			sum, hashErr := trust.HashFile(path)
-			if hashErr != nil {
-				verified = false
-				break
-			}
-			files = append(files, trust.FileHash{Path: filepath.ToSlash(rel), SHA256: sum})
-		}
-		if !verified || !inputs.Covers(root, files) {
+		root := skillTrustRoot(dir)
+		if !inputs.Covers(root, files) {
 			blocked = append(blocked, dir.Path)
 			continue
 		}
@@ -537,17 +503,14 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 	skillDirs := projectScopeSkillDirs(contentRoot, workDir, projectSkillExtras)
 	var skillItems []skillDisclosureEntry
 	for _, dir := range skillDirs {
-		declarations, err := listSkillDeclarationFiles(dir.Path)
+		files, names, err := discoverSkillDeclarations(dir)
 		if err != nil {
 			return nil, err
 		}
-		for _, path := range declarations {
-			if err := addProjectTrustFile(filesByRoot, dir.Root, path); err != nil {
-				return nil, err
-			}
-		}
-		for _, path := range declarations {
-			skillItems = append(skillItems, skillDisclosureEntry{label: dir.Path, name: skillDisplayName(path)})
+		root := skillTrustRoot(dir)
+		filesByRoot[root] = append(filesByRoot[root], files...)
+		for _, name := range names {
+			skillItems = append(skillItems, skillDisclosureEntry{label: dir.Path, name: name})
 		}
 	}
 	discovery.Sources = append(discovery.Sources, skillDisclosureSources(skillItems)...)
@@ -620,30 +583,54 @@ func projectScopeSkillDirs(contentRoot, workDir string, projectExtras []string) 
 	return out
 }
 
-// listSkillDeclarationFiles enumerates the declaration files of one skill
-// directory: every SKILL.md plus the chord.yaml/agent.yaml sidecars that
-// sit next to it.
-func listSkillDeclarationFiles(dir string) ([]string, error) {
-	matches, err := doublestar.Glob(os.DirFS(dir), "**/SKILL.md")
+func discoverSkillDeclarations(dir SkillDir) ([]trust.FileHash, []string, error) {
+	matches, err := doublestar.Glob(os.DirFS(dir.Path), "**/SKILL.md")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, fmt.Errorf("scan skill directory %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("scan skill directory %s: %w", dir.Path, err)
 	}
 	sort.Strings(matches)
-	var out []string
+	var files []trust.FileHash
+	var names []string
+	seen := map[string]bool{}
 	for _, rel := range matches {
-		out = append(out, filepath.Join(dir, filepath.FromSlash(rel)))
-		skillRoot := filepath.Dir(filepath.Join(dir, filepath.FromSlash(rel)))
-		for _, sidecar := range []string{"chord.yaml", "agent.yaml"} {
-			sidecarPath := filepath.Join(skillRoot, sidecar)
-			if _, err := os.Stat(sidecarPath); err == nil {
-				out = append(out, sidecarPath)
+		snapshot, err := skill.ReadSnapshot(filepath.Join(dir.Path, filepath.FromSlash(rel)))
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, file := range snapshot.Files {
+			if file.Data == nil {
+				continue
+			}
+			hash, err := skillDeclarationHash(skillTrustRoot(dir), file)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !seen[hash.Path] {
+				files = append(files, hash)
+				seen[hash.Path] = true
 			}
 		}
+		name := filepath.Base(filepath.Dir(rel))
+		if loaded, err := snapshot.Load(); err == nil {
+			name = loaded.Name
+		}
+		names = append(names, name)
 	}
-	return out, nil
+	return files, names, nil
+}
+
+func skillTrustRoot(dir SkillDir) string {
+	if dir.Scope == skillDirScopeExtra {
+		// Keep the configured path identity when the directory itself is a
+		// symlink. Retargeting it must not turn a project source into a global one.
+		if root, err := filepath.Abs(dir.Root); err == nil {
+			return root
+		}
+	}
+	return canonicalProjectTrustRoot(dir.Root)
 }
 
 // listProjectAgentFiles enumerates the flat agent definition files the
@@ -772,7 +759,7 @@ func configDisclosureSources(configPath string, data []byte, parsed projectDiscl
 		if endpoint == "" {
 			endpoint = "(endpoint inherited)"
 		}
-		items = append(items, fmt.Sprintf("provider %q -> %s", name, truncateDisclosureTarget(endpoint)))
+		items = append(items, fmt.Sprintf("provider %q -> %s", name, disclosureEndpoint(endpoint)))
 	}
 	if len(parsed.Providers) > 0 || parsed.Proxy != "" {
 		effects = append(effects, "Model requests may be sent to the configured provider or proxy endpoints.")
@@ -781,11 +768,11 @@ func configDisclosureSources(configPath string, data []byte, parsed projectDiscl
 		items = append(items, fmt.Sprintf("model pools: %d pool(s)", len(parsed.ModelPools)))
 	}
 	if parsed.Proxy != "" {
-		items = append(items, fmt.Sprintf("proxy -> %s", truncateDisclosureTarget(parsed.Proxy)))
+		items = append(items, fmt.Sprintf("proxy -> %s", disclosureEndpoint(parsed.Proxy)))
 	}
 	if parsed.WebFetch != nil {
 		if parsed.WebFetch.Proxy != nil && *parsed.WebFetch.Proxy != "" {
-			items = append(items, fmt.Sprintf("web_fetch proxy -> %s", truncateDisclosureTarget(*parsed.WebFetch.Proxy)))
+			items = append(items, fmt.Sprintf("web_fetch proxy -> %s", disclosureEndpoint(*parsed.WebFetch.Proxy)))
 			effects = append(effects, "Web fetch requests may be sent through the configured proxy.")
 		} else {
 			items = append(items, "web_fetch override")
@@ -806,13 +793,13 @@ func configDisclosureSources(configPath string, data []byte, parsed projectDiscl
 }
 
 func mcpServerDisclosure(name string, server config.MCPServerConfig) string {
-	target := server.URL
+	target := disclosureEndpoint(server.URL)
 	kind := "http"
 	if target == "" {
 		kind = "stdio"
 		target = strings.TrimSpace(server.Command)
 		if len(server.Args) > 0 {
-			target += " " + strings.Join(server.Args, " ")
+			target += " [arguments hidden]"
 		}
 	}
 	if target == "" {
@@ -851,9 +838,9 @@ func projectHookEvents() []projectHookEvent {
 
 func hookCommandDisplay(command config.HookCommand) string {
 	if len(command.Args) > 0 {
-		return strings.Join(command.Args, " ")
+		return command.Args[0] + " [arguments hidden]"
 	}
-	return command.Shell
+	return "(shell script; contents hidden)"
 }
 
 func agentDisclosureSources(contentRoot string, paths []string) []projectTrustSource {
@@ -938,13 +925,6 @@ func skillDisclosureSources(entries []skillDisclosureEntry) []projectTrustSource
 		sources = append(sources, projectTrustSource{File: label, Items: byDir[label]})
 	}
 	return sources
-}
-
-func skillDisplayName(skillMDPath string) string {
-	if meta, err := skill.LoadMeta(skillMDPath); err == nil && meta != nil && meta.Name != "" {
-		return meta.Name
-	}
-	return filepath.Base(filepath.Dir(skillMDPath))
 }
 
 func sortedMapKeys[V any](m map[string]V) []string {

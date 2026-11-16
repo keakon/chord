@@ -591,7 +591,7 @@ func TestFilterSkillDirsByTrustBlocksUncoveredDirs(t *testing.T) {
 	}
 }
 
-func TestProjectSkillTrustVerifierChecksDeclarationChanges(t *testing.T) {
+func TestProjectSkillLoaderChecksDeclarationChanges(t *testing.T) {
 	projectRoot := t.TempDir()
 	skillMD := filepath.Join(projectRoot, ".chord", "skills", "commit", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(skillMD), 0o755); err != nil {
@@ -604,25 +604,28 @@ func TestProjectSkillTrustVerifierChecksDeclarationChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
-	verifier := newProjectSkillTrustVerifier(discovery.Inputs, "authorized")
+	load := newProjectSkillLoader(discovery.Inputs, "authorized")
 	meta, err := skill.LoadMeta(skillMD)
 	if err != nil {
 		t.Fatalf("load meta: %v", err)
 	}
-	if err := verifier(meta); err != nil {
+	if _, err := load(meta); err != nil {
 		t.Fatalf("unchanged declaration must pass: %v", err)
 	}
 
 	if err := os.WriteFile(skillMD, []byte("---\nname: commit\ndescription: changed helper\n---\nbody\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifier(meta); err == nil {
-		t.Fatal("a changed declaration must fail the verifier")
+	if _, err := load(meta); err == nil {
+		t.Fatal("a changed declaration must fail the loader")
 	}
 
 	// A skill outside every authorized root is not project-controlled.
 	globalMeta := &skill.Meta{Name: "global", Location: filepath.Join(t.TempDir(), "SKILL.md")}
-	if err := verifier(globalMeta); err != nil {
+	if err := os.WriteFile(globalMeta.Location, []byte("---\nname: global\ndescription: sample helper\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := load(globalMeta); err != nil {
 		t.Fatalf("non-project skill must pass: %v", err)
 	}
 }

@@ -45,18 +45,6 @@ func loadCustomCommands(ac *AppContext) {
 	}
 }
 
-func skillLoadDirs(ac *AppContext) []string {
-	if ac == nil {
-		return nil
-	}
-	return skillLoadDirsForWorkDir(ac, ac.WorkDir)
-}
-
-func skillLoadDirsForWorkDir(ac *AppContext, workDir string) []string {
-	dirs, _ := trustedSkillDirsForWorkDir(ac, workDir)
-	return SkillDirPaths(dirs)
-}
-
 func trustedSkillDirsForWorkDir(ac *AppContext, workDir string) ([]SkillDir, []string) {
 	if ac == nil {
 		return nil, nil
@@ -76,6 +64,18 @@ func trustedSkillDirsForWorkDir(ac *AppContext, workDir string) ([]SkillDir, []s
 	}
 	if ac.TrustPlan == nil {
 		return dirs, nil
+	}
+	for i := range dirs {
+		if dirs[i].Scope != skillDirScopeExtra {
+			continue
+		}
+		root := skillTrustRoot(SkillDir{Root: dirs[i].Path, Scope: skillDirScopeExtra})
+		for _, input := range ac.TrustPlan.Inputs {
+			if input.Root == root {
+				dirs[i].Root = dirs[i].Path
+				break
+			}
+		}
 	}
 	allowed, blocked := filterSkillDirsByTrust(dirs, ac.TrustPlan.Inputs)
 	return allowed, blocked

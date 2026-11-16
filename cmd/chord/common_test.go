@@ -535,7 +535,8 @@ func TestSkillLoadDirsIncludesAgentsSkillsByDefault(t *testing.T) {
 		TrustPlan:   authorizedProjectTrustPlan(),
 	}
 
-	got := skillLoadDirs(ac)
+	dirs, _ := trustedSkillDirsForWorkDir(ac, ac.WorkDir)
+	got := SkillDirPaths(dirs)
 	want := []string{
 		filepath.Join(projectRoot, ".chord", "skills"),
 		filepath.Join(projectRoot, ".agents", "skills"),
@@ -579,8 +580,9 @@ func TestInitialSkillLoadDirsExcludeUncoveredProjectDeclarations(t *testing.T) {
 		TrustPlan:   &projectTrustPlan{ApplyProject: true, Authorized: true, Inputs: discovery.Inputs},
 	}
 
-	for _, dir := range skillLoadDirs(ac) {
-		if dir == filepath.Join(projectRoot, ".chord", "skills") {
+	dirs, _ := trustedSkillDirsForWorkDir(ac, ac.WorkDir)
+	for _, dir := range dirs {
+		if dir.Path == filepath.Join(projectRoot, ".chord", "skills") {
 			t.Fatalf("initial skill scan includes directory with an uncovered declaration: %v", dir)
 		}
 	}
@@ -601,7 +603,8 @@ func TestSkillLoadDirsAppendsConfiguredPathsAfterDefaults(t *testing.T) {
 		TrustPlan: authorizedProjectTrustPlan(),
 	}
 
-	got := skillLoadDirs(ac)
+	dirs, _ := trustedSkillDirsForWorkDir(ac, ac.WorkDir)
+	got := SkillDirPaths(dirs)
 	want := []string{
 		filepath.Join(projectRoot, ".chord", "skills"),
 		filepath.Join(projectRoot, ".agents", "skills"),
@@ -649,7 +652,8 @@ func TestSkillLoadDirsForWorkDirInsertsChainBeforeHome(t *testing.T) {
 		Cfg:         &config.Config{},
 		TrustPlan:   authorizedProjectTrustPlan(),
 	}
-	got := skillLoadDirsForWorkDir(ac, workDir)
+	dirs, _ := trustedSkillDirsForWorkDir(ac, workDir)
+	got := SkillDirPaths(dirs)
 	want := []string{
 		filepath.Join(projectRoot, ".chord", "skills"),
 		filepath.Join(projectRoot, ".agents", "skills"),
@@ -689,7 +693,8 @@ func TestSkillLoadDirsPrefersCheckoutOverContentRoot(t *testing.T) {
 	// The checkout's own skill dirs come first, then its .agents/skills chain
 	// down to workDir, then the content root as the fallback for gitignored
 	// project skills the checkout does not contain.
-	got := skillLoadDirs(ac)
+	dirs, _ := trustedSkillDirsForWorkDir(ac, ac.WorkDir)
+	got := SkillDirPaths(dirs)
 	want := []string{
 		filepath.Join(checkout, ".chord", "skills"),
 		filepath.Join(checkout, ".agents", "skills"),

@@ -373,17 +373,6 @@ func (r *doctorModelsRuntimeConfig) providerCredentials(provider string) []confi
 	return cloneProviderCredentials(r.Auth[provider])
 }
 
-func orderedModelPoolsFromPath(path string) ([]orderedModelPool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return orderedModelPoolsFromData(path, data)
-}
-
 func orderedModelPoolsFromData(path string, data []byte) ([]orderedModelPool, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {

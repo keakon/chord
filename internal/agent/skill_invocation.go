@@ -66,10 +66,9 @@ func nextUserSkillCallID() string {
 // resolveAndBuildUserSkillPair is the shared parse, authorization and pair
 // construction for an explicit /skill load. MainAgent and SubAgent differ only
 // in how they persist the pair and surface toasts, so they share this pure
-// step and keep their own write paths. The verifier re-checks the skill's
-// declaration files against the authorized project input set before the body
-// is read; it may be nil.
-func resolveAndBuildUserSkillPair(states []skill.InvocationState, verifier func(*skill.Meta) error, content string) (sk *skill.Skill, assistantMsg, toolMsg message.Message, callName string, loadErr error) {
+// step and keep their own write paths. The loader authorizes and parses the
+// same declaration snapshot.
+func resolveAndBuildUserSkillPair(states []skill.InvocationState, load ProjectSkillLoader, content string) (sk *skill.Skill, assistantMsg, toolMsg message.Message, callName string, loadErr error) {
 	name, args, ok := parseUserSkillCommand(content)
 	if !ok {
 		return nil, message.Message{}, message.Message{}, "", nil
@@ -78,10 +77,7 @@ func resolveAndBuildUserSkillPair(states []skill.InvocationState, verifier func(
 	if err != nil {
 		return nil, message.Message{}, message.Message{}, name, err
 	}
-	if err := verifier(state.Meta); err != nil {
-		return nil, message.Message{}, message.Message{}, name, err
-	}
-	loaded, err := skill.LoadSkill(state.Meta.Location)
+	loaded, err := load(state.Meta)
 	if err != nil {
 		return nil, message.Message{}, message.Message{}, name, fmt.Errorf("%w %q: %w", errSkillLoadFailed, name, err)
 	}
@@ -173,7 +169,7 @@ func buildUserSkillInvocationPair(sk *skill.Skill, args, callID string) (message
 // whose content is `/skill <name> [args]` without appending it. A failed load
 // only toasts: the user's original message stays committed either way.
 func (a *MainAgent) buildUserSkillInvocation(userMsg message.Message) (string, []message.Message) {
-	sk, assistantMsg, toolMsg, _, err := resolveAndBuildUserSkillPair(a.skillInvocationStates(), a.verifyProjectSkillTrust, userMsg.Content)
+	sk, assistantMsg, toolMsg, _, err := resolveAndBuildUserSkillPair(a.skillInvocationStates(), a.loadProjectSkill, userMsg.Content)
 	if sk == nil || err != nil {
 		if err != nil {
 			a.emitToTUI(ToastEvent{Message: err.Error(), Level: skillLoadToastLevel(err)})
@@ -218,11 +214,7 @@ func (a *MainAgent) applyUserSkillPairInMemory(name string, pair []message.Messa
 // same parse, authorization and pair shape, but the messages persist through
 // the SubAgent's own write path.
 func (s *SubAgent) appendUserSkillInvocation(userMsg message.Message) {
-	var verifier func(*skill.Meta) error
-	if s.parent != nil {
-		verifier = s.parent.verifyProjectSkillTrust
-	}
-	sk, assistantMsg, toolMsg, _, err := resolveAndBuildUserSkillPair(s.skillInvocationStates(), verifier, userMsg.Content)
+	sk, assistantMsg, toolMsg, _, err := resolveAndBuildUserSkillPair(s.skillInvocationStates(), s.parent.loadProjectSkill, userMsg.Content)
 	if sk == nil || err != nil {
 		if err != nil {
 			s.emitToast(err.Error(), skillLoadToastLevel(err))

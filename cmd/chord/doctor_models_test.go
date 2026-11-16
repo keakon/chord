@@ -57,6 +57,7 @@ func testDoctorModelsConfig() *config.Config {
 
 func setupDoctorModelsConfigHome(t *testing.T, configYAML, authYAML string) string {
 	t.Helper()
+	t.Chdir(t.TempDir())
 	configHome := t.TempDir()
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
 	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(configYAML), 0o600); err != nil {
@@ -318,6 +319,7 @@ func TestRunDoctorModelsNoProvidersReturnsConfigError(t *testing.T) {
 }
 
 func TestRunDoctorModelsJSONAppliesVariantTuning(t *testing.T) {
+	t.Chdir(t.TempDir())
 	var got map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -1018,9 +1020,9 @@ func TestRunDoctorModelsToleratesMalformedProjectConfig(t *testing.T) {
 	}
 	t.Chdir(projectRoot)
 
-	pools, err := orderedModelPoolsFromPath(filepath.Join(projectRoot, ".chord", "config.yaml"))
+	pools, err := orderedModelPoolsFromData(filepath.Join(projectRoot, ".chord", "config.yaml"), []byte("providers:\n  local: [\n"))
 	if err != nil {
-		t.Fatalf("orderedModelPoolsFromPath failed for malformed config: %v", err)
+		t.Fatalf("orderedModelPoolsFromData failed for malformed config: %v", err)
 	}
 	if len(pools) != 0 {
 		t.Fatalf("pools = %#v, want empty for malformed config", pools)

@@ -846,15 +846,14 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.MainAgent.SetStartupConfigIssues(startupConfigIssues(startupPlan))
 	ac.MainAgent.SetStartupCatalogAdvisories(startupPlan.CatalogAdvisories)
 	// When the project layer applies — under a stored authorization or a
-	// one-shot trust — dynamic skill loads re-verify the skill's declaration
-	// files against the startup-discovered input set before its body is read
-	// from disk.
+	// one-shot trust — dynamic skill loads authorize and parse the same
+	// declaration snapshot against the startup-discovered input set.
 	if startupPlan.TrustPlan != nil && startupPlan.TrustPlan.ApplyProject {
 		trustState := "authorized"
 		if !startupPlan.TrustPlan.Authorized {
 			trustState = "trusted for this run"
 		}
-		ac.MainAgent.SetProjectSkillTrustVerifier(newProjectSkillTrustVerifier(startupPlan.TrustPlan.Inputs, trustState))
+		ac.MainAgent.SetProjectSkillLoader(newProjectSkillLoader(startupPlan.TrustPlan.Inputs, trustState))
 	}
 	ac.MainAgent.SetSessionArtifactsDirFunc(func() string {
 		if ac == nil || strings.TrimSpace(ac.SessionDir) == "" {

@@ -157,13 +157,19 @@ func metaFromFrontmatter(path string, fm frontmatter) (*Meta, error) {
 	if real, err := filepath.EvalSymlinks(absPath); err == nil {
 		absPath = real
 	}
-	rootDir := filepath.Dir(absPath)
+	meta := buildMeta(declarationPath, absPath, fm)
+	loadSidecarMeta(meta.RootDir, meta)
+	descriptor := BuildPathDescriptor(meta)
+	meta.pathDescriptor = &descriptor
+	return meta, nil
+}
 
-	meta := &Meta{
+func buildMeta(declarationPath, absPath string, fm frontmatter) *Meta {
+	return &Meta{
 		Name:                   fm.Name,
 		Description:            fm.Description,
 		Location:               absPath,
-		RootDir:                rootDir,
+		RootDir:                filepath.Dir(absPath),
 		DeclarationPath:        declarationPath,
 		WhenToUse:              fm.WhenToUse,
 		ArgsHint:               fm.ArgsHint,
@@ -175,13 +181,6 @@ func metaFromFrontmatter(path string, fm frontmatter) (*Meta, error) {
 		Resources:              normalizeResourceList(fm.Resources),
 		DisableModelInvocation: fm.DisableModelInvocation != nil && *fm.DisableModelInvocation,
 	}
-
-	// Apply sidecar metadata if present (overrides frontmatter).
-	loadSidecarMeta(rootDir, meta)
-	descriptor := BuildPathDescriptor(meta)
-	meta.pathDescriptor = &descriptor
-
-	return meta, nil
 }
 
 // normalizeContext returns "fork" when s is "fork" (case-insensitive),
@@ -251,35 +250,39 @@ func loadSidecarMeta(rootDir string, meta *Meta) {
 		if err := yaml.Unmarshal(data, &sidecar); err != nil {
 			continue
 		}
-		meta.SidecarSource = name
-		if sidecar.WhenToUse != "" {
-			meta.WhenToUse = sidecar.WhenToUse
-		}
-		if sidecar.ArgsHint != "" {
-			meta.ArgsHint = sidecar.ArgsHint
-		}
-		if sidecar.Context != "" {
-			meta.Context = normalizeContext(sidecar.Context)
-		}
-		if sidecar.Model != "" {
-			meta.Model = sidecar.Model
-		}
-		if sidecar.Effort != "" {
-			meta.Effort = sidecar.Effort
-		}
-		if len(sidecar.AllowedTools) > 0 {
-			meta.AllowedTools = sidecar.AllowedTools
-		}
-		if len(sidecar.Paths) > 0 {
-			meta.Paths = sidecar.Paths
-		}
-		if len(sidecar.Resources) > 0 {
-			meta.Resources = normalizeResourceList(sidecar.Resources)
-		}
-		if sidecar.DisableModelInvocation != nil {
-			meta.DisableModelInvocation = *sidecar.DisableModelInvocation
-		}
+		applySidecarMeta(name, sidecar, meta)
 		break // first sidecar wins
+	}
+}
+
+func applySidecarMeta(name string, sidecar frontmatter, meta *Meta) {
+	meta.SidecarSource = name
+	if sidecar.WhenToUse != "" {
+		meta.WhenToUse = sidecar.WhenToUse
+	}
+	if sidecar.ArgsHint != "" {
+		meta.ArgsHint = sidecar.ArgsHint
+	}
+	if sidecar.Context != "" {
+		meta.Context = normalizeContext(sidecar.Context)
+	}
+	if sidecar.Model != "" {
+		meta.Model = sidecar.Model
+	}
+	if sidecar.Effort != "" {
+		meta.Effort = sidecar.Effort
+	}
+	if len(sidecar.AllowedTools) > 0 {
+		meta.AllowedTools = sidecar.AllowedTools
+	}
+	if len(sidecar.Paths) > 0 {
+		meta.Paths = sidecar.Paths
+	}
+	if len(sidecar.Resources) > 0 {
+		meta.Resources = normalizeResourceList(sidecar.Resources)
+	}
+	if sidecar.DisableModelInvocation != nil {
+		meta.DisableModelInvocation = *sidecar.DisableModelInvocation
 	}
 }
 
