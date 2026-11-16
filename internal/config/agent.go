@@ -256,9 +256,14 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read agent config %s: %w", path, err)
 	}
+	return LoadAgentConfigData(path, data)
+}
 
+// LoadAgentConfigData parses a captured declaration without rereading its file.
+func LoadAgentConfigData(path string, data []byte) (*AgentConfig, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	var cfg *AgentConfig
+	var err error
 	switch ext {
 	case ".md":
 		cfg, err = loadMarkdownAgentConfig(path, data)
@@ -397,16 +402,15 @@ func finalizeAgentConfig(path string, cfg *AgentConfig) (*AgentConfig, error) {
 }
 
 // LoadAgentConfigs loads all agent configurations from a directory.
-// It reads every *.yaml and *.yml file in dir and returns them keyed by agent name.
+// It reads every *.yaml, *.yml and *.md file in dir and returns them keyed by agent name.
 // Returns an empty (non-nil) map if the directory does not exist or is empty.
 func LoadAgentConfigs(dir string) (map[string]*AgentConfig, error) {
-	configs := make(map[string]*AgentConfig)
-	configPaths := make(map[string]string)
+	var paths []string
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return configs, nil
+			return loadAgentConfigs(paths, LoadAgentConfig)
 		}
 		return nil, fmt.Errorf("read agent config directory %s: %w", dir, err)
 	}
@@ -421,19 +425,32 @@ func LoadAgentConfigs(dir string) (map[string]*AgentConfig, error) {
 			continue
 		}
 
-		path := filepath.Join(dir, entry.Name())
-		cfg, err := LoadAgentConfig(path)
+		paths = append(paths, filepath.Join(dir, entry.Name()))
+	}
+	return loadAgentConfigs(paths, LoadAgentConfig)
+}
+
+// LoadAgentConfigsData loads a captured set, including an empty directory.
+func LoadAgentConfigsData(files map[string][]byte) (map[string]*AgentConfig, error) {
+	return loadAgentConfigs(slices.Sorted(maps.Keys(files)), func(path string) (*AgentConfig, error) {
+		return LoadAgentConfigData(path, files[path])
+	})
+}
+
+func loadAgentConfigs(paths []string, load func(string) (*AgentConfig, error)) (map[string]*AgentConfig, error) {
+	configs := make(map[string]*AgentConfig)
+	configPaths := make(map[string]string)
+	for _, path := range paths {
+		cfg, err := load(path)
 		if err != nil {
 			return nil, err
 		}
 		if previousPath, exists := configPaths[cfg.Name]; exists {
 			return nil, fmt.Errorf("duplicate agent name %q in %s and %s", cfg.Name, previousPath, path)
 		}
-
 		configs[cfg.Name] = cfg
 		configPaths[cfg.Name] = path
 	}
-
 	return configs, nil
 }
 
@@ -557,6 +574,20 @@ func ResolveAgentConfigs(projectDir, globalDir string) (map[string]*AgentConfig,
 	}
 	maps.Copy(merged, projectConfigs)
 
+	return merged, nil
+}
+
+// ResolveAgentConfigsData overlays captured project declarations on global roles.
+func ResolveAgentConfigsData(projectFiles map[string][]byte, globalDir string) (map[string]*AgentConfig, error) {
+	merged, err := ResolveAgentConfigs("", globalDir)
+	if err != nil {
+		return nil, err
+	}
+	projectConfigs, err := LoadAgentConfigsData(projectFiles)
+	if err != nil {
+		return nil, fmt.Errorf("load project agent configs: %w", err)
+	}
+	maps.Copy(merged, projectConfigs)
 	return merged, nil
 }
 

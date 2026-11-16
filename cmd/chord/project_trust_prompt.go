@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/config"
 )
 
 // promptProjectTrustAuthorization is the interactive disclosure and consent
@@ -226,7 +228,18 @@ func inspectProjectTrustStatus(contentRoot, workDir, globalConfigPath string) (*
 		return status, nil
 	}
 	status.Fingerprint = shortProjectTrustFingerprint(discovery.Inputs.Fingerprint())
-	storePath, hasRecord, record, err := loadProjectTrustRecord(globalConfigPath, contentRoot)
+	globalData, readErr := os.ReadFile(globalConfigPath)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("read global config: %w", readErr)
+	}
+	if readErr != nil {
+		globalData = nil
+	}
+	resolved, err := config.LoadResolvedConfigData(globalConfigPath, globalData, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	storePath, hasRecord, record, err := loadProjectTrustRecord(resolved.Global, contentRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -239,13 +252,6 @@ func inspectProjectTrustStatus(contentRoot, workDir, globalConfigPath string) (*
 
 	// A hazard-free delta starts without an authorization record. Report that
 	// accurately instead of showing a project that runs as "not authorized".
-	globalData, readErr := os.ReadFile(globalConfigPath)
-	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-		return nil, readErr
-	}
-	if readErr != nil {
-		globalData = nil
-	}
 	risk, err := assessProjectTrustRisk(globalConfigPath, globalData, contentRoot, workDir, discovery)
 	if err != nil {
 		return nil, err

@@ -207,7 +207,7 @@ func TestLowRiskGateAppliesWithoutPrompt(t *testing.T) {
 		t.Fatal("prompt must not be called for low-risk layer")
 		return false, nil
 	}
-	plan, data, err := gate.resolve(globalConfigPathForTrustTest(t), root, root)
+	plan, data, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestHighRiskGateStillPrompts(t *testing.T) {
 		}
 		return false, nil
 	}
-	plan, _, err := gate.resolve(globalConfigPathForTrustTest(t), root, root)
+	plan, _, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), root, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestHighRiskFailClosedStillErrors(t *testing.T) {
 	writeProjectConfigForTrustTest(t, root, "mcp:\n  fetch:\n    command: /bin/fetcher\n")
 
 	gate := newProjectTrustGate(projectTrustPolicyFailClosed)
-	if _, _, err := gate.resolve(globalConfigPathForTrustTest(t), root, root); err == nil {
+	if _, _, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), root, root); err == nil {
 		t.Fatal("high-risk layer must fail closed without authorization")
 	}
 }

@@ -204,7 +204,7 @@ func planInitAppStartup(contentRoot, workDir string, trustGate *projectTrustGate
 		return nil, wrapConfigLoadError("read global config", err)
 	}
 	projectConfigPath := config.ProjectConfigPath(contentRoot)
-	trustPlan, projectData, err := trustGate.resolve(globalPath, contentRoot, workDir)
+	trustPlan, projectData, err := trustGate.resolve(globalPath, globalData, contentRoot, workDir)
 	if err != nil {
 		return nil, err
 	}
@@ -570,10 +570,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 
 	// The project trust gate decided whether the project layer applies. When
-	// it applies, re-verify the disclosed declaration files before anything
-	// below reads them from disk — under a stored authorization and under a
-	// one-shot trust alike, what applies must be what was disclosed. The
-	// project config itself merges from the discovery snapshot bytes.
+	// it applies, detect edits since discovery before initializing components.
+	// Config, agent and command loading use the captured declaration bytes,
+	// so a later edit cannot replace the content this run reviewed.
 	if startupPlan.TrustPlan != nil && startupPlan.TrustPlan.ApplyProject {
 		if err := verifyProjectTrustInputs(startupPlan.TrustPlan.Inputs, contentRoot, workDir); err != nil {
 			ac.cleanup()
@@ -585,12 +584,12 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	// selection and MainAgent setup. Agent definitions are control-plane
 	// configuration, so they come from the content root only — and only when
 	// the trust gate applied the project layer.
-	projectAgentsDir := ""
+	var projectAgentFiles map[string][]byte
 	if ac.projectLayerApplied() {
-		projectAgentsDir = filepath.Join(contentRoot, ".chord", "agents")
+		projectAgentFiles = ac.TrustPlan.AgentFiles
 	}
-	agentConfigs, agentConfigsErr := config.ResolveAgentConfigs(
-		projectAgentsDir,
+	agentConfigs, agentConfigsErr := config.ResolveAgentConfigsData(
+		projectAgentFiles,
 		filepath.Join(pathLocator.ConfigHome, "agents"),
 	)
 

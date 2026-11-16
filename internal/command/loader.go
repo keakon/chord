@@ -11,8 +11,10 @@ package command
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -91,7 +93,7 @@ func scanMDDir(dir, source string) ([]*Definition, []string) {
 	if err != nil {
 		return nil, []string{fmt.Sprintf("scan %s: %v", dir, err)}
 	}
-	var defs []*Definition
+	files := make(map[string][]byte, len(matches))
 	var warnings []string
 	for _, rel := range matches {
 		absPath := filepath.Join(dir, rel)
@@ -100,7 +102,22 @@ func scanMDDir(dir, source string) ([]*Definition, []string) {
 			warnings = append(warnings, fmt.Sprintf("read %s: %v", absPath, readErr))
 			continue
 		}
-		fm, body, parseErr := parseMDFile(data)
+		files[absPath] = data
+	}
+	defs, parsedWarnings := parseMDFiles(dir, source, files)
+	return defs, append(warnings, parsedWarnings...)
+}
+
+func parseMDFiles(dir, source string, files map[string][]byte) ([]*Definition, []string) {
+	var defs []*Definition
+	var warnings []string
+	for _, absPath := range slices.Sorted(maps.Keys(files)) {
+		rel, err := filepath.Rel(dir, absPath)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("relativize %s: %v", absPath, err))
+			continue
+		}
+		fm, body, parseErr := parseMDFile(files[absPath])
 		if parseErr != nil {
 			warnings = append(warnings, fmt.Sprintf("parse %s: %v", absPath, parseErr))
 			continue
@@ -184,6 +201,10 @@ type LoadOptions struct {
 	ProjectCfgPath string            // absolute path to project config.yaml
 	GlobalCfg      map[string]string // global config.yaml commands
 	GlobalCfgPath  string            // absolute path to global config.yaml
+	// ProjectFiles supplies captured Markdown bytes keyed by full path.
+	// A non-nil empty map means the captured directory had no files; nil
+	// keeps disk discovery for callers that do not gate project inputs.
+	ProjectFiles map[string][]byte
 	// SkipProjectFiles leaves out both project layers (the .chord/commands
 	// directory scan and the project config.yaml commands). The project
 	// trust gate sets it when the project configuration is not authorized;
@@ -208,7 +229,12 @@ func Load(opts LoadOptions) ([]*Definition, []string) {
 	}
 
 	projectMDDir := filepath.Join(opts.ContentRoot, ".chord", "commands")
-	projectMD, w := scanMDDir(projectMDDir, "project-md")
+	var projectMD []*Definition
+	if opts.ProjectFiles == nil {
+		projectMD, w = scanMDDir(projectMDDir, "project-md")
+	} else {
+		projectMD, w = parseMDFiles(projectMDDir, "project-md", opts.ProjectFiles)
+	}
 	allWarnings = append(allWarnings, w...)
 	projectYAML, w := fromYAML(opts.ProjectCfg, opts.ProjectCfgPath, "project-yaml")
 	allWarnings = append(allWarnings, w...)

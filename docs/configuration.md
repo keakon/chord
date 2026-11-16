@@ -875,7 +875,7 @@ that can start a process, redirect traffic, or rewrite another control. At
 discovery it compares the project declarations against the configuration
 that would be in effect without them (global config plus built-in roles and
 global commands/skills). A layer with no such high-risk change is applied
-silently — new agents, new commands, and ordinary skills are guidance that
+silently — new guidance-only agents, new commands, and ordinary skills are guidance that
 you can still invoke or decline at use time, so they need no blanket
 approval.
 
@@ -883,8 +883,12 @@ The changes that require confirmation are:
 
 - MCP servers, hooks, LSP servers, and provider/proxy/web-fetch changes that
   start local processes or send traffic to project-declared endpoints.
-- An agent that widens an existing role's permission, or declares its own
-  MCP servers.
+- An agent that widens an existing role's permission, changes its rules in
+  a way Chord cannot prove more restrictive, or declares its own MCP servers.
+  Rule order matters; removing a restriction can widen access.
+- An agent that adds an external backend or changes its `command`,
+  `launch_args`, or `env`. These declarations start a local process when
+  that role is delegated, regardless of its tool permission rules.
 - A command or skill that overrides an existing global command/skill, and a
   skill that sets `context: fork`, `model`, `effort`, or `allowed_tools`.
 
@@ -894,6 +898,9 @@ specific changes under **Changes that need your approval**, plus up to four
 source entries; choose **Inspect all files and configuration details** for
 the full list of sources and targets. Skipping starts Chord with global
 settings; project agents, commands, skills, and settings do not load.
+Configuration, agent definitions, and command templates are applied from
+the same captured bytes used for assessment and disclosure. Edits after
+discovery cannot substitute different content into the current launch.
 
 Authorizing records what was approved for the project. The record binds the
 declaration files by content: adding, removing, or changing any of them
@@ -907,7 +914,7 @@ authorized.
 
 Non-interactive entries (`chord headless`, ACP, `chord mcp login`, and the
 provider login and refresh flows under `chord auth`) refuse to apply an
-unauthorized project layer and exit with instructions. Pass
+unauthorized high-risk project layer and exit with instructions. Pass
 `--skip-project-config` to ignore the project layer for one run, or
 `--trust-project-config` to apply the current files without saving an
 authorization.

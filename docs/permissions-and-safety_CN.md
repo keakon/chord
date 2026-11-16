@@ -251,7 +251,9 @@ Chord 在**请求发出之前**匹配模型给出的 URL，并在跟随每次 HT
 
 ## 项目配置信任
 
-项目级配置与能力声明——`.chord/config.yaml`、agent 定义、命令和 skill——都是仓库内容，不是用户设置。Chord 会把它们与「不应用项目层时生效的配置」比较，只有当改动会启动进程、重定向流量或改写其他控制时才要求确认：包括 MCP server、hooks、LSP server、provider / proxy 改动、放宽已有角色权限、命令或 skill 覆盖全局同名项，以及带 fork 上下文或工具授权的 skill。无法解析的声明同样需要确认。新增代理、新增命令和普通 skill 不需要确认即可生效——它们属于你在使用时可选择调用或拒绝的参考内容。需要确认时，提示会在「需要你批准的改动」下逐条列出具体变化；拒绝或关闭提示，就按不带项目层的方式启动。
+项目级配置与能力声明——`.chord/config.yaml`、agent 定义、命令和 skill——都是仓库内容，不是用户设置。Chord 会把它们与「不应用项目层时生效的配置」比较，只有当改动会启动进程、重定向流量或改写其他控制时才要求确认：包括 MCP server、hooks、LSP server、provider / proxy 改动、放宽已有角色权限或无法证明更严格的权限变化、外部 agent backend 启动声明、命令或 skill 覆盖全局同名项，以及带 fork 上下文或工具授权的 skill。无法解析的声明同样需要确认。新增的纯指导型代理、新增命令和普通 skill 不需要确认即可生效——它们属于你在使用时可选择调用或拒绝的参考内容。需要确认时，提示会在「需要你批准的改动」下逐条列出具体变化；拒绝或关闭提示，就按不带项目层的方式启动。
+
+权限比较保留规则顺序和限制。外部 agent 的 `backend.command`、`launch_args`、`env` 会在委派时启动本地进程，角色的工具规则不约束进程本身。配置、代理定义和命令模板使用与评估、披露相同的字节加载，后续文件编辑不能在启动期间替换已审阅内容。
 
 需要授权时，授权按内容绑定这批声明文件：新增、删除或修改其中任何一个，若改动属于高危就要重新确认。低风险项目层不保存授权，每次启动都会重新评估；因此后续引入高危改动，或全局基线变化使同一 delta 升级为高危，仍会被拦下。记录以 `project-trust.json` 保存在你的 state 目录中（默认 `~/.local/state/chord/project-trust.json`，设置 `CHORD_STATE_DIR` 时为 `$CHORD_STATE_DIR/project-trust.json`）；`chord doctor config` 可以查看状态和存储路径，`chord doctor config --revoke-project-trust` 撤销授权。非交互入口（`chord headless`、ACP、`chord mcp login`，以及 `chord auth` 的 provider 登录与刷新流程）遇到未授权的高危项目层会拒绝应用并退出，同时给出处理说明；`--skip-project-config` 与 `--trust-project-config` 提供单次运行的替代方式。
 

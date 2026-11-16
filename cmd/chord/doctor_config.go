@@ -358,7 +358,11 @@ func runDoctorConfigRevokeTrust(cmdCtx context.Context, out io.Writer, asJSON bo
 	if err != nil {
 		return cliExitError{code: 2, err: fmt.Errorf("resolve config path: %w", err)}
 	}
-	storePath, _, _, err := loadProjectTrustRecord(globalPath, contentRoot)
+	globalCfg, err := config.LoadConfigFromPath(globalPath)
+	if err != nil {
+		return cliExitError{code: 2, err: fmt.Errorf("load global config: %w", err)}
+	}
+	storePath, _, _, err := loadProjectTrustRecord(globalCfg, contentRoot)
 	if err != nil {
 		return cliExitError{code: 2, err: err}
 	}

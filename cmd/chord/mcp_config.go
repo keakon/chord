@@ -29,6 +29,7 @@ func loadMCPCommandConfig(ctx context.Context, agentName, serverName string, con
 	root = resolveContentRoot(ctx, root)
 	skipProject := flagSkipProjectConfig
 	var cfg *config.Config
+	var decision *projectTrustDecision
 	if connect {
 		globalPath, err := config.ConfigPath()
 		if err != nil {
@@ -40,11 +41,12 @@ func loadMCPCommandConfig(ctx context.Context, agentName, serverName string, con
 		} else if err != nil {
 			return nil, "", wrapConfigLoadError("read global config", err)
 		}
-		resolved, _, err := resolveProjectConfigForUse(ctx, root, "headless", globalPath, globalData)
+		resolved, trustDecision, err := resolveProjectConfigForUse(ctx, root, "headless", globalPath, globalData)
 		if err != nil {
 			return nil, "", err
 		}
 		cfg = resolved.Config
+		decision = trustDecision
 	} else {
 		cfg, err = config.LoadConfig()
 		if errors.Is(err, os.ErrNotExist) {
@@ -68,7 +70,16 @@ func loadMCPCommandConfig(ctx context.Context, agentName, serverName string, con
 	if !skipProject {
 		projectAgentsDir = filepath.Join(root, ".chord", "agents")
 	}
-	agents, err := config.ResolveAgentConfigs(projectAgentsDir, filepath.Join(paths.ConfigHome, "agents"))
+	var agents map[string]*config.AgentConfig
+	if connect {
+		var files map[string][]byte
+		if decision.Plan.ApplyProject {
+			files = decision.Plan.AgentFiles
+		}
+		agents, err = config.ResolveAgentConfigsData(files, filepath.Join(paths.ConfigHome, "agents"))
+	} else {
+		agents, err = config.ResolveAgentConfigs(projectAgentsDir, filepath.Join(paths.ConfigHome, "agents"))
+	}
 	if err != nil {
 		return nil, "", err
 	}

@@ -180,7 +180,7 @@ func TestStartupWorktreeConfigUsesProjectRootOverride(t *testing.T) {
 	}
 }
 
-func TestPrepareStartupWorktreeRejectsUntrustedProjectRoot(t *testing.T) {
+func TestPrepareStartupWorktreeAppliesLowRiskProjectRoot(t *testing.T) {
 	setProjectTrustFlagsForTest(t, false, false)
 	withTestStateDir(t)
 	repo := setupStartupRepo(t)
@@ -188,17 +188,36 @@ func TestPrepareStartupWorktreeRejectsUntrustedProjectRoot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repo, ".chord"), 0o755); err != nil {
 		t.Fatalf("mkdir project .chord: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, ".chord", "config.yaml"), []byte("worktree:\n  root: untrusted-wt\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".chord", "config.yaml"), []byte("worktree:\n  root: project-wt\n"), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
 	chdirForTest(t, repo)
 
-	_, _, err := prepareStartupWorktree(context.Background(), "feat-untrusted", false, "headless")
-	if err == nil || !strings.Contains(err.Error(), "project") {
-		t.Fatalf("prepareStartupWorktree error = %v, want project trust rejection", err)
+	info, decision, err := prepareStartupWorktree(context.Background(), "feature", false, "headless")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, statErr := os.Stat(filepath.Join(repo, "untrusted-wt")); !os.IsNotExist(statErr) {
-		t.Fatalf("untrusted project root was created: stat error = %v", statErr)
+	if decision == nil || !decision.Plan.LowRisk || decision.Plan.Authorized {
+		t.Fatalf("worktree-only delta should be low risk: %+v", decision)
+	}
+	if info.Path != filepath.Join(repo, "project-wt", "feature") {
+		t.Fatalf("worktree path=%q", info.Path)
+	}
+}
+
+func TestPrepareStartupWorktreeRejectsUnauthorizedHighRiskLayer(t *testing.T) {
+	setProjectTrustFlagsForTest(t, false, false)
+	withTestStateDir(t)
+	repo := setupStartupRepo(t)
+	writeStartupTestConfig(t, "worktree:\n  root: global-wt\n")
+	writeProjectConfigForTrustTest(t, repo, "worktree:\n  root: project-wt\nmcp:\n  sample:\n    command: sample-server\n")
+	chdirForTest(t, repo)
+
+	if _, _, err := prepareStartupWorktree(context.Background(), "feature", false, "headless"); err == nil || !strings.Contains(err.Error(), "project") {
+		t.Fatalf("prepareStartupWorktree error=%v, want project trust rejection", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "project-wt")); !os.IsNotExist(err) {
+		t.Fatalf("high-risk project layer created a worktree: %v", err)
 	}
 }
 

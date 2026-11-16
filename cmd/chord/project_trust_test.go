@@ -27,6 +27,15 @@ func globalConfigPathForTrustTest(t *testing.T) string {
 	return path
 }
 
+func globalConfigDataForTrustTest(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(globalConfigPathForTrustTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 // trustOnceGate applies the current project layer without consulting the
 // trust store. Tests of trusted-path merge semantics use it so their
 // fixtures keep exercising the merged config exactly as before the gate.
@@ -145,7 +154,7 @@ func TestGateTrustOnceAppliesWithoutStore(t *testing.T) {
 	writeProjectConfigForTrustTest(t, projectRoot, "proxy: \"\"\n")
 
 	gate := trustOnceGate()
-	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -182,7 +191,7 @@ func TestGateReusesPreflightDeclineWithoutPromptingAgain(t *testing.T) {
 		return true, nil
 	}
 
-	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -215,7 +224,7 @@ func TestGateRejectsChangedInputsAfterPreflightTrustOnce(t *testing.T) {
 		ConfigData: discovery.ConfigData,
 	}
 
-	_, _, err = gate.resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	_, _, err = gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err == nil || !strings.Contains(err.Error(), "changed after worktree setup") {
 		t.Fatalf("resolve error = %v, want changed preflight input rejection", err)
 	}
@@ -248,7 +257,7 @@ func TestLocalGateConfirmsChangedInputsAfterPreflightTrustOnce(t *testing.T) {
 		return true, nil
 	}
 
-	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -262,7 +271,7 @@ func TestGateSkipProjectPolicy(t *testing.T) {
 	projectRoot := t.TempDir()
 	writeProjectConfigForTrustTest(t, projectRoot, "proxy: \"\"\n")
 
-	plan, projectData, err := skipProjectGate().resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	plan, projectData, err := skipProjectGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -277,9 +286,9 @@ func TestGateSkipProjectPolicy(t *testing.T) {
 func TestGateFailClosedOnUnauthorizedInputs(t *testing.T) {
 	writeGlobalConfigForTrustTest(t)
 	projectRoot := t.TempDir()
-	writeProjectConfigForTrustTest(t, projectRoot, "proxy: \"\"\n")
+	writeProjectConfigForTrustTest(t, projectRoot, "proxy: http://example.invalid:8080\n")
 
-	_, _, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	_, _, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err == nil {
 		t.Fatal("fail-closed must refuse to start with unauthorized inputs")
 	}
@@ -293,7 +302,7 @@ func TestGateNoInputsNeedsNoAuthorization(t *testing.T) {
 	projectRoot := t.TempDir()
 
 	for _, gate := range []*projectTrustGate{failClosedGate(), skipProjectGate(), trustOnceGate()} {
-		plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+		plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 		if err != nil {
 			t.Fatalf("resolve with no inputs: %v", err)
 		}
@@ -318,7 +327,7 @@ func TestGateStoredAuthorizationMatches(t *testing.T) {
 		t.Fatalf("authorize: %v", err)
 	}
 
-	plan, projectData, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	plan, projectData, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err != nil {
 		t.Fatalf("resolve with a matching authorization: %v", err)
 	}
@@ -348,11 +357,11 @@ func TestGateRejectsChangedProjectConfig(t *testing.T) {
 	// Change the project config after the authorization: the fingerprint no
 	// longer matches, so every non-interactive policy must refuse.
 	writeProjectConfigForTrustTest(t, projectRoot, "proxy: \"\"\nmcp:\n  evil:\n    command: /bin/evil\n")
-	_, _, err = failClosedGate().resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	_, _, err = failClosedGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err == nil {
 		t.Fatal("changed inputs must fail closed")
 	}
-	plan, projectData, err := skipProjectGate().resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	plan, projectData, err := skipProjectGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err != nil || plan.ApplyProject || projectData != nil {
 		t.Fatalf("changed inputs under skip policy must skip the layer, got %+v data=%v err=%v", plan, projectData, err)
 	}
@@ -361,11 +370,11 @@ func TestGateRejectsChangedProjectConfig(t *testing.T) {
 func TestGatePromptDeclineSkipsLayer(t *testing.T) {
 	writeGlobalConfigForTrustTest(t)
 	projectRoot := t.TempDir()
-	writeProjectConfigForTrustTest(t, projectRoot, "proxy: \"\"\n")
+	writeProjectConfigForTrustTest(t, projectRoot, "proxy: http://example.invalid:8080\n")
 
 	gate := newProjectTrustGate(projectTrustPolicyInteractive)
 	gate.prompt = func(*projectTrustDiscovery, string) (bool, error) { return false, nil }
-	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -377,13 +386,13 @@ func TestGatePromptDeclineSkipsLayer(t *testing.T) {
 func TestGatePromptErrorAbortsStartup(t *testing.T) {
 	writeGlobalConfigForTrustTest(t)
 	projectRoot := t.TempDir()
-	writeProjectConfigForTrustTest(t, projectRoot, "proxy: \"\"\n")
+	writeProjectConfigForTrustTest(t, projectRoot, "proxy: http://example.invalid:8080\n")
 
 	gate := newProjectTrustGate(projectTrustPolicyInteractive)
 	gate.prompt = func(*projectTrustDiscovery, string) (bool, error) {
 		return false, errors.New("interactive terminal unavailable")
 	}
-	if _, _, err := gate.resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot); err == nil {
+	if _, _, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot); err == nil {
 		t.Fatal("a prompt error must abort startup, not silently skip the layer")
 	}
 }
@@ -397,11 +406,11 @@ func TestGateSaveFailureNeverAuthorizes(t *testing.T) {
 	t.Setenv("CHORD_STATE_DIR", blocked)
 	writeGlobalConfigForTrustTest(t)
 	projectRoot := t.TempDir()
-	writeProjectConfigForTrustTest(t, projectRoot, "proxy: \"\"\n")
+	writeProjectConfigForTrustTest(t, projectRoot, "proxy: http://example.invalid:8080\n")
 
 	gate := newProjectTrustGate(projectTrustPolicyInteractive)
 	gate.prompt = func(*projectTrustDiscovery, string) (bool, error) { return true, nil }
-	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), projectRoot, projectRoot)
+	plan, projectData, err := gate.resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -532,7 +541,7 @@ func TestGateSubdirectoryLaunchWithNewSkillNeedsReauthorization(t *testing.T) {
 	if err := os.MkdirAll(subDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	plan, _, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), projectRoot, subDir)
+	plan, _, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, subDir)
 	if err != nil {
 		t.Fatalf("subdirectory launch must stay authorized: %v", err)
 	}
@@ -549,7 +558,7 @@ func TestGateSubdirectoryLaunchWithNewSkillNeedsReauthorization(t *testing.T) {
 	if err := os.WriteFile(newSkill, []byte("---\nname: sub-skill\ndescription: sub helper\n---\nbody\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	plan, _, err = failClosedGate().resolve(globalConfigPathForTrustTest(t), projectRoot, subDir)
+	plan, _, err = failClosedGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, subDir)
 	if err != nil {
 		t.Fatalf("a plain new skill must apply low-risk: %v", err)
 	}
@@ -565,7 +574,7 @@ func TestGateSubdirectoryLaunchWithNewSkillNeedsReauthorization(t *testing.T) {
 	if err := os.WriteFile(forkSkill, []byte("---\nname: fork-skill\ndescription: fork helper\ncontext: fork\n---\nbody\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), projectRoot, subDir); err == nil {
+	if _, _, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, subDir); err == nil {
 		t.Fatal("a fork-context skill must require re-authorization")
 	}
 }

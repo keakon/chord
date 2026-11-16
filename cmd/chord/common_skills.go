@@ -26,6 +26,10 @@ func loadCustomCommands(ac *AppContext) {
 	}
 	projectCfgPath := filepath.Join(ac.ContentRoot, ".chord", "config.yaml")
 	globalCfgPath := filepath.Join(ac.ConfigHome, "config.yaml")
+	projectFiles := map[string][]byte{}
+	if projectLayerApplied && ac.TrustPlan.CommandFiles != nil {
+		projectFiles = ac.TrustPlan.CommandFiles
+	}
 	defs, warnings := command.Load(command.LoadOptions{
 		ContentRoot:      ac.ContentRoot,
 		ConfigHome:       ac.ConfigHome,
@@ -33,6 +37,7 @@ func loadCustomCommands(ac *AppContext) {
 		ProjectCfgPath:   projectCfgPath,
 		GlobalCfg:        globalCfgCommands,
 		GlobalCfgPath:    globalCfgPath,
+		ProjectFiles:     projectFiles,
 		SkipProjectFiles: !projectLayerApplied,
 	})
 	for _, w := range warnings {

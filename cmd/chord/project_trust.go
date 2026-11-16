@@ -94,14 +94,17 @@ type projectTrustSource struct {
 }
 
 // projectTrustDiscovery is the static snapshot of project-level sources for
-// one launch. The same read feeds the fingerprint, the disclosure, and (for
-// the config file) the eventual merge.
+// one launch. The same read feeds the fingerprint, disclosure, assessment,
+// and application.
 type projectTrustDiscovery struct {
 	// Inputs is the fingerprint input set over every declaration file.
 	Inputs trust.InputSet
 	// ConfigData holds the project config.yaml bytes as read during
 	// discovery; nil when the file is absent.
-	ConfigData []byte
+	ConfigData     []byte
+	AgentFiles     map[string][]byte
+	CommandFiles   map[string][]byte
+	SkillSnapshots []*skill.Snapshot
 	// Sources are the disclosed capability sources.
 	Sources []projectTrustSource
 	// Risk is the high-risk delta over the no-project baseline. Set by the
@@ -123,7 +126,9 @@ type projectTrustPlan struct {
 	LowRisk bool
 	// Inputs is the declaration input set covered by this run's trust decision;
 	// nil when the project layer is not applied.
-	Inputs trust.InputSet
+	Inputs       trust.InputSet
+	AgentFiles   map[string][]byte
+	CommandFiles map[string][]byte
 	// Notice explains a skipped project layer; empty when nothing was
 	// skipped.
 	Notice string
@@ -153,7 +158,7 @@ func newProjectTrustGate(policy projectTrustPolicy) *projectTrustGate {
 // store, and the policy decision. It returns the plan and the project
 // config bytes to merge (nil when no project config applies or the layer is
 // skipped).
-func (g *projectTrustGate) resolve(globalConfigPath, contentRoot, workDir string) (*projectTrustPlan, []byte, error) {
+func (g *projectTrustGate) resolve(globalConfigPath string, globalData []byte, contentRoot, workDir string) (*projectTrustPlan, []byte, error) {
 	discovery, err := discoverProjectTrust(contentRoot, workDir)
 	if err != nil {
 		return nil, nil, err
@@ -186,6 +191,8 @@ func (g *projectTrustGate) resolve(globalConfigPath, contentRoot, workDir string
 				return &projectTrustPlan{
 					ApplyProject: true,
 					Inputs:       discovery.Inputs,
+					AgentFiles:   discovery.AgentFiles,
+					CommandFiles: discovery.CommandFiles,
 				}, discovery.ConfigData, nil
 			}
 			return nil, nil, fmt.Errorf("project configuration changed after worktree setup; restart chord to review it")
@@ -205,10 +212,16 @@ func (g *projectTrustGate) resolve(globalConfigPath, contentRoot, workDir string
 		return &projectTrustPlan{
 			ApplyProject: true,
 			Inputs:       discovery.Inputs,
+			AgentFiles:   discovery.AgentFiles,
+			CommandFiles: discovery.CommandFiles,
 		}, discovery.ConfigData, nil
 	}
 
-	storePath, hasRecord, record, err := loadProjectTrustRecord(globalConfigPath, contentRoot)
+	globalResolved, err := config.LoadResolvedConfigData(globalConfigPath, globalData, "", nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load global config: %w", err)
+	}
+	storePath, hasRecord, record, err := loadProjectTrustRecord(globalResolved.Global, contentRoot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -218,6 +231,8 @@ func (g *projectTrustGate) resolve(globalConfigPath, contentRoot, workDir string
 			ApplyProject: true,
 			Authorized:   true,
 			Inputs:       discovery.Inputs,
+			AgentFiles:   discovery.AgentFiles,
+			CommandFiles: discovery.CommandFiles,
 		}, discovery.ConfigData, nil
 	}
 
@@ -227,13 +242,6 @@ func (g *projectTrustGate) resolve(globalConfigPath, contentRoot, workDir string
 	// is hazard-free, apply it without a prompt and without persisting trust.
 	// Recomputing on every start means a later high-risk edit, or a baseline
 	// change that promotes the delta, is still gated.
-	globalData, readErr := os.ReadFile(globalConfigPath)
-	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-		return nil, nil, fmt.Errorf("read global config for risk assessment: %w", readErr)
-	}
-	if readErr != nil {
-		globalData = nil
-	}
 	risk, err := assessProjectTrustRisk(globalConfigPath, globalData, contentRoot, workDir, discovery)
 	if err != nil {
 		return nil, nil, err
@@ -247,6 +255,8 @@ func (g *projectTrustGate) resolve(globalConfigPath, contentRoot, workDir string
 			ApplyProject: true,
 			LowRisk:      true,
 			Inputs:       discovery.Inputs,
+			AgentFiles:   discovery.AgentFiles,
+			CommandFiles: discovery.CommandFiles,
 		}, discovery.ConfigData, nil
 	}
 
@@ -279,6 +289,8 @@ func (g *projectTrustGate) resolve(globalConfigPath, contentRoot, workDir string
 			ApplyProject: true,
 			Authorized:   true,
 			Inputs:       discovery.Inputs,
+			AgentFiles:   discovery.AgentFiles,
+			CommandFiles: discovery.CommandFiles,
 		}, discovery.ConfigData, nil
 	default:
 		return nil, nil, fmt.Errorf("unknown project trust policy %d", g.policy)
@@ -303,11 +315,7 @@ func verifyProjectTrustInputs(inputs trust.InputSet, contentRoot, workDir string
 // and returns the record for the canonical project root. A store that
 // cannot be read yields no record: damaged state must never read as
 // authorized.
-func loadProjectTrustRecord(globalConfigPath, contentRoot string) (storePath string, hasRecord bool, record trust.ProjectTrust, err error) {
-	globalCfg, err := config.LoadConfigFromPath(globalConfigPath)
-	if err != nil {
-		return "", false, trust.ProjectTrust{}, fmt.Errorf("load config: %w", err)
-	}
+func loadProjectTrustRecord(globalCfg *config.Config, contentRoot string) (storePath string, hasRecord bool, record trust.ProjectTrust, err error) {
 	pathLocator, err := config.ResolvePathLocator(globalCfg, config.PathOptions{})
 	if err != nil {
 		return "", false, trust.ProjectTrust{}, fmt.Errorf("resolve storage paths: %w", err)
@@ -353,7 +361,7 @@ func resolveProjectConfigForUse(ctx context.Context, workDir, mode, globalPath s
 	}
 	contentRoot := resolveContentRoot(ctx, workDir)
 	gate := newProjectTrustGate(projectTrustPolicyForStartup(mode))
-	plan, projectData, err := gate.resolve(globalPath, contentRoot, workDir)
+	plan, projectData, err := gate.resolve(globalPath, globalData, contentRoot, workDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -498,7 +506,10 @@ func filterSkillDirsByTrust(dirs []SkillDir, inputs trust.InputSet) (allowed []S
 // project-scope skill declarations. Only files under project-controlled
 // roots count; global config-home sources are the user's own.
 func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, error) {
-	discovery := &projectTrustDiscovery{}
+	discovery := &projectTrustDiscovery{
+		AgentFiles:   make(map[string][]byte),
+		CommandFiles: make(map[string][]byte),
+	}
 	filesByRoot := map[string][]trust.FileHash{}
 
 	// Project config: this one read is the disclosure and the merge snapshot.
@@ -532,11 +543,16 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 		return nil, err
 	}
 	for _, path := range agentFiles {
-		if err := addProjectTrustFile(filesByRoot, contentRoot, path); err != nil {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read agent declaration %s: %w", path, err)
+		}
+		discovery.AgentFiles[path] = data
+		if err := addProjectTrustData(filesByRoot, contentRoot, path, data); err != nil {
 			return nil, err
 		}
 	}
-	discovery.Sources = append(discovery.Sources, agentDisclosureSources(contentRoot, agentFiles)...)
+	discovery.Sources = append(discovery.Sources, agentDisclosureSources(contentRoot, discovery.AgentFiles)...)
 
 	// Custom command Markdown under .chord/commands.
 	commandFiles, err := listProjectCommandFiles(filepath.Join(contentRoot, ".chord", "commands"))
@@ -544,7 +560,12 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 		return nil, err
 	}
 	for _, path := range commandFiles {
-		if err := addProjectTrustFile(filesByRoot, contentRoot, path); err != nil {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read command declaration %s: %w", path, err)
+		}
+		discovery.CommandFiles[path] = data
+		if err := addProjectTrustData(filesByRoot, contentRoot, path, data); err != nil {
 			return nil, err
 		}
 	}
@@ -555,11 +576,16 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 	skillDirs := projectScopeSkillDirs(contentRoot, workDir, projectSkillExtras)
 	var skillItems []skillDisclosureEntry
 	for _, dir := range skillDirs {
-		files, names, err := discoverSkillDeclarations(dir)
+		snapshots, err := readProjectSkillSnapshots(dir)
+		if err != nil {
+			return nil, err
+		}
+		files, names, err := skillSnapshotDeclarations(dir, snapshots)
 		if err != nil {
 			return nil, err
 		}
 		root := skillTrustRoot(dir)
+		discovery.SkillSnapshots = append(discovery.SkillSnapshots, snapshots...)
 		filesByRoot[root] = append(filesByRoot[root], files...)
 		for _, name := range names {
 			skillItems = append(skillItems, skillDisclosureEntry{label: dir.Path, name: name})
@@ -569,15 +595,6 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 
 	discovery.Inputs = buildProjectTrustInputs(filesByRoot)
 	return discovery, nil
-}
-
-// addProjectTrustFile hashes one declaration file into its root's group.
-func addProjectTrustFile(filesByRoot map[string][]trust.FileHash, root, path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-	return addProjectTrustData(filesByRoot, root, path, data)
 }
 
 func addProjectTrustData(filesByRoot map[string][]trust.FileHash, root, path string, data []byte) error {
@@ -636,22 +653,38 @@ func projectScopeSkillDirs(contentRoot, workDir string, projectExtras []string) 
 }
 
 func discoverSkillDeclarations(dir SkillDir) ([]trust.FileHash, []string, error) {
+	snapshots, err := readProjectSkillSnapshots(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return skillSnapshotDeclarations(dir, snapshots)
+}
+
+func readProjectSkillSnapshots(dir SkillDir) ([]*skill.Snapshot, error) {
 	matches, err := doublestar.Glob(os.DirFS(dir.Path), "**/SKILL.md")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, nil
+			return nil, nil
 		}
-		return nil, nil, fmt.Errorf("scan skill directory %s: %w", dir.Path, err)
+		return nil, fmt.Errorf("scan skill directory %s: %w", dir.Path, err)
 	}
 	sort.Strings(matches)
-	var files []trust.FileHash
-	var names []string
-	seen := map[string]bool{}
+	var snapshots []*skill.Snapshot
 	for _, rel := range matches {
 		snapshot, err := skill.ReadSnapshot(filepath.Join(dir.Path, filepath.FromSlash(rel)))
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots, nil
+}
+
+func skillSnapshotDeclarations(dir SkillDir, snapshots []*skill.Snapshot) ([]trust.FileHash, []string, error) {
+	var files []trust.FileHash
+	var names []string
+	seen := map[string]bool{}
+	for _, snapshot := range snapshots {
 		for _, file := range snapshot.Files {
 			if file.Data == nil {
 				continue
@@ -665,7 +698,7 @@ func discoverSkillDeclarations(dir SkillDir) ([]trust.FileHash, []string, error)
 				seen[hash.Path] = true
 			}
 		}
-		name := filepath.Base(filepath.Dir(rel))
+		name := filepath.Base(filepath.Dir(snapshot.Files[0].Path))
 		if loaded, err := snapshot.Load(); err == nil {
 			name = loaded.Name
 		}
@@ -895,21 +928,26 @@ func hookCommandDisplay(command config.HookCommand) string {
 	return "(shell script; contents hidden)"
 }
 
-func agentDisclosureSources(contentRoot string, paths []string) []projectTrustSource {
-	if len(paths) == 0 {
+func agentDisclosureSources(contentRoot string, files map[string][]byte) []projectTrustSource {
+	if len(files) == 0 {
 		return nil
 	}
 	byFile := map[string][]string{}
 	effectsByFile := map[string][]string{}
-	order := make([]string, 0, len(paths))
-	for _, path := range paths {
+	order := make([]string, 0, len(files))
+	for _, path := range sortedMapKeys(files) {
 		display := projectTrustDisplayPath(path, contentRoot)
 		if _, seen := byFile[display]; !seen {
 			order = append(order, display)
 		}
 		item := fmt.Sprintf("agent definition %q", filepath.Base(path))
-		if agentCfg, err := config.LoadAgentConfig(path); err == nil && agentCfg != nil {
+		if agentCfg, err := config.LoadAgentConfigData(path, files[path]); err == nil && agentCfg != nil {
 			item = fmt.Sprintf("agent %q", agentCfg.Name)
+			if agentCfg.IsExternalBackend() {
+				backend := agentCfg.Backend
+				byFile[display] = append(byFile[display], fmt.Sprintf("backend %q -> %s [arguments and environment hidden]", backend.Kind, truncateDisclosureTarget(backend.EffectiveCommand())))
+				effectsByFile[display] = append(effectsByFile[display], "External agent backends start local processes when delegated.")
+			}
 			if len(agentCfg.MCP) > 0 {
 				item += fmt.Sprintf(" with %d mcp server(s)", len(agentCfg.MCP))
 				effectsByFile[display] = append(effectsByFile[display], "Agent MCP servers may start local processes or connect to remote services.")

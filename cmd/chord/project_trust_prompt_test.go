@@ -139,7 +139,11 @@ func TestProjectTrustAgentMCPDetails(t *testing.T) {
 	if err := os.WriteFile(path, []byte("name: reviewer\nmcp:\n  sample:\n    command: sample-server\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sources := agentDisclosureSources(root, []string{path})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := agentDisclosureSources(root, map[string][]byte{path: data})
 	var out bytes.Buffer
 	renderProjectTrustSources(&out, sources)
 	if !strings.Contains(out.String(), "sample-server") || len(projectTrustEffects(sources)) != 1 {

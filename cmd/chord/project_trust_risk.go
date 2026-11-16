@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -20,8 +22,8 @@ import (
 // projectTrustRisk classifies what the project layer actually changes relative
 // to the configuration that would be in effect without it. Only changes that
 // can start a process, redirect traffic, or rewrite another control require an
-// explicit trust decision. Everything else - new agents, new commands, new
-// skills, prose-only changes - is applied without a prompt.
+// explicit trust decision. New guidance-only agents, commands, and ordinary
+// skills are applied without a prompt.
 //
 // The assessment is recomputed on every discovery: a low-risk layer is applied
 // without writing an authorization, so a later mutation that introduces a
@@ -83,11 +85,11 @@ func assessProjectTrustRisk(globalPath string, globalData []byte, contentRoot, w
 		}
 	}
 
-	agentHazards, agentUnreadable := compareAgentHazards(base, contentRoot)
+	agentHazards, agentUnreadable := compareAgentHazards(base, discovery.AgentFiles)
 	risk.Hazards = append(risk.Hazards, agentHazards...)
 	risk.Unreadable = risk.Unreadable || agentUnreadable
-	risk.Hazards = append(risk.Hazards, compareCommandHazards(base, contentRoot, discovery.ConfigData)...)
-	skillHazards, skillUnreadable := compareSkillHazards(base, contentRoot, workDir, discovery.ConfigData)
+	risk.Hazards = append(risk.Hazards, compareCommandHazards(base, contentRoot, discovery)...)
+	skillHazards, skillUnreadable := compareSkillHazards(base, discovery.SkillSnapshots)
 	risk.Hazards = append(risk.Hazards, skillHazards...)
 	risk.Unreadable = risk.Unreadable || skillUnreadable
 
@@ -101,11 +103,7 @@ func buildRiskBaseline(globalPath string, globalData []byte, contentRoot, workDi
 	}
 	b := &riskBaseline{config: resolved.Config}
 
-	globalCfg, err := config.LoadConfigFromPath(globalPath)
-	if err != nil {
-		return nil, err
-	}
-	locator, err := config.ResolvePathLocator(globalCfg, config.PathOptions{})
+	locator, err := config.ResolvePathLocator(resolved.Global, config.PathOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -169,16 +167,22 @@ func compareConfigHazards(base, applied *config.Config) []string {
 	var out []string
 	if len(base.MCP) == 0 && len(applied.MCP) > 0 {
 		out = append(out, "declares MCP server(s) that start local processes or connect to remote services")
-	} else if !reflect.DeepEqual(base.MCP, applied.MCP) {
+	} else if !maps.EqualFunc(base.MCP, applied.MCP, func(a, b config.MCPServerConfig) bool {
+		return reflect.DeepEqual(a, b)
+	}) {
 		out = append(out, "changes MCP server configuration")
 	}
 	if !reflect.DeepEqual(base.Hooks, applied.Hooks) {
 		out = append(out, "adds or changes hooks that run commands automatically")
 	}
-	if !reflect.DeepEqual(base.LSP, applied.LSP) {
+	if !maps.EqualFunc(base.LSP, applied.LSP, func(a, b config.LSPServerConfig) bool {
+		return reflect.DeepEqual(a, b)
+	}) {
 		out = append(out, "adds or changes LSP server(s) that start local processes")
 	}
-	if !reflect.DeepEqual(base.Providers, applied.Providers) || base.Proxy != applied.Proxy ||
+	if !maps.EqualFunc(base.Providers, applied.Providers, func(a, b config.ProviderConfig) bool {
+		return reflect.DeepEqual(applyRuntimeAPIBaseOverride(a), applyRuntimeAPIBaseOverride(b))
+	}) || base.Proxy != applied.Proxy ||
 		!reflect.DeepEqual(base.WebFetch, applied.WebFetch) {
 		out = append(out, "redirects model or web-fetch requests to configured endpoints")
 	}
@@ -186,62 +190,48 @@ func compareConfigHazards(base, applied *config.Config) []string {
 }
 
 // compareAgentHazards flags agents that widen an existing role or introduce an
-// auto-starting MCP server. A new agent with ordinary permission is guidance.
-func compareAgentHazards(b *riskBaseline, contentRoot string) ([]string, bool) {
-	paths, err := listProjectAgentFiles(filepath.Join(contentRoot, ".chord", "agents"))
+// MCP server or an external process. A new guidance-only agent is low-risk.
+func compareAgentHazards(b *riskBaseline, files map[string][]byte) ([]string, bool) {
+	agents, err := config.LoadAgentConfigsData(files)
 	if err != nil {
-		return []string{"project agent declarations could not be read"}, true
+		return []string{"project agent declaration could not be parsed"}, true
 	}
 	var out []string
-	for _, path := range paths {
-		cfg, err := config.LoadAgentConfig(path)
-		if err != nil || cfg == nil {
-			return append(out, "project agent declaration could not be parsed"), true
-		}
+	for _, name := range sortedMapKeys(agents) {
+		cfg := agents[name]
 		if len(cfg.MCP) > 0 {
 			out = append(out, fmt.Sprintf("agent %q declares MCP server(s) that start automatically", cfg.Name))
 		}
 		baseCfg, exists := b.agents[cfg.Name]
+		if cfg.IsExternalBackend() && (!exists || !sameBackendLaunch(baseCfg.Backend, cfg.Backend)) {
+			out = append(out, fmt.Sprintf("agent %q adds or changes an external backend process", cfg.Name))
+		}
 		if !exists {
 			continue
 		}
-		if widensPermission(permission.ParsePermission(&baseCfg.Permission), permission.ParsePermission(&cfg.Permission)) {
-			out = append(out, fmt.Sprintf("agent %q widens an existing role's permission", cfg.Name))
+		if permission.ParsePermission(&cfg.Permission).MayWiden(permission.ParsePermission(&baseCfg.Permission)) {
+			out = append(out, fmt.Sprintf("agent %q widens an existing role's permission or cannot be proven more restrictive", cfg.Name))
 		}
 	}
 	return out, false
 }
 
-// widensPermission reports whether the project ruleset grants allow where the
-// baseline grants something weaker. Rules are keyed by (permission, pattern) so
-// a pure reordering of identical rules is not a false positive.
-func widensPermission(base, project permission.Ruleset) bool {
-	baseByKey := make(map[[2]string]permission.Action, len(base))
-	for _, rule := range base {
-		baseByKey[[2]string{rule.Permission, rule.Pattern}] = rule.Action
-	}
-	for _, rule := range project {
-		if rule.Action != permission.ActionAllow {
-			continue
-		}
-		key := [2]string{rule.Permission, rule.Pattern}
-		before, found := baseByKey[key]
-		if !found || before != permission.ActionAllow {
-			return true
-		}
-	}
-	return false
+func sameBackendLaunch(base, project *config.BackendConfig) bool {
+	return base != nil && strings.TrimSpace(base.Kind) == strings.TrimSpace(project.Kind) &&
+		base.EffectiveCommand() == project.EffectiveCommand() &&
+		slices.Equal(base.LaunchArgs, project.LaunchArgs) && maps.Equal(base.Env, project.Env)
 }
 
 // compareCommandHazards flags a project command that shadows a global one: the
 // user believes they invoke their own command but run project-supplied text.
-func compareCommandHazards(b *riskBaseline, contentRoot string, configData []byte) []string {
-	projectCfg := parseProjectCommands(configData)
+func compareCommandHazards(b *riskBaseline, contentRoot string, discovery *projectTrustDiscovery) []string {
+	projectCfg := parseProjectCommands(discovery.ConfigData)
 	defs, _ := command.Load(command.LoadOptions{
-		ContentRoot: contentRoot,
-		ConfigHome:  b.configHome,
-		ProjectCfg:  projectCfg,
-		GlobalCfg:   b.config.Commands,
+		ContentRoot:  contentRoot,
+		ConfigHome:   b.configHome,
+		ProjectCfg:   projectCfg,
+		GlobalCfg:    b.config.Commands,
+		ProjectFiles: discovery.CommandFiles,
 	})
 	var out []string
 	for _, def := range defs {
@@ -270,42 +260,28 @@ func parseProjectCommands(data []byte) map[string]string {
 
 // compareSkillHazards flags project skills that shadow a global skill or carry
 // execution-affecting frontmatter (fork context, model override, tool grants).
-func compareSkillHazards(b *riskBaseline, contentRoot, workDir string, configData []byte) ([]string, bool) {
-	var extras []string
+func compareSkillHazards(b *riskBaseline, snapshots []*skill.Snapshot) ([]string, bool) {
 	unreadable := false
-	if len(configData) > 0 {
-		var parsed projectDisclosureYAML
-		if yaml.Unmarshal(configData, &parsed) == nil {
-			extras = parsed.Skills.Paths
-		}
-	}
 	var out []string
 	seen := make(map[string]bool)
-	for _, dir := range projectScopeSkillDirs(contentRoot, workDir, extras) {
-		matches, err := listSkillDeclarationPaths(dir.Path)
+	for _, snapshot := range snapshots {
+		loaded, err := snapshot.Load()
 		if err != nil {
-			out = append(out, "project skill declarations could not be read")
+			out = append(out, "project skill declaration could not be parsed")
 			unreadable = true
 			continue
 		}
-		for _, path := range matches {
-			meta, err := readSkillMeta(path)
-			if err != nil {
-				out = append(out, "project skill declaration could not be parsed")
-				unreadable = true
-				continue
-			}
-			if seen[meta.Name] {
-				continue
-			}
-			seen[meta.Name] = true
-			if b.skills[meta.Name] {
-				out = append(out, fmt.Sprintf("skill %q overrides an existing skill", meta.Name))
-			}
-			if meta.AllowedTools != nil || strings.TrimSpace(meta.Model) != "" ||
-				strings.TrimSpace(meta.Effort) != "" || meta.Context == "fork" {
-				out = append(out, fmt.Sprintf("skill %q changes execution context or tool access", meta.Name))
-			}
+		meta := loaded.Meta
+		if seen[meta.Name] {
+			continue
+		}
+		seen[meta.Name] = true
+		if b.skills[meta.Name] {
+			out = append(out, fmt.Sprintf("skill %q overrides an existing skill", meta.Name))
+		}
+		if meta.AllowedTools != nil || strings.TrimSpace(meta.Model) != "" ||
+			strings.TrimSpace(meta.Effort) != "" || meta.Context == "fork" {
+			out = append(out, fmt.Sprintf("skill %q changes execution context or tool access", meta.Name))
 		}
 	}
 	return out, unreadable
