@@ -72,6 +72,23 @@ Chord uses Go's standard proxy resolution (`http.ProxyFromEnvironment`) for outb
 
 For per-tool proxy override (e.g. routing only `web_fetch` through a SOCKS5), see [Configuration & Auth: WebFetch](./configuration.md#webfetch).
 
+Configured proxies take precedence over environment variables. Resolution order per request target (provider / `web_fetch` / image generation):
+
+1. The target's own `proxy` field, when set (`""` = force direct);
+2. otherwise the global `proxy` setting;
+3. otherwise the standard environment variables above.
+
+While nothing is configured, Chord follows the standard Go/CLI convention and honors these environment variables. To ignore them entirely (allowlist mode — only targets with an explicit `proxy` value use one), set the global proxy to `direct`:
+
+```yaml
+proxy: direct  # ignore HTTP_PROXY / HTTPS_PROXY / NO_PROXY
+providers:
+  gateway:
+    proxy: socks5://127.0.0.1:1080  # only this provider is proxied
+```
+
+A per-provider `proxy: ""` (empty string) also forces direct connections for that provider regardless of environment variables. See the [provider field reference](./configuration.md#provider-field-reference).
+
 ## Terminal detection (read-only)
 
 These are standard variables Chord inspects; you typically never set them yourself.

@@ -1680,7 +1680,7 @@ maintenance:
 | `hooks`                 | object                | 空                              | global / project / agent | 按触发点分组的 hooks。见 [Hooks](./hooks_CN.md)。                                                                    |
 | `max_output_tokens`     | int                   | `64000`                        | global / project         | 全局输出 token 上限。实际请求还会受各模型 `limit.output` 限制；reasoning 请求同样遵守该上限。                      |
 | `stream_retry_rounds`   | int                   | `0`（重试直到成功/取消）       | global / project         | 公开 LLM 流式请求的整轮重试硬上限。`0` 表示一直重试，直到成功、取消或终态失败。                                       |
-| `proxy`                 | string                | 空（用环境变量或直连）          | global / project         | 全局代理 URL。可通过 `web_fetch.proxy` 单独覆盖。                                                                    |
+| `proxy`                 | string                | 空（用环境变量或直连）          | global / project         | 全局代理 URL：`http://...` / `https://...` / `socks5://...`，或 `direct` 表示完全无视代理环境变量。未配置时，标准 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 生效。可按目标单独覆盖：provider 的 `proxy` 字段和 `web_fetch.proxy`。见 [网络代理](./environment_CN.md#网络代理)。 |
 | `web_fetch`             | object                | 空                              | global / project         | `user_agent`、`proxy`（nil 继承全局；空字符串 = 显式直连）。见 [WebFetch](#webfetch)。                                |
 | `worktree`              | object                | 空                              | global / project         | `branch_prefix` 决定 worktree 分支名前缀，`root` 决定 checkout 建在哪里（相对路径以仓库根为基准；默认仍在仓库之外的 state 目录下）。见 [Worktree 用法](./usage_CN.md#worktree)。 |
 
@@ -1725,6 +1725,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制未携带合法 `Retry-After` 提示的普通 HTTP 429 的 key 冷却。合法服务端提示、已确认的配额重置与凭据硬状态仍然优先。从未到达服务器的请求（DNS 解析、连接建立、TLS 验证）按内置连接梯子调度——1s 起每连续失败翻倍、梯子自身封顶 20s——不受本设置约束；最终等待取梯子与所配置退避中较大者。 |
 | `retry_delay_ms`| int   | 轮间退避和普通 429 冷却的基准值或固定值，单位毫秒，可取 `0` 到 `60000`；`0` / 省略默认 1000ms。即使省略 `retry_backoff`，只要写出该字段（包括显式 `0`）就算覆盖。`none` 模式下忽略。超出范围的值会记录日志并回退默认值，不会中断启动。 |
 | `compress`    | string | 上游请求体的压缩编码：`off`、`gzip` 或 `zstd`；不设即用 preset 默认值——`preset: codex` 发送 `zstd`，其他 preset 按原文发送。只在压缩能缩小体积时生效。旧的布尔写法 `compress: true` 已删除——会被忽略并由 `chord doctor config` 报告（改成 `compress: gzip` 即可）。 |
+| `proxy`       | string | 三态 — 省略（默认）继承全局 `proxy`；`""`（空字符串）强制直连并绕过代理环境变量；`http://...` / `https://...` / `socks5://...` 使用指定代理。见 [网络代理](./environment_CN.md#网络代理)。 |
 | `response_header_timeout` | int | 从开始该 provider 的流式 HTTP 请求到收到响应头的超时，单位秒，包括连接建立与请求体上传。`0` / 省略表示使用内置默认值；健康流由 `stream_idle_timeout` 约束，而不是总请求计时器。 |
 | `stream_idle_timeout` | int | 该 provider 的流式空闲超时，单位秒。`0` / 省略表示使用内置 SSE/WebSocket idle 默认值。 |
 | `stream_total_timeout` | int | 单条流的墙钟上限，单位秒，也包括 Codex Responses WebSocket 读等待。`0` / 省略表示不设上限——持续产出数据的流不会仅因耗时被截断。 |

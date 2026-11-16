@@ -72,6 +72,23 @@ Chord 使用 Go 标准的 `http.ProxyFromEnvironment` 解析出站 HTTP 代理�
 
 只想给某个工具单独设代理（如只让 `web_fetch` 走 SOCKS5），见 [配置与认证：WebFetch](./configuration_CN.md#webfetch)。
 
+显式配置的代理优先于环境变量。每个请求目标（provider / `web_fetch` / 图像生成）的解析顺序：
+
+1. 目标自身的 `proxy` 字段（写 `""` 表示强制直连）；
+2. 否则继承全局 `proxy`；
+3. 都未配置时，才应用上表的标准环境变量。
+
+在没有任何配置时，Chord 遵循 Go/CLI 生态惯例使用这些环境变量。若要完全无视它们（白名单模式——只有显式写了 `proxy` 的目标才走代理），把全局代理设为 `direct`：
+
+```yaml
+proxy: direct  # 忽略 HTTP_PROXY / HTTPS_PROXY / NO_PROXY
+providers:
+  gateway:
+    proxy: socks5://127.0.0.1:1080  # 只有这个 provider 走代理
+```
+
+provider 级 `proxy: ""`（空字符串）同样能让该 provider 无视环境变量强制直连。见 [Provider 字段参考](./configuration_CN.md#provider-字段参考)。
+
 ## 终端检测（只读）
 
 下面是标准变量，Chord 只读不写，通常不需主动设置。
