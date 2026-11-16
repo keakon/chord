@@ -89,6 +89,8 @@ type projectTrustSource struct {
 	File string
 	// Items are the redacted capability lines.
 	Items []string
+	// Effects describes automatic or external behavior contributed by this source.
+	Effects []string
 }
 
 // projectTrustDiscovery is the static snapshot of project-level sources for
@@ -729,25 +731,13 @@ func configDisclosureSources(configPath string, data []byte, parsed projectDiscl
 		return []projectTrustSource{{File: display, Items: []string{"config declaration present (could not be read for disclosure)"}}}
 	}
 	var items []string
+	var effects []string
 	for _, name := range sortedMapKeys(parsed.MCP) {
 		server := parsed.MCP[name]
-		target := server.URL
-		kind := "http"
-		if target == "" {
-			kind = "stdio"
-			target = strings.TrimSpace(server.Command)
-			if len(server.Args) > 0 {
-				target += " " + strings.Join(server.Args, " ")
-			}
-		}
-		if target == "" {
-			target = "(no target)"
-		}
-		item := fmt.Sprintf("mcp server %q -> %s (%s)", name, truncateDisclosureTarget(target), kind)
-		if server.Manual {
-			item += " [manual]"
-		}
-		items = append(items, item)
+		items = append(items, mcpServerDisclosure(name, server))
+	}
+	if len(parsed.MCP) > 0 {
+		effects = append(effects, "MCP servers may start local processes or connect to remote services.")
 	}
 	for _, event := range projectHookEvents() {
 		entries := event.entries(parsed.Hooks)
@@ -759,13 +749,19 @@ func configDisclosureSources(configPath string, data []byte, parsed projectDiscl
 			commands = append(commands, truncateDisclosureTarget(hookCommandDisplay(entry.Command)))
 		}
 		items = append(items, fmt.Sprintf("hook %s -> %s", event.label, strings.Join(commands, "; ")))
+		effects = append(effects, "Hooks can run commands automatically during configured events.")
 	}
+	hasLSP := false
 	for _, name := range sortedMapKeys(parsed.LSP) {
 		server := parsed.LSP[name]
 		if server.Disabled {
 			continue
 		}
+		hasLSP = true
 		items = append(items, fmt.Sprintf("lsp server %q -> %s", name, truncateDisclosureTarget(server.Command)))
+	}
+	if hasLSP {
+		effects = append(effects, "LSP servers may start local processes.")
 	}
 	for _, name := range sortedMapKeys(parsed.Providers) {
 		provider := parsed.Providers[name]
@@ -778,6 +774,9 @@ func configDisclosureSources(configPath string, data []byte, parsed projectDiscl
 		}
 		items = append(items, fmt.Sprintf("provider %q -> %s", name, truncateDisclosureTarget(endpoint)))
 	}
+	if len(parsed.Providers) > 0 || parsed.Proxy != "" {
+		effects = append(effects, "Model requests may be sent to the configured provider or proxy endpoints.")
+	}
 	if len(parsed.ModelPools) > 0 {
 		items = append(items, fmt.Sprintf("model pools: %d pool(s)", len(parsed.ModelPools)))
 	}
@@ -785,7 +784,12 @@ func configDisclosureSources(configPath string, data []byte, parsed projectDiscl
 		items = append(items, fmt.Sprintf("proxy -> %s", truncateDisclosureTarget(parsed.Proxy)))
 	}
 	if parsed.WebFetch != nil {
-		items = append(items, "web_fetch override")
+		if parsed.WebFetch.Proxy != nil && *parsed.WebFetch.Proxy != "" {
+			items = append(items, fmt.Sprintf("web_fetch proxy -> %s", truncateDisclosureTarget(*parsed.WebFetch.Proxy)))
+			effects = append(effects, "Web fetch requests may be sent through the configured proxy.")
+		} else {
+			items = append(items, "web_fetch override")
+		}
 	}
 	for _, path := range parsed.Skills.Paths {
 		if strings.TrimSpace(path) != "" {
@@ -798,7 +802,27 @@ func configDisclosureSources(configPath string, data []byte, parsed projectDiscl
 	if len(items) == 0 {
 		items = []string{"config declaration present (no capability-bearing section)"}
 	}
-	return []projectTrustSource{{File: display, Items: items}}
+	return []projectTrustSource{{File: display, Items: items, Effects: effects}}
+}
+
+func mcpServerDisclosure(name string, server config.MCPServerConfig) string {
+	target := server.URL
+	kind := "http"
+	if target == "" {
+		kind = "stdio"
+		target = strings.TrimSpace(server.Command)
+		if len(server.Args) > 0 {
+			target += " " + strings.Join(server.Args, " ")
+		}
+	}
+	if target == "" {
+		target = "(no target)"
+	}
+	item := fmt.Sprintf("mcp server %q -> %s (%s)", name, truncateDisclosureTarget(target), kind)
+	if server.Manual {
+		item += " [manual]"
+	}
+	return item
 }
 
 type projectHookEvent struct {
@@ -837,6 +861,7 @@ func agentDisclosureSources(contentRoot string, paths []string) []projectTrustSo
 		return nil
 	}
 	byFile := map[string][]string{}
+	effectsByFile := map[string][]string{}
 	order := make([]string, 0, len(paths))
 	for _, path := range paths {
 		display := projectTrustDisplayPath(path, contentRoot)
@@ -848,13 +873,17 @@ func agentDisclosureSources(contentRoot string, paths []string) []projectTrustSo
 			item = fmt.Sprintf("agent %q", agentCfg.Name)
 			if len(agentCfg.MCP) > 0 {
 				item += fmt.Sprintf(" with %d mcp server(s)", len(agentCfg.MCP))
+				effectsByFile[display] = append(effectsByFile[display], "Agent MCP servers may start local processes or connect to remote services.")
+				for _, name := range sortedMapKeys(agentCfg.MCP) {
+					byFile[display] = append(byFile[display], mcpServerDisclosure(name, agentCfg.MCP[name]))
+				}
 			}
 		}
 		byFile[display] = append(byFile[display], item)
 	}
 	sources := make([]projectTrustSource, 0, len(order))
 	for _, display := range order {
-		sources = append(sources, projectTrustSource{File: display, Items: byFile[display]})
+		sources = append(sources, projectTrustSource{File: display, Items: byFile[display], Effects: effectsByFile[display]})
 	}
 	return sources
 }

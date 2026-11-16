@@ -23,30 +23,18 @@ func promptProjectTrustAuthorization(discovery *projectTrustDiscovery, contentRo
 			_ = termIO.closer()
 		}
 	}()
+	return promptProjectTrustOnTerminal(termIO, discovery, contentRoot)
+}
+
+func promptProjectTrustOnTerminal(termIO *setupTerminal, discovery *projectTrustDiscovery, contentRoot string) (bool, error) {
 	out := termIO.out
 	if out == nil {
 		out = io.Discard
 	}
 
-	fmt.Fprintln(out, "This directory contains project-level Chord configuration.")
-	fmt.Fprintln(out, "Project configuration can start MCP servers (local commands), run")
-	fmt.Fprintln(out, "shell hooks, redirect model providers to other endpoints, and add")
-	fmt.Fprintln(out, "agents, commands, and skills. It applies only if you authorize it.")
-	fmt.Fprintln(out)
-	fmt.Fprintf(out, "Project configuration found in %s:\n", contentRoot)
-	for _, source := range discovery.Sources {
-		fmt.Fprintf(out, "  %s\n", source.File)
-		for _, item := range source.Items {
-			fmt.Fprintf(out, "    - %s\n", item)
-		}
-	}
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Chord records what it authorized for this project; later changes ask again.")
+	renderProjectTrustAuthorization(out, discovery, contentRoot)
 
 	for {
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "  1) Authorize and apply this project configuration")
-		fmt.Fprintln(out, "  2) Start without the project layer")
 		line, err := promptLine(termIO, "Choice: ")
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -60,10 +48,58 @@ func promptProjectTrustAuthorization(discovery *projectTrustDiscovery, contentRo
 			return true, nil
 		case "2":
 			return false, nil
+		case "3":
+			renderProjectTrustSources(out, discovery.Sources)
 		default:
-			fmt.Fprintln(out, "Enter 1 to authorize or 2 to skip the project layer.")
+			fmt.Fprintln(out, "Enter 1 to apply, 2 to skip, or 3 to inspect the files.")
 		}
 	}
+}
+
+func renderProjectTrustAuthorization(out io.Writer, discovery *projectTrustDiscovery, contentRoot string) {
+	fmt.Fprintf(out, "Project configuration found in %s:\n", contentRoot)
+	const previewLimit = 4
+	total := 0
+	for _, source := range discovery.Sources {
+		for _, item := range source.Items {
+			if total < previewLimit {
+				fmt.Fprintf(out, "  - %s\n", item)
+			}
+			total++
+		}
+	}
+	if total > previewLimit {
+		fmt.Fprintf(out, "  ... and %d more entries (choose 3 to inspect all files).\n", total-previewLimit)
+	}
+
+	if effects := projectTrustEffects(discovery.Sources); len(effects) > 0 {
+		fmt.Fprintln(out)
+		for _, effect := range effects {
+			fmt.Fprintf(out, "  - %s\n", effect)
+		}
+	}
+
+	fmt.Fprintln(out, "\nApply only if you trust this project's configuration.")
+	fmt.Fprintln(out, "  1) Apply and remember this configuration")
+	fmt.Fprintln(out, "     Changes to these declaration files will ask again.")
+	fmt.Fprintln(out, "  2) Skip project configuration for this run")
+	fmt.Fprintln(out, "     Start with global settings; project agents, commands, and skills will not load.")
+	fmt.Fprintln(out, "  3) Inspect all files and configuration details")
+}
+
+func projectTrustEffects(sources []projectTrustSource) []string {
+	seen := make(map[string]struct{})
+	var effects []string
+	for _, source := range sources {
+		for _, effect := range source.Effects {
+			if _, ok := seen[effect]; ok {
+				continue
+			}
+			seen[effect] = struct{}{}
+			effects = append(effects, effect)
+		}
+	}
+	return effects
 }
 
 // renderProjectTrustSources renders the disclosure as plain lines; the

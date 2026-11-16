@@ -870,13 +870,12 @@ Common uses include:
 
 ### Trust gate for project configuration
 
-Project-level configuration is repository content, so Chord applies it only
-after you authorize it in that directory. Before anything project-declared
-runs, Chord discovers every source — `config.yaml`, `.chord/agents/`,
-`.chord/commands/`, and project skills — shows what they would do (MCP
-servers, hooks, LSP servers, providers, agents, commands, and skills, with
-their key targets), and asks. Declining, cancelling, or closing the prompt
-starts Chord without the project layer.
+Chord asks before applying project configuration. The prompt shows up to
+four entries and describes the effects of the configuration it found.
+Choose **Inspect all files and configuration details** for the full list
+of sources and targets. Apply it only if you trust the project's
+configuration. Skipping starts Chord with global settings; project agents,
+commands, skills, and settings do not load.
 
 Authorizing records what was approved for the project. The record binds the
 declaration files by content: adding, removing, or changing any of them
