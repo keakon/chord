@@ -8,9 +8,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/term"
@@ -40,6 +42,59 @@ type setupTerminal struct {
 	// wizard; other promptLine consumers (project trust prompt) keep Esc as
 	// plain input.
 	escRestarts bool
+	// interrupt is the startup-phase Ctrl+C handler. main.go registers a
+	// process-wide signal.NotifyContext that only cancels a context, which a
+	// blocking line read cannot observe; without this, Ctrl+C in a cooked
+	// prompt is swallowed. Raw single-key prompts handle 0x03 themselves.
+	interrupt *setupInterrupt
+}
+
+type setupInterrupt struct {
+	signalCh chan os.Signal
+	stopCh   chan struct{}
+	stopOnce sync.Once
+}
+
+// armSetupInterrupt makes Ctrl+C terminate the process while a startup prompt
+// owns a real terminal. It is a no-op for non-TTY terminals (tests, pipes),
+// where the caller's line read already returns on EOF. The handler restores
+// the terminal to its baseline before exiting so a Ctrl+C during a hidden
+// input (term.ReadPassword) cannot leave the terminal in no-echo mode.
+func armSetupInterrupt(termIO *setupTerminal) {
+	if termIO == nil || !termIO.ttyInput() {
+		return
+	}
+	fd := termIO.in.Fd()
+	base, err := term.GetState(fd)
+	if err != nil {
+		return
+	}
+	handler := &setupInterrupt{
+		signalCh: make(chan os.Signal, 1),
+		stopCh:   make(chan struct{}),
+	}
+	signal.Notify(handler.signalCh, os.Interrupt)
+	go func() {
+		select {
+		case <-handler.signalCh:
+			// In cooked mode the terminal driver already echoes ^C, so don't
+			// print one here (unlike the raw path, which must echo it itself).
+			_ = term.Restore(fd, base)
+			os.Exit(130)
+		case <-handler.stopCh:
+		}
+	}()
+	termIO.interrupt = handler
+}
+
+func (h *setupInterrupt) stop() {
+	if h == nil {
+		return
+	}
+	h.stopOnce.Do(func() {
+		signal.Stop(h.signalCh)
+		close(h.stopCh)
+	})
 }
 
 // ttyInput reports whether the terminal's input side is a real terminal.
@@ -553,37 +608,48 @@ func openSetupTerminal(opts SetupWizardOptions) (*setupTerminal, error) {
 
 	inFile, inOK := opts.In.(*os.File)
 	outFile, outOK := opts.Out.(*os.File)
+	var termIO *setupTerminal
 	if inOK && outOK && term.IsTerminal(inFile.Fd()) && term.IsTerminal(outFile.Fd()) {
-		return &setupTerminal{in: inFile, out: opts.Out, reader: bufio.NewReader(inFile), readPassword: opts.ReadPassword}, nil
-	}
-	if opts.OpenTTY == nil {
-		return nil, fmt.Errorf("interactive terminal unavailable")
-	}
-
-	ttyIn, ttyOut, err := opts.OpenTTY()
-	if err != nil {
-		return nil, err
-	}
-	return &setupTerminal{
-		in:           ttyIn,
-		out:          ttyOut,
-		reader:       bufio.NewReader(ttyIn),
-		readPassword: opts.ReadPassword,
-		closer: func() error {
-			var firstErr error
-			if ttyIn != nil {
-				if err := ttyIn.Close(); err != nil {
-					firstErr = err
+		termIO = &setupTerminal{in: inFile, out: opts.Out, reader: bufio.NewReader(inFile), readPassword: opts.ReadPassword}
+	} else {
+		if opts.OpenTTY == nil {
+			return nil, fmt.Errorf("interactive terminal unavailable")
+		}
+		ttyIn, ttyOut, err := opts.OpenTTY()
+		if err != nil {
+			return nil, err
+		}
+		termIO = &setupTerminal{
+			in:           ttyIn,
+			out:          ttyOut,
+			reader:       bufio.NewReader(ttyIn),
+			readPassword: opts.ReadPassword,
+			closer: func() error {
+				var firstErr error
+				if ttyIn != nil {
+					if err := ttyIn.Close(); err != nil {
+						firstErr = err
+					}
 				}
-			}
-			if ttyOut != nil {
-				if err := ttyOut.Close(); err != nil && firstErr == nil {
-					firstErr = err
+				if ttyOut != nil {
+					if err := ttyOut.Close(); err != nil && firstErr == nil {
+						firstErr = err
+					}
 				}
-			}
-			return firstErr
-		},
-	}, nil
+				return firstErr
+			},
+		}
+	}
+	armSetupInterrupt(termIO)
+	prevCloser := termIO.closer
+	termIO.closer = func() error {
+		termIO.interrupt.stop()
+		if prevCloser != nil {
+			return prevCloser()
+		}
+		return nil
+	}
+	return termIO, nil
 }
 
 func promptChoice(termIO *setupTerminal, prompt string, allowed []string, defaultChoice string) (string, error) {
