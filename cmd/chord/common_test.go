@@ -845,3 +845,63 @@ model_pools:
 		t.Fatalf("issues = %v, want secondary pool diagnostic from snapshot", issues)
 	}
 }
+
+func TestSkillDirsBlockUnboundProjectExtras(t *testing.T) {
+	projectRoot := t.TempDir()
+	chordHome := t.TempDir()
+	extraDir := filepath.Join(projectRoot, "vendor", "skills")
+	if err := os.MkdirAll(extraDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ac := &AppContext{
+		ContentRoot: projectRoot,
+		WorkDir:     projectRoot,
+		ConfigHome:  chordHome,
+		Cfg:         &config.Config{Skills: config.SkillsConfig{Paths: []string{extraDir}}},
+		TrustPlan:   &projectTrustPlan{ApplyProject: true, SkillExtrasUnbound: true},
+	}
+
+	dirs, blocked := trustedSkillDirsForWorkDir(ac, ac.WorkDir)
+	for _, dir := range dirs {
+		if dir.Path == extraDir {
+			t.Fatalf("unbound project extra must be blocked, got dirs %+v", dirs)
+		}
+	}
+	found := false
+	for _, path := range blocked {
+		if path == extraDir {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("blocked list must contain %q, got %v", extraDir, blocked)
+	}
+}
+
+func TestSkillDirsKeepGlobalExtrasWhenProjectExtrasUnbound(t *testing.T) {
+	projectRoot := t.TempDir()
+	chordHome := t.TempDir()
+	extraDir := filepath.Join(chordHome, "my-skills")
+	if err := os.MkdirAll(extraDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The extra path is declared by the user's own global config, so it stays
+	// attributable to the user even when the project layer applied with its
+	// skill extras unbound; only unattributable extras are blocked.
+	ac := &AppContext{
+		ContentRoot: projectRoot,
+		WorkDir:     projectRoot,
+		ConfigHome:  chordHome,
+		Cfg:         &config.Config{Skills: config.SkillsConfig{Paths: []string{extraDir}}},
+		GlobalCfg:   &config.Config{Skills: config.SkillsConfig{Paths: []string{extraDir}}},
+		TrustPlan:   &projectTrustPlan{ApplyProject: true, SkillExtrasUnbound: true},
+	}
+
+	dirs, blocked := trustedSkillDirsForWorkDir(ac, ac.WorkDir)
+	for _, dir := range dirs {
+		if dir.Path == extraDir {
+			return
+		}
+	}
+	t.Fatalf("global extra must stay loaded, got dirs %+v blocked %v", dirs, blocked)
+}

@@ -83,7 +83,35 @@ func trustedSkillDirsForWorkDir(ac *AppContext, workDir string) ([]SkillDir, []s
 		}
 	}
 	allowed, blocked := filterSkillDirsByTrust(dirs, ac.TrustPlan.Inputs)
-	return allowed, blocked
+	if !ac.TrustPlan.SkillExtrasUnbound {
+		return allowed, blocked
+	}
+	// The applied project config failed disclosure parsing and declared no
+	// extractable skill extras, so project-declared extras would not be
+	// covered by the input set. Config merging strips the same undecodable
+	// leaves the disclosure parse rejects, so project extras cannot normally
+	// reach this list; this check is a fail-closed net for that invariant
+	// breaking. Extras attributable to the user's own global configuration
+	// stay loaded; anything else is treated as project-controlled and
+	// uncovered instead of letting the empty-Root passthrough load it like a
+	// global directory.
+	globalExtras := make(map[string]struct{})
+	if ac.GlobalCfg != nil {
+		for _, path := range ac.GlobalCfg.Skills.Paths {
+			globalExtras[path] = struct{}{}
+		}
+	}
+	kept := make([]SkillDir, 0, len(allowed))
+	for _, dir := range allowed {
+		if dir.Scope == skillDirScopeExtra && dir.Root == "" {
+			if _, ok := globalExtras[dir.Path]; !ok {
+				blocked = append(blocked, dir.Path)
+				continue
+			}
+		}
+		kept = append(kept, dir)
+	}
+	return kept, blocked
 }
 
 // globalScopeSkillDirs keeps only the directories that are not

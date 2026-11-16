@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -112,11 +113,24 @@ func (s InputSet) Covers(root string, files []FileHash) bool {
 	return false
 }
 
+// maxHashFileBytes caps one hashed declaration file. Declaration inputs are
+// small text documents; the cap keeps a re-check from reading a file that
+// was swapped for a huge one after discovery.
+const maxHashFileBytes = 1 << 20
+
 // HashFile hashes one file's content for a FileHash entry.
 func HashFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxHashFileBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(data) > maxHashFileBytes {
+		return "", fmt.Errorf("file %s exceeds the %d byte hashing limit", path, maxHashFileBytes)
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil

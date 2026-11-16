@@ -3,14 +3,11 @@ package main
 import (
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"gopkg.in/yaml.v3"
 
 	"github.com/keakon/chord/internal/command"
@@ -133,27 +130,19 @@ func buildRiskBaseline(globalPath string, globalData []byte, contentRoot, workDi
 	// Global skill declarations: config-home skills plus global skills.paths.
 	// Project-declared extra paths are deliberately excluded (they are part of
 	// the delta being assessed).
-	b.skills = make(map[string]bool)
 	dirs := ResolveSkillDirs(SkillDirsInput{
 		ContentRoot: contentRoot,
 		WorkDir:     workDir,
 		ConfigHome:  locator.ConfigHome,
 		Extra:       b.config.Skills.Paths,
 	})
-	for _, dir := range globalScopeSkillDirs(dirs) {
-		// Global skill dirs carry no Root, so discoverSkillDeclarations cannot
-		// relativize against it. Read names straight from the declarations.
-		paths, err := listSkillDeclarationPaths(dir.Path)
-		if err != nil {
-			return nil, err
-		}
-		for _, path := range paths {
-			meta, err := readSkillMeta(path)
-			if err != nil {
-				continue
-			}
-			b.skills[meta.Name] = true
-		}
+	globalSkills, err := skill.NewLoader(SkillDirPaths(globalScopeSkillDirs(dirs))).ScanMeta()
+	if err != nil {
+		return nil, err
+	}
+	b.skills = make(map[string]bool, len(globalSkills))
+	for _, meta := range globalSkills {
+		b.skills[meta.Name] = true
 	}
 	return b, nil
 }
@@ -285,36 +274,4 @@ func compareSkillHazards(b *riskBaseline, snapshots []*skill.Snapshot) ([]string
 		}
 	}
 	return out, unreadable
-}
-
-func readSkillMeta(path string) (*skill.Meta, error) {
-	snapshot, err := skill.ReadSnapshot(path)
-	if err != nil {
-		return nil, err
-	}
-	loaded, err := snapshot.Load()
-	if err != nil {
-		return nil, err
-	}
-	meta := loaded.Meta
-	return &meta, nil
-}
-
-func listSkillDeclarationPaths(dir string) ([]string, error) {
-	if dir == "" {
-		return nil, nil
-	}
-	matches, err := doublestar.Glob(os.DirFS(dir), "**/SKILL.md")
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	sort.Strings(matches)
-	out := make([]string, 0, len(matches))
-	for _, rel := range matches {
-		out = append(out, filepath.Join(dir, filepath.FromSlash(rel)))
-	}
-	return out, nil
 }

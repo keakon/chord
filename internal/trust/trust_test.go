@@ -1,9 +1,11 @@
 package trust
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -264,5 +266,15 @@ func TestStoreConcurrentAuthorizeKeepsBothRecords(t *testing.T) {
 		if _, ok := store.Lookup(root); !ok {
 			t.Errorf("record for %s lost under concurrency", root)
 		}
+	}
+}
+
+func TestHashFileRejectsOversizedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "big.txt")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 1<<20+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := HashFile(path); err == nil || !strings.Contains(err.Error(), "hashing limit") {
+		t.Fatalf("HashFile err = %v, want the hashing limit error", err)
 	}
 }

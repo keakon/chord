@@ -23,14 +23,16 @@ type Snapshot struct {
 	Files []Declaration
 }
 
-func ReadSnapshot(path string) (*Snapshot, error) {
-	main, err := readDeclaration(path, false)
+// ReadSnapshot uses the caller's reader for every declaration so one read
+// budget can cover the main file, sidecars and other project inputs.
+func ReadSnapshot(path string, readFile func(string) ([]byte, error)) (*Snapshot, error) {
+	main, err := readDeclaration(path, false, readFile)
 	if err != nil {
 		return nil, err
 	}
 	snapshot := &Snapshot{Files: []Declaration{main}}
 	for _, name := range []string{"chord.yaml", "agent.yaml"} {
-		file, err := readDeclaration(filepath.Join(filepath.Dir(main.Target), name), true)
+		file, err := readDeclaration(filepath.Join(filepath.Dir(main.Target), name), true, readFile)
 		if err != nil {
 			return nil, err
 		}
@@ -39,7 +41,7 @@ func ReadSnapshot(path string) (*Snapshot, error) {
 	return snapshot, nil
 }
 
-func readDeclaration(path string, optional bool) (Declaration, error) {
+func readDeclaration(path string, optional bool, readFile func(string) ([]byte, error)) (Declaration, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return Declaration{}, fmt.Errorf("resolve declaration path: %w", err)
@@ -56,7 +58,7 @@ func readDeclaration(path string, optional bool) (Declaration, error) {
 		return file, fmt.Errorf("resolve declaration %s: %w", path, err)
 	}
 	file.Target = target
-	file.Data, err = os.ReadFile(target)
+	file.Data, err = readFile(target)
 	if err != nil {
 		return file, fmt.Errorf("read declaration %s: %w", path, err)
 	}

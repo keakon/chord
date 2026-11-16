@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -110,6 +111,11 @@ type projectTrustDiscovery struct {
 	// Risk is the high-risk delta over the no-project baseline. Set by the
 	// gate before disclosure; nil until assessed.
 	Risk *projectTrustRisk
+	// SkillExtrasUnbound is set when the project config failed disclosure
+	// parsing and no skill extra paths could be extracted from it. The
+	// runtime side uses it to fail closed over project-declared skill
+	// extras instead of trusting them like global directories.
+	SkillExtrasUnbound bool
 }
 
 // projectTrustPlan is the gate decision handed to startup.
@@ -129,6 +135,11 @@ type projectTrustPlan struct {
 	Inputs       trust.InputSet
 	AgentFiles   map[string][]byte
 	CommandFiles map[string][]byte
+	// SkillExtrasUnbound carries the discovery flag: the applied project
+	// config failed disclosure parsing and declared no extractable skill
+	// extras, so extra skill directories the runtime finds are not covered
+	// by Inputs and must be skipped.
+	SkillExtrasUnbound bool
 	// Notice explains a skipped project layer; empty when nothing was
 	// skipped.
 	Notice string
@@ -161,6 +172,14 @@ func newProjectTrustGate(policy projectTrustPolicy) *projectTrustGate {
 func (g *projectTrustGate) resolve(globalConfigPath string, globalData []byte, contentRoot, workDir string) (*projectTrustPlan, []byte, error) {
 	discovery, err := discoverProjectTrust(contentRoot, workDir)
 	if err != nil {
+		// Skip mode ignores the project layer entirely: an unreadable or
+		// oversized declaration must not block a run that asked to ignore
+		// the layer, so report it as skipped instead of failing startup.
+		if g.policy == projectTrustPolicySkipProject {
+			return &projectTrustPlan{
+				Notice: fmt.Sprintf("project configuration in %s is ignored (--skip-project-config)", contentRoot),
+			}, nil, nil
+		}
 		return nil, nil, err
 	}
 	// A low-risk decision is recomputed from the baseline on every start, so a
@@ -189,10 +208,11 @@ func (g *projectTrustGate) resolve(globalConfigPath string, globalData []byte, c
 					}, nil, nil
 				}
 				return &projectTrustPlan{
-					ApplyProject: true,
-					Inputs:       discovery.Inputs,
-					AgentFiles:   discovery.AgentFiles,
-					CommandFiles: discovery.CommandFiles,
+					ApplyProject:       true,
+					Inputs:             discovery.Inputs,
+					AgentFiles:         discovery.AgentFiles,
+					CommandFiles:       discovery.CommandFiles,
+					SkillExtrasUnbound: discovery.SkillExtrasUnbound,
 				}, discovery.ConfigData, nil
 			}
 			return nil, nil, fmt.Errorf("project configuration changed after worktree setup; restart chord to review it")
@@ -210,10 +230,11 @@ func (g *projectTrustGate) resolve(globalConfigPath string, globalData []byte, c
 		}, nil, nil
 	case projectTrustPolicyTrustOnce:
 		return &projectTrustPlan{
-			ApplyProject: true,
-			Inputs:       discovery.Inputs,
-			AgentFiles:   discovery.AgentFiles,
-			CommandFiles: discovery.CommandFiles,
+			ApplyProject:       true,
+			Inputs:             discovery.Inputs,
+			AgentFiles:         discovery.AgentFiles,
+			CommandFiles:       discovery.CommandFiles,
+			SkillExtrasUnbound: discovery.SkillExtrasUnbound,
 		}, discovery.ConfigData, nil
 	}
 
@@ -228,11 +249,12 @@ func (g *projectTrustGate) resolve(globalConfigPath string, globalData []byte, c
 	fingerprint := discovery.Inputs.Fingerprint()
 	if hasRecord && record.Fingerprint == fingerprint {
 		return &projectTrustPlan{
-			ApplyProject: true,
-			Authorized:   true,
-			Inputs:       discovery.Inputs,
-			AgentFiles:   discovery.AgentFiles,
-			CommandFiles: discovery.CommandFiles,
+			ApplyProject:       true,
+			Authorized:         true,
+			Inputs:             discovery.Inputs,
+			AgentFiles:         discovery.AgentFiles,
+			CommandFiles:       discovery.CommandFiles,
+			SkillExtrasUnbound: discovery.SkillExtrasUnbound,
 		}, discovery.ConfigData, nil
 	}
 
@@ -252,11 +274,12 @@ func (g *projectTrustGate) resolve(globalConfigPath string, globalData []byte, c
 		// on every start would recreate the confirmation fatigue this removes.
 		// doctor config reports the low-risk state for anyone who wants it.
 		return &projectTrustPlan{
-			ApplyProject: true,
-			LowRisk:      true,
-			Inputs:       discovery.Inputs,
-			AgentFiles:   discovery.AgentFiles,
-			CommandFiles: discovery.CommandFiles,
+			ApplyProject:       true,
+			LowRisk:            true,
+			Inputs:             discovery.Inputs,
+			AgentFiles:         discovery.AgentFiles,
+			CommandFiles:       discovery.CommandFiles,
+			SkillExtrasUnbound: discovery.SkillExtrasUnbound,
 		}, discovery.ConfigData, nil
 	}
 
@@ -286,11 +309,12 @@ func (g *projectTrustGate) resolve(globalConfigPath string, globalData []byte, c
 			}, nil, nil
 		}
 		return &projectTrustPlan{
-			ApplyProject: true,
-			Authorized:   true,
-			Inputs:       discovery.Inputs,
-			AgentFiles:   discovery.AgentFiles,
-			CommandFiles: discovery.CommandFiles,
+			ApplyProject:       true,
+			Authorized:         true,
+			Inputs:             discovery.Inputs,
+			AgentFiles:         discovery.AgentFiles,
+			CommandFiles:       discovery.CommandFiles,
+			SkillExtrasUnbound: discovery.SkillExtrasUnbound,
 		}, discovery.ConfigData, nil
 	default:
 		return nil, nil, fmt.Errorf("unknown project trust policy %d", g.policy)
@@ -405,7 +429,10 @@ func newProjectSkillLoader(inputs trust.InputSet, trustState string) agent.Proje
 			}
 		}
 		if matched != nil {
-			snapshot, err := skill.ReadSnapshot(declaration)
+			declarationBudget := int64(maxProjectDeclarationTotalBytes)
+			snapshot, err := skill.ReadSnapshot(declaration, func(path string) ([]byte, error) {
+				return readProjectDeclarationFile(path, &declarationBudget)
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -481,12 +508,13 @@ func skillDeclarationHash(root string, file skill.Declaration) (trust.FileHash, 
 // declaration files are all covered by the authorized input set, and
 // returns the paths of the directories that had to be skipped.
 func filterSkillDirsByTrust(dirs []SkillDir, inputs trust.InputSet) (allowed []SkillDir, blocked []string) {
+	declarationBudget := int64(maxProjectDeclarationTotalBytes)
 	for _, dir := range dirs {
 		if dir.Root == "" {
 			allowed = append(allowed, dir)
 			continue
 		}
-		files, _, err := discoverSkillDeclarations(dir)
+		files, _, err := discoverSkillDeclarations(dir, &declarationBudget)
 		if err != nil {
 			blocked = append(blocked, dir.Path)
 			continue
@@ -501,6 +529,42 @@ func filterSkillDirsByTrust(dirs []SkillDir, inputs trust.InputSet) (allowed []S
 	return allowed, blocked
 }
 
+const (
+	// Project declaration inputs are small text documents. The caps keep a
+	// huge repository from stalling startup with unbounded reads; a file or
+	// repository beyond them fails startup instead of being applied or
+	// silently truncated.
+	maxProjectDeclarationFileBytes  = 1 << 20
+	maxProjectDeclarationTotalBytes = 16 << 20
+)
+
+// readProjectDeclarationFile reads one project declaration file, refusing
+// files beyond maxProjectDeclarationFileBytes and tracking the total read
+// budget against maxProjectDeclarationTotalBytes.
+func readProjectDeclarationFile(path string, budget *int64) ([]byte, error) {
+	if *budget < 0 {
+		return nil, fmt.Errorf("project declarations exceed the %d byte total limit while reading %s", maxProjectDeclarationTotalBytes, path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	limit := min(int64(maxProjectDeclarationFileBytes), *budget)
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	*budget -= int64(len(data))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxProjectDeclarationFileBytes {
+		return nil, fmt.Errorf("declaration file %s exceeds the %d byte limit", path, maxProjectDeclarationFileBytes)
+	}
+	if *budget < 0 {
+		return nil, fmt.Errorf("project declarations exceed the %d byte total limit while reading %s", maxProjectDeclarationTotalBytes, path)
+	}
+	return data, nil
+}
+
 // discoverProjectTrust enumerates and hashes every project-level source:
 // the project config, agent definitions, custom command files, and the
 // project-scope skill declarations. Only files under project-controlled
@@ -511,10 +575,11 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 		CommandFiles: make(map[string][]byte),
 	}
 	filesByRoot := map[string][]trust.FileHash{}
+	declarationBudget := int64(maxProjectDeclarationTotalBytes)
 
 	// Project config: this one read is the disclosure and the merge snapshot.
 	configPath := config.ProjectConfigPath(contentRoot)
-	configData, err := os.ReadFile(configPath)
+	configData, err := readProjectDeclarationFile(configPath, &declarationBudget)
 	switch {
 	case err == nil:
 		discovery.ConfigData = configData
@@ -531,11 +596,14 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 	discovery.Sources = append(discovery.Sources, configDisclosureSources(configPath, configData, parsed, parseErr, contentRoot)...)
 
 	// Extra skill directories declared by the project config are themselves
-	// project-controlled inputs.
-	var projectSkillExtras []string
-	if parseErr == nil {
-		projectSkillExtras = parsed.Skills.Paths
-	}
+	// project-controlled inputs. A disclosure parse failure must not drop
+	// them: yaml.v3 keeps decoding the sections a type error did not touch,
+	// so the best-effort extraction still binds those directories. When even
+	// that yields nothing (a broken skills section, or a syntax error), the
+	// plan records the extras as unbound and the runtime side fails closed
+	// instead of loading them like global directories.
+	projectSkillExtras := parsed.Skills.Paths
+	discovery.SkillExtrasUnbound = parseErr != nil && len(projectSkillExtras) == 0
 
 	// Agent definitions under .chord/agents.
 	agentFiles, err := listProjectAgentFiles(filepath.Join(contentRoot, ".chord", "agents"))
@@ -543,7 +611,7 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 		return nil, err
 	}
 	for _, path := range agentFiles {
-		data, err := os.ReadFile(path)
+		data, err := readProjectDeclarationFile(path, &declarationBudget)
 		if err != nil {
 			return nil, fmt.Errorf("read agent declaration %s: %w", path, err)
 		}
@@ -560,7 +628,7 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 		return nil, err
 	}
 	for _, path := range commandFiles {
-		data, err := os.ReadFile(path)
+		data, err := readProjectDeclarationFile(path, &declarationBudget)
 		if err != nil {
 			return nil, fmt.Errorf("read command declaration %s: %w", path, err)
 		}
@@ -576,7 +644,7 @@ func discoverProjectTrust(contentRoot, workDir string) (*projectTrustDiscovery, 
 	skillDirs := projectScopeSkillDirs(contentRoot, workDir, projectSkillExtras)
 	var skillItems []skillDisclosureEntry
 	for _, dir := range skillDirs {
-		snapshots, err := readProjectSkillSnapshots(dir)
+		snapshots, err := readProjectSkillSnapshots(dir, &declarationBudget)
 		if err != nil {
 			return nil, err
 		}
@@ -652,15 +720,15 @@ func projectScopeSkillDirs(contentRoot, workDir string, projectExtras []string) 
 	return out
 }
 
-func discoverSkillDeclarations(dir SkillDir) ([]trust.FileHash, []string, error) {
-	snapshots, err := readProjectSkillSnapshots(dir)
+func discoverSkillDeclarations(dir SkillDir, budget *int64) ([]trust.FileHash, []string, error) {
+	snapshots, err := readProjectSkillSnapshots(dir, budget)
 	if err != nil {
 		return nil, nil, err
 	}
 	return skillSnapshotDeclarations(dir, snapshots)
 }
 
-func readProjectSkillSnapshots(dir SkillDir) ([]*skill.Snapshot, error) {
+func readProjectSkillSnapshots(dir SkillDir, budget *int64) ([]*skill.Snapshot, error) {
 	matches, err := doublestar.Glob(os.DirFS(dir.Path), "**/SKILL.md")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -671,7 +739,9 @@ func readProjectSkillSnapshots(dir SkillDir) ([]*skill.Snapshot, error) {
 	sort.Strings(matches)
 	var snapshots []*skill.Snapshot
 	for _, rel := range matches {
-		snapshot, err := skill.ReadSnapshot(filepath.Join(dir.Path, filepath.FromSlash(rel)))
+		snapshot, err := skill.ReadSnapshot(filepath.Join(dir.Path, filepath.FromSlash(rel)), func(path string) ([]byte, error) {
+			return readProjectDeclarationFile(path, budget)
+		})
 		if err != nil {
 			return nil, err
 		}

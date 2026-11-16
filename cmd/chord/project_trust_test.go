@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -309,6 +310,22 @@ func TestGateNoInputsNeedsNoAuthorization(t *testing.T) {
 		if plan.ApplyProject || plan.Notice != "" || projectData != nil {
 			t.Fatalf("no project inputs must pass untouched, got %+v data=%v", plan, projectData)
 		}
+	}
+}
+
+func TestGateSkipProjectIgnoresDiscoveryFailures(t *testing.T) {
+	writeGlobalConfigForTrustTest(t)
+	projectRoot := t.TempDir()
+	// Skip mode asked to ignore the project layer, so even an oversized
+	// declaration that fails discovery must not block the run.
+	writeProjectConfigForTrustTest(t, projectRoot, strings.Repeat("x", maxProjectDeclarationFileBytes+1))
+
+	plan, projectData, err := skipProjectGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), projectRoot, projectRoot)
+	if err != nil {
+		t.Fatalf("skip mode must not fail on discovery errors: %v", err)
+	}
+	if plan.ApplyProject || projectData != nil || !strings.Contains(plan.Notice, "--skip-project-config") {
+		t.Fatalf("skip plan must ignore the layer, got %+v data=%v", plan, projectData)
 	}
 }
 
@@ -809,5 +826,255 @@ func TestDoctorConfigShowsProjectTrustStatus(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "No project configuration authorization") {
 		t.Fatalf("expected no-record notice, got %s", out.String())
+	}
+}
+
+func TestDiscoverProjectTrustBindsSkillExtrasUnderDisclosureTypeError(t *testing.T) {
+	projectRoot := t.TempDir()
+	// The bad lsp leaf fails the strict disclosure parse while the lenient
+	// runtime load tolerates it. yaml.v3 keeps decoding the sections the type
+	// error did not touch, so the declared extra directory must stay bound to
+	// the input set instead of escaping content verification.
+	extraDir := filepath.Join(projectRoot, "vendor", "skills")
+	writeProjectConfigForTrustTest(t, projectRoot, "lsp: 42\nskills:\n  paths:\n    - "+extraDir+"\n")
+	skillPath := filepath.Join(extraDir, "demo", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: demo\ndescription: demo helper\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	discovery, err := discoverProjectTrust(projectRoot, projectRoot)
+	if err != nil {
+		t.Fatalf("discoverProjectTrust: %v", err)
+	}
+	if discovery.SkillExtrasUnbound {
+		t.Fatal("a type error outside the skills section must not mark the extras unbound")
+	}
+	var extra *trust.Input
+	for i := range discovery.Inputs {
+		if strings.HasSuffix(filepath.ToSlash(discovery.Inputs[i].Root), "vendor/skills") {
+			extra = &discovery.Inputs[i]
+			break
+		}
+	}
+	if extra == nil {
+		t.Fatalf("declared extra directory must be an input, got %+v", discovery.Inputs)
+	}
+	if len(extra.Files) != 1 {
+		t.Fatalf("extra input must bind the skill declaration, got %+v", extra.Files)
+	}
+}
+
+func TestDiscoverProjectTrustFlagsUnboundSkillExtras(t *testing.T) {
+	projectRoot := t.TempDir()
+	// A broken skills section yields no extractable extras: the plan must
+	// record them as unbound so the runtime side fails closed.
+	writeProjectConfigForTrustTest(t, projectRoot, "skills:\n  paths: 42\n")
+
+	discovery, err := discoverProjectTrust(projectRoot, projectRoot)
+	if err != nil {
+		t.Fatalf("discoverProjectTrust: %v", err)
+	}
+	if !discovery.SkillExtrasUnbound {
+		t.Fatal("a broken skills section must mark the extras unbound")
+	}
+}
+
+func TestDiscoverProjectTrustBindsValidExtrasAmongInvalidElements(t *testing.T) {
+	projectRoot := t.TempDir()
+	// One bad element fails the strict disclosure parse, but yaml.v3 keeps
+	// decoding the elements it can read. The valid extras must stay bound to
+	// the input set instead of being dropped with the broken element.
+	extraDir := filepath.Join(projectRoot, "vendor", "skills")
+	writeProjectConfigForTrustTest(t, projectRoot, "skills:\n  paths:\n    - "+extraDir+"\n    - bad: true\n")
+	skillPath := filepath.Join(extraDir, "demo", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: demo\ndescription: demo helper\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	discovery, err := discoverProjectTrust(projectRoot, projectRoot)
+	if err != nil {
+		t.Fatalf("discoverProjectTrust: %v", err)
+	}
+	if discovery.SkillExtrasUnbound {
+		t.Fatal("valid extras alongside a broken element must not be marked unbound")
+	}
+	var extra *trust.Input
+	for i := range discovery.Inputs {
+		if strings.HasSuffix(filepath.ToSlash(discovery.Inputs[i].Root), "vendor/skills") {
+			extra = &discovery.Inputs[i]
+			break
+		}
+	}
+	if extra == nil {
+		t.Fatalf("valid extra directory must be an input, got %+v", discovery.Inputs)
+	}
+	if len(extra.Files) != 1 {
+		t.Fatalf("extra input must bind the skill declaration, got %+v", extra.Files)
+	}
+}
+
+func TestDiscoverProjectTrustRejectsOversizedConfig(t *testing.T) {
+	projectRoot := t.TempDir()
+	// A declaration file beyond the per-file cap fails discovery instead of
+	// being read whole or silently truncated.
+	writeProjectConfigForTrustTest(t, projectRoot, strings.Repeat("x", maxProjectDeclarationFileBytes+1))
+
+	_, err := discoverProjectTrust(projectRoot, projectRoot)
+	if err == nil {
+		t.Fatal("an oversized project config must fail discovery")
+	}
+	if !strings.Contains(err.Error(), "exceeds") || !strings.Contains(err.Error(), "config.yaml") {
+		t.Fatalf("error must name the limit and the file, got %v", err)
+	}
+}
+
+func TestDiscoverProjectTrustRejectsOversizedDeclarationTotal(t *testing.T) {
+	projectRoot := t.TempDir()
+	// Files within the per-file cap accumulate against the total read
+	// budget; the read that crosses it fails discovery and names the file.
+	agentsDir := filepath.Join(projectRoot, ".chord", "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	count := int(maxProjectDeclarationTotalBytes/maxProjectDeclarationFileBytes) + 1
+	for i := range count {
+		name := filepath.Join(agentsDir, fmt.Sprintf("sample-%02d.yaml", i))
+		if err := os.WriteFile(name, []byte(strings.Repeat("x", maxProjectDeclarationFileBytes)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := discoverProjectTrust(projectRoot, projectRoot)
+	if err == nil {
+		t.Fatal("declarations beyond the total budget must fail discovery")
+	}
+	if !strings.Contains(err.Error(), "total limit") || !strings.Contains(err.Error(), fmt.Sprintf("sample-%02d.yaml", count-1)) {
+		t.Fatalf("error must name the total limit and the crossing file, got %v", err)
+	}
+}
+
+func TestReadProjectDeclarationFileBudgetBoundaries(t *testing.T) {
+	tests := []struct {
+		name       string
+		size       int
+		budget     int64
+		wantBudget int64
+		wantError  string
+	}{
+		{"exact total", 8, 8, 0, ""},
+		{"total exceeded", 64, 8, -1, "total limit"},
+		{"empty at total", 0, 0, 0, ""},
+		{"nonempty at total", 1, 0, -1, "total limit"},
+		{"exact file", maxProjectDeclarationFileBytes, maxProjectDeclarationTotalBytes, maxProjectDeclarationTotalBytes - maxProjectDeclarationFileBytes, ""},
+		{"file exceeded", maxProjectDeclarationFileBytes + 8, maxProjectDeclarationTotalBytes, maxProjectDeclarationTotalBytes - maxProjectDeclarationFileBytes - 1, "byte limit"},
+		{"total before file", maxProjectDeclarationFileBytes + 8, 8, -1, "total limit"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "sample.yaml")
+			if err := os.WriteFile(path, []byte(strings.Repeat("x", tc.size)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			budget := tc.budget
+			data, err := readProjectDeclarationFile(path, &budget)
+			if budget != tc.wantBudget {
+				t.Fatalf("remaining budget=%d, want %d", budget, tc.wantBudget)
+			}
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) || !strings.Contains(err.Error(), path) || data != nil {
+					t.Fatalf("data=%v error=%v, want no data and %q with the path", data, err, tc.wantError)
+				}
+			} else if err != nil || len(data) != tc.size {
+				t.Fatalf("bytes=%d error=%v, want %d bytes", len(data), err, tc.size)
+			}
+		})
+	}
+	t.Run("exhausted budget stops before open", func(t *testing.T) {
+		budget := int64(-1)
+		path := filepath.Join(t.TempDir(), "absent.yaml")
+		_, err := readProjectDeclarationFile(path, &budget)
+		if err == nil || !strings.Contains(err.Error(), "total limit") || errors.Is(err, os.ErrNotExist) || budget != -1 {
+			t.Fatalf("error=%v budget=%d, want no filesystem read after exhaustion", err, budget)
+		}
+	})
+}
+
+func TestDiscoverProjectTrustStopsAtSkillBudgetCrossing(t *testing.T) {
+	for _, layout := range []string{"main files", "sidecars", "multiple directories"} {
+		t.Run(layout, func(t *testing.T) {
+			root := t.TempDir()
+			writeProjectConfigForTrustTest(t, root, "log_level: debug\n")
+			const header = "---\nname: sample\ndescription: sample helper\n---\n"
+			full := header + strings.Repeat("x", maxProjectDeclarationFileBytes-len(header))
+			writeFile := func(path, data string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			skillDir := filepath.Join(root, ".agents", "skills")
+			switch layout {
+			case "sidecars":
+				for i := range 8 {
+					dir := filepath.Join(skillDir, fmt.Sprintf("sample-%02d", i))
+					writeFile(filepath.Join(dir, "SKILL.md"), full)
+					writeFile(filepath.Join(dir, "chord.yaml"), strings.Repeat(" ", maxProjectDeclarationFileBytes))
+				}
+			case "multiple directories":
+				first := filepath.Join(root, ".chord", "skills")
+				for i := range 15 {
+					writeFile(filepath.Join(first, fmt.Sprintf("sample-%02d", i), "SKILL.md"), full)
+				}
+				writeFile(filepath.Join(skillDir, "sample-00", "SKILL.md"), full)
+			default:
+				for i := range 16 {
+					writeFile(filepath.Join(skillDir, fmt.Sprintf("sample-%02d", i), "SKILL.md"), full)
+				}
+			}
+			sentinel := filepath.Join(skillDir, "sentinel", "SKILL.md")
+			writeFile(sentinel, full+"x")
+			discovery, err := discoverProjectTrust(root, root)
+			if discovery != nil || err == nil || !strings.Contains(err.Error(), "total limit") || strings.Contains(err.Error(), sentinel) {
+				t.Fatalf("discovery=%+v error=%v, want total-budget failure before the sentinel", discovery, err)
+			}
+			if layout == "sidecars" && !strings.Contains(err.Error(), "chord.yaml") {
+				t.Fatalf("crossing sidecar must be named: %v", err)
+			}
+		})
+	}
+}
+
+func TestReadProjectSkillSnapshotsSharesDeclarationBudget(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "sample", "SKILL.md")
+	mainData := "---\nname: sample\ndescription: sample helper\n---\nbody\n"
+	if err := os.MkdirAll(filepath.Dir(mainPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mainPath, []byte(mainData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	budget := int64(len(mainData))
+	snapshots, err := readProjectSkillSnapshots(SkillDir{Path: dir}, &budget)
+	if err != nil || len(snapshots) != 1 || budget != 0 {
+		t.Fatalf("snapshots=%+v budget=%d error=%v", snapshots, budget, err)
+	}
+	sidecar := filepath.Join(filepath.Dir(mainPath), "chord.yaml")
+	if err = os.WriteFile(sidecar, []byte("context: inline\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	budget = int64(len(mainData))
+	snapshots, err = readProjectSkillSnapshots(SkillDir{Path: dir}, &budget)
+	if snapshots != nil || err == nil || !strings.Contains(err.Error(), sidecar) || !strings.Contains(err.Error(), "total limit") || budget != -1 {
+		t.Fatalf("snapshots=%+v budget=%d error=%v, want failure on the first sidecar byte", snapshots, budget, err)
 	}
 }

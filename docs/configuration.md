@@ -902,6 +902,12 @@ Configuration, agent definitions, and command templates are applied from
 the same captured bytes used for assessment and disclosure. Edits after
 discovery cannot substitute different content into the current launch.
 
+Project declaration reads are limited to 1 MiB per file and 16 MiB in total,
+including skill bodies and sidecars. Exceeding either limit stops discovery
+and fails startup with the file path. Split oversized declarations or remove
+unused ones, or use `--skip-project-config` to start with global settings.
+These limits do not change how user-owned global skills are loaded.
+
 Authorizing records what was approved for the project. The record binds the
 declaration files by content: adding, removing, or changing any of them
 asks again if the resulting change is high-risk. A low-risk layer is applied

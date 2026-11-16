@@ -1,10 +1,15 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/trust"
 )
 
 func writeRiskSkill(t *testing.T, root, name, body string) {
@@ -190,6 +195,67 @@ func TestRiskSkillShadowAndContext(t *testing.T) {
 	}
 	if !containsHazard(risk.Hazards, "skill \"forked\" changes execution context or tool access") {
 		t.Fatalf("missing skill context hazard: %v", risk.Hazards)
+	}
+}
+
+func TestRiskGlobalSkillUsesRuntimeDiscovery(t *testing.T) {
+	for _, source := range []string{"config home", "extra"} {
+		for _, largeFile := range []string{"SKILL.md", "chord.yaml", "agent.yaml"} {
+			t.Run(source+"/"+largeFile, func(t *testing.T) {
+				configHome, root := riskFixture(t)
+				t.Setenv("CHORD_STATE_DIR", t.TempDir())
+				skillDir := filepath.Join(configHome, "skills")
+				if source == "extra" {
+					skillDir = filepath.Join(t.TempDir(), "skills")
+					data := "skills:\n  paths:\n    - " + skillDir + "\n"
+					if err := os.WriteFile(globalConfigPathForTrustTest(t), []byte(data), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				dir := filepath.Join(skillDir, "helper")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				globalPath := filepath.Join(dir, "SKILL.md")
+				data := "---\nname: helper\ndescription: global helper\n---\nbody\n"
+				if largeFile == "SKILL.md" {
+					data += strings.Repeat("x", maxProjectDeclarationFileBytes)
+				} else if err := os.WriteFile(filepath.Join(dir, largeFile), []byte("#"+strings.Repeat("x", maxProjectDeclarationFileBytes)), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(globalPath, []byte(data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				writeRiskSkill(t, root, "helper", "---\nname: helper\ndescription: project helper\n---\nbody\n")
+				globalMeta, err := skill.NewLoader([]string{skillDir}).ScanMeta()
+				if err != nil || len(globalMeta) != 1 || globalMeta[0].Name != "helper" {
+					t.Fatalf("global runtime catalog=%+v error=%v", globalMeta, err)
+				}
+				risk := assessForTest(t, root)
+				if !risk.requiresTrust() || risk.Unreadable || !containsHazard(risk.Hazards, "skill \"helper\" overrides an existing skill") {
+					t.Fatalf("runtime-visible global skill must trigger shadow approval: %+v", risk)
+				}
+				plan, projectData, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), root, root)
+				if err == nil || plan != nil || projectData != nil || !strings.Contains(err.Error(), root) ||
+					!strings.Contains(err.Error(), "is not authorized") || !strings.Contains(err.Error(), "--skip-project-config") {
+					t.Fatalf("plan=%+v data=%v error=%v, want fail-closed rejection", plan, projectData, err)
+				}
+				if _, statErr := os.Stat(trust.Path(os.Getenv("CHORD_STATE_DIR"))); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("rejected shadow must not write an authorization: %v", statErr)
+				}
+				skipPlan, _, err := skipProjectGate().resolve(globalConfigPathForTrustTest(t), globalConfigDataForTrustTest(t), root, root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				globalCfg := &config.Config{Skills: config.SkillsConfig{Paths: []string{skillDir}}}
+				ac := &AppContext{ContentRoot: root, WorkDir: root, ConfigHome: configHome, Cfg: globalCfg, GlobalCfg: globalCfg, TrustPlan: skipPlan}
+				dirs, blocked := trustedSkillDirsForWorkDir(ac, root)
+				meta, err := skill.NewLoader(SkillDirPaths(dirs)).ScanMeta()
+				if err != nil || len(meta) != 1 || meta[0].DeclarationPath != globalMeta[0].DeclarationPath || len(blocked) != 0 {
+					t.Fatalf("skipping must preserve the original global skill: meta=%+v blocked=%v error=%v", meta, blocked, err)
+				}
+			})
+		}
 	}
 }
 
