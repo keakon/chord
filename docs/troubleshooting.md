@@ -327,6 +327,28 @@ If a tool card, local shell result, question dialog, or confirmation summary sho
 
 Chord sanitizes assistant/thinking streaming replies, tool results, local shell output, status/error cards, and tool-request previews such as the `apply_patch` patch text before rendering them as terminal-safe plain text. Control characters and ANSI escapes such as `\x1b[1;1H` (a cursor-position command) render as literals instead of corrupting the card layout or its background. A raw carriage return embedded in a patch preview is treated the same way: CRLF still displays as a normal line break, while a standalone CR shows as the literal `\r`, so the preview cannot reflow mid-line and truncate or miscolor the card background or its left edge. If the same content consistently breaks layout, attach the original text and a screenshot so the rendering case can be reproduced.
 
+## Colors look wrong when running over SSH or on a remote host
+
+If Chord renders with odd colors — for example the splash logo's accent turns salmon instead of amber, or the context-usage bar shows pink instead of a blue gradient — the terminal's color depth has been downgraded to the 16-color ANSI palette.
+
+Chord's dark theme is defined with 256-color indices, and color support is detected automatically from the `TERM` and `COLORTERM` environment variables. When `TERM` does not advertise 256 colors (a plain `xterm` value is a common culprit on SSH hosts) and `COLORTERM` is unset, every 256-index color is approximated with the nearest of the 16 base colors, which distorts the theme.
+
+Check what the shell on the remote host reports:
+
+```bash
+echo "$TERM" && tput colors
+```
+
+If `tput colors` prints anything other than `256` (or higher), fix the environment on the remote host:
+
+```bash
+export TERM=xterm-256color
+```
+
+Add the line to `~/.bashrc` (or the rc file of your shell) so it survives reconnections, then restart Chord. `TERM` is normally forwarded by SSH automatically, so a manual export is only needed when something in the chain (a jump host, a web-based terminal, a login shell) resets it.
+
+Optionally also set `export COLORTERM=truecolor` on the remote host for exact diff-background colors. Note that `COLORTERM` is not forwarded by SSH, so it must be set on the host where Chord runs. Inside tmux, set `set -g default-terminal "tmux-256color"` in `~/.tmux.conf` instead, since tmux overrides the outer `TERM`.
+
 ## Dark block at a card's right edge or text shifted after an emoji
 
 If a dark one-column block shows up at the right edge of a card, or text after an emoji sits slightly to the left of where it belongs, your terminal and Chord disagree about how many columns that emoji occupies. There is no authority for emoji cell widths: the same emoji sequence paints anywhere from one to six columns across popular terminals, and a keycap emoji such as `1️⃣` measures two columns while many terminals draw it in one.
