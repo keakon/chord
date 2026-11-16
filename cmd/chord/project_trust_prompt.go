@@ -137,7 +137,8 @@ func renderProjectTrustAuthorization(out io.Writer, discovery *projectTrustDisco
 		fmt.Fprintln(out, "\nSome declarations could not be read and may hide changes; they require approval.")
 	}
 
-	fmt.Fprintln(out, "\nApply only if you trust this project's configuration.")
+	fmt.Fprintln(out, "\nRepository prompt files such as AGENTS.md are shown to the model as guidance and are not covered by this gate; review them like source code.")
+	fmt.Fprintln(out, "Apply only if you trust this project's configuration.")
 	fmt.Fprintln(out, "  1) Apply and remember this configuration")
 	fmt.Fprintln(out, "     Changes to these declaration files will ask again.")
 	fmt.Fprintln(out, "  2) Skip project configuration for this run")

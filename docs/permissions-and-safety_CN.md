@@ -257,7 +257,7 @@ Chord 在**请求发出之前**匹配模型给出的 URL，并在跟随每次 HT
 
 需要授权时，授权按内容绑定这批声明文件：新增、删除或修改其中任何一个，若改动属于高危就要重新确认。低风险项目层不保存授权，每次启动都会重新评估；因此后续引入高危改动，或全局基线变化使同一 delta 升级为高危，仍会被拦下。记录以 `project-trust.json` 保存在你的 state 目录中（默认 `~/.local/state/chord/project-trust.json`，设置 `CHORD_STATE_DIR` 时为 `$CHORD_STATE_DIR/project-trust.json`）；`chord doctor config` 可以查看状态和存储路径，`chord doctor config --revoke-project-trust` 撤销授权。非交互入口（`chord headless`、ACP、`chord mcp login`，以及 `chord auth` 的 provider 登录与刷新流程）遇到未授权的高危项目层会拒绝应用并退出，同时给出处理说明；`--skip-project-config` 与 `--trust-project-config` 提供单次运行的替代方式。
 
-这道门禁是同意边界，不是沙箱。它覆盖的是配置声明的内容，而不是仓库里的所有东西：配置要运行的脚本、依赖和普通源码在 checkout 之后就是受信任的，`AGENTS.md` 的目录指令和项目记忆也只作参考。完整行为见[配置：项目配置信任门禁](./configuration_CN.md#项目配置信任门禁)。
+这道门禁是同意边界，不是沙箱。它覆盖的是配置声明的内容，而不是仓库里的所有东西：配置要运行的脚本、依赖和普通源码在 checkout 之后就是受信任的。`AGENTS.md` 的目录指令和项目记忆同样只作参考，但它们的文本和其他仓库内容一样会进入模型上下文并可能影响模型行为——信任一个项目前应一并审查。完整行为见[配置：项目配置信任门禁](./configuration_CN.md#项目配置信任门禁)。
 
 ## Headless 模式安全边界
 

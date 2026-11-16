@@ -17,7 +17,7 @@ func TestProjectTrustPromptPreviewAndDetails(t *testing.T) {
 	var out bytes.Buffer
 	renderProjectTrustAuthorization(&out, discovery, "/sample")
 	preview := out.String()
-	for _, want := range []string{"command four", "1 more entries", "Start with global settings", "Changes to these declaration files"} {
+	for _, want := range []string{"command four", "1 more entries", "Start with global settings", "Changes to these declaration files", "AGENTS.md"} {
 		if !strings.Contains(preview, want) {
 			t.Fatalf("preview missing %q:\n%s", want, preview)
 		}
