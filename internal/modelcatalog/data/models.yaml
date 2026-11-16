@@ -1821,9 +1821,14 @@ models:
       compat:
         chat_completions:
           native_thinking: thinking
+        reasoning_continuity:
+          mode: openai_visible
+          reasoning_replay: all
       sources:
         - url: https://cloud.tencent.com/document/product/1823/131208
           checked: "2026-11-11"
+        - url: https://www.tencentcloud.com/document/product/1300/81572
+          checked: "2026-11-16"
     connection:
       request_url: https://tokenhub-intl.tencentcloudmaas.com/v1/chat/completions
       wire_model_id: hy4
@@ -1870,3 +1875,73 @@ models:
         checked: "2026-11-11"
       - url: https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/
         checked: "2026-11-11"
+
+  - id: tencent/hy4-flash
+    released: "2026-11-16"
+    config_profile:
+      compat:
+        chat_completions:
+          native_thinking: thinking
+        reasoning_continuity:
+          mode: openai_visible
+          reasoning_replay: all
+      sources:
+        - url: https://intl.cloud.tencent.com/zh/document/product/1300/80637
+          checked: "2026-11-16"
+        - url: https://www.tencentcloud.com/document/product/1300/81572
+          checked: "2026-11-16"
+    connection:
+      request_url: https://tokenhub-intl.tencentcloudmaas.com/v1/chat/completions
+      wire_model_id: hy4-flash
+      env_var: TENCENT_API_KEY
+      sources:
+        - url: https://www.tencentcloud.com/document/product/1300/80632
+          checked: "2026-11-16"
+    # The Hy4-family rows use 1M/960k/64k. As with hy4, record the binary
+    # reading: 983040 + 65536 = 1048576.
+    context: 1048576
+    input: 983040
+    output: 65536
+    input_modalities: [text, image]
+    reasoning_options: [high, no_think]
+    coding_sources:
+      - url: https://news.qq.com/rain/a/20261116A08RCK00
+        checked: "2026-11-16"
+      - url: https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/
+        checked: "2026-11-16"
+    cost:
+      input_per_million: 0.07
+      output_per_million: 0.281
+      currency: USD
+      checked: "2026-11-16"
+      source:
+        url: https://www.tencentcloud.com/document/product/1300/78937
+        checked: "2026-11-16"
+      notes: >-
+        Standard Singapore-region TokenHub USD list rates for uncached input
+        and output; cache hits are $0.003/MTok and no cache-write fee is
+        documented. The Guangzhou region lists ¥0.5 input, ¥2 output and
+        ¥0.02 cache hits per million tokens. TokenHub applies a 50%
+        promotional discount to Hy4 flash until 12:00 Beijing time on
+        November 30, 2026; the recorded figures are the standard list rates.
+    sources:
+      - url: https://news.qq.com/rain/a/20261116A08RCK00
+        checked: "2026-11-16"
+      - url: https://intl.cloud.tencent.com/document/product/1300/78934?lang=en
+        checked: "2026-11-16"
+      - url: https://intl.cloud.tencent.com/document/product/1300/80695?lang=en
+        checked: "2026-11-16"
+      - url: https://www.tencentcloud.com/document/product/1300/80632
+        checked: "2026-11-16"
+      - url: https://intl.cloud.tencent.com/zh/document/product/1300/80637
+        checked: "2026-11-16"
+      - url: https://www.tencentcloud.com/document/product/1300/81572
+        checked: "2026-11-16"
+      - url: https://www.tencentcloud.com/document/product/1300/78937
+        checked: "2026-11-16"
+      - url: https://cloud.tencent.com/document/product/1823/130055
+        checked: "2026-11-16"
+      - url: https://cloud.tencent.com/document/product/1823/130078
+        checked: "2026-11-16"
+      - url: https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/
+        checked: "2026-11-16"
