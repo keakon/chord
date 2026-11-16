@@ -140,6 +140,12 @@ jobs:
             fi
           done
 
+          # Publish the installer as a release asset so users can run it from
+          # an immutable URL: /releases/latest/download/install.sh. It is
+          # listed in SHA256SUMS with the archives below.
+          cp scripts/install.sh dist/install.sh
+          chmod +x dist/install.sh
+
           (cd dist && sha256sum * > SHA256SUMS)
 
       - name: Create GitHub Release

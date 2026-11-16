@@ -120,10 +120,12 @@ resource-scripts-check:
 	bash -n scripts/test_model_catalog_check.sh
 	bash -n scripts/check_deadcode.sh scripts/test_check_deadcode.sh
 	bash -n scripts/check_ci_race.sh scripts/test_check_ci_race.sh
+	bash -n scripts/install.sh scripts/test_install.sh
 	bash scripts/test_tmpdir_ownership.sh
 	bash scripts/test_model_catalog_check.sh
 	bash scripts/test_check_deadcode.sh
 	bash scripts/test_check_ci_race.sh
+	bash scripts/test_install.sh
 
 model-catalog-check:
 	./scripts/check_model_catalog_update.sh

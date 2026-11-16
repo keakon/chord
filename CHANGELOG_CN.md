@@ -32,6 +32,7 @@
 - `chord doctor skills --agent <name>` 会报告角色权限基线、技能目录搜索顺序、各技能对模型的可见状态及按名或路径加载权限，并列出元数据来源以及源文件、解析正文和渲染内容的大小。子代理一行只反映角色自身规则，不代表其运行时有效权限；外部后端角色显示 `not_applicable`，未知角色返回退出码 `2`。
 - Anthropic Messages 目标新增消息级动态 MCP 工具挂载。开启 `compat.anthropic.mcp_inline_tools` 后，Chord 会把运行时手动启用的 MCP 工具声明作为对话中段 `role: system` 消息发送，并携带 `tool_addition` 定义（使用 `inline-tools` beta 及 `anthropic-beta: inline-tools-2026-09-15` 请求头）。会话中途启用 MCP 服务时，顶层 `tools` 数组与提示词缓存前缀保持稳定。所选目标不支持这种挂载格式时，Chord 会将声明并入该请求顶层的 `tools` 数组。该开关默认关闭，包括采用官方模型目录条目的自定义端点；仅对官方 API 或已验证能透传对话中段系统消息的网关开启。
 - 全局配置新增可选的启动期清理 `maintenance.cleanup`。`sessions` 删除最近活动时间早于 `retain_days`（默认 30）的会话目录；`llm_dumps` 删除各会话 `dumps/llm/` 目录中超过保留期的调试 dump 文件（默认保留 1 天）。两项策略默认关闭。清理在启动后于后台运行，跳过其他进程打开的会话，只能由全局配置开启。配置项无效（未知键或类型错误）时，Chord 会禁用受影响的策略并告警，避免用默认保留期误删数据。`chord cleanup dumps` 可手动预览和删除匹配的 dump 文件。
+- 新增 Linux 与 macOS 安装脚本：`curl -fsSL https://github.com/keakon/chord/releases/latest/download/install.sh | bash` 会下载最新发布版二进制、按发布页的 SHA256SUMS 校验，并安装到 `/usr/local/bin`；校验和不一致即中止安装。脚本仅在需要写入安装目录时请求 `sudo`，且不会改动你的 shell 配置文件；`--version` 可固定版本，`--install-dir` 可指定安装目录。
 
 ### 改进
 

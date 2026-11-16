@@ -367,6 +367,18 @@ jobs:
       - name: Test release update and recovery
         run: ruby scripts/test_homebrew.rb
 
+  install-script:
+    name: Install script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Test install script
+        run: bash scripts/test_install.sh
+
   deadcode:
     name: Deadcode gate
     runs-on: ubuntu-latest
