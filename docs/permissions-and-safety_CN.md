@@ -251,9 +251,9 @@ Chord 在**请求发出之前**匹配模型给出的 URL，并在跟随每次 HT
 
 ## 项目配置信任
 
-项目级配置与能力声明——`.chord/config.yaml`、agent 定义、命令和 skill——都是仓库内容，不是用户设置。Chord 把它们当作不可信内容：在你于该 checkout 内授权之前，项目声明的东西一律不运行。运行前 Chord 会先发现所有来源，列出它们会做什么（MCP server、hooks、LSP server、provider、agent、命令和 skill 及其关键目标），然后询问；拒绝或关闭提示，就按不带项目层的方式启动。
+项目级配置与能力声明——`.chord/config.yaml`、agent 定义、命令和 skill——都是仓库内容，不是用户设置。Chord 会把它们与「不应用项目层时生效的配置」比较，只有当改动会启动进程、重定向流量或改写其他控制时才要求确认：包括 MCP server、hooks、LSP server、provider / proxy 改动、放宽已有角色权限、命令或 skill 覆盖全局同名项，以及带 fork 上下文或工具授权的 skill。无法解析的声明同样需要确认。新增代理、新增命令和普通 skill 不需要确认即可生效——它们属于你在使用时可选择调用或拒绝的参考内容。需要确认时，提示会在「需要你批准的改动」下逐条列出具体变化；拒绝或关闭提示，就按不带项目层的方式启动。
 
-授权按内容绑定这批声明文件：新增、删除或修改其中任何一个，都要重新确认。记录以 `project-trust.json` 保存在你的 state 目录中（默认 `~/.local/state/chord/project-trust.json`，设置 `CHORD_STATE_DIR` 时为 `$CHORD_STATE_DIR/project-trust.json`）；`chord doctor config` 可以查看状态和存储路径，`chord doctor config --revoke-project-trust` 撤销授权。非交互入口（`chord headless`、ACP、`chord mcp login`，以及 `chord auth` 的 provider 登录与刷新流程）遇到未授权的项目层会拒绝应用并退出，同时给出处理说明；`--skip-project-config` 与 `--trust-project-config` 提供单次运行的替代方式。
+需要授权时，授权按内容绑定这批声明文件：新增、删除或修改其中任何一个，若改动属于高危就要重新确认。低风险项目层不保存授权，每次启动都会重新评估；因此后续引入高危改动，或全局基线变化使同一 delta 升级为高危，仍会被拦下。记录以 `project-trust.json` 保存在你的 state 目录中（默认 `~/.local/state/chord/project-trust.json`，设置 `CHORD_STATE_DIR` 时为 `$CHORD_STATE_DIR/project-trust.json`）；`chord doctor config` 可以查看状态和存储路径，`chord doctor config --revoke-project-trust` 撤销授权。非交互入口（`chord headless`、ACP、`chord mcp login`，以及 `chord auth` 的 provider 登录与刷新流程）遇到未授权的高危项目层会拒绝应用并退出，同时给出处理说明；`--skip-project-config` 与 `--trust-project-config` 提供单次运行的替代方式。
 
 这道门禁是同意边界，不是沙箱。它覆盖的是配置声明的内容，而不是仓库里的所有东西：配置要运行的脚本、依赖和普通源码在 checkout 之后就是受信任的，`AGENTS.md` 的目录指令和项目记忆也只作参考。完整行为见[配置：项目配置信任门禁](./configuration_CN.md#项目配置信任门禁)。
 

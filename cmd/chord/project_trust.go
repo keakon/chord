@@ -104,6 +104,9 @@ type projectTrustDiscovery struct {
 	ConfigData []byte
 	// Sources are the disclosed capability sources.
 	Sources []projectTrustSource
+	// Risk is the high-risk delta over the no-project baseline. Set by the
+	// gate before disclosure; nil until assessed.
+	Risk *projectTrustRisk
 }
 
 // projectTrustPlan is the gate decision handed to startup.
@@ -112,8 +115,12 @@ type projectTrustPlan struct {
 	// project commands, project skills) to be applied.
 	ApplyProject bool
 	// Authorized is true when an explicit authorization (stored or granted
-	// in this startup) covers Inputs. Trust-once runs apply without it.
+	// in this startup) covers Inputs. Trust-once and low-risk runs apply
+	// without it.
 	Authorized bool
+	// LowRisk is true when the project layer was applied without a prompt
+	// because its delta over the global baseline contained no hazard.
+	LowRisk bool
 	// Inputs is the declaration input set covered by this run's trust decision;
 	// nil when the project layer is not applied.
 	Inputs trust.InputSet
@@ -151,8 +158,10 @@ func (g *projectTrustGate) resolve(globalConfigPath, contentRoot, workDir string
 	if err != nil {
 		return nil, nil, err
 	}
+	// A low-risk decision is recomputed from the baseline on every start, so a
+	// worktree switch must not reuse or lock it like a pending authorization.
 	if decision := g.preflight; decision != nil && decision.Plan != nil &&
-		!decision.Plan.Authorized && !decision.Plan.Inputs.Empty() {
+		!decision.Plan.Authorized && !decision.Plan.LowRisk && !decision.Plan.Inputs.Empty() {
 		sameRoot := canonicalProjectTrustRoot(decision.ContentRoot) == canonicalProjectTrustRoot(contentRoot)
 		if sameRoot && decision.Plan.Inputs.Fingerprint() == discovery.Inputs.Fingerprint() {
 			if decision.Plan.ApplyProject {
@@ -208,6 +217,35 @@ func (g *projectTrustGate) resolve(globalConfigPath, contentRoot, workDir string
 		return &projectTrustPlan{
 			ApplyProject: true,
 			Authorized:   true,
+			Inputs:       discovery.Inputs,
+		}, discovery.ConfigData, nil
+	}
+
+	// A stored authorization is only needed when the project layer changes
+	// something that can start a process, redirect traffic, or rewrite a
+	// control. Compare against the effective no-project baseline; if the delta
+	// is hazard-free, apply it without a prompt and without persisting trust.
+	// Recomputing on every start means a later high-risk edit, or a baseline
+	// change that promotes the delta, is still gated.
+	globalData, readErr := os.ReadFile(globalConfigPath)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return nil, nil, fmt.Errorf("read global config for risk assessment: %w", readErr)
+	}
+	if readErr != nil {
+		globalData = nil
+	}
+	risk, err := assessProjectTrustRisk(globalConfigPath, globalData, contentRoot, workDir, discovery)
+	if err != nil {
+		return nil, nil, err
+	}
+	discovery.Risk = risk
+	if !risk.requiresTrust() {
+		// No notice: a hazard-free layer is the normal case, so surfacing it
+		// on every start would recreate the confirmation fatigue this removes.
+		// doctor config reports the low-risk state for anyone who wants it.
+		return &projectTrustPlan{
+			ApplyProject: true,
+			LowRisk:      true,
 			Inputs:       discovery.Inputs,
 		}, discovery.ConfigData, nil
 	}

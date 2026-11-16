@@ -870,17 +870,38 @@ Common uses include:
 
 ### Trust gate for project configuration
 
-Chord asks before applying project configuration. The prompt shows up to
-four entries and describes the effects of the configuration it found.
-Choose **Inspect all files and configuration details** for the full list
-of sources and targets. Apply it only if you trust the project's
-configuration. Skipping starts Chord with global settings; project agents,
-commands, skills, and settings do not load.
+Chord only asks for confirmation when the project layer changes something
+that can start a process, redirect traffic, or rewrite another control. At
+discovery it compares the project declarations against the configuration
+that would be in effect without them (global config plus built-in roles and
+global commands/skills). A layer with no such high-risk change is applied
+silently — new agents, new commands, and ordinary skills are guidance that
+you can still invoke or decline at use time, so they need no blanket
+approval.
+
+The changes that require confirmation are:
+
+- MCP servers, hooks, LSP servers, and provider/proxy/web-fetch changes that
+  start local processes or send traffic to project-declared endpoints.
+- An agent that widens an existing role's permission, or declares its own
+  MCP servers.
+- A command or skill that overrides an existing global command/skill, and a
+  skill that sets `context: fork`, `model`, `effort`, or `allowed_tools`.
+
+A declaration that cannot be parsed is treated as high-risk rather than
+being assumed safe. When confirmation is needed, the prompt lists the
+specific changes under **Changes that need your approval**, plus up to four
+source entries; choose **Inspect all files and configuration details** for
+the full list of sources and targets. Skipping starts Chord with global
+settings; project agents, commands, skills, and settings do not load.
 
 Authorizing records what was approved for the project. The record binds the
 declaration files by content: adding, removing, or changing any of them
-asks again before the layer applies. Restarting inside a linked worktree or
-subdirectory reuses the authorization only while the same files are in
+asks again if the resulting change is high-risk. A low-risk layer is applied
+without a stored authorization and is re-assessed on every start, so a later
+edit that introduces a high-risk change, or a global-baseline change that
+promotes the delta, is still gated. Restarting inside a linked worktree or
+subdirectory reuses an authorization only while the same files are in
 effect; new skill directories there stay out of the catalog until
 authorized.
 
@@ -894,8 +915,9 @@ authorization.
 Authorizations are stored in `project-trust.json` under your state directory
 (`~/.local/state/chord/project-trust.json` by default, or under
 `$CHORD_STATE_DIR` when set). `chord doctor config` shows the authorization
-status, the discovered sources, the fingerprint, and the store path;
-`chord doctor config --revoke-project-trust` drops the recorded authorization
+status, the discovered sources, the fingerprint, and the store path; a layer
+applied without confirmation is reported as applied (low-risk, no
+confirmation required). `chord doctor config --revoke-project-trust` drops the recorded authorization
 for the current project. The gate covers what the configuration declares, not everything a
 repository contains: executed scripts, dependencies, and ordinary source
 code are not part of the authorization, and `AGENTS.md` instructions and

@@ -780,13 +780,21 @@ HTTP，确保最终 JSON patch 生效。
 
 ### 项目配置信任门禁
 
-Chord 会在应用项目配置前询问。提示最多预览四条配置，并说明本次发现的配置会产生哪些影响；选择“查看所有文件和配置详情”可展开完整来源和目标。确认信任这些配置后再应用。选择跳过，Chord 仍会按全局设置启动，但不加载项目的代理、命令、技能和设置。
+只有当项目层改动了会启动进程、重定向流量或改写其他控制的内容时，Chord 才会要求确认。发现阶段会把项目声明与「不应用项目层时生效的配置」比较——基线是全局配置，加上内置角色与全局命令、技能。没有这类高危改动的项目层会静默生效：新增代理、新增命令和普通 skill 属于参考性内容，你仍可在使用时选择调用或拒绝，不需要一次性 blanket 批准。
 
-授权会把当次批准的内容记录下来，以 `project-trust.json` 保存在 state 目录中（默认 `~/.local/state/chord/project-trust.json`，设置 `CHORD_STATE_DIR` 时为 `$CHORD_STATE_DIR/project-trust.json`）。记录按内容绑定这批声明文件：新增、删除或修改其中任何一个，都会在项目层应用前重新询问。在 linked worktree 或子目录里启动时，只有同一批文件仍然生效才复用授权；那里新出现的 skill 目录未经授权不会进入 skill 清单。
+需要确认的改动包括：
+
+- 会启动本地进程、或把流量发往项目指定端点的 MCP server、hooks、LSP server，以及 provider / proxy / web_fetch 改动；
+- 放宽已有角色权限、或自带 MCP server 的代理定义；
+- 覆盖已有全局命令 / skill 的命令或 skill，以及设置了 `context: fork`、`model`、`effort` 或 `allowed_tools` 的 skill。
+
+无法解析的声明按高危处理，不会当成安全内容放行。需要确认时，提示会在 **需要你批准的改动** 下逐条列出具体变化，并最多预览四条来源；选择“查看所有文件和配置详情”可展开完整来源和目标。选择跳过，Chord 仍会按全局设置启动，但不加载项目的代理、命令、技能和设置。
+
+授权会把当次批准的内容记录下来，以 `project-trust.json` 保存在 state 目录中（默认 `~/.local/state/chord/project-trust.json`，设置 `CHORD_STATE_DIR` 时为 `$CHORD_STATE_DIR/project-trust.json`）。记录按内容绑定这批声明文件：新增、删除或修改其中任何一个，若由此产生的改动属于高危，就会在项目层应用前重新询问。低风险项目层不写授权记录，每次启动都会重新评估；因此后续引入高危改动，或全局基线的变化使同一 delta 升级为高危，仍会被拦下确认。在 linked worktree 或子目录里启动时，只有同一批文件仍然生效才复用授权；那里新出现的 skill 目录未经授权不会进入 skill 清单。
 
 非交互入口（`chord headless`、ACP、`chord mcp login`，以及 `chord auth` 的 provider 登录与刷新流程）遇到未授权的项目层会拒绝应用并退出，同时给出处理说明。加 `--skip-project-config` 可以让这一次运行忽略项目层，加 `--trust-project-config` 可以在不保存授权的情况下应用当前文件。
 
-`chord doctor config` 会显示授权状态、发现的来源和指纹；`chord doctor config --revoke-project-trust` 撤销当前项目已记录的授权。门禁覆盖的是配置声明的内容，而不是仓库里的所有东西：会被执行的脚本、依赖和普通源码不在授权范围内，`AGENTS.md` 的目录指令和项目记忆也只作参考、不参与门禁。
+`chord doctor config` 会显示授权状态、发现的来源和指纹；未经确认即应用的项目层会显示为「已应用（低风险，无需确认）」。`chord doctor config --revoke-project-trust` 撤销当前项目已记录的授权。门禁覆盖的是配置声明的内容，而不是仓库里的所有东西：会被执行的脚本、依赖和普通源码不在授权范围内，`AGENTS.md` 的目录指令和项目记忆也只作参考、不参与门禁。
 
 ## Provider 请求压缩
 

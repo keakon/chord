@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 )
@@ -124,6 +125,15 @@ func renderProjectTrustAuthorization(out io.Writer, discovery *projectTrustDisco
 			fmt.Fprintf(out, "  - %s\n", projectTrustDisplayText(effect))
 		}
 	}
+	if discovery.Risk != nil && len(discovery.Risk.Hazards) > 0 {
+		fmt.Fprintln(out, "\nChanges that need your approval:")
+		for _, hazard := range discovery.Risk.Hazards {
+			fmt.Fprintf(out, "  - %s\n", projectTrustDisplayText(hazard))
+		}
+	}
+	if discovery.Risk != nil && discovery.Risk.Unreadable {
+		fmt.Fprintln(out, "\nSome declarations could not be read and may hide changes; they require approval.")
+	}
 
 	fmt.Fprintln(out, "\nApply only if you trust this project's configuration.")
 	fmt.Fprintln(out, "  1) Apply and remember this configuration")
@@ -224,6 +234,24 @@ func inspectProjectTrustStatus(contentRoot, workDir, globalConfigPath string) (*
 	if hasRecord && record.Fingerprint == discovery.Inputs.Fingerprint() {
 		status.State = "authorized"
 		status.GrantedAt = formatProjectTrustTime(record.GrantedAtNs)
+		return status, nil
+	}
+
+	// A hazard-free delta starts without an authorization record. Report that
+	// accurately instead of showing a project that runs as "not authorized".
+	globalData, readErr := os.ReadFile(globalConfigPath)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return nil, readErr
+	}
+	if readErr != nil {
+		globalData = nil
+	}
+	risk, err := assessProjectTrustRisk(globalConfigPath, globalData, contentRoot, workDir, discovery)
+	if err != nil {
+		return nil, err
+	}
+	if !risk.requiresTrust() {
+		status.State = "applied (low-risk, no confirmation required)"
 		return status, nil
 	}
 	if hasRecord {

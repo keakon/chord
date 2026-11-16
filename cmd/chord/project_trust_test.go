@@ -540,8 +540,8 @@ func TestGateSubdirectoryLaunchWithNewSkillNeedsReauthorization(t *testing.T) {
 		t.Fatal("authorized layer must still apply")
 	}
 
-	// A new skill declaration under the subdirectory is a new input and must
-	// require re-authorization.
+	// A new plain skill under the subdirectory is a new input but carries no
+	// hazard, so it applies low-risk without requiring re-authorization.
 	newSkill := filepath.Join(subDir, ".agents", "skills", "sub-skill", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(newSkill), 0o755); err != nil {
 		t.Fatal(err)
@@ -549,8 +549,24 @@ func TestGateSubdirectoryLaunchWithNewSkillNeedsReauthorization(t *testing.T) {
 	if err := os.WriteFile(newSkill, []byte("---\nname: sub-skill\ndescription: sub helper\n---\nbody\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	plan, _, err = failClosedGate().resolve(globalConfigPathForTrustTest(t), projectRoot, subDir)
+	if err != nil {
+		t.Fatalf("a plain new skill must apply low-risk: %v", err)
+	}
+	if !plan.LowRisk {
+		t.Fatal("a plain new skill must be reported as low-risk")
+	}
+
+	// A skill that changes execution context is a hazard and must re-gate.
+	forkSkill := filepath.Join(subDir, ".agents", "skills", "fork-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(forkSkill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(forkSkill, []byte("---\nname: fork-skill\ndescription: fork helper\ncontext: fork\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := failClosedGate().resolve(globalConfigPathForTrustTest(t), projectRoot, subDir); err == nil {
-		t.Fatal("a new workdir-chain skill must require re-authorization")
+		t.Fatal("a fork-context skill must require re-authorization")
 	}
 }
 
