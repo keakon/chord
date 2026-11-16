@@ -835,7 +835,7 @@ func TestSelectChoiceBySingleKey(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			out := &bytes.Buffer{}
-			value, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader(tc.input)), out, prompt, allowed, '1', "Please choose one of the listed options.")
+			value, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader(tc.input)), out, prompt, allowed, '1', "Please choose one of the listed options.", true)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("err = %v, want %v", err, tc.wantErr)
@@ -857,12 +857,42 @@ func TestSelectChoiceBySingleKey(t *testing.T) {
 
 func TestSelectChoiceBySingleKeyRepromptsOnInvalidKey(t *testing.T) {
 	out := &bytes.Buffer{}
-	_, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader("x")), out, "Provider [1]: ", map[byte]struct{}{'1': {}, '2': {}}, '1', "Please choose one of the listed options.")
+	_, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader("x")), out, "Provider [1]: ", map[byte]struct{}{'1': {}, '2': {}}, '1', "Please choose one of the listed options.", true)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("err = %v, want EOF", err)
 	}
 	if !strings.Contains(out.String(), "Please choose one of the listed options.") || !strings.Contains(out.String(), "Provider [1]: ") {
 		t.Fatalf("output missing reprompt message and prompt: %q", out.String())
+	}
+}
+
+func TestSelectChoiceBySingleKeyNoDefault(t *testing.T) {
+	// The project trust prompt has no default answer: Enter reprompts instead
+	// of submitting a phantom choice.
+	out := &bytes.Buffer{}
+	_, err := selectChoiceBySingleKey(
+		bufio.NewReader(strings.NewReader("\n")), out, "Choice: ",
+		map[byte]struct{}{'1': {}, '2': {}, '3': {}}, 0,
+		"Enter 1 to apply, 2 to skip.", false)
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("err = %v, want EOF", err)
+	}
+	if !strings.Contains(out.String(), "Enter 1 to apply, 2 to skip.") {
+		t.Fatalf("output missing reprompt after Enter: %q", out.String())
+	}
+
+	// A bare Esc is ignored when escRestarts is false (project trust prompt);
+	// it restarts setup only in the setup wizard.
+	out.Reset()
+	value, err := selectChoiceBySingleKey(
+		bufio.NewReader(strings.NewReader("\x1b2")), out, "Choice: ",
+		map[byte]struct{}{'1': {}, '2': {}, '3': {}}, 0,
+		"Enter 1 to apply, 2 to skip.", false)
+	if err != nil || value != "2" {
+		t.Fatalf("value/err = %q/%v, want 2/nil", value, err)
+	}
+	if strings.Contains(out.String(), "^[") {
+		t.Fatalf("bare Esc should be silently ignored, got %q", out.String())
 	}
 }
 

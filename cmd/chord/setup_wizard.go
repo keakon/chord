@@ -617,19 +617,41 @@ var errSingleKeyInterrupt = errors.New("setup interrupted by user")
 // Esc as plain text.
 var errWizardRestart = errors.New("setup restarted by user")
 
-// promptChoiceSingleKey submits listed choices from a single keypress when the
-// input is a real terminal, so users don't have to press Enter after typing
-// "1"/"2" or y/N. It returns handled=false when the fast path is unavailable
-// (piped input, tests, unsupported platform, MakeRaw failure) so callers fall
-// back to line-based reading, which stays the canonical path.
-func promptChoiceSingleKey(termIO *setupTerminal, prompt string, allowed []string, defaultChoice string, invalidMessage string) (string, bool, error) {
+// withSingleKeyTerminal runs fn with the input terminal in raw mode when it is
+// a real terminal. It returns handled=false when the fast path is unavailable
+// (piped input, tests, unsupported platform, MakeRaw failure) so callers can
+// fall back to line-based reading, which stays the canonical path. The
+// terminal is restored before returning; on Ctrl+C it is restored and the
+// process exits with 130, matching a SIGINT death in line mode.
+func withSingleKeyTerminal(termIO *setupTerminal, fn func(*bufio.Reader, io.Writer) (string, error)) (string, bool, error) {
 	if termIO == nil || termIO.in == nil || termIO.reader == nil || termIO.out == nil {
 		return "", false, nil
 	}
 	if !term.IsTerminal(termIO.in.Fd()) {
 		return "", false, nil
 	}
-	if len(defaultChoice) != 1 {
+	fd := termIO.in.Fd()
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return "", false, nil
+	}
+	restore := func() { _ = term.Restore(fd, oldState) }
+	defer restore()
+	value, err := fn(termIO.reader, termIO.out)
+	if errors.Is(err, errSingleKeyInterrupt) {
+		restore()
+		fmt.Fprintln(termIO.out, "^C")
+		os.Exit(130)
+	}
+	return value, true, err
+}
+
+// promptChoiceSingleKey submits listed choices from a single keypress when the
+// input is a real terminal, so users don't have to press Enter after typing
+// "1"/"2" or y/N. It returns handled=false when the fast path is unavailable
+// so callers fall back to line-based reading.
+func promptChoiceSingleKey(termIO *setupTerminal, prompt string, allowed []string, defaultChoice string, invalidMessage string) (string, bool, error) {
+	if termIO == nil || len(defaultChoice) != 1 {
 		return "", false, nil
 	}
 	allowedKeys := make(map[byte]struct{}, len(allowed))
@@ -639,38 +661,25 @@ func promptChoiceSingleKey(termIO *setupTerminal, prompt string, allowed []strin
 		}
 		allowedKeys[v[0]] = struct{}{}
 	}
-	fd := termIO.in.Fd()
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		// Terminal does not support raw mode; fall back to line-based reading.
-		return "", false, nil
-	}
-	defer func() { _ = term.Restore(fd, oldState) }()
-	// OPOST is off in raw mode, so bare "\n" in a multi-line prompt would
-	// staircase; emit "\r\n" explicitly.
-	rawPrompt := strings.ReplaceAll(prompt, "\n", "\r\n")
-	if _, err := fmt.Fprint(termIO.out, rawPrompt); err != nil {
-		return "", true, err
-	}
-	value, err := selectChoiceBySingleKey(termIO.reader, termIO.out, rawPrompt, allowedKeys, defaultChoice[0], invalidMessage)
-	if errors.Is(err, errSingleKeyInterrupt) {
-		// Raw mode swallowed the SIGINT that Ctrl+C would have raised; mirror
-		// the line-mode behavior: restore the terminal, then exit with the
-		// status a SIGINT death produces.
-		_ = term.Restore(fd, oldState)
-		fmt.Fprintln(termIO.out, "^C")
-		os.Exit(130)
-	}
-	return value, true, err
+	return withSingleKeyTerminal(termIO, func(reader *bufio.Reader, out io.Writer) (string, error) {
+		// OPOST is off in raw mode, so bare "\n" in a multi-line prompt would
+		// staircase; emit "\r\n" explicitly.
+		rawPrompt := strings.ReplaceAll(prompt, "\n", "\r\n")
+		if _, err := fmt.Fprint(out, rawPrompt); err != nil {
+			return "", err
+		}
+		return selectChoiceBySingleKey(reader, out, rawPrompt, allowedKeys, defaultChoice[0], invalidMessage, true)
+	})
 }
 
 // selectChoiceBySingleKey runs the single-key selection loop with the terminal
 // already in raw mode (echo off, OPOST off). A listed key submits immediately;
-// Enter selects defaultChoice; escape sequences (arrow keys) are ignored;
-// bare Esc restarts setup; unhandled control bytes are ignored; an invalid
-// printable key reprompts. The remainder of a pasted line is drained so it
-// does not leak into the next prompt.
-func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string, allowed map[byte]struct{}, defaultChoice byte, invalidMessage string) (string, error) {
+// Enter selects defaultChoice (or reprompts when defaultChoice is 0, meaning
+// no default); escape sequences (arrow keys) are ignored; a bare Esc restarts
+// setup when escRestarts is true and is otherwise ignored; unhandled control
+// bytes are ignored; an invalid printable key reprompts. The remainder of a
+// pasted line is drained so it does not leak into the next prompt.
+func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string, allowed map[byte]struct{}, defaultChoice byte, invalidMessage string, escRestarts bool) (string, error) {
 	for {
 		b, err := reader.ReadByte()
 		if err != nil {
@@ -679,19 +688,26 @@ func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string,
 		switch b {
 		case '\r', '\n':
 			drainPastedLineRemainder(reader)
+			if defaultChoice == 0 {
+				fmt.Fprintf(out, "\r\n%s\r\n%s", invalidMessage, prompt)
+				continue
+			}
 			fmt.Fprintf(out, "%c\r\n", defaultChoice)
 			return string(defaultChoice), nil
 		case 0x03: // Ctrl+C
 			return "", errSingleKeyInterrupt
 		case 0x04: // Ctrl+D: EOF, matching line-mode behavior.
 			return "", io.EOF
-		case 0x1b: // ESC: swallow CSI/SS3 sequences (arrow keys); bare Esc restarts setup.
+		case 0x1b: // ESC: swallow CSI/SS3 sequences (arrow keys); bare Esc is caller-defined.
 			if reader.Buffered() > 0 {
 				if seq, peekErr := reader.Peek(1); peekErr == nil && (seq[0] == '[' || seq[0] == 'O') {
 					_, _ = reader.ReadByte() // introducer
 					_, _ = reader.ReadByte() // final byte
 					continue
 				}
+			}
+			if !escRestarts {
+				continue
 			}
 			fmt.Fprint(out, "^[\r\n")
 			return "", errWizardRestart

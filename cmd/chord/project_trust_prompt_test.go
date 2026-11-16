@@ -87,6 +87,52 @@ providers:
 	}
 }
 
+func TestProjectTrustPromptHidesNoOpInspect(t *testing.T) {
+	// A single source whose items are all in the preview, with no config
+	// declaration, has nothing left for choice 3 to reveal. It must not be
+	// offered — that was the no-op "just prints the path again" case.
+	discovery := &projectTrustDiscovery{Sources: []projectTrustSource{{
+		File:  ".chord/skills",
+		Items: []string{`skill "gateway-release"`},
+	}}}
+	var preview bytes.Buffer
+	renderProjectTrustAuthorization(&preview, discovery, "/sample")
+	text := preview.String()
+	if strings.Contains(text, "3) Inspect") {
+		t.Fatalf("no-op inspect option shown:\n%s", text)
+	}
+	if !strings.Contains(text, "1) Apply") || !strings.Contains(text, "2) Skip") {
+		t.Fatalf("required options missing:\n%s", text)
+	}
+
+	// In line mode, typing 3 is rejected with the shorter hint.
+	var output bytes.Buffer
+	terminal := &setupTerminal{out: &output, reader: bufio.NewReader(strings.NewReader("3\n1\n"))}
+	got, err := promptProjectTrustOnTerminal(terminal, discovery, "/sample")
+	if err != nil || !got {
+		t.Fatalf("authorized=%v err=%v, want true/nil", got, err)
+	}
+	if !strings.Contains(output.String(), "Enter 1 to apply, 2 to skip.") {
+		t.Fatalf("missing short hint after rejected 3:\n%s", output.String())
+	}
+}
+
+func TestProjectTrustPromptShowsConfigDeclaration(t *testing.T) {
+	discovery := &projectTrustDiscovery{
+		ConfigData: []byte("mcp:\n  sample:\n    command: sample-server\n"),
+		Sources:    []projectTrustSource{{File: ".chord/config.yaml", Items: []string{`mcp "sample"`}}},
+	}
+	var out bytes.Buffer
+	renderProjectTrustSources(&out, discovery.Sources)
+	renderProjectTrustConfig(&out, discovery.ConfigData)
+	text := out.String()
+	for _, want := range []string{"Project config declaration:", "command: sample-server", ".chord/config.yaml"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("config declaration missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestProjectTrustAgentMCPDetails(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "reviewer.yaml")
