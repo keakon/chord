@@ -105,6 +105,12 @@ If `config.yaml` is missing, the setup wizard offers two ways to connect:
 - **API key**: enter your provider's full API URL, model name, and key. You can also enter a proxy URL if needed.
 - **Codex OAuth**: follow the sign-in prompts without entering an API key manually.
 
+On terminals that report bracketed-paste support, single-character choices
+submit without `Enter`. A pasted choice is consumed in full before it
+submits; only its first non-whitespace character selects an option. On
+other terminals, enter a choice and press `Enter`. Input received before
+paste mode is enabled also uses this `Enter`-confirmed fallback.
+
 The wizard creates a minimal `config.yaml` and, when needed, `auth.yaml`, then shows where it saved them. It reuses matching credentials when possible. Chord also creates the project's `.chord/` directory as needed.
 
 See [More configuration options](#more-configuration-options) for API URL formats, manual setup, and setup without an interactive terminal.

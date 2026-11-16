@@ -15,6 +15,7 @@ require (
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/dgraph-io/ristretto/v2 v2.4.2
 	github.com/disintegration/imaging v1.6.2
+	github.com/ebitengine/purego v0.11.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/golang-lru/v2 v2.0.7
@@ -59,7 +60,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.8.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
-	github.com/ebitengine/purego v0.11.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/keakon/displaywidth v0.11.0-fork.1 // indirect

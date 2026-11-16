@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/spf13/cobra"
@@ -51,9 +52,11 @@ type setupTerminal struct {
 }
 
 type setupInterrupt struct {
-	signalCh chan os.Signal
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	signalCh        chan os.Signal
+	stopCh          chan struct{}
+	stopOnce        sync.Once
+	restoreMu       sync.Mutex
+	restoreTerminal func() error
 }
 
 // armSetupInterrupt makes Ctrl+C terminate the process while a startup prompt
@@ -71,8 +74,9 @@ func armSetupInterrupt(termIO *setupTerminal) {
 		return
 	}
 	handler := &setupInterrupt{
-		signalCh: make(chan os.Signal, 1),
-		stopCh:   make(chan struct{}),
+		signalCh:        make(chan os.Signal, 1),
+		stopCh:          make(chan struct{}),
+		restoreTerminal: func() error { return term.Restore(fd, base) },
 	}
 	signal.Notify(handler.signalCh, os.Interrupt)
 	go func() {
@@ -80,7 +84,8 @@ func armSetupInterrupt(termIO *setupTerminal) {
 		case <-handler.signalCh:
 			// In cooked mode the terminal driver already echoes ^C, so don't
 			// print one here (unlike the raw path, which must echo it itself).
-			_ = term.Restore(fd, base)
+			handler.restoreMu.Lock()
+			_ = handler.restoreTerminal()
 			os.Exit(130)
 		case <-handler.stopCh:
 		}
@@ -690,7 +695,7 @@ var errWizardRestart = errors.New("setup restarted by user")
 // fall back to line-based reading, which stays the canonical path. The
 // terminal is restored before returning; on Ctrl+C it is restored and the
 // process exits with 130, matching a SIGINT death in line mode.
-func withSingleKeyTerminal(termIO *setupTerminal, fn func(*bufio.Reader, io.Writer) (string, error)) (string, bool, error) {
+func withSingleKeyTerminal(termIO *setupTerminal, fn func(*bufio.Reader, io.Writer) (string, error)) (value string, handled bool, err error) {
 	if termIO == nil || termIO.in == nil || termIO.reader == nil || termIO.out == nil {
 		return "", false, nil
 	}
@@ -698,15 +703,86 @@ func withSingleKeyTerminal(termIO *setupTerminal, fn func(*bufio.Reader, io.Writ
 		return "", false, nil
 	}
 	fd := termIO.in.Fd()
+	restoreMu := &sync.Mutex{}
+	handler := termIO.interrupt
+	if handler != nil {
+		restoreMu = &handler.restoreMu
+	}
+	restoreMu.Lock()
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
+		restoreMu.Unlock()
 		return "", false, nil
 	}
-	restore := func() { _ = term.Restore(fd, oldState) }
-	defer restore()
-	value, err := fn(termIO.reader, termIO.out)
+	var restoreOnce sync.Once
+	var restoreErr error
+	resetPaste := false
+	restore := func() error {
+		restoreOnce.Do(func() {
+			if resetPaste {
+				if _, writeErr := io.WriteString(termIO.out, ansi.ResetModeBracketedPaste); writeErr != nil {
+					restoreErr = fmt.Errorf("restore terminal paste mode: %w", writeErr)
+				}
+			}
+			if termErr := term.Restore(fd, oldState); termErr != nil {
+				restoreErr = errors.Join(restoreErr, fmt.Errorf("restore terminal input mode: %w", termErr))
+			}
+		})
+		return restoreErr
+	}
+	var previousRestore func() error
+	if handler != nil {
+		previousRestore = handler.restoreTerminal
+		handler.restoreTerminal = restore
+	}
+	restoreMu.Unlock()
+	restoreLocked := func() error {
+		restoreMu.Lock()
+		defer restoreMu.Unlock()
+		return restore()
+	}
+	defer func() {
+		restoreMu.Lock()
+		defer restoreMu.Unlock()
+		if restoreErr := restore(); restoreErr != nil {
+			err = errors.Join(err, restoreErr)
+			handled = true
+		}
+		if handler != nil {
+			handler.restoreTerminal = previousRestore
+		}
+	}()
+	wait := func(timeout time.Duration) (bool, error) {
+		return waitSetupInput(termIO.in, timeout)
+	}
+	mode, _, err := querySetupPasteMode(termIO.reader, termIO.out, wait)
+	if err == nil && mode == ansi.ModeReset {
+		restoreMu.Lock()
+		resetPaste = true
+		_, writeErr := io.WriteString(termIO.out, ansi.SetModeBracketedPaste)
+		restoreMu.Unlock()
+		if writeErr != nil {
+			return "", true, fmt.Errorf("enable terminal paste mode: %w", writeErr)
+		}
+		// The ordered report closes the window between querying and enabling.
+		// Unmarked input before it needs an Enter-confirmed line boundary.
+		var unmarkedInput bool
+		mode, unmarkedInput, err = querySetupPasteMode(termIO.reader, termIO.out, wait)
+		if err == nil && unmarkedInput {
+			return "", false, nil
+		}
+	}
+	if err != nil && !errors.Is(err, errSingleKeyInterrupt) {
+		return "", true, err
+	}
+	if err == nil && !mode.IsSet() {
+		return "", false, nil
+	}
+	if err == nil {
+		value, err = fn(termIO.reader, termIO.out)
+	}
 	if errors.Is(err, errSingleKeyInterrupt) {
-		restore()
+		_ = restoreLocked()
 		fmt.Fprintln(termIO.out, "^C")
 		os.Exit(130)
 	}
@@ -746,17 +822,22 @@ func promptChoiceSingleKey(termIO *setupTerminal, prompt string, allowed []strin
 // Enter selects defaultChoice (or reprompts when defaultChoice is 0, meaning
 // no default); escape sequences (arrow keys) are ignored; a bare Esc restarts
 // setup when escRestarts is true and is otherwise ignored; unhandled control
-// bytes are ignored; an invalid printable key reprompts. The remainder of a
-// pasted line is drained so it does not leak into the next prompt.
+// bytes are ignored; an invalid printable key reprompts. A bracketed paste is
+// consumed through its end marker before its first choice byte can submit.
 func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string, allowed map[byte]struct{}, defaultChoice byte, invalidMessage string, escRestarts bool, wait func(time.Duration) (bool, error)) (string, error) {
 	for {
 		b, err := reader.ReadByte()
 		if err != nil {
 			return "", err
 		}
+		if b == '\r' && reader.Buffered() > 0 {
+			next, _ := reader.Peek(1)
+			if len(next) != 0 && next[0] == '\n' {
+				_, _ = reader.ReadByte()
+			}
+		}
 		switch b {
 		case '\r', '\n':
-			drainPastedLineRemainder(reader)
 			if defaultChoice == 0 {
 				fmt.Fprintf(out, "\r\n%s\r\n%s", invalidMessage, prompt)
 				continue
@@ -768,9 +849,22 @@ func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string,
 		case 0x04: // Ctrl+D: EOF, matching line-mode behavior.
 			return "", io.EOF
 		case 0x1b:
-			bare, err := consumeSetupEscape(reader, wait)
+			sequence, bare, err := readSetupEscape(reader, wait)
 			if err != nil {
 				return "", err
+			}
+			if sequence == ansi.BracketedPasteStart {
+				b, err = readSetupChoicePaste(reader, wait)
+				if err != nil {
+					return "", err
+				}
+				b = normalizeSetupChoiceKey(b, allowed)
+				if _, ok := allowed[b]; ok {
+					fmt.Fprintf(out, "%c\r\n", b)
+					return string(b), nil
+				}
+				fmt.Fprintf(out, "\r\n%s\r\n%s", invalidMessage, prompt)
+				continue
 			}
 			if !bare {
 				continue
@@ -784,30 +878,12 @@ func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string,
 		if b < 0x20 || b == 0x7f {
 			continue
 		}
-		if b >= 'A' && b <= 'Z' {
-			if _, ok := allowed[b+'a'-'A']; ok {
-				b += 'a' - 'A'
-			}
-		}
+		b = normalizeSetupChoiceKey(b, allowed)
 		if _, ok := allowed[b]; ok {
-			drainPastedLineRemainder(reader)
 			fmt.Fprintf(out, "%c\r\n", b)
 			return string(b), nil
 		}
-		drainPastedLineRemainder(reader)
 		fmt.Fprintf(out, "\r\n%s\r\n%s", invalidMessage, prompt)
-	}
-}
-
-// drainPastedLineRemainder discards already-buffered bytes up to and including
-// the next newline so a pasted line does not leak into the following prompt.
-// It never blocks: only currently buffered bytes are considered.
-func drainPastedLineRemainder(reader *bufio.Reader) {
-	for reader.Buffered() > 0 {
-		b, err := reader.ReadByte()
-		if err != nil || b == '\n' {
-			return
-		}
 	}
 }
 
@@ -926,6 +1002,9 @@ func promptLine(termIO *setupTerminal, prompt string) (string, error) {
 		return "", err
 	}
 	line = strings.TrimRight(line, "\r\n")
+	for mode := ansi.ModeNotRecognized; mode <= ansi.ModePermanentlyReset; mode++ {
+		line = strings.ReplaceAll(line, ansi.ReportMode(ansi.ModeBracketedPaste, mode), "")
+	}
 	// Any Esc byte in a submitted line means restart: Esc never belongs in
 	// legitimate wizard input, so this also catches Esc typed before other
 	// characters and pastes carrying escape bytes.
