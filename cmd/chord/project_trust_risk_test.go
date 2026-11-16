@@ -262,3 +262,42 @@ func containsHazard(hazards []string, substr string) bool {
 	}
 	return false
 }
+
+// Reproduces the startup case: the process cwd is the project root. The
+// baseline must ignore project commands even though a relative
+// ".chord/commands" would resolve against that cwd.
+func TestRiskCommandBaselineIgnoresCwdProjectCommands(t *testing.T) {
+	configHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CHORD_CONFIG_HOME", configHome)
+	root := t.TempDir()
+	cmdDir := filepath.Join(root, ".chord", "commands")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"retrospect", "write-plan"} {
+		if err := os.WriteFile(filepath.Join(cmdDir, name+".md"), []byte("body\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(root)
+
+	globalPath := globalConfigPathForTrustTest(t)
+	globalData, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery, err := discoverProjectTrust(root, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	risk, err := assessProjectTrustRisk(globalPath, globalData, root, root, discovery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if risk.requiresTrust() {
+		t.Fatalf("project commands must not be treated as overriding a global baseline: hazards=%v unreadable=%v", risk.Hazards, risk.Unreadable)
+	}
+}

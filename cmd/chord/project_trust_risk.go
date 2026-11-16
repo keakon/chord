@@ -116,10 +116,16 @@ func buildRiskBaseline(globalPath string, globalData []byte, contentRoot, workDi
 		return nil, err
 	}
 
+	// SkipProjectFiles is essential: with an empty ContentRoot the loader's
+	// project command directory is the relative ".chord/commands", which
+	// resolves against the process cwd - normally the project root at startup.
+	// Without this, the baseline would scan the very commands being assessed
+	// and every project command would look like it overrides a global one.
 	baseDefs, _ := command.Load(command.LoadOptions{
-		ConfigHome:    locator.ConfigHome,
-		GlobalCfg:     b.config.Commands,
-		GlobalCfgPath: globalPath,
+		ConfigHome:       locator.ConfigHome,
+		GlobalCfg:        b.config.Commands,
+		GlobalCfgPath:    globalPath,
+		SkipProjectFiles: true,
 	})
 	b.commands = make(map[string]bool, len(baseDefs))
 	for _, def := range baseDefs {
