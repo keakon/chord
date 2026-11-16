@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -806,5 +808,100 @@ func TestRunInitialSetupWizardPreventSleepChoice(t *testing.T) {
 				t.Fatalf("prompt present = %v, want %v", got, tc.prompt)
 			}
 		})
+	}
+}
+
+func TestSelectChoiceBySingleKey(t *testing.T) {
+	allowed := map[byte]struct{}{'1': {}, '2': {}}
+	prompt := "Provider [1]: "
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr error
+	}{
+		{name: "digit submits without enter", input: "1", want: "1"},
+		{name: "second digit submits without enter", input: "2", want: "2"},
+		{name: "carriage return selects default", input: "\r", want: "1"},
+		{name: "newline selects default", input: "\n", want: "1"},
+		{name: "paste remainder drained", input: "1x2", want: "1"},
+		{name: "paste drain stops at newline", input: "1\r\n2", want: "1"},
+		{name: "arrow sequence swallowed", input: "\x1b[A1", want: "1"},
+		{name: "bare escape restarts setup", input: "\x1b1", wantErr: errWizardRestart},
+		{name: "bare escape after arrow sequence restarts setup", input: "\x1b[A\x1b", wantErr: errWizardRestart},
+		{name: "ctrl-d is EOF", input: "\x04", wantErr: io.EOF},
+		{name: "ctrl-c interrupts", input: "\x03", wantErr: errSingleKeyInterrupt},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			value, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader(tc.input)), out, prompt, allowed, '1', "Please choose one of the listed options.")
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+			if value != tc.want {
+				t.Fatalf("value = %q, want %q", value, tc.want)
+			}
+			if !strings.Contains(out.String(), tc.want+"\r\n") {
+				t.Fatalf("output missing echo of %q: %q", tc.want, out.String())
+			}
+		})
+	}
+}
+
+func TestSelectChoiceBySingleKeyRepromptsOnInvalidKey(t *testing.T) {
+	out := &bytes.Buffer{}
+	_, err := selectChoiceBySingleKey(bufio.NewReader(strings.NewReader("x")), out, "Provider [1]: ", map[byte]struct{}{'1': {}, '2': {}}, '1', "Please choose one of the listed options.")
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("err = %v, want EOF", err)
+	}
+	if !strings.Contains(out.String(), "Please choose one of the listed options.") || !strings.Contains(out.String(), "Provider [1]: ") {
+		t.Fatalf("output missing reprompt message and prompt: %q", out.String())
+	}
+}
+
+func TestPromptChoiceSingleKeyFallsBackWithoutTTY(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	termIO := &setupTerminal{in: f, out: &bytes.Buffer{}, reader: bufio.NewReader(f)}
+	value, handled, err := promptChoiceSingleKey(termIO, "Provider [1]: ", []string{"1", "2"}, "1", "Please choose one of the listed options.")
+	if handled {
+		t.Fatal("handled = true, want false for non-TTY input")
+	}
+	if value != "" || err != nil {
+		t.Fatalf("value/err = %q/%v, want empty/nil", value, err)
+	}
+}
+
+func TestPromptLineKeepsEscAsTextWithoutTTY(t *testing.T) {
+	// Esc-to-restart is terminal-only; on non-TTY input Esc stays plain text
+	// so piped scripts cannot spin the restart loop.
+	f, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString("\x1b\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	termIO := &setupTerminal{in: f, out: &bytes.Buffer{}, reader: bufio.NewReader(f), escRestarts: true}
+	line, err := promptLine(termIO, "Provider [1]: ")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if line != "\x1b" {
+		t.Fatalf("line = %q, want %q", line, "\x1b")
 	}
 }

@@ -36,6 +36,15 @@ type setupTerminal struct {
 	reader       *bufio.Reader
 	readPassword func(int) ([]byte, error)
 	closer       func() error
+	// escRestarts enables Esc-to-restart for prompts owned by the setup
+	// wizard; other promptLine consumers (project trust prompt) keep Esc as
+	// plain input.
+	escRestarts bool
+}
+
+// ttyInput reports whether the terminal's input side is a real terminal.
+func (t *setupTerminal) ttyInput() bool {
+	return t != nil && t.in != nil && term.IsTerminal(t.in.Fd())
 }
 
 type existingSetupCredentialState struct {
@@ -92,6 +101,28 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 		return fmt.Errorf("check config path %s: %w", configPath, err)
 	}
 
+	restarted := false
+	for {
+		err := runInitialSetupWizardOnce(ctx, opts, restarted)
+		if err == nil || !errors.Is(err, errWizardRestart) {
+			return err
+		}
+		restarted = true
+	}
+}
+
+// runInitialSetupWizardOnce runs one pass of the setup prompts. It returns
+// errWizardRestart when the user pressed Esc; the caller may run it again.
+// Nothing is written to disk until all prompts succeed, so a restart is
+// side-effect free.
+func runInitialSetupWizardOnce(ctx context.Context, opts SetupWizardOptions, restarted bool) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	configPath, err := config.ConfigPath()
+	if err != nil {
+		return err
+	}
 	if opts.OpenTTY == nil {
 		opts.OpenTTY = tea.OpenTTY
 	}
@@ -108,6 +139,7 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 	if err != nil {
 		return initialSetupRequiredError()
 	}
+	termIO.escRestarts = true
 	defer func() {
 		if termIO != nil && termIO.closer != nil {
 			_ = termIO.closer()
@@ -119,9 +151,17 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 		out = io.Discard
 	}
 
+	if restarted {
+		fmt.Fprintln(out, "Restarting setup.")
+		fmt.Fprintln(out)
+	}
 	fmt.Fprintln(out, "No config.yaml found.")
 	fmt.Fprintln(out, "Let's set up Chord for first use.")
 	fmt.Fprintln(out)
+	if termIO.ttyInput() {
+		fmt.Fprintln(out, "Press Esc to restart setup, or Ctrl+C to quit.")
+		fmt.Fprintln(out)
+	}
 	fmt.Fprintln(out, "Chord stores behavior settings in config.yaml and credentials in auth.yaml.")
 	fmt.Fprintln(out, "I'll show the exact file locations after setup.")
 	fmt.Fprintln(out)
@@ -547,6 +587,9 @@ func openSetupTerminal(opts SetupWizardOptions) (*setupTerminal, error) {
 }
 
 func promptChoice(termIO *setupTerminal, prompt string, allowed []string, defaultChoice string) (string, error) {
+	if value, handled, err := promptChoiceSingleKey(termIO, prompt+" ["+defaultChoice+"]: ", allowed, defaultChoice, "Please choose one of the listed options."); handled {
+		return value, err
+	}
 	allowedSet := make(map[string]struct{}, len(allowed))
 	for _, v := range allowed {
 		allowedSet[v] = struct{}{}
@@ -564,6 +607,117 @@ func promptChoice(termIO *setupTerminal, prompt string, allowed []string, defaul
 			return value, nil
 		}
 		fmt.Fprintln(termIO.out, "Please choose one of the listed options.")
+	}
+}
+
+var errSingleKeyInterrupt = errors.New("setup interrupted by user")
+
+// errWizardRestart is returned when the user pressed Esc to restart setup
+// from the first prompt. It is only produced on terminals; piped input keeps
+// Esc as plain text.
+var errWizardRestart = errors.New("setup restarted by user")
+
+// promptChoiceSingleKey submits listed choices from a single keypress when the
+// input is a real terminal, so users don't have to press Enter after typing
+// "1"/"2" or y/N. It returns handled=false when the fast path is unavailable
+// (piped input, tests, unsupported platform, MakeRaw failure) so callers fall
+// back to line-based reading, which stays the canonical path.
+func promptChoiceSingleKey(termIO *setupTerminal, prompt string, allowed []string, defaultChoice string, invalidMessage string) (string, bool, error) {
+	if termIO == nil || termIO.in == nil || termIO.reader == nil || termIO.out == nil {
+		return "", false, nil
+	}
+	if !term.IsTerminal(termIO.in.Fd()) {
+		return "", false, nil
+	}
+	if len(defaultChoice) != 1 {
+		return "", false, nil
+	}
+	allowedKeys := make(map[byte]struct{}, len(allowed))
+	for _, v := range allowed {
+		if len(v) != 1 {
+			return "", false, nil
+		}
+		allowedKeys[v[0]] = struct{}{}
+	}
+	fd := termIO.in.Fd()
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		// Terminal does not support raw mode; fall back to line-based reading.
+		return "", false, nil
+	}
+	defer func() { _ = term.Restore(fd, oldState) }()
+	// OPOST is off in raw mode, so bare "\n" in a multi-line prompt would
+	// staircase; emit "\r\n" explicitly.
+	rawPrompt := strings.ReplaceAll(prompt, "\n", "\r\n")
+	if _, err := fmt.Fprint(termIO.out, rawPrompt); err != nil {
+		return "", true, err
+	}
+	value, err := selectChoiceBySingleKey(termIO.reader, termIO.out, rawPrompt, allowedKeys, defaultChoice[0], invalidMessage)
+	if errors.Is(err, errSingleKeyInterrupt) {
+		// Raw mode swallowed the SIGINT that Ctrl+C would have raised; mirror
+		// the line-mode behavior: restore the terminal, then exit with the
+		// status a SIGINT death produces.
+		_ = term.Restore(fd, oldState)
+		fmt.Fprintln(termIO.out, "^C")
+		os.Exit(130)
+	}
+	return value, true, err
+}
+
+// selectChoiceBySingleKey runs the single-key selection loop with the terminal
+// already in raw mode (echo off, OPOST off). A listed key submits immediately;
+// Enter selects defaultChoice; escape sequences (arrow keys) are ignored;
+// bare Esc restarts setup; unhandled control bytes are ignored; an invalid
+// printable key reprompts. The remainder of a pasted line is drained so it
+// does not leak into the next prompt.
+func selectChoiceBySingleKey(reader *bufio.Reader, out io.Writer, prompt string, allowed map[byte]struct{}, defaultChoice byte, invalidMessage string) (string, error) {
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		switch b {
+		case '\r', '\n':
+			drainPastedLineRemainder(reader)
+			fmt.Fprintf(out, "%c\r\n", defaultChoice)
+			return string(defaultChoice), nil
+		case 0x03: // Ctrl+C
+			return "", errSingleKeyInterrupt
+		case 0x04: // Ctrl+D: EOF, matching line-mode behavior.
+			return "", io.EOF
+		case 0x1b: // ESC: swallow CSI/SS3 sequences (arrow keys); bare Esc restarts setup.
+			if reader.Buffered() > 0 {
+				if seq, peekErr := reader.Peek(1); peekErr == nil && (seq[0] == '[' || seq[0] == 'O') {
+					_, _ = reader.ReadByte() // introducer
+					_, _ = reader.ReadByte() // final byte
+					continue
+				}
+			}
+			fmt.Fprint(out, "^[\r\n")
+			return "", errWizardRestart
+		}
+		if b < 0x20 || b == 0x7f {
+			continue
+		}
+		if _, ok := allowed[b]; ok {
+			drainPastedLineRemainder(reader)
+			fmt.Fprintf(out, "%c\r\n", b)
+			return string(b), nil
+		}
+		drainPastedLineRemainder(reader)
+		fmt.Fprintf(out, "\r\n%s\r\n%s", invalidMessage, prompt)
+	}
+}
+
+// drainPastedLineRemainder discards already-buffered bytes up to and including
+// the next newline so a pasted line does not leak into the following prompt.
+// It never blocks: only currently buffered bytes are considered.
+func drainPastedLineRemainder(reader *bufio.Reader) {
+	for reader.Buffered() > 0 {
+		b, err := reader.ReadByte()
+		if err != nil || b == '\n' {
+			return
+		}
 	}
 }
 
@@ -639,8 +793,16 @@ func promptOptionalText(termIO *setupTerminal, prompt string, defaultValue strin
 
 func promptYesNo(termIO *setupTerminal, prompt string, defaultYes bool) (bool, error) {
 	defaultLabel := "N"
+	defaultChoice := "n"
 	if defaultYes {
 		defaultLabel = "Y"
+		defaultChoice = "y"
+	}
+	if value, handled, err := promptChoiceSingleKey(termIO, prompt, []string{"y", "n"}, defaultChoice, fmt.Sprintf("Please answer y or n (default %s).", defaultLabel)); handled {
+		if err != nil {
+			return false, err
+		}
+		return value == "y", nil
 	}
 	for {
 		value, err := promptLine(termIO, prompt)
@@ -673,7 +835,14 @@ func promptLine(termIO *setupTerminal, prompt string) (string, error) {
 	if err != nil && (!errors.Is(err, io.EOF) || len(line) == 0) {
 		return "", err
 	}
-	return strings.TrimRight(line, "\r\n"), nil
+	line = strings.TrimRight(line, "\r\n")
+	// Any Esc byte in a submitted line means restart: Esc never belongs in
+	// legitimate wizard input, so this also catches Esc typed before other
+	// characters and pastes carrying escape bytes.
+	if termIO.escRestarts && termIO.ttyInput() && strings.Contains(line, "\x1b") {
+		return "", errWizardRestart
+	}
+	return line, nil
 }
 
 func promptAPIKeyCredential(termIO *setupTerminal, providerName string) (string, bool, error) {
@@ -695,6 +864,9 @@ func promptAPIKeyCredential(termIO *setupTerminal, providerName string) (string,
 		return "", false, err
 	}
 	value := strings.TrimSpace(string(secret))
+	if strings.Contains(value, "\x1b") {
+		return "", false, errWizardRestart
+	}
 	if value == "" {
 		return "", false, fmt.Errorf("API key cannot be empty")
 	}
