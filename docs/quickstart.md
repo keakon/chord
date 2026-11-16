@@ -21,6 +21,26 @@ brew update
 brew upgrade chord
 ```
 
+### Install with a script (Linux and macOS)
+
+This downloads the latest release binary, verifies it against the release checksums, and installs it into `/usr/local/bin`:
+
+```bash
+curl -fsSL https://github.com/keakon/chord/releases/latest/download/install.sh | bash
+```
+
+The script asks for `sudo` when it must write to the install directory, and it never edits your shell profile. Pin a release or choose another directory with flags:
+
+```bash
+curl -fsSL https://github.com/keakon/chord/releases/latest/download/install.sh | bash -s -- --version v0.8.3 --install-dir "$HOME/.local/bin"
+```
+
+If that URL returns 404, the latest release does not ship the installer yet; fetch it from the repository instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/keakon/chord/main/scripts/install.sh | bash
+```
+
 ### Download a binary
 
 Download the archive for your OS and architecture from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`. These binaries do not require Go.
@@ -31,6 +51,18 @@ With Go 1.27.0 or newer:
 
 ```bash
 go install github.com/keakon/chord/cmd/chord@latest
+```
+
+`go install` writes the binary to `$(go env GOPATH)/bin` (usually `~/go/bin`) unless `GOBIN` is set. That directory must be on your `PATH`, otherwise the shell reports `chord: command not found`:
+
+```bash
+export PATH="$PATH:$(go env GOPATH)/bin"
+```
+
+Add that export to your shell profile (`~/.bashrc` for Bash, `~/.zshrc` for Zsh) so it survives new sessions. To place the binary in a directory that is already on `PATH` everywhere, copy it after the build:
+
+```bash
+sudo install -m 0755 "$(go env GOPATH)/bin/chord" /usr/local/bin/chord
 ```
 
 ### Verify the installation

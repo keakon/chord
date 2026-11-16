@@ -55,6 +55,15 @@ brew install keakon/tap/chord
 chord --version
 ```
 
+Linux 与 macOS 未安装 Homebrew 时：
+
+```bash
+curl -fsSL https://github.com/keakon/chord/releases/latest/download/install.sh | bash
+chord --version
+```
+
+如果该 URL 返回 404，说明最新发布版还没带上安装脚本，详见[快速开始](./docs/quickstart_CN.md#1-安装)。
+
 Windows 从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载压缩包，解压后把 `chord` 加入 `PATH`。
 
 <details>
@@ -65,6 +74,8 @@ Windows 从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载�
 ```bash
 go install github.com/keakon/chord/cmd/chord@latest
 ```
+
+`go install` 会把二进制放在 `$(go env GOPATH)/bin`，需确认该目录在 `PATH` 中。修法见[快速开始](./docs/quickstart_CN.md#用-go-安装)。
 
 </details>
 

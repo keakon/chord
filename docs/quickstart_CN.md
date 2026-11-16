@@ -21,6 +21,26 @@ brew update
 brew upgrade chord
 ```
 
+### 用脚本安装（Linux 与 macOS）
+
+脚本会下载最新发布版的二进制、按发布页的校验和验证，并安装到 `/usr/local/bin`：
+
+```bash
+curl -fsSL https://github.com/keakon/chord/releases/latest/download/install.sh | bash
+```
+
+需要写入安装目录时脚本会请求 `sudo`，并且不会改动你的 shell 配置文件。用参数固定版本或更换安装目录：
+
+```bash
+curl -fsSL https://github.com/keakon/chord/releases/latest/download/install.sh | bash -s -- --version v0.8.3 --install-dir "$HOME/.local/bin"
+```
+
+如果该 URL 返回 404，说明最新发布版还没带上安装脚本，改为从仓库获取：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/keakon/chord/main/scripts/install.sh | bash
+```
+
 ### 下载二进制文件
 
 从 [GitHub Releases](https://github.com/keakon/chord/releases) 下载对应系统和架构的压缩包，解压后把 `chord` 加入 `PATH`。这些二进制文件不需要 Go。
@@ -31,6 +51,18 @@ brew upgrade chord
 
 ```bash
 go install github.com/keakon/chord/cmd/chord@latest
+```
+
+`go install` 会把二进制写入 `$(go env GOPATH)/bin`（通常是 `~/go/bin`），除非设置了 `GOBIN`。该目录必须在 `PATH` 中，否则 shell 会报 `chord: command not found`：
+
+```bash
+export PATH="$PATH:$(go env GOPATH)/bin"
+```
+
+把这条 export 写进 shell 配置文件（Bash 用 `~/.bashrc`，Zsh 用 `~/.zshrc`），新终端才能继续生效。若想把二进制放到各系统默认就在 `PATH` 的目录，编译完成后复制过去：
+
+```bash
+sudo install -m 0755 "$(go env GOPATH)/bin/chord" /usr/local/bin/chord
 ```
 
 ### 确认安装

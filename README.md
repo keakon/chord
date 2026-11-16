@@ -55,6 +55,15 @@ brew install keakon/tap/chord
 chord --version
 ```
 
+On Linux and macOS without Homebrew:
+
+```bash
+curl -fsSL https://github.com/keakon/chord/releases/latest/download/install.sh | bash
+chord --version
+```
+
+If that URL returns 404, the latest release does not ship the installer yet; see [Quickstart](./docs/quickstart.md#1-install).
+
 On Windows, download the archive from [GitHub Releases](https://github.com/keakon/chord/releases), extract it, and put `chord` on your `PATH`.
 
 <details>
@@ -65,6 +74,8 @@ With Go 1.27.0 or newer:
 ```bash
 go install github.com/keakon/chord/cmd/chord@latest
 ```
+
+`go install` puts the binary in `$(go env GOPATH)/bin`, so make sure that directory is on your `PATH`. See [Quickstart](./docs/quickstart.md#install-with-go) for the PATH fix.
 
 </details>
 

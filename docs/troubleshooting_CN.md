@@ -8,7 +8,7 @@
 
 先在终端运行 `chord --version`，确认命令能找到且程序可以启动。下载的二进制不需要 Go；只有源码构建才需要检查 Go 版本和启动入口。
 
-1. **命令找不到或被系统阻止**：检查安装路径；macOS 下载版的处理步骤见[快速开始](./quickstart_CN.md#1-安装)。
+1. **命令找不到或被系统阻止**：检查安装路径。安装脚本会把二进制放到已在 `PATH` 的 `/usr/local/bin`：`curl -fsSL https://github.com/keakon/chord/releases/latest/download/install.sh | bash`（如果该 URL 返回 404，说明最新发布版还没带上安装脚本，改用 `curl -fsSL https://raw.githubusercontent.com/keakon/chord/main/scripts/install.sh | bash`）。`go install` 装出来的二进制在 `$(go env GOPATH)/bin`（通常是 `~/go/bin`），该目录常常不在 `PATH` 里；用 `export PATH="$PATH:$(go env GOPATH)/bin"` 补上，或用 `sudo install -m 0755 "$(go env GOPATH)/bin/chord" /usr/local/bin/chord` 复制到已在 `PATH` 的目录。macOS 下载版的处理步骤见[快速开始](./quickstart_CN.md#1-安装)。
 2. **配置缺失**：在交互式终端运行 `chord`，按[初始化向导](./quickstart_CN.md#2-第一次运行)配置。
 3. **配置错误**：运行 `chord doctor config`，根据报告修正 YAML 或字段。
 4. **仍无法启动**：保留终端错误输出，再查看本页末尾的日志采集说明。

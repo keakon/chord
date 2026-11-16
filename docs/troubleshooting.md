@@ -8,7 +8,7 @@ Start from the symptom and find the next command to run. Symptoms are grouped ro
 
 Run `chord --version` in a terminal first to check that the command is available and the program starts. Prebuilt binaries do not need Go; only source builds require checking the Go version and source entry point.
 
-1. **Command not found or blocked by the OS**: check the install path. For downloaded macOS binaries, see [Quickstart](./quickstart.md#1-install).
+1. **Command not found or blocked by the OS**: check the install path. The install script places the binary in `/usr/local/bin`, which is already on `PATH`: `curl -fsSL https://github.com/keakon/chord/releases/latest/download/install.sh | bash` (if that URL returns 404, the latest release does not ship the installer yet — use `curl -fsSL https://raw.githubusercontent.com/keakon/chord/main/scripts/install.sh | bash`). A `go install` build lands in `$(go env GOPATH)/bin` (usually `~/go/bin`), which is often missing from `PATH`; add it with `export PATH="$PATH:$(go env GOPATH)/bin"`, or copy the binary into a directory that is already on `PATH` with `sudo install -m 0755 "$(go env GOPATH)/bin/chord" /usr/local/bin/chord`. For downloaded macOS binaries, see [Quickstart](./quickstart.md#1-install).
 2. **Missing configuration**: run `chord` in an interactive terminal and follow the [setup wizard](./quickstart.md#2-first-run).
 3. **Invalid configuration**: run `chord doctor config` and correct the reported YAML or field issues.
 4. **Still unable to start**: keep the terminal error output, then use the log collection guidance at the end of this page.
