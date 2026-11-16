@@ -585,6 +585,8 @@ history.
 | Skill instructions | `skill` loads | `stale_age_turns` (default 3) | `stale_output_bytes` (default 1500) | Shares the catch-all gates (including `min_tool_results_prune`) but is rendered as instructions rather than data: a skill body is the workflow the model is executing, and the copy that was loaded is named by its `<path>` / `<root>` anchors — the same skill name can exist in several load roots. The summary keeps those anchors and the body's section outline, and the full text stays readable at the archived address |
 | Other stale results | Tool output not covered above | `stale_age_turns` (default 3) | `stale_output_bytes` (default 1500) | Catch-all fallback; most conservative to avoid losing hard-to-reconstruct data |
 
+Image parts in local tool results become eligible for eviction at `stale_age_turns`, independently of the text rules above. Cache amortization can defer eviction of images in an already-sent prefix. Evicted images are replaced in the prepared request by a short marker with the saved path and `view_image` recall route when both are available; otherwise it states that the image cannot be re-loaded. This step leaves tool-result text unchanged, though the text rules can still reduce it separately. Saved history, PDFs, user-uploaded images, and images replayed through native tool history are unaffected by this rule.
+
 How to read the age and size parameters:
 
 - `*_age_turns` keeps its configuration name, but the unit is an actual
