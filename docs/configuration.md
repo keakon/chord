@@ -891,10 +891,12 @@ unauthorized project layer and exit with instructions. Pass
 `--trust-project-config` to apply the current files without saving an
 authorization.
 
-`chord doctor config` shows the authorization status, the discovered
-sources, and the fingerprint; `chord doctor config
---revoke-project-trust` drops the recorded authorization for the current
-project. The gate covers what the configuration declares, not everything a
+Authorizations are stored in `project-trust.json` under your state directory
+(`~/.local/state/chord/project-trust.json` by default, or under
+`$CHORD_STATE_DIR` when set). `chord doctor config` shows the authorization
+status, the discovered sources, the fingerprint, and the store path;
+`chord doctor config --revoke-project-trust` drops the recorded authorization
+for the current project. The gate covers what the configuration declares, not everything a
 repository contains: executed scripts, dependencies, and ordinary source
 code are not part of the authorization, and `AGENTS.md` instructions and
 project memory stay guidance-only.

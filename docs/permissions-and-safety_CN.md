@@ -253,7 +253,7 @@ Chord 在**请求发出之前**匹配模型给出的 URL，并在跟随每次 HT
 
 项目级配置与能力声明——`.chord/config.yaml`、agent 定义、命令和 skill——都是仓库内容，不是用户设置。Chord 把它们当作不可信内容：在你于该 checkout 内授权之前，项目声明的东西一律不运行。运行前 Chord 会先发现所有来源，列出它们会做什么（MCP server、hooks、LSP server、provider、agent、命令和 skill 及其关键目标），然后询问；拒绝或关闭提示，就按不带项目层的方式启动。
 
-授权按内容绑定这批声明文件：新增、删除或修改其中任何一个，都要重新确认。记录保存在你的 state 目录里，`chord doctor config` 可以查看状态，`chord doctor config --revoke-project-trust` 撤销授权。非交互入口（`chord headless`、ACP、`chord mcp login`，以及 `chord auth` 的 provider 登录与刷新流程）遇到未授权的项目层会拒绝应用并退出，同时给出处理说明；`--skip-project-config` 与 `--trust-project-config` 提供单次运行的替代方式。
+授权按内容绑定这批声明文件：新增、删除或修改其中任何一个，都要重新确认。记录以 `project-trust.json` 保存在你的 state 目录中（默认 `~/.local/state/chord/project-trust.json`，设置 `CHORD_STATE_DIR` 时为 `$CHORD_STATE_DIR/project-trust.json`）；`chord doctor config` 可以查看状态和存储路径，`chord doctor config --revoke-project-trust` 撤销授权。非交互入口（`chord headless`、ACP、`chord mcp login`，以及 `chord auth` 的 provider 登录与刷新流程）遇到未授权的项目层会拒绝应用并退出，同时给出处理说明；`--skip-project-config` 与 `--trust-project-config` 提供单次运行的替代方式。
 
 这道门禁是同意边界，不是沙箱。它覆盖的是配置声明的内容，而不是仓库里的所有东西：配置要运行的脚本、依赖和普通源码在 checkout 之后就是受信任的，`AGENTS.md` 的目录指令和项目记忆也只作参考。完整行为见[配置：项目配置信任门禁](./configuration_CN.md#项目配置信任门禁)。
 

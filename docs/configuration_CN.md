@@ -782,7 +782,7 @@ HTTP，确保最终 JSON patch 生效。
 
 Chord 会在应用项目配置前询问。提示最多预览四条配置，并说明本次发现的配置会产生哪些影响；选择“查看所有文件和配置详情”可展开完整来源和目标。确认信任这些配置后再应用。选择跳过，Chord 仍会按全局设置启动，但不加载项目的代理、命令、技能和设置。
 
-授权会把当次批准的内容记录下来。记录按内容绑定这批声明文件：新增、删除或修改其中任何一个，都会在项目层应用前重新询问。在 linked worktree 或子目录里启动时，只有同一批文件仍然生效才复用授权；那里新出现的 skill 目录未经授权不会进入 skill 清单。
+授权会把当次批准的内容记录下来，以 `project-trust.json` 保存在 state 目录中（默认 `~/.local/state/chord/project-trust.json`，设置 `CHORD_STATE_DIR` 时为 `$CHORD_STATE_DIR/project-trust.json`）。记录按内容绑定这批声明文件：新增、删除或修改其中任何一个，都会在项目层应用前重新询问。在 linked worktree 或子目录里启动时，只有同一批文件仍然生效才复用授权；那里新出现的 skill 目录未经授权不会进入 skill 清单。
 
 非交互入口（`chord headless`、ACP、`chord mcp login`，以及 `chord auth` 的 provider 登录与刷新流程）遇到未授权的项目层会拒绝应用并退出，同时给出处理说明。加 `--skip-project-config` 可以让这一次运行忽略项目层，加 `--trust-project-config` 可以在不保存授权的情况下应用当前文件。
 
