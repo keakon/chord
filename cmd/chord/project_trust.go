@@ -338,10 +338,24 @@ func newProjectSkillLoader(inputs trust.InputSet, trustState string) agent.Proje
 			declaration = meta.Location
 		}
 		var matched *trust.Input
+		matchedLen := -1
 		for _, input := range inputs {
 			_, ok := projectTrustRelativePath(input.Root, declaration)
-			if ok && (matched == nil || len(input.Root) > len(matched.Root)) {
+			if !ok {
+				continue
+			}
+			// Compare canonical roots, not the raw strings. A canonical trust
+			// root may spell the same ancestor differently from a lexical
+			// declaration path (macOS /var vs /private/var), and then the
+			// shorter-spelled but less specific root could outwin the truly
+			// most specific one by raw string length alone.
+			length := len(input.Root)
+			if canonical, err := config.CanonicalProjectRoot(input.Root); err == nil {
+				length = len(canonical)
+			}
+			if matched == nil || length > matchedLen {
 				matched = &input
+				matchedLen = length
 			}
 		}
 		if matched != nil {
