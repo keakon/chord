@@ -2,7 +2,7 @@
 
 **更快、更省、更轻的终端 Coding Agent。**
 
-六款编程 Agent 用同一模型（`deepseek-flash`）完成同一 DeepSWE v1.1 任务（给 `httpx` 添加流式 JSON 迭代接口），Chord 用时最短、成本最低：6m37s，估算成本 ￥0.348，耗时和成本约为 Claude Code 的 1/3。完整对比表和测量条件见[性能](./performance_CN.md)。
+六款编程 Agent 用同一模型（`DeepSeek-V4.1-Flash-1017`）完成同一 DeepSWE v1.1 任务（给 `httpx` 添加流式 JSON 迭代接口），Chord 用时最短、成本最低：6m37s，估算成本 ￥0.348，耗时和成本约为 Claude Code 的 1/3。完整对比表和测量条件见[性能](./performance_CN.md)。
 
 单个会话只占几十 MB 内存，配置不高的电脑也能同时跑多个 Agent。
 

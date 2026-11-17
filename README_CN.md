@@ -31,7 +31,7 @@
 
 ## 实测数据
 
-六款编程 Agent 用同一模型（`deepseek-flash`）完成同一 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)，Chord 用时最短、成本最低：
+六款编程 Agent 用同一模型（`DeepSeek-V4.1-Flash-1017`）完成同一 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)，Chord 用时最短、成本最低：
 
 | 工具 | 耗时 | 估算成本 |
 |---------|------|------|

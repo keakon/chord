@@ -2,7 +2,7 @@
 
 **A faster, cheaper, lighter terminal coding agent.**
 
-Six coding agents each ran the same DeepSWE v1.1 task (adding streaming JSON iteration to `httpx`) on the same model (`deepseek-flash`). Chord was fastest and cheapest: 6m37s at an estimated $0.052, about 1/3 of Claude Code's time and cost. See [Performance](./performance.md) for the full comparisons and test conditions.
+Six coding agents each ran the same DeepSWE v1.1 task (adding streaming JSON iteration to `httpx`) on the same model (`DeepSeek-V4.1-Flash-1017`). Chord was fastest and cheapest: 6m37s at an estimated $0.052, about 1/3 of Claude Code's time and cost. See [Performance](./performance.md) for the full comparisons and test conditions.
 
 A session uses tens of megabytes of memory, so you can run several agents at once even on modest hardware.
 

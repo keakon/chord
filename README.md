@@ -31,7 +31,7 @@
 
 ## Measured results
 
-Six coding agents completed the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) with the same model (`deepseek-flash`). Chord was fastest and cheapest:
+Six coding agents completed the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration) with the same model (`DeepSeek-V4.1-Flash-1017`). Chord was fastest and cheapest:
 
 | Harness | Time | Estimated cost |
 |---------|------|------|
