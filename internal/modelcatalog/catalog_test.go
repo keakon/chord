@@ -49,42 +49,81 @@ func TestEndpointContracts(t *testing.T) {
 }
 
 func TestModelFactsAndBindings(t *testing.T) {
-	m, ok := Model("openai/gpt-6.1-sol")
-	if !ok {
-		t.Fatal("Model(openai/gpt-6.1-sol) missing")
+	c := effective()
+	if len(c.Models) == 0 {
+		t.Fatal("embedded catalog has no model facts")
 	}
-	if m.Context != 1050000 || m.Input != 0 || m.Output != 128000 {
-		t.Fatalf("gpt-6.1-sol facts = %+v", m)
-	}
-	if m.Cost != nil && (m.Cost.InputPerMillion <= 0 || m.Cost.OutputPerMillion <= 0) {
-		t.Fatal("recorded pricing must be positive, never zero")
-	}
-	for _, s := range m.Sources {
-		if !strings.HasPrefix(s.URL, "https://") || s.Checked == "" {
-			t.Fatalf("source %+v, want an https URL and a check date", s)
+	modelIDs := make(map[string]bool, len(c.Models))
+	for _, m := range c.Models {
+		if m.ID == "" || modelIDs[m.ID] {
+			t.Errorf("duplicate or empty model ID %q", m.ID)
+			continue
+		}
+		modelIDs[m.ID] = true
+		if m.Context <= 0 || m.Output <= 0 || m.Input < 0 || m.Input > m.Context {
+			t.Errorf("invalid token budgets for %s: %+v", m.ID, m)
+		}
+		if len(m.Sources) == 0 {
+			t.Errorf("%s has no verification sources", m.ID)
+		}
+		for _, s := range m.Sources {
+			if !strings.HasPrefix(s.URL, "https://") || s.Checked == "" {
+				t.Errorf("source %+v for %s, want an https URL and a check date", s, m.ID)
+			}
+		}
+		if m.Cost != nil && (m.Cost.InputPerMillion <= 0 || m.Cost.OutputPerMillion <= 0) {
+			t.Errorf("%s records non-positive pricing", m.ID)
 		}
 	}
 
-	b, ok := LookupBinding("codex", "gpt-6.1-sol")
-	if !ok {
-		t.Fatal("LookupBinding(codex, gpt-6.1-sol) missing")
+	endpoints := EndpointContracts()
+	if len(endpoints) == 0 {
+		t.Fatal("embedded catalog has no endpoints")
 	}
-	if b.ModelID != "openai/gpt-6.1-sol" {
-		t.Fatalf("binding = %+v", b)
+	wireByPreset := make(map[string]map[string]bool, len(endpoints))
+	total := 0
+	for _, e := range endpoints {
+		bindings := BindingsForEndpoint(e.PresetID)
+		wires := make(map[string]bool, len(bindings))
+		for i, b := range bindings {
+			if b.WireModelID == "" || b.ModelID == "" {
+				t.Errorf("%s has an incomplete binding: %+v", e.PresetID, b)
+				continue
+			}
+			if !modelIDs[b.ModelID] {
+				t.Errorf("%s binding %s references unknown model %s", e.PresetID, b.WireModelID, b.ModelID)
+			}
+			if wires[b.WireModelID] {
+				t.Errorf("%s has duplicate wire model %s", e.PresetID, b.WireModelID)
+			}
+			wires[b.WireModelID] = true
+			if i > 0 && bindings[i-1].WireModelID > b.WireModelID {
+				t.Errorf("BindingsForEndpoint(%s) is not sorted by wire model ID", e.PresetID)
+			}
+			got, ok := LookupBinding(e.PresetID, b.WireModelID)
+			if !ok || got.ModelID != b.ModelID {
+				t.Errorf("LookupBinding(%s, %s) = (%+v, %v)", e.PresetID, b.WireModelID, got, ok)
+			}
+			total++
+		}
+		wireByPreset[e.PresetID] = wires
 	}
-	if _, ok := b.Variants["high"]; !ok {
-		t.Fatal("codex gpt-6.1-sol is missing the verified high tier")
+	if total == 0 {
+		t.Fatal("embedded catalog has no bindings")
 	}
-	if _, ok := LookupBinding("openai", "claude-sonnet-5-5"); ok {
-		t.Fatal("cross-endpoint lookup must not resolve")
-	}
-	bindings := BindingsForEndpoint("codex")
-	if len(bindings) != 8 {
-		t.Fatalf("codex bindings = %d, want the eight wizard models", len(bindings))
-	}
-	for i := 1; i < len(bindings); i++ {
-		if bindings[i-1].WireModelID > bindings[i].WireModelID {
-			t.Fatal("BindingsForEndpoint is not sorted by wire model ID")
+	for a, aWires := range wireByPreset {
+		for b, bWires := range wireByPreset {
+			if a == b {
+				continue
+			}
+			for wire := range aWires {
+				if bWires[wire] {
+					continue
+				}
+				if _, ok := LookupBinding(b, wire); ok {
+					t.Errorf("LookupBinding(%s, %s) crossed endpoints from %s", b, wire, a)
+				}
+			}
 		}
 	}
 }

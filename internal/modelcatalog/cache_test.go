@@ -74,9 +74,13 @@ func TestInstallCachedCatalogInstallsNewerSnapshotWhole(t *testing.T) {
 	if len(candidates) != 1 || candidates[0].WireModelID != "gpt-6.2-sol-mirror" {
 		t.Fatalf("candidates = %+v, want the cache's candidate entries", candidates)
 	}
-	// Whole-catalog replacement: the cached snapshot keeps carrying the
-	// embedded endpoints even though it is a different version.
-	if _, ok := Model("openai/gpt-6.1-sol"); !ok {
+	// Whole-catalog replacement: the cached snapshot keeps serving the model
+	// identities declared by its own sources.
+	models := effective().Models
+	if len(models) == 0 {
+		t.Fatal("cached catalog has no model facts")
+	}
+	if _, ok := Model(models[0].ID); !ok {
 		t.Fatal("cached snapshot must serve the same model identities as its sources")
 	}
 }

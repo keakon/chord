@@ -1032,6 +1032,114 @@ models:
       - url: https://developers.openai.com/api/docs/models
         checked: "2026-10-27"
 
+  - id: openai/gpt-6.2-astra
+    config_profile:
+      compaction:
+        threshold: 0.25
+        reminder: 0.20
+        notes: Chord starting heuristic to stay below the 272K whole-request 2x pricing tier; the official 922,000 max input cap is the fixed baseline. Tune for task quality, latency and cache reuse.
+      sources:
+        - url: https://developers.openai.com/api/docs/models/gpt-6.2-astra
+          checked: "2026-11-18"
+        - url: https://developers.openai.com/api/docs/pricing
+          checked: "2026-11-18"
+    released: "2026-11-17"
+    context: 1050000
+    input: 922000
+    output: 128000
+    input_modalities: [text, image, pdf]
+    coding_sources:
+    - url: https://openai.com/index/introducing-gpt-6-2-astra-sol/
+      checked: "2026-11-18"
+    reasoning_options: [low, medium, high, xhigh, max]
+    cost:
+      input_per_million: 8
+      output_per_million: 40
+      currency: USD
+      checked: "2026-11-18"
+      source:
+        url: https://developers.openai.com/api/docs/models/gpt-6.2-astra
+        checked: "2026-11-18"
+      notes: >-
+        Standard USD API rates for uncached text input and text output up to
+        272K input tokens. Cached input is $0.40/MTok; cache writes are
+        $10/MTok (30-minute) and $20/MTok (12-hour). Above 272K, the entire
+        request uses 2x input and cache rates and 1.5x output rates. Batch
+        costs 50% of Standard; Fast costs 2x; Ultrafast costs 3x through
+        2027-02-28 and 6x from 2027-03-01 (Pacific time). Eligible background
+        completion windows are 30% below Standard for 2 hours and 40% below
+        for 8 hours. Regional processing adds a 10% premium. These are not
+        Codex subscription rates.
+    sources:
+      - url: https://openai.com/news/
+        checked: "2026-11-18"
+      - url: https://openai.com/index/introducing-gpt-6-2-astra-sol/
+        checked: "2026-11-18"
+      - url: https://developers.openai.com/api/docs/models/gpt-6.2-astra
+        checked: "2026-11-18"
+      - url: https://developers.openai.com/api/docs/pricing
+        checked: "2026-11-18"
+      - url: https://platform.openai.com/docs/guides/reasoning
+        checked: "2026-11-18"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-18"
+      - url: https://learn.chatgpt.com/docs/models
+        checked: "2026-11-18"
+
+  - id: openai/gpt-6.2-sol
+    config_profile:
+      compaction:
+        threshold: 0.25
+        reminder: 0.20
+        notes: Chord starting heuristic to stay below the 272K whole-request 2x pricing tier; the official 922,000 max input cap is the fixed baseline. Tune for task quality, latency and cache reuse.
+      sources:
+        - url: https://developers.openai.com/api/docs/models/gpt-6.2-sol
+          checked: "2026-11-18"
+        - url: https://developers.openai.com/api/docs/pricing
+          checked: "2026-11-18"
+    released: "2026-11-17"
+    context: 1050000
+    input: 922000
+    output: 128000
+    input_modalities: [text, image, pdf]
+    coding_sources:
+    - url: https://openai.com/index/introducing-gpt-6-2-astra-sol/
+      checked: "2026-11-18"
+    reasoning_options: [low, medium, high, xhigh, max]
+    cost:
+      input_per_million: 2
+      output_per_million: 10
+      currency: USD
+      checked: "2026-11-18"
+      source:
+        url: https://developers.openai.com/api/docs/models/gpt-6.2-sol
+        checked: "2026-11-18"
+      notes: >-
+        Standard USD API rates for uncached text input and text output up to
+        272K input tokens. Cached input is $0.10/MTok; cache writes are
+        $2.50/MTok (30-minute) and $5/MTok (12-hour). Above 272K, the entire
+        request uses 2x input and cache rates and 1.5x output rates. Batch
+        costs 50% of Standard; Fast costs 2x; Ultrafast costs 3x through
+        2027-02-28 and 6x from 2027-03-01 (Pacific time). Eligible background
+        completion windows are 30% below Standard for 2 hours and 40% below
+        for 8 hours. Regional processing adds a 10% premium. These are not
+        Codex subscription rates.
+    sources:
+      - url: https://openai.com/news/
+        checked: "2026-11-18"
+      - url: https://openai.com/index/introducing-gpt-6-2-astra-sol/
+        checked: "2026-11-18"
+      - url: https://developers.openai.com/api/docs/models/gpt-6.2-sol
+        checked: "2026-11-18"
+      - url: https://developers.openai.com/api/docs/pricing
+        checked: "2026-11-18"
+      - url: https://platform.openai.com/docs/guides/reasoning
+        checked: "2026-11-18"
+      - url: https://developers.openai.com/api/docs/guides/pdf-files
+        checked: "2026-11-18"
+      - url: https://learn.chatgpt.com/docs/models
+        checked: "2026-11-18"
+
   # Documented connections support one-command onboarding. These are API
   # recipes, not smoke-tested managed bindings; no route send rules are borrowed.
   - id: zhipuai/glm-5.3
@@ -1303,6 +1411,57 @@ models:
         checked: "2026-10-04"
       - url: https://models.dev/alibaba/qwen3.8-flash
         checked: "2026-10-04"
+
+  - id: alibaba/qwen4-max
+    released: "2026-11-16"
+    config_profile:
+      compat:
+        chat_completions:
+          native_thinking: qwen
+        reasoning_continuity:
+          mode: openai_visible
+          reasoning_replay: all
+      sources:
+        - url: https://www.alibabacloud.com/help/zh/model-studio/qwen4-max
+          checked: "2026-11-17"
+    # Ordinary mode allows 991808 input tokens; use the smaller documented
+    # thinking cap across modes because the catalog has one shared input
+    # limit. Non-thinking mode caps output at 131072; thinking and the final
+    # answer share the 262144 budget recorded here.
+    context: 1000000
+    input: 983616
+    output: 262144
+    input_modalities: [text, image, video]
+    reasoning_options: [low, high, xhigh]
+    coding_sources:
+    - url: https://www.alibabacloud.com/en/press-room/alibaba-unveils-qwen4-max
+      checked: "2026-11-17"
+    - url: https://qwen.ai/blog?id=qwen4-max
+      checked: "2026-11-17"
+    cost:
+      input_per_million: 1.5
+      output_per_million: 4.5
+      currency: USD
+      checked: "2026-11-17"
+      source:
+        url: https://www.alibabacloud.com/help/zh/model-studio/qwen4-max
+        checked: "2026-11-17"
+      notes: >-
+        Singapore International scope USD rates for the single 0<Token≤1M
+        tier; output billing includes the thinking chain and the final
+        answer. Cache hits (implicit and explicit) are $0.075/MTok and
+        explicit cache creation bills at 125% (5m TTL) and 200% (1h TTL) of
+        the input rate. Hong Kong, Frankfurt, Virginia and Tokyo (Global
+        scope) list $1.413 input and $4.24 output per million tokens. The
+        China site bills Beijing in CNY: ¥10 input, ¥30 output, ¥0.5 cache
+        hits and ¥12.5/¥20 explicit cache creation per million tokens.
+    sources:
+      - url: https://www.alibabacloud.com/help/zh/model-studio/qwen4-max
+        checked: "2026-11-17"
+      - url: https://help.aliyun.com/zh/model-studio/model-pricing
+        checked: "2026-11-17"
+      - url: https://help.aliyun.com/zh/model-studio/newly-released-models
+        checked: "2026-11-17"
 
   - id: deepseek/deepseek-flash
     config_profile:
