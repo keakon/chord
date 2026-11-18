@@ -49,13 +49,21 @@ func TestInstallCachedCatalogInstallsNewerSnapshotWhole(t *testing.T) {
 		Output:      128000,
 		Sources:     []Source{{URL: "https://example.invalid/gpt-6.2-sol-mirror", Checked: "2026-10-02"}},
 	}
+	const cachedModelID = "sample/cache-only-model"
 	path := writeCache(t, &CacheFile{
 		SchemaVersion: CacheSchemaVersion,
 		Repository:    "https://example.invalid/chord-models",
 		Revision:      "v2099-01-01.1",
 		FetchedAt:     "2026-10-03T00:00:00Z",
-		Catalog:       fixtureCatalog(t, "2099-01-01.1", nil),
-		Candidates:    []Candidate{candidate},
+		Catalog: fixtureCatalog(t, "2099-01-01.1", func(c *Catalog) {
+			c.Models = append(c.Models, ModelFacts{
+				ID:      cachedModelID,
+				Context: 123456,
+				Output:  7890,
+				Sources: []Source{{URL: "https://example.invalid/cache-only-model", Checked: "2026-10-02"}},
+			})
+		}),
+		Candidates: []Candidate{candidate},
 	})
 	if err := InstallCachedCatalog(path, nil); err != nil {
 		t.Fatalf("install cached catalog: %v", err)
@@ -74,14 +82,9 @@ func TestInstallCachedCatalogInstallsNewerSnapshotWhole(t *testing.T) {
 	if len(candidates) != 1 || candidates[0].WireModelID != "gpt-6.2-sol-mirror" {
 		t.Fatalf("candidates = %+v, want the cache's candidate entries", candidates)
 	}
-	// Whole-catalog replacement: the cached snapshot keeps serving the model
-	// identities declared by its own sources.
-	models := effective().Models
-	if len(models) == 0 {
-		t.Fatal("cached catalog has no model facts")
-	}
-	if _, ok := Model(models[0].ID); !ok {
-		t.Fatal("cached snapshot must serve the same model identities as its sources")
+	// Whole-catalog replacement must expose models that exist only in the cache.
+	if got, ok := Model(cachedModelID); !ok || got.Context != 123456 || got.Output != 7890 {
+		t.Fatalf("cache-only model = (%+v, %v), want its cached facts", got, ok)
 	}
 }
 
