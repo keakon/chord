@@ -177,9 +177,10 @@ openai:
   (`1050000 − min(64000, 128000) = 986000`). A declared independent
   `input` limit still takes priority. Above 272K is a pricing threshold here, not an input cap, so
   do not add `input: 272000`.
-- The catalog's GPT-5.6 / 6 Codex bindings use a `1050000` total window
-  and `128000` output capacity, without a separate input cap. Chord derives
-  their input budgets in the same way (see [OpenAI Codex preset](#openai-codex-preset) below).
+- The catalog's GPT-5.6 / 6 / 6.1 Codex bindings use a `1050000` total window
+  and `128000` output capacity, without a separate input cap. GPT-6.2 adds a
+  `922000` input cap. Chord derives input budgets without a declared cap in the
+  same way (see [OpenAI Codex preset](#openai-codex-preset) below).
 - Supported API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; select a configured variant with a ref such as `openai/gpt-5.6-sol@xhigh`.
 - When reasoning is active, Responses defaults `reasoning.summary` to `auto`; set it to `none` to opt out explicitly. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
 - `preset: codex` providers can also use `max` when the selected model/backend supports it. Whether a given effort level is accepted is model/provider-specific.
@@ -226,14 +227,14 @@ providers:
     preset: codex
 model_pools:
   default:
-    - codex/gpt-6.1-sol
-    - codex/gpt-6-astra
+    - codex/gpt-6.2-sol
+    - codex/gpt-6.2-astra
 ```
 
-These bindings inherit a `1050000` context window and `128000` output
-capacity. With the default requested output budget of `64000`, Chord plans
-`986000` input tokens. A separately documented route input cap can be set
-explicitly and takes priority. The
+These bindings inherit a `1050000` context window, a `922000` input cap, and
+`128000` output capacity. Chord plans `922000` input tokens because a published
+input cap takes priority over the `986000` derived from the default `64000`
+output budget. The
 [chord-models](https://github.com/keakon/chord-models) repository publishes each
 model's facts with their sources and pricing scope.
 
@@ -375,7 +376,7 @@ chord config add
 
 Without arguments it lists the managed presets and your configured providers,
 then the wire models each preset is verified to serve, and continues into the
-guided setup. `chord config add openai/gpt-6.1-sol` adds a known catalog ID
+guided setup. `chord config add openai/gpt-6.2-sol` adds a known catalog ID
 directly. `add` can create your first config and uses the documented API URL,
 wire model ID and API key environment variable. It prints which variable to
 export; API secrets are never copied from the catalog. Existing providers keep
@@ -405,11 +406,11 @@ a managed preset, models without `catalog: false` receive facts you did not decl
 
 - `limit.context`, `limit.input`, `limit.output`, and reasoning `variants` are filled only when no config layer declared them. A block you cleared with an explicit null stays cleared.
 - A model referenced from a `model_pools` entry but never defined is created from the catalog, so pool references to catalog models work without hand-copied limits.
-- Matching is exact within the provider preset. A custom wire name can explicitly bind a stable catalog model with `catalog: openai/gpt-6.1-sol`; `catalog: false` disables all catalog filling for that model.
+- Matching is exact within the provider preset. A custom wire name can explicitly bind a stable catalog model with `catalog: openai/gpt-6.2-sol`; `catalog: false` disables all catalog filling for that model.
 
 Only facts the catalog actually verified are filled; unknown facts (such as pricing) stay absent instead of being guessed. Facts carry their verification sources and check dates.
 
-A custom endpoint without a preset can explicitly set `catalog: openai/gpt-6.1-sol` to inherit limits, input modalities and compaction hints. When the protocol matches, it also inherits the catalog's model behavior, `compat`, named variants and Responses field-send rules; the provider retains its URL, credentials and transport settings. Supported reasoning levels do not automatically create `@variant` names: a catalog binding or explicit configuration must define them. See [What a catalog recipe contains](./model-configs.md#what-a-catalog-recipe-contains). Unknown catalog IDs are errors. Structural errors in the selected model or pool block startup or switching; problems in unselected secondary pools appear in the startup notice and `chord doctor config`.
+A custom endpoint without a preset can explicitly set `catalog: openai/gpt-6.2-sol` to inherit limits, input modalities and compaction hints. When the protocol matches, it also inherits the catalog's model behavior, `compat`, named variants and Responses field-send rules; the provider retains its URL, credentials and transport settings. Supported reasoning levels do not automatically create `@variant` names: a catalog binding or explicit configuration must define them. See [What a catalog recipe contains](./model-configs.md#what-a-catalog-recipe-contains). Unknown catalog IDs are errors. Structural errors in the selected model or pool block startup or switching; problems in unselected secondary pools appear in the startup notice and `chord doctor config`.
 
 On a managed preset, an explicit `compat.responses.send_*` override still wins over the catalog's field-emission rules. When the binding verified the endpoint never accepts that field, `chord doctor config` reports it as an error — the override is still sent and requests on that model will fail — instead of silently dropping your value.
 
@@ -2084,7 +2085,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `compat.responses.send_prompt_cache_breakpoint` | bool | `false` — Mark eligible input content blocks with `prompt_cache_breakpoint` on GPT-5.6 and later Responses models. Enable it only for endpoints known to support explicit cache breakpoints; the default matches Codex and sends no explicit cache fields. Disabling it also omits `prompt_cache_options`, which only selects the breakpoint policy. |
 | `compat.responses.mcp_additional_tools` | bool | `false` — Mount runtime manual-MCP schemas as fixed-anchor `input[type="additional_tools"]` items instead of changing top-level `tools`. Enable only for Responses endpoints/models known to accept this item. The mount follows the currently selected target; when a fallback pool member without this capability serves the request, Chord inlines the declarations into that request's top-level `tools` array. |
 | `compat.hosted_tools` | list | *(empty)* — Hosted tool names this provider's models may serve. With the hosted bridge, each call runs as a separate request that declares the tool's per-type wire declaration and returns the provider's result as an ordinary tool result. Explicit main-request search requires the separate native preauthorization described above. Enable only on endpoints known to support the declaration: one that rejects it fails the call with the endpoint's error, and one that silently ignores it fails with a message pointing back at this list. The catalog shape is documented under [Hosted tools](#hosted-tools). |
-| `compat.apply_patch.enabled` | bool | Three-state — when omitted, Chord infers from the model name. `true` keeps `apply_patch` (hiding `edit`, `write`, and `delete`); `false` falls back to `edit` with `write`/`delete` visible. gpt-5-and-later family names (`gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5-codex`, any `gpt-5.*` name, later majors like `gpt-6-astra`) and `codex-auto-review` default to `true`; `gpt-oss-*`, gpt-3.5, gpt-4/4o, the o-series, and non-OpenAI models default to `false`. |
+| `compat.apply_patch.enabled` | bool | Three-state — when omitted, Chord infers from the model name. `true` keeps `apply_patch` (hiding `edit`, `write`, and `delete`); `false` falls back to `edit` with `write`/`delete` visible. gpt-5-and-later family names (`gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5-codex`, any `gpt-5.*` name, later majors like `gpt-6.2-astra`) and `codex-auto-review` default to `true`; `gpt-oss-*`, gpt-3.5, gpt-4/4o, the o-series, and non-OpenAI models default to `false`. |
 | `compat.apply_patch.freeform` | bool | Three-state — when omitted, Chord infers from the model name and the wire type. `true` emits `apply_patch` as a freeform custom tool (`type: "custom"` with a grammar); `false` emits a JSON function tool. gpt-5-and-later family names and `codex-auto-review` on Responses endpoints default to `true`; all non-Responses wires default to `false` (they have no custom tool type). Hosts that accept Responses but reject custom tools have no built-in exception: set `false` there, or `true` only for gateways that actually accept custom tools. |
 | `compat.chat_completions.send_stream_options` | bool | `true` — Omit `stream_options.include_usage` for gateways that reject it; streaming token usage then remains unavailable. |
 | `compat.chat_completions.infer_finish_reason` | bool | `false` — Derive a normal `stop` / `tool_calls` completion for compatible gateways that end the stream without emitting `finish_reason`; otherwise those streams are treated as interrupted. |

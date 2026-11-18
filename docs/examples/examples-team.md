@@ -13,7 +13,7 @@ The global `config.yaml` from this page is available as a ready-to-copy file: [`
 
 This example uses the reliability-first recipe from [Choosing models](../model-choice.md). Opus 5.5 handles coordination, expert work, and review in `deep`; Sonnet 5.5 handles implementation in `coding`; GPT-6 Luna handles discovery in `fast`. Compaction uses `coding` because preserving task state needs more than path discovery. Model limits and variants are explicit. Base references use endpoint defaults; append `@high` or another listed variant to select an effort.
 
-For everyday work, replace the model reference in `deep` with `openai/gpt-6.1-sol`. For an Anthropic-only setup, keep `deep` and `coding` on the Anthropic models, point `fast` at `anthropic/claude-sonnet-5-5`, and remove the unused OpenAI provider and credential. Pool names do not impose capability levels or automatic escalation.
+For everyday work, replace the model reference in `deep` with `openai/gpt-6.2-sol`. For an Anthropic-only setup, keep `deep` and `coding` on the Anthropic models, point `fast` at `anthropic/claude-sonnet-5-5`, and remove the unused OpenAI provider and credential. Pool names do not impose capability levels or automatic escalation.
 
 Get the model configuration working first, then add only the roles you need. Supply the scripts referenced by hook commands, or remove those hooks until ready. Keep credentials in personal configuration, never in the shared repository.
 

@@ -24,10 +24,10 @@ Chord 提供两种互补的文件编辑工具，按模型的训练背景分别�
 
 Chord 自动根据当前模型选择合适的工具：
 
-- **gpt-5 及之后主版本家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6-astra` 等更高的主版本）及 `codex-auto-review`** → `apply_patch`（Codex 补丁格式）
+- **gpt-5 及之后主版本家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6.2-astra` 等更高的主版本）及 `codex-auto-review`** → `apply_patch`（Codex 补丁格式）
 - **其他所有模型**（gpt-3.5、gpt-4/4o、`gpt-oss-*`、o 系列、Claude、Qwen、GLM、DeepSeek、Gemini 等）→ `edit`（old_string/new_string）
 
-gpt-4/4o、gpt-3.5 和 o 系列都不是补丁原生（patch-native）模型：它们训练时 `apply_patch` 还不存在（该工具随 GPT-5 在 2025 年 8 月引入），实测结果为负面，或模型未经训练。gpt-5 及之后的每个主版本家族都默认使用补丁工具面，与 Codex 模型目录一致；`gpt-6-astra` 这类更高的主版本也在其中，因为 `apply_patch` 是 Codex 的第一方训练数据，会随 OpenAI 模型代际延续。不携带补丁信号的模型可以用 `compat.apply_patch.enabled: false` 关掉。
+gpt-4/4o、gpt-3.5 和 o 系列都不是补丁原生（patch-native）模型：它们训练时 `apply_patch` 还不存在（该工具随 GPT-5 在 2025 年 8 月引入），实测结果为负面，或模型未经训练。gpt-5 及之后的每个主版本家族都默认使用补丁工具面，与 Codex 模型目录一致；`gpt-6.2-astra` 这类更高的主版本也在其中，因为 `apply_patch` 是 Codex 的第一方训练数据，会随 OpenAI 模型代际延续。不携带补丁信号的模型可以用 `compat.apply_patch.enabled: false` 关掉。
 
 补丁原生模型保留 `apply_patch` 时，Chord 还会隐藏 `write` 和 `delete`：补丁格式本身已覆盖它们（`*** Add File:` 创建、`*** Delete File:` 删除），与这些模型训练时熟悉的原生 Codex CLI 工具面一致。回退组合会保留 `write`/`delete`：非补丁原生模型仅因 `edit` 被禁用才拿到 `apply_patch` 时仍能看到它们；补丁原生模型被降级到 `edit` 时也需要 `write` 才能创建文件。
 
@@ -329,7 +329,7 @@ permission:
 A：可以。用 `compat.apply_patch.enabled: true` 选择补丁工具，`false` 选择替换工具；通常保留自动选择即可。
 
 **Q：如果我的模型未被识别怎么办？**
-A：默认情况下，未识别的模型使用 `edit`（替换）工具。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6-astra` 等更高的主版本）和 `codex-auto-review` 使用 `apply_patch`；任意模型都可以用 `compat.apply_patch.enabled` 覆盖。
+A：默认情况下，未识别的模型使用 `edit`（替换）工具。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6.2-astra` 等更高的主版本）和 `codex-auto-review` 使用 `apply_patch`；任意模型都可以用 `compat.apply_patch.enabled` 覆盖。
 
 **Q：两个工具支持相同的文件类型吗？**
 A：是的。两者都适用于任何文本文件（检测到的编码：UTF-8、UTF-16、GB18030 等）。二进制文件会被拒绝。

@@ -2,7 +2,7 @@
 
 <!-- description: Choose concrete models by task difficulty, then assign coordination, implementation, and review roles. Includes four task tiers and team recipes. -->
 
-> Selection date: October 9, 2026. Candidates are listed in suggested trial order, not as a Chord benchmark ranking. Confirm official model names, prices, and account availability before buying or reconfiguring.
+> Selection date: November 18, 2026. Candidates are listed in suggested trial order, not as a Chord benchmark ranking. Confirm official model names, prices, and account availability before buying or reconfiguring.
 
 Start with the balanced tier for everyday development and the reliability-first tier for concurrency, permissions, or recovery. Use cheaper models for explicit mechanical work. A single main agent can finish a small task without starting a team. Add models for Chord's native agents with [`chord config add`](./cli.md#chord-config-add); the catalog supplies limits, modalities, and reasoning variants. Full layouts are in [Examples](./examples/index.md).
 
@@ -40,7 +40,7 @@ A coordinator in this tier needs a settled goal, dependencies, and acceptance cr
 
 Use this tier for ordinary features, multi-file edits, reproducible bugs, and refactoring whose interfaces are mostly settled.
 
-1. GPT-6.1 Sol: a starting choice for the daily main agent and implementation. Start at `medium`; try `high` for harder planning or review.
+1. GPT-6.2 Sol: a starting choice for the daily main agent and implementation. Start at `medium`; try `high` for harder planning or review.
 2. Claude Sonnet 5.5: a candidate for the everyday coder or main agent. Start implementation at `high`, then test whether lower effort preserves quality.
 3. Claude Opus 5.5: use for coordination, implementation, or review when requirements are less clear, call chains are longer, or rework is expensive.
 
@@ -51,8 +51,8 @@ The coder can choose local implementation details. Changes to behavior, public i
 Use this tier for cross-subsystem changes, intermittent failures, concurrency and lifetimes, permissions, durable recovery, and performance hot paths.
 
 1. Claude Opus 5.5: the default candidate for coordination, difficult implementation, and review; try `high` first.
-2. GPT-6 Astra: invoke for important design decisions, difficult root causes, or an independent investigation.
-3. GPT-6.1 Sol: a cost-conscious candidate starting at `high`. Validate it on project tasks before expanding its responsibilities.
+2. GPT-6.2 Astra: invoke for important design decisions, difficult root causes, or an independent investigation.
+3. GPT-6.2 Sol: a cost-conscious candidate starting at `high`. Validate it on project tasks before expanding its responsibilities.
 
 An expert may investigate, implement, and verify a difficult part directly. Forcing a handoff to a cheaper coder before the implementation is unambiguous can add handoff and rework costs.
 
@@ -60,7 +60,7 @@ An expert may investigate, implement, and verify a difficult part directly. Forc
 
 First check whether the failure comes from the environment, a false assumption, or unclear acceptance criteria before spending more on model capability.
 
-1. GPT-6 Astra: give it a complete difficult investigation or design task.
+1. GPT-6.2 Astra: give it a complete difficult investigation or design task.
 2. Claude Fable 5.1: use for difficult reasoning or a second independent investigation.
 3. Claude Opus 5.5: raise effort for a new approach supported by evidence. A more expensive model does not guarantee a better result.
 
@@ -88,8 +88,8 @@ Having an expert does not remove the coordinator's judgment work. The expert nee
 
 | Recipe | `deep` | `coding` | `fast` |
 | --- | --- | --- | --- |
-| Economy, explicit specifications | GPT-6.1 Sol | GPT-6 Luna | GPT-6 Luna |
-| Everyday development | GPT-6.1 Sol | Claude Sonnet 5.5 | GPT-6 Luna |
+| Economy, explicit specifications | GPT-6.2 Sol | GPT-6 Luna | GPT-6 Luna |
+| Everyday development | GPT-6.2 Sol | Claude Sonnet 5.5 | GPT-6 Luna |
 | Complex development | Claude Opus 5.5 | Claude Sonnet 5.5 | GPT-6 Luna |
 
 The [team example](./examples/examples-team.md) uses the complex-development recipe. With Codex alone, choose Sol from the account catalog for coordination, implementation, and review, and Luna for discovery and mechanical work; use Astra for intensive work when available. With only an Anthropic API key, Sonnet can cover everyday implementation and discovery while Opus handles difficult decisions. API keys do not require a subscription to the vendor's chat app.
@@ -107,7 +107,7 @@ Multiple entries in a model pool provide fallback on request failures. They do n
 - Start with few workers. Parallel writes need independent deliverables and settled shared decisions; different files can still have semantic dependencies. Whether a worker may edit files or run commands is decided by its role's permission rules.
 - Review original requirements, actual changes, and verification evidence, not just the implementer's summary. Different models offer another perspective but do not guarantee independent errors.
 - Start with supported `medium` or `high` effort and adjust from results. Effort labels across vendors do not represent equal compute, and `max` does not guarantee better cost or quality.
-- Run `chord doctor models --pool <pool-name>` to check a native model pool's connectivity. It does not measure task success. Use Responses for GPT-6.1 Sol tool tasks; see [Model configuration](./model-configs.md).
+- Run `chord doctor models --pool <pool-name>` to check a native model pool's connectivity. It does not measure task success. Use Responses for GPT-6.2 Sol tool tasks; see [Model configuration](./model-configs.md).
 - For Claude Code subagents, confirm CLI authentication, available models, and quotas separately, then delegate a small, verifiable task to check the integration. `chord doctor models --pool` does not check this backend, and Chord's usage statistics do not include its model calls.
 
 ## Sources and limits

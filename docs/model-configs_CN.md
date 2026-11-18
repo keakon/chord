@@ -11,12 +11,12 @@
 托管 preset 的 provider（`openai`、`anthropic`、`gemini`、`codex`）一条命令即可：
 
 ```bash
-chord config add openai/gpt-6.1-sol
+chord config add openai/gpt-6.2-sol
 ```
 
 绑定 `preset` 的请求模型名在添加时按目录解析一次，命令将解析后的模型参数和池引用写入配置，保留你已有的显式设置。其余接入选项交给参数（`--pool` 指定目标池，`--api-key-env` 写入凭据引用），完整说明见 [`chord config add`](./cli_CN.md#chord-config-add)。
 
-思考档位保存在命名 `variants` 中；基础档位保持未设置，除非你已显式配置。命令优先使用端点已验证的变体列表；没有该列表时，只在协议一致的情况下使用模型文档列出的档位。通过 `--variant high` 或 `openai/gpt-6.1-sol@high` 等引用选择档位，未显式选择时使用端点默认值。
+思考档位保存在命名 `variants` 中；基础档位保持未设置，除非你已显式配置。命令优先使用端点已验证的变体列表；没有该列表时，只在协议一致的情况下使用模型文档列出的档位。通过 `--variant high` 或 `openai/gpt-6.2-sol@high` 等引用选择档位，未显式选择时使用端点默认值。
 
 自定义网关用别的名字提供目录模型时，显式借用其事实：
 
@@ -25,7 +25,7 @@ chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
   --catalog anthropic/claude-opus-5-5
 ```
 
-在交互终端中，可以直接运行 `chord config add mygw/gpt-6-sol`。没有目录绑定时，Chord 会列出接近的已验证模型，由你按数字键立即选择，无需回车；按 `m` 可输入完整目录 ID，按 Esc 取消；新 provider 接着填写 API 地址和密钥环境变量。选择后可选择已有模型池或创建新池，并调整推理档位和请求体压缩，查看预览后确认保存。已有 provider 会沿用地址和凭据。输入 `q` 或在保存时选择否即可取消，文件保持原样。
+在交互终端中，可以直接运行 `chord config add mygw/gpt-6.2-sol`。没有目录绑定时，Chord 会列出接近的已验证模型，由你按数字键立即选择，无需回车；按 `m` 可输入完整目录 ID，按 Esc 取消；新 provider 接着填写 API 地址和密钥环境变量。选择后可选择已有模型池或创建新池，并调整推理档位和请求体压缩，查看预览后确认保存。已有 provider 会沿用地址和凭据。输入 `q` 或在保存时选择否即可取消，文件保持原样。
 
 脚本可传 `--no-interactive` 和完整参数。非交互模式未命中时会列出已验证模型及刷新候选，然后返回错误；不会根据名字自动绑定或采纳候选。要接入刚发布的新模型，先让命令从上游仓库刷新目录（显式联网操作）：
 

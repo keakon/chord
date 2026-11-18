@@ -2,7 +2,7 @@
 
 <!-- description: 按任务难度选择具体模型，再配置协调、执行和审查角色；包含四个任务档位与团队配方。 -->
 
-> 选型日期：2026 年 10 月 9 日。下面的候选顺序是建议的试用顺序，不是 Chord 实测排名。购买或改配置前，请确认官方型号、价格和账号可用性。
+> 选型日期：2026 年 11 月 18 日。下面的候选顺序是建议的试用顺序，不是 Chord 实测排名。购买或改配置前，请确认官方型号、价格和账号可用性。
 
 日常开发从均衡档开始，涉及并发、权限或恢复时用可靠性优先档。明确的机械任务可以降档；小任务由单个主代理直接完成，不必启动整套团队。Chord 原生 Agent 接入模型用 [`chord config add`](./cli_CN.md#chord-config-add)，限额、模态和 reasoning 档位由目录补齐；完整布局见[配置示例](./examples/index_CN.md)。
 
@@ -40,7 +40,7 @@ Chord 原生主／子 Agent 通过 API key 或 Codex OAuth（`chord auth codex`�
 
 适合常规功能、多文件修改、已有稳定复现的 bug，以及接口大体明确的重构。
 
-1. GPT-6.1 Sol：日常主代理和常规实现的起始选择；从 `medium` 开始，复杂规划或审查再试 `high`。
+1. GPT-6.2 Sol：日常主代理和常规实现的起始选择；从 `medium` 开始，复杂规划或审查再试 `high`。
 2. Claude Sonnet 5.5：常规 coder 或主代理的候选；实现任务可从 `high` 开始，再测试降低 effort 是否影响质量。
 3. Claude Opus 5.5：需求更模糊、调用链更长或返工成本较高时，用于协调、实现或审查。
 
@@ -51,8 +51,8 @@ coder 可以决定局部实现细节；行为、公共接口或安全边界仍�
 适合跨子系统改动、间歇性故障、并发与生命周期、权限、持久化恢复和性能热路径。
 
 1. Claude Opus 5.5：协调、复杂实现和审查的默认候选，先试 `high`。
-2. GPT-6 Astra：用于重要设计决策、困难根因或独立调查路线，按需调用。
-3. GPT-6.1 Sol：控制成本的候选，从 `high` 开始，在本项目任务上验证后再扩大职责。
+2. GPT-6.2 Astra：用于重要设计决策、困难根因或独立调查路线，按需调用。
+3. GPT-6.2 Sol：控制成本的候选，从 `high` 开始，在本项目任务上验证后再扩大职责。
 
 复杂部分可由 expert 直接调查、实现并验证。结论尚未消除实现歧义时，强制转交便宜 coder 容易增加交接和返工成本。
 
@@ -60,7 +60,7 @@ coder 可以决定局部实现细节；行为、公共接口或安全边界仍�
 
 先检查失败是否来自环境、错误假设或验收不明确，再决定是否提高模型能力。
 
-1. GPT-6 Astra：承担完整的高难度调查或设计任务。
+1. GPT-6.2 Astra：承担完整的高难度调查或设计任务。
 2. Claude Fable 5.1：用于困难推理或第二条独立调查路线。
 3. Claude Opus 5.5：提高 effort 后重试有证据支持的新路线；更贵的型号不保证更好的结果。
 
@@ -88,8 +88,8 @@ Chord 自带 `builder` 和 `planner`。下面的角色来自可选的[团队方�
 
 | 配方 | `deep` | `coding` | `fast` |
 | --- | --- | --- | --- |
-| 省钱、规格明确 | GPT-6.1 Sol | GPT-6 Luna | GPT-6 Luna |
-| 日常开发 | GPT-6.1 Sol | Claude Sonnet 5.5 | GPT-6 Luna |
+| 省钱、规格明确 | GPT-6.2 Sol | GPT-6 Luna | GPT-6 Luna |
+| 日常开发 | GPT-6.2 Sol | Claude Sonnet 5.5 | GPT-6 Luna |
 | 复杂开发 | Claude Opus 5.5 | Claude Sonnet 5.5 | GPT-6 Luna |
 
 [团队示例](./examples/examples-team_CN.md)采用复杂开发配方。只有 Codex 时，从账号目录中选择 Sol 承担协调、实现和审查，Luna 承担探索及机械任务；Astra 在可用时用于攻坚。只有 Anthropic API 时，可以让 Sonnet 承担日常实现和探索，Opus 承担复杂判断。API key 不要求订阅该厂商的聊天应用。
@@ -107,7 +107,7 @@ Chord 自带 `builder` 和 `planner`。下面的角色来自可选的[团队方�
 - 从少量 worker 开始。并行写入需要独立交付与明确的共享决策；文件不同仍可能存在语义依赖。worker 能否修改文件或运行命令，由所属角色的权限规则决定。
 - 审查要看原始需求、实际改动和验证证据，不能只读实现者摘要。不同模型可以提供另一种视角，但不保证错误相互独立。
 - 先使用模型支持的 `medium` 或 `high` 档位，按结果调整。不同厂商的 effort 名称不代表相同计算量；`max` 不保证更好的成本或质量。
-- 用 `chord doctor models --pool <池名>` 检查原生模型池接入。它不验证上述任务成功率。GPT-6.1 Sol 的工具任务应使用 Responses 接入；配置方式见[模型配置](./model-configs_CN.md)。
+- 用 `chord doctor models --pool <池名>` 检查原生模型池接入。它不验证上述任务成功率。GPT-6.2 Sol 的工具任务应使用 Responses 接入；配置方式见[模型配置](./model-configs_CN.md)。
 - Claude Code 子 Agent 要单独确认 CLI 认证、可用模型与额度，再委派一个容易验证的小任务检查接入。`chord doctor models --pool` 不检查这个后端，Chord 用量统计也不包含它的模型调用。
 
 ## 资料与适用范围

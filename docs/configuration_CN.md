@@ -171,8 +171,8 @@ openai:
   （此处为 `1050000 - min(64000, 128000) = 986000`）。独立声明的 `input`
   上限仍然优先。这里超过 272K 是计价阈值，不是输入上限，因此**不要**
   再补 `input: 272000`。
-- 目录中的 GPT-5.6 / 6 Codex 绑定使用 `1050000` 总窗口和 `128000` 最大输出，
-  不另设独立输入上限；Chord 同样按本次输出预算推导可用输入
+- 目录中的 GPT-5.6 / 6 / 6.1 Codex 绑定使用 `1050000` 总窗口和 `128000` 最大输出，
+  不另设独立输入上限；GPT-6.2 另有 `922000` 输入上限。未声明输入上限时，Chord 同样按输出预算推导可用输入
   （见下方 [OpenAI Codex preset](#openai-codex-preset)）。
 - API 支持的 reasoning effort 为 `none`、`low`、`medium`、`high`、`xhigh`、`max`；可用 `openai/gpt-5.6-sol@xhigh` 这样的 ref 选择已配置 variant。
 - Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如需明确关闭，请配置为 `none`。Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
@@ -220,11 +220,11 @@ providers:
     preset: codex
 model_pools:
   default:
-    - codex/gpt-6.1-sol
-    - codex/gpt-6-astra
+    - codex/gpt-6.2-sol
+    - codex/gpt-6.2-astra
 ```
 
-这些绑定继承 `1050000` 总窗口和 `128000` 最大输出。采用默认的 `64000` 请求输出预算时，Chord 规划的输入预算为 `986000`。若端点另有明确公布的独立输入上限，可显式配置，该值优先。模型事实、来源与价格适用范围发布在 [chord-models](https://github.com/keakon/chord-models) 仓库。
+这些绑定继承 `1050000` 总窗口、`922000` 的独立输入上限和 `128000` 最大输出。Chord 规划的输入预算为 `922000`：已公布的输入上限优先于用默认 `64000` 输出预算推算出的 `986000`。模型事实、来源与价格适用范围发布在 [chord-models](https://github.com/keakon/chord-models) 仓库。
 
 `preset: codex` 可使用 `auth.yaml` 中的 OpenAI / ChatGPT OAuth 凭据。OAuth 条目通常是 mapping：
 
@@ -362,7 +362,7 @@ Chord 内置一份版本化目录，收录编程模型事实、官方 API 接入
 chord config add
 ```
 
-不带参数时，先列出托管 preset 和这些 preset 下已配置的 provider，再列出该 preset 已验证服务的 wire 模型，随后进入常规引导。已知目录 ID 可直接执行 `chord config add openai/gpt-6.1-sol`。`add` 可以直接创建首次配置，按官方文档填写 API 地址、请求模型名和密钥环境变量，并提示你设置哪个变量。目录不会保存或复制 API 密钥。已有 provider 会继续使用原地址和凭据。OAuth 模型还需执行提示中的 `chord auth <provider>` 登录。
+不带参数时，先列出托管 preset 和这些 preset 下已配置的 provider，再列出该 preset 已验证服务的 wire 模型，随后进入常规引导。已知目录 ID 可直接执行 `chord config add openai/gpt-6.2-sol`。`add` 可以直接创建首次配置，按官方文档填写 API 地址、请求模型名和密钥环境变量，并提示你设置哪个变量。目录不会保存或复制 API 密钥。已有 provider 会继续使用原地址和凭据。OAuth 模型还需执行提示中的 `chord auth <provider>` 登录。
 
 `add` 会把解析后的模型参数写入 `config.yaml`，并设置 `catalog: false`。限额、模态、模型行为、命名变体和目录中的字段发送规则均显式保存，已有配置值仍然优先。后续刷新目录不会改变这些参数。端点价格需在 `cost` 中填写；命令会保留已有费用配置。
 
@@ -374,11 +374,11 @@ chord config add
 
 - `limit.context`、`limit.input`、`limit.output` 和 reasoning `variants` 只在所有配置层都未声明时填充。用显式 null 清空的块保持清空，不会被目录重新填上。
 - 被 `model_pools` 引用但从未定义的模型会按目录整体创建，引用目录里的模型无需手工抄写限额。
-- 默认只按 preset 下的精确 wire model ID 匹配；自定义 wire 名称可在模型下用 `catalog: openai/gpt-6.1-sol` 显式绑定稳定目录 ID，`catalog: false` 则关闭该模型的全部目录填充。
+- 默认只按 preset 下的精确 wire model ID 匹配；自定义 wire 名称可在模型下用 `catalog: openai/gpt-6.2-sol` 显式绑定稳定目录 ID，`catalog: false` 则关闭该模型的全部目录填充。
 
 目录只填充实际核验过的事实；未知事实（例如价格）保持缺席，不做猜测。事实条目附带核验来源与核验日期。
 
-无 `preset` 的自定义端点也可显式写 `catalog: openai/gpt-6.1-sol`，继承目录中的限额、输入模态和上下文压缩建议。协议匹配时，还会继承目录已有的模型行为、`compat`、命名变体和 Responses 字段发送规则；地址、凭据和传输设置仍由 `provider` 配置决定。模型支持的推理档位不会自动变成 `@variant`，命名变体必须由目录绑定或显式配置定义，见[目录配方包含什么](./model-configs_CN.md#目录配方包含什么)。不存在的目录 ID 会报错。当前模型使用的结构错误会阻止启动或切换；未选中的次要池问题会进入启动提示，可用 `chord doctor config` 查询。
+无 `preset` 的自定义端点也可显式写 `catalog: openai/gpt-6.2-sol`，继承目录中的限额、输入模态和上下文压缩建议。协议匹配时，还会继承目录已有的模型行为、`compat`、命名变体和 Responses 字段发送规则；地址、凭据和传输设置仍由 `provider` 配置决定。模型支持的推理档位不会自动变成 `@variant`，命名变体必须由目录绑定或显式配置定义，见[目录配方包含什么](./model-configs_CN.md#目录配方包含什么)。不存在的目录 ID 会报错。当前模型使用的结构错误会阻止启动或切换；未选中的次要池问题会进入启动提示，可用 `chord doctor config` 查询。
 
 在托管 preset 上，显式的 `compat.responses.send_*` 覆盖仍按来源矩阵生效；但若绑定已核验该端点从不接受该字段，`chord doctor config` 会将其报为错误——覆盖仍会发送、该模型的请求会失败——而不是静默丢弃你的取值。
 
@@ -1747,7 +1747,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.responses.send_prompt_cache_breakpoint` | bool | `false` — 给 GPT-5.6 及之后 Responses 模型的合格输入内容块打 `prompt_cache_breakpoint` 标记。只为确认支持显式缓存断点的端点开启；默认与 Codex 一致，不发送任何显式缓存字段。关闭时也会省略只用于选择断点策略的 `prompt_cache_options`。 |
 | `compat.responses.mcp_additional_tools` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `input[type="additional_tools"]` item，不改写顶层 `tools`。只为已确认接受该 item 的 Responses endpoint / 模型开启。挂载形态跟随当前选中的目标；请求最终落到不接受该 item 的池成员时，Chord 会把声明并入该请求的顶层 `tools` 数组。 |
 | `compat.hosted_tools` | list | （空）— 允许该 provider 的模型提供的 hosted 工具名列表。使用 hosted 桥时，每次调用另发一条请求，在那里按 provider 类型声明工具，Chord 把 provider 返回的结果作为普通工具结果返回。主请求内的搜索需要上文所述的独立原生预授权。只为确认支持该声明的端点启用：端点拒绝声明时调用会带着端点返回的原因失败，端点静默忽略时错误会提示检查这个列表。条目形状见 [Hosted tools](#hosted-tools)。 |
-| `compat.apply_patch.enabled` | bool | 三态 — 省略时按模型名推断。`true` 保留 `apply_patch`（同时隐藏 `edit`、`write`、`delete`）；`false` 退回 `edit`，`write`/`delete` 重新可见。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6-astra` 等更高的主版本）和 `codex-auto-review` 默认 `true`；`gpt-oss-*`、gpt-3.5、gpt-4/4o、o 系列及非 OpenAI 模型默认 `false`。 |
+| `compat.apply_patch.enabled` | bool | 三态 — 省略时按模型名推断。`true` 保留 `apply_patch`（同时隐藏 `edit`、`write`、`delete`）；`false` 退回 `edit`，`write`/`delete` 重新可见。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6.2-astra` 等更高的主版本）和 `codex-auto-review` 默认 `true`；`gpt-oss-*`、gpt-3.5、gpt-4/4o、o 系列及非 OpenAI 模型默认 `false`。 |
 | `compat.apply_patch.freeform` | bool | 三态 — 省略时按模型名和 wire 类型推断。`true` 把 `apply_patch` 作为 freeform custom tool 发送（`type: "custom"`，随请求带上 grammar）；`false` 按 JSON function tool 发送。gpt-5 及之后家族名称和 `codex-auto-review` 在 Responses 端点上默认 `true`；非 Responses wire 一律默认 `false`（没有 custom tool 类型）。接受 Responses 但拒绝 custom tool 的主机没有内置例外：请在那里设置 `false`；只有确实支持 custom tool 的网关才设 `true`。 |
 | `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
 | `compat.chat_completions.infer_finish_reason` | bool | `false` — 对结束流时不发 `finish_reason` 的兼容网关，自动推断为正常的 `stop` / `tool_calls` 完成；不开启时这类流会被当成中断处理。 |

@@ -238,14 +238,14 @@ chord config advise
 chord config advise --json
 
 # Remove a safe direct override and follow the catalog at load time
-chord config advise openai/gpt-6.1-sol reasoning.summary \
+chord config advise openai/gpt-6.2-sol reasoning.summary \
   --accept follow-catalog
 
 # Pin the recommended scalar in config.yaml
-chord config advise openai/gpt-6.1-sol reasoning.summary --accept pin
+chord config advise openai/gpt-6.2-sol reasoning.summary --accept pin
 
 # Keep the current value for this exact catalog/value combination
-chord config advise openai/gpt-6.1-sol reasoning.summary --keep-current
+chord config advise openai/gpt-6.2-sol reasoning.summary --keep-current
 
 # Apply every active recommendation
 chord config advise --accept pin
@@ -264,7 +264,7 @@ Run the command without arguments to browse the catalog interactively: pick a ma
 
 How the model resolves:
 
-- **Wire name bound to the provider's preset** (for example `gpt-6.1-sol` under `preset: openai`): the resolved model settings are saved, including context, modalities, reasoning variants and field send rules, along with the pool reference.
+- **Wire name bound to the provider's preset** (for example `gpt-6.2-sol` under `preset: openai`): the resolved model settings are saved, including context, modalities, reasoning variants and field send rules, along with the pool reference.
 - **Custom endpoint**: pass `--catalog <id>` to copy a catalog recipe under your own wire name. Limits, modalities and compaction hints transfer; the same protocol also copies model behavior, compat, reasoning variants and field send rules. Your URL, credentials and compression settings stay explicit. Request-body compression follows the provider preset unless you set it: `preset: codex` sends `zstd`, other presets send uncompressed bodies, and provider `compress: gzip` / `compress: zstd` / `compress: off` overrides that choice.
 - **No match**: the closest verified models are listed with their catalog IDs. In an interactive terminal, press a number to select immediately without Enter, press `m` to enter a verified catalog ID, or press Esc/`0` to cancel; the request model name stays unchanged. Non-interactive mode also shows refreshed candidates with their provider scope and sources, then returns an error; it never adopts one automatically.
 
@@ -301,10 +301,10 @@ Reasoning levels are saved in `variants`, without setting a base `reasoning.effo
 chord config add
 
 # Save explicit settings and a pool reference for an official model
-chord config add openai/gpt-6-sol
+chord config add openai/gpt-6.2-sol
 
 # Guided gateway setup: select a catalog entry and fill connection details
-chord config add mygw/gpt-6-sol
+chord config add mygw/gpt-6.2-sol
 
 # Scripted gateway setup with explicit arguments
 # Serve a catalog model through your own gateway under its wire name
@@ -313,10 +313,10 @@ chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
 
 # Add credentials for a new provider in the same step
 chord config add mygw2/m1 --url https://gateway.example.com/v1/chat/completions \
-  --catalog openai/gpt-6-sol --api-key-env MYGW_API_KEY
+  --catalog openai/gpt-6.2-sol --api-key-env MYGW_API_KEY
 
 # Silence a freshness advisory after deciding to keep the current borrow
-chord config add mygw2/gpt-6-sol-gw --keep-current
+chord config add mygw2/gpt-6.2-sol-gw --keep-current
 ```
 
 ## `chord config refresh-catalog`

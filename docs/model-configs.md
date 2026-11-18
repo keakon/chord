@@ -29,7 +29,7 @@ A provider on a managed preset (`openai`, `anthropic`, `gemini`, `codex`)
 needs one command:
 
 ```bash
-chord config add openai/gpt-6.1-sol
+chord config add openai/gpt-6.2-sol
 ```
 
 A preset-bound wire name resolves against the catalog once. The command writes
@@ -42,7 +42,7 @@ Thinking levels are saved as named `variants`, leaving the base effort or level
 unset unless you already configured one. The endpoint's verified variants take
 precedence; without that list, the command uses documented model levels only
 when the protocol matches. Select a level with `--variant high` or a model
-reference such as `openai/gpt-6.1-sol@high`. With no explicit selection, the
+reference such as `openai/gpt-6.2-sol@high`. With no explicit selection, the
 endpoint default applies.
 
 A custom gateway that serves a catalog model under its own name borrows the
@@ -53,7 +53,7 @@ chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
   --catalog anthropic/claude-opus-5-5
 ```
 
-In an interactive terminal, run `chord config add mygw/gpt-6-sol` directly. If there is no catalog binding, press a number to choose a suggested verified model without Enter, press `m` to enter a catalog ID, or press Esc to cancel. For a new provider, supply the API URL and API-key environment variable. You can then choose an existing pool or create a new one, and adjust the reasoning variant and request compression, review the preview and confirm saving. Existing providers reuse their URL and credentials. Enter `q` or decline saving to cancel without changing files.
+In an interactive terminal, run `chord config add mygw/gpt-6.2-sol` directly. If there is no catalog binding, press a number to choose a suggested verified model without Enter, press `m` to enter a catalog ID, or press Esc to cancel. For a new provider, supply the API URL and API-key environment variable. You can then choose an existing pool or create a new one, and adjust the reasoning variant and request compression, review the preview and confirm saving. Existing providers reuse their URL and credentials. Enter `q` or decline saving to cancel without changing files.
 
 For scripts, pass `--no-interactive` and explicit arguments. An unmatched name in non-interactive mode shows verified suggestions and refreshed candidates, then returns an error; no model or candidate is adopted automatically. To fetch recently published catalog updates, opt into network access:
 

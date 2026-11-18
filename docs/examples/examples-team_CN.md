@@ -13,7 +13,7 @@
 
 本例采用[按工作选模型](../model-choice_CN.md)中的可靠性优先配方。`deep` 中的 Opus 5.5 负责协调、专家任务和审查，`coding` 中的 Sonnet 5.5 负责实现，`fast` 中的 GPT-6 Luna 负责探索。压缩使用 `coding`，保留任务状态的要求高于定位文件。模型限额和变体均显式配置，基础模型引用使用端点默认值；在引用后添加 `@high` 等已列出的变体即可选择思考档位。
 
-日常开发可将 `deep` 中的模型引用改为 `openai/gpt-6.1-sol`。只使用 Anthropic 时，保留 `deep` 和 `coding` 中的 Anthropic 模型，将 `fast` 指向 `anthropic/claude-sonnet-5-5`，并移除不用的 OpenAI provider 和凭据。池名不强制能力档位，也不会自动升级模型。
+日常开发可将 `deep` 中的模型引用改为 `openai/gpt-6.2-sol`。只使用 Anthropic 时，保留 `deep` 和 `coding` 中的 Anthropic 模型，将 `fast` 指向 `anthropic/claude-sonnet-5-5`，并移除不用的 OpenAI provider 和凭据。池名不强制能力档位，也不会自动升级模型。
 
 先跑通模型配置，再添加需要的角色。Hook 命令引用的脚本需要自行提供；尚未准备好时先移除对应 Hook。凭据保留在个人配置中，不要提交到团队仓库。
 

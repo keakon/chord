@@ -147,7 +147,7 @@ chord doctor models
 
 ```bash
 export OPENAI_API_KEY="你的 API key"
-chord config add openai/gpt-6.1-sol
+chord config add openai/gpt-6.2-sol
 chord
 ```
 

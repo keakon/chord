@@ -238,14 +238,14 @@ chord config advise
 chord config advise --json
 
 # 删除安全的直接覆盖，后续跟随目录值
-chord config advise openai/gpt-6.1-sol reasoning.summary \
+chord config advise openai/gpt-6.2-sol reasoning.summary \
   --accept follow-catalog
 
 # 把推荐标量固定写入 config.yaml
-chord config advise openai/gpt-6.1-sol reasoning.summary --accept pin
+chord config advise openai/gpt-6.2-sol reasoning.summary --accept pin
 
 # 保留当前值，只抑制这一次目录/数值组合
-chord config advise openai/gpt-6.1-sol reasoning.summary --keep-current
+chord config advise openai/gpt-6.2-sol reasoning.summary --keep-current
 
 # 接受全部生效建议
 chord config advise --accept pin
@@ -262,7 +262,7 @@ chord config advise --keep-current
 
 模型的解析方式：
 
-- **请求模型名已绑定 `provider` 的 `preset`**（例如 `preset: openai` 下的 `gpt-6.1-sol`）：保存解析后的模型参数，包括上下文、模态、推理档位与字段发送规则，并写入池引用。
+- **请求模型名已绑定 `provider` 的 `preset`**（例如 `preset: openai` 下的 `gpt-6.2-sol`）：保存解析后的模型参数，包括上下文、模态、推理档位与字段发送规则，并写入池引用。
 - **自定义端点**：传 `--catalog <id>`，用自己的请求模型名复制目录配方。限额、模态和上下文压缩建议可以复制；协议相同时，还会复制模型行为、`compat`、推理变体和字段发送规则。地址、凭据和请求体压缩保持用户自己的设置。请求体压缩默认跟随 `provider` 的 `preset`：`preset: codex` 发送 `zstd`，其他 `preset` 按原文发送；用 `provider` 的 `compress: gzip` / `compress: zstd` / `compress: off` 覆盖这个选择。
 - **未命中**：列出最接近的已验证模型及其目录 ID。交互终端中可按数字键立即选择目录模型，无需回车；按 `m` 可输入完整目录 ID，按 Esc 或 `0` 取消；模型的请求名称保持不变。非交互模式还会列出刷新得到的候选条目（标注 provider 作用域与来源），然后返回错误，不会自动采纳。
 
@@ -301,10 +301,10 @@ chord config advise --keep-current
 chord config add
 
 # 保存官方模型的显式参数和池引用
-chord config add openai/gpt-6-sol
+chord config add openai/gpt-6.2-sol
 
 # 引导添加网关模型：选择目录条目，再填写接入信息
-chord config add mygw/gpt-6-sol
+chord config add mygw/gpt-6.2-sol
 
 # 脚本中通过完整参数添加网关模型
 # 在自己的网关上以自定义 wire 名使用目录模型
@@ -313,10 +313,10 @@ chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
 
 # 同一步骤为新 provider 写入凭据
 chord config add mygw2/m1 --url https://gateway.example.com/v1/chat/completions \
-  --catalog openai/gpt-6-sol --api-key-env MYGW_API_KEY
+  --catalog openai/gpt-6.2-sol --api-key-env MYGW_API_KEY
 
 # 决定保留当前借用后，静默对应的新鲜度提示
-chord config add mygw2/gpt-6-sol-gw --keep-current
+chord config add mygw2/gpt-6.2-sol-gw --keep-current
 ```
 
 ## `chord config refresh-catalog`

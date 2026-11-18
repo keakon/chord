@@ -24,10 +24,10 @@ Chord provides two complementary tools for editing files, optimized for differen
 
 Chord automatically selects the appropriate tool based on the active model:
 
-- **gpt-5 and later gpt major families (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and later majors like gpt-6-astra) and `codex-auto-review`** → `apply_patch` (Codex envelope)
+- **gpt-5 and later gpt major families (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, and later majors like gpt-6.2-astra) and `codex-auto-review`** → `apply_patch` (Codex envelope)
 - **All other models** (gpt-3.5, gpt-4/4o, gpt-oss-*, o-series, Claude, Qwen, GLM, DeepSeek, Gemini, …) → `edit` (old_string/new_string)
 
-The gpt-4/4o, gpt-3.5, and o-series families are **not** patch native: the `apply_patch` tool did not exist when they were trained (it was introduced with GPT-5 in August 2025), and measured results are negative or untrained. Every gpt family from gpt-5 onward defaults to the patch tool surface, matching the Codex model catalog; this includes later majors such as gpt-6-astra, since `apply_patch` is first-party Codex training data that stays in OpenAI training across generations. A model that does not carry the patch signal can be opted out with `compat.apply_patch.enabled: false`.
+The gpt-4/4o, gpt-3.5, and o-series families are **not** patch native: the `apply_patch` tool did not exist when they were trained (it was introduced with GPT-5 in August 2025), and measured results are negative or untrained. Every gpt family from gpt-5 onward defaults to the patch tool surface, matching the Codex model catalog; this includes later majors such as gpt-6.2-astra, since `apply_patch` is first-party Codex training data that stays in OpenAI training across generations. A model that does not carry the patch signal can be opted out with `compat.apply_patch.enabled: false`.
 
 When a patch-native model keeps `apply_patch`, Chord also hides `write` and `delete`: the envelope subsumes them (`*** Add File:` creates, `*** Delete File:` removes), matching the native Codex CLI surface those models are trained on. Fallback pairings keep `write`/`delete`: a non-patch-native model that only got `apply_patch` because `edit` is disabled still sees them, and a patch-native model downgraded to `edit` needs `write` to create files at all.
 
@@ -349,7 +349,7 @@ It preserves punctuation from the current file in unchanged parts of replacement
 A: Yes. Set `compat.apply_patch.enabled: true` for patches or `false` for replacements. Usually, leave the automatic selection in place.
 
 **Q: What if my model isn't recognized?**
-A: By default, unrecognized models use the `edit` (replace) tool. gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, later majors like gpt-6-astra) and `codex-auto-review` use `apply_patch`; you can override any model via `compat.apply_patch.enabled`.
+A: By default, unrecognized models use the `edit` (replace) tool. gpt-5-and-later family names (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-codex, any `gpt-5.*` name, later majors like gpt-6.2-astra) and `codex-auto-review` use `apply_patch`; you can override any model via `compat.apply_patch.enabled`.
 
 **Q: Do both tools support the same file types?**
 A: Yes. Both work with any text file (detected encoding: UTF-8, UTF-16, GB18030, etc.). Binary files are rejected.

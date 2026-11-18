@@ -151,7 +151,7 @@ If you have an API key, you can skip the setup wizard:
 
 ```bash
 export OPENAI_API_KEY="your-api-key"
-chord config add openai/gpt-6.1-sol
+chord config add openai/gpt-6.2-sol
 chord
 ```
 

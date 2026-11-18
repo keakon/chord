@@ -20,10 +20,11 @@ providers:
     preset: codex
     type: responses
     models:
-      gpt-6.1-sol:
+      gpt-6.2-sol:
         catalog: false
         limit:
           context: 1050000
+          input: 922000
           output: 128000
         reasoning:
           # 推荐示例：当你希望 OpenAI Responses reasoning 模型返回可读的
@@ -66,7 +67,7 @@ providers:
 
 model_pools:
   deep:
-    - codex/gpt-6.1-sol
+    - codex/gpt-6.2-sol
   fast:
     - fast/gpt-5.4-mini
 
