@@ -1,8 +1,8 @@
 {
-  "version": "2026-11-18.1",
+  "version": "2026-11-19.1",
   "source": {
     "repository": "https://github.com/keakon/chord-models",
-    "revision": "v2026-11-18.1"
+    "revision": "v2026-11-19.1"
   },
   "endpoints": [
     {
@@ -1457,6 +1457,104 @@
           {
             "url": "https://aistudio.google.com/docs/whats-new-gemini-4-hydrogen",
             "checked": "2026-11-13"
+          }
+        ]
+      }
+    },
+    {
+      "id": "google/gemini-4-neon",
+      "released": "2026-11-18",
+      "coding_sources": [
+        {
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-neon/",
+          "checked": "2026-11-19"
+        },
+        {
+          "url": "https://deepmind.google/models/model-cards/gemini-4-neon/",
+          "checked": "2026-11-19"
+        }
+      ],
+      "connection": {
+        "request_url": "https://generativelanguage.googleapis.com/v1beta/",
+        "wire_model_id": "gemini-4-neon",
+        "env_var": "GEMINI_API_KEY",
+        "sources": [
+          {
+            "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-neon",
+            "checked": "2026-11-19"
+          },
+          {
+            "url": "https://aistudio.google.com/docs/whats-new-gemini-4-neon",
+            "checked": "2026-11-19"
+          }
+        ]
+      },
+      "context": 1048576,
+      "output": 1048576,
+      "input_modalities": [
+        "text",
+        "image",
+        "video",
+        "audio",
+        "pdf"
+      ],
+      "reasoning_options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "cost": {
+        "input_per_million": 3,
+        "output_per_million": 15,
+        "currency": "USD",
+        "checked": "2026-11-19",
+        "source": {
+          "url": "https://aistudio.google.com/docs/whats-new-gemini-4-neon",
+          "checked": "2026-11-19"
+        },
+        "notes": "Standard paid-tier USD API rates, flat across the entire 1,048,576-token context window with no long-context surcharge. Output includes thinking tokens. Implicit cache hits are $0.15/MTok for prompts of at least 4,096 tokens (a 95% discount); explicit caching is unsupported and the page lists no separate cache-write or storage fee. Neon is available on the paid tier only, with no Free tier; Batch, Flex and Priority rates differ and grounding is billed per query."
+      },
+      "sources": [
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-neon",
+          "checked": "2026-11-19"
+        },
+        {
+          "url": "https://aistudio.google.com/docs/whats-new-gemini-4-neon",
+          "checked": "2026-11-19"
+        },
+        {
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-neon/",
+          "checked": "2026-11-19"
+        },
+        {
+          "url": "https://deepmind.google/models/model-cards/gemini-4-neon/",
+          "checked": "2026-11-19"
+        },
+        {
+          "url": "https://aistudio.google.com/docs/thinking",
+          "checked": "2026-11-19"
+        },
+        {
+          "url": "https://aistudio.google.com/docs/long-decode",
+          "checked": "2026-11-19"
+        }
+      ],
+      "config_profile": {
+        "model": {
+          "thinking": {
+            "level": "high"
+          }
+        },
+        "sources": [
+          {
+            "url": "https://aistudio.google.com/docs/whats-new-gemini-4-neon",
+            "checked": "2026-11-19"
+          },
+          {
+            "url": "https://aistudio.google.com/docs/thinking",
+            "checked": "2026-11-19"
           }
         ]
       }
@@ -3694,6 +3792,26 @@
           {
             "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-hydrogen?generate-content=true",
             "checked": "2026-11-13"
+          }
+        ]
+      }
+    },
+    {
+      "endpoint": "gemini",
+      "wire_model_id": "gemini-4-neon",
+      "model_id": "google/gemini-4-neon",
+      "limit": {
+        "output": 65536
+      },
+      "config_profile": {
+        "sources": [
+          {
+            "url": "https://aistudio.google.com/docs/long-decode",
+            "checked": "2026-11-19"
+          },
+          {
+            "url": "https://ai.google.dev/gemini-api/docs/models/gemini-4-neon",
+            "checked": "2026-11-19"
           }
         ]
       }
