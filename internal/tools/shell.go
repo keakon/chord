@@ -467,6 +467,9 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		ShellType:   t.shellType,
 		LogDir:      logDir,
 		Detached:    a.RunInBackground,
+		// The verdict must come from the same args the scheduler classified:
+		// stripping is the env-side half of the read-only concurrency grant.
+		ReadOnlyShell: shellReadOnlyArgsVerdict(raw, t.shellType).ReadOnly,
 	})
 	if err != nil {
 		return "", err

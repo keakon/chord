@@ -804,3 +804,53 @@ func TestBackgroundJobHandleNamesSavedLog(t *testing.T) {
 		t.Fatalf("handle does not name the job log: %q", handle)
 	}
 }
+
+func TestShellReadOnlySpawnEnvDoesNotExecuteBashStartupHooks(t *testing.T) {
+	resetJobRegistryOnlyForTest(t)
+	bashEnvFile := filepath.Join(t.TempDir(), "bashenv")
+	if err := os.WriteFile(bashEnvFile, []byte("echo startup-marker\n"), 0o600); err != nil {
+		t.Fatalf("write BASH_ENV script: %v", err)
+	}
+
+	t.Setenv(bashEnvKey, bashEnvFile)
+	// Bash 3.2 imports the legacy plain-variable form; modern Bash imports the
+	// BASH_FUNC_ form. The same body makes either import observable.
+	const function = `() { echo function-marker; command cat; }`
+	t.Setenv("cat", function)
+	t.Setenv(bashFuncKeyPrefix+"cat%%", function)
+	t.Setenv(bashShellOptionsKey, "xtrace")
+	t.Setenv(bashPS4Key, "+ ")
+	t.Setenv("BASH_XTRACEFD", "2")
+
+	tool := NewShellTool("bash")
+	for _, tc := range []struct {
+		name     string
+		args     json.RawMessage
+		readOnly bool
+	}{
+		{"read-only", json.RawMessage(`{"command":"cat <<< sample-input","yield_time_ms":0}`), true},
+		// The fallback makes the same read command run with the unchanged env,
+		// so the test proves the startup behavior is observable on this Bash.
+		{"exclusive", json.RawMessage(`{"command":"cat <<< sample-input || true","yield_time_ms":0}`), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tool.ConcurrencySafeReadOnly(tc.args); got != tc.readOnly {
+				t.Fatalf("read-only verdict = %v, want %v", got, tc.readOnly)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			out, err := tool.Execute(ctx, tc.args)
+			if err != nil {
+				t.Fatalf("execute cat: %v; output: %q", err, out)
+			}
+			if !strings.Contains(out, "sample-input\n") {
+				t.Fatalf("cat did not print its input: %q", out)
+			}
+			for _, marker := range []string{"startup-marker", "function-marker", "+ cat\n"} {
+				if got, want := strings.Contains(out, marker), !tc.readOnly; got != want {
+					t.Errorf("output contains %q = %v, want %v; output: %q", marker, got, want, out)
+				}
+			}
+		})
+	}
+}

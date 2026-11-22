@@ -65,6 +65,12 @@ type jobStartRequest struct {
 	// Detached starts the job as background-owned: no caller waits on it and
 	// its completion is delivered as an asynchronous notification.
 	Detached bool
+	// ReadOnlyShell marks an invocation the read-only classifier proved free
+	// of writes and process side effects (ShellTool.ConcurrencyPolicy). Only
+	// such a command may batch with other reads, so its spawn env is hardened
+	// against the bash dynamic-env vectors that could redirect a PATH-named
+	// program to different code (see shellSpawnEnv).
+	ReadOnlyShell bool
 }
 
 type job struct {
@@ -288,7 +294,7 @@ func (r *JobRegistry) start(ctx context.Context, req jobStartRequest) (*job, err
 	}
 	// Jobs are intentionally non-interactive. Leaving Stdin nil makes Go
 	// connect the child process to the null device instead of the TUI stdin.
-	cmd.Env = appendNonInteractiveEnv(nil)
+	cmd.Env = shellSpawnEnv(req.ReadOnlyShell)
 	outputBuf := newTailWriter(maxOutputBytes)
 	j.output = outputBuf
 	// The job owns the command's combined output pipe instead of handing the
