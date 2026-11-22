@@ -310,15 +310,26 @@ func TestResponsesProvider_AppliesRequestOverrides(t *testing.T) {
 		Type:   config.ProviderTypeResponses,
 		APIURL: server.URL + "/v1/responses",
 		Compat: &config.ProviderCompatConfig{RequestOverrides: &config.RequestOverridesConfig{
-			Body:    map[string]any{"reasoning": map[string]any{"effort": "max"}, "store": nil},
+			Body:    map[string]any{"instructions": "gateway-specific instructions", "reasoning": map[string]any{"effort": "max"}, "store": nil},
 			Headers: map[string]*string{"OpenAI-Beta": nil, "X-Trace": &trace},
 		}},
 	}, []string{"test-key"})
 	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
 
-	_, err := r.CompleteStream(context.Background(), "test-key", "glm-5.2", "", []message.Message{{Role: "user", Content: "hello"}}, nil, 0, RequestTuning{}, func(message.StreamDelta) {})
+	_, err := r.CompleteStream(context.Background(), "test-key", "glm-5.2", "Chord system prompt", []message.Message{{Role: "user", Content: "hello"}}, nil, 0, RequestTuning{}, func(message.StreamDelta) {})
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
+	}
+	if got := gotBody["instructions"]; got != "gateway-specific instructions" {
+		t.Fatalf("instructions override = %#v, want the explicit override preserved", got)
+	}
+	input, ok := gotBody["input"].([]any)
+	if !ok || len(input) == 0 {
+		t.Fatalf("input = %#v, want the Chord developer prefix", gotBody["input"])
+	}
+	prefix, ok := input[0].(map[string]any)
+	if !ok || prefix["role"] != responsesDeveloperItemRole || inputItemText(prefix) != "Chord system prompt" {
+		t.Fatalf("input[0] = %#v, want the Chord developer prefix alongside the explicit instructions override", input[0])
 	}
 	if gotBody["reasoning"].(map[string]any)["effort"] != "max" {
 		t.Fatalf("reasoning = %#v, want effort=max", gotBody["reasoning"])
@@ -334,7 +345,7 @@ func TestResponsesProvider_AppliesRequestOverrides(t *testing.T) {
 	}
 }
 
-func TestResponsesProvider_SendsSystemPromptAsInstructions(t *testing.T) {
+func TestResponsesProvider_SendsSystemPromptAsDeveloperInputItem(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
@@ -353,29 +364,72 @@ func TestResponsesProvider_SendsSystemPromptAsInstructions(t *testing.T) {
 	_, err := r.CompleteStream(
 		context.Background(), "test-key", "gpt-5", "You are helpful.",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		nil, 128, RequestTuning{},
+		nil, 128, RequestTuning{SessionKey: "20260102150405123"},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
 		t.Fatalf("CompleteStream: %v", err)
 	}
-	if got := gotBody["instructions"]; got != "You are helpful." {
-		t.Fatalf("instructions = %v, want system prompt", got)
-	}
+	assertDeveloperInstructionsPrefix(t, gotBody, "20260102150405123", "You are helpful.")
 	input, ok := gotBody["input"].([]any)
-	if !ok || len(input) != 1 {
-		t.Fatalf("input = %#v, want one user message", gotBody["input"])
+	if !ok || len(input) != 2 {
+		t.Fatalf("input = %#v, want the instructions prefix plus one user message", gotBody["input"])
 	}
-	item, ok := input[0].(map[string]any)
-	if !ok {
-		t.Fatalf("input[0] = %#v, want object", input[0])
+	user, ok := input[1].(map[string]any)
+	if !ok || user["role"] != "user" {
+		t.Fatalf("input[1] = %#v, want the user message", input[1])
 	}
-	if got := item["type"]; got != "message" {
-		t.Fatalf("input[0].type = %v, want message", got)
+}
+
+// TestResponsesProviderBaseInstructionsItemIDStableAcrossProviders pins prefix
+// id stability across separately built requests: two fresh providers sending
+// the same session key and instructions must mint the same base-instructions
+// id, so a retried or rebuilt request keeps the cached prefix byte-identical.
+// Each request uses its own provider because the body-reuse cache would hand
+// the second identical request the first marshaled body instead of rebuilding
+// it.
+func TestResponsesProviderBaseInstructionsItemIDStableAcrossProviders(t *testing.T) {
+	capture := func(t *testing.T, tuning RequestTuning) map[string]any {
+		t.Helper()
+		var gotBody map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		}))
+		t.Cleanup(server.Close)
+
+		providerCfg := NewProviderConfig("sample", config.ProviderConfig{
+			Type:   config.ProviderTypeResponses,
+			APIURL: server.URL + "/v1/responses",
+		}, []string{"test-key"})
+		r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+		if _, err := r.CompleteStream(
+			context.Background(), "test-key", "gpt-5", "You are helpful.",
+			[]message.Message{{Role: "user", Content: "hello"}},
+			nil, 128, tuning,
+			func(message.StreamDelta) {},
+		); err != nil {
+			t.Fatalf("CompleteStream: %v", err)
+		}
+		return gotBody
 	}
-	if got := item["role"]; got == "system" {
-		t.Fatalf("unexpected system message in input: %#v", item)
+
+	first := capture(t, RequestTuning{SessionKey: "20260102150405123"})
+	second := capture(t, RequestTuning{SessionKey: "20260102150405123"})
+	want := baseInstructionsItemID(deriveResponsesWireIdentity("20260102150405123", 0, false).sessionID, "You are helpful.")
+	for i, body := range []map[string]any{first, second} {
+		assertDeveloperInstructionsPrefix(t, body, "20260102150405123", "You are helpful.")
+		input := body["input"].([]any)
+		if got := input[0].(map[string]any)["id"]; got != want {
+			t.Fatalf("body %d input[0] id = %v, want %q", i, got, want)
+		}
 	}
+
+	// Without a session key the prefix item is sent without an id.
+	sessionless := capture(t, RequestTuning{})
+	assertDeveloperInstructionsPrefix(t, sessionless, "", "You are helpful.")
 }
 
 func TestResponsesProvider_ReasoningSummaryDefaultsToAuto(t *testing.T) {

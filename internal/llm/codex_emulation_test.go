@@ -109,16 +109,7 @@ func TestCodexEmulationWritesCodexBodyShapeAndUserAgent(t *testing.T) {
 func TestCodexEmulationDisabledKeepsChordRequestShape(t *testing.T) {
 	header, body := captureCodexEmulationRequest(t, nil)
 
-	if got, _ := body["instructions"].(string); got != "you are a helpful assistant" {
-		t.Fatalf("instructions = %#v, want the base instructions as a top-level field", body["instructions"])
-	}
-	input, _ := body["input"].([]any)
-	if len(input) == 0 {
-		t.Fatalf("body input = %#v, want the conversation without an instructions prefix", body["input"])
-	}
-	if first, _ := input[0].(map[string]any); first["role"] == responsesDeveloperItemRole {
-		t.Fatalf("input[0] = %#v, want no emulated instructions item", first)
-	}
+	assertDeveloperInstructionsPrefix(t, body, "20260102150405123", "you are a helpful assistant")
 	if _, ok := body["tool_choice"]; ok {
 		t.Fatalf("tool_choice = %#v, want it absent for a tool-less request", body["tool_choice"])
 	}
@@ -136,9 +127,7 @@ func TestCodexEmulationDisabledKeepsChordRequestShape(t *testing.T) {
 func TestCodexEmulationWithoutVersionImitatesNothing(t *testing.T) {
 	header, body := captureCodexEmulationRequest(t, &config.EmulationConfig{Codex: &config.CodexEmulationConfig{}})
 
-	if got, _ := body["instructions"].(string); got != "you are a helpful assistant" {
-		t.Fatalf("instructions = %#v, want Chord's top-level field: an opt-in without a version has nothing to imitate", body["instructions"])
-	}
+	assertDeveloperInstructionsPrefix(t, body, "20260102150405123", "you are a helpful assistant")
 	if _, ok := body["tool_choice"]; ok {
 		t.Fatalf("tool_choice = %#v, want it absent for a tool-less request", body["tool_choice"])
 	}
@@ -245,4 +234,36 @@ func inputItemText(item map[string]any) string {
 		}
 	}
 	return text.String()
+}
+
+// assertDeveloperInstructionsPrefix checks that a captured Responses body opens
+// its input with the developer base-instructions item and carries no top-level
+// instructions field. A non-empty sessionKey must yield the deterministic
+// base-instructions id; a sessionless item must carry none.
+func assertDeveloperInstructionsPrefix(t *testing.T, body map[string]any, sessionKey, text string) {
+	t.Helper()
+	if got, ok := body["instructions"]; ok {
+		t.Fatalf("instructions = %#v, want no top-level instructions field", got)
+	}
+	input, ok := body["input"].([]any)
+	if !ok || len(input) == 0 {
+		t.Fatalf("body input = %#v, want the developer instructions prefix", body["input"])
+	}
+	first, ok := input[0].(map[string]any)
+	if !ok || first["type"] != "message" || first["role"] != responsesDeveloperItemRole {
+		t.Fatalf("input[0] = %#v, want the developer base-instructions item", input[0])
+	}
+	if got := inputItemText(first); got != text {
+		t.Fatalf("input[0] text = %q, want the base instructions %q", got, text)
+	}
+	if sessionKey == "" {
+		if id, present := first["id"]; present {
+			t.Fatalf("sessionless base-instructions item carries an id: %v", id)
+		}
+		return
+	}
+	want := baseInstructionsItemID(deriveResponsesWireIdentity(sessionKey, 0, false).sessionID, text)
+	if first["id"] != want {
+		t.Fatalf("input[0] id = %v, want the deterministic base-instructions id %q", first["id"], want)
+	}
 }

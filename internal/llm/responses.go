@@ -121,7 +121,6 @@ type responsesRequest struct {
 	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
 	Stream             bool                   `json:"stream"`
 	ServiceTier        string                 `json:"service_tier,omitempty"`
-	Instructions       *string                `json:"instructions,omitzero"`
 	Input              []responsesInputItem   `json:"input"`
 	Tools              []responsesTool        `json:"tools"`
 	ToolChoice         string                 `json:"tool_choice,omitempty"`
@@ -454,12 +453,15 @@ func (r *ResponsesProvider) CompleteStream(
 			if r.provider != nil {
 				rc = r.provider.ResponsesCompat(model)
 			}
-			reqBody, err := newResponsesHostedRequest(model, systemPrompt, hostedSubRequestText(messages), ht, maxTokens, store, rc)
+			reqBody, err := newResponsesHostedRequest(model, systemPrompt, hostedSubRequestText(messages), sessionKey, ht, maxTokens, store, rc)
 			if err != nil {
 				return nil, nil, err
 			}
 			if r.provider.codexShapeEmulated(model) {
-				applyResponsesHostedCodexShape(&reqBody, systemPrompt, sessionKey, ot.ParallelToolCalls, rc)
+				applyResponsesHostedCodexShape(&reqBody, ot.ParallelToolCalls, rc)
+			}
+			if reqBody.PromptCacheKey != "" {
+				reqBody.ClientMetadata = responsesClientMetadata(wire, ResponsesTurnStateFromContext(ctx))
 			}
 			reqBody.ServiceTier = ot.ServiceTier
 			bodyBytes, err := jsonx.Marshal(reqBody)
@@ -470,14 +472,13 @@ func (r *ResponsesProvider) CompleteStream(
 			if err != nil {
 				return nil, nil, err
 			}
-			return bodyBytes, responsesBuiltBody{}, nil
+			return bodyBytes, responsesBuiltBody{reqBody: responsesRequest{ClientMetadata: reqBody.ClientMetadata}}, nil
 		}
 
 		// Convert messages to Responses API format. The system prompt is not part of the
-		// history: Codex emulation sends it as the developer item that opens the input
-		// (below), other Responses requests send it through the top-level
-		// instructions field, which keeps typed system messages out of input for backends
-		// that reject them. apply_patch history replays in the shape matching
+		// history: it opens the input as the developer base-instructions item (below),
+		// which keeps typed system messages out of input for backends that reject
+		// them. apply_patch history replays in the shape matching
 		// this request's tool declarations (freeform custom_tool_call or JSON
 		// function_call), so the model sees the same wire form it is asked to emit.
 		replayMessages, err := projectNativeImageReplay(ctx, messages)
@@ -494,9 +495,8 @@ func (r *ResponsesProvider) CompleteStream(
 			rc = r.provider.ResponsesCompat(model)
 		}
 		// Mimicking the Codex client's own body layout is an explicit opt-in
-		// (emulate: codex) on top of the transport the codex preset selects: base
-		// instructions ride in the input prefix and the tool fields stay in the body
-		// even when a request declares no tools.
+		// (emulate: codex) on top of the transport the codex preset selects: the
+		// tool fields stay in the body even when a request declares no tools.
 		codexShape := r.provider.codexShapeEmulated(model)
 		var sendStore, sendToolChoice, sendParallelToolCalls, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens, sendPromptCacheOptions *bool
 		if rc != nil {
@@ -561,14 +561,12 @@ func (r *ResponsesProvider) CompleteStream(
 			fullInput = fillResponsesReasoningForReplay(fullInput)
 		}
 
-		// The Codex client sends no top-level instructions field at all: the base
-		// instructions open the input as a developer message whose id is derived from
-		// the thread and the text, so retries and a resumed thread rebuild the same
-		// prefix item and the cached prefix stays byte-identical. Other Responses
-		// backends keep the top-level field, which avoids a typed input message on
-		// relays that reject them.
-		instructionsInInput := codexShape && systemPrompt != ""
-		if instructionsInInput {
+		// The top-level instructions field is not prompt-cached on GPT-6.2+ models,
+		// so the base instructions open the input as a developer message on every
+		// Responses target. Its id is derived from the thread and the text, so
+		// retries and a resumed thread rebuild the same prefix item and the cached
+		// prefix stays byte-identical.
+		if systemPrompt != "" {
 			fullInput = append([]responsesInputItem{responsesDeveloperInstructionsItem(sessionKey, systemPrompt)}, fullInput...)
 		}
 
@@ -623,13 +621,6 @@ func (r *ResponsesProvider) CompleteStream(
 			reqBody.ServiceTier = ot.ServiceTier
 		}
 		log.Debugf("responses: full model=%v store=%v input_len=%v", model, reqBody.Store, len(fullInput))
-		// Set instructions separately from input messages, matching Codex's Responses
-		// request shape and avoiding system-role input items on compatible backends.
-		// Emulation already moved them into the input prefix above.
-		if systemPrompt != "" && !instructionsInInput {
-			instructions := systemPrompt
-			reqBody.Instructions = &instructions
-		}
 
 		if maxTokens > 0 {
 			if compatBool(sendMaxOutputTokens, false) {

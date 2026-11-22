@@ -1168,6 +1168,71 @@ func TestCodexWebSocketPreservesCacheOptionsAndTurnMetadata(t *testing.T) {
 	}
 }
 
+func TestResponsesProviderCodexWebSocketSendsDeveloperPrefixAndHonorsCacheKeyCompat(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		compat  *config.ResponsesCompatConfig
+		wantKey bool
+	}{
+		{name: "default", wantKey: true},
+		{name: "disabled", compat: &config.ResponsesCompatConfig{SendPromptCacheKey: new(false)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newCodexWSCaptureServer(t, []string{"prewarm-a", "response-a"})
+			defer srv.Close()
+
+			provider, accessToken := newOpenAITestOAuthProviderWithResponsesCompat(t, srv.ResponsesURL(), tc.compat)
+			provider.responsesWebsocket = new(true)
+			impl := &ResponsesProvider{provider: provider, client: srv.server.Client()}
+			sessionKey := "20260102150405123"
+			if _, err := impl.CompleteStream(
+				context.Background(), accessToken, "gpt-5.5", "You are helpful.",
+				[]message.Message{{Role: message.RoleUser, Content: "hello"}},
+				nil, 0, RequestTuning{SessionKey: sessionKey}, func(message.StreamDelta) {},
+			); err != nil {
+				t.Fatalf("CompleteStream: %v", err)
+			}
+
+			requests := srv.Requests()
+			if len(requests) != 2 {
+				t.Fatalf("captured %d WebSocket requests, want prewarm and real request", len(requests))
+			}
+			wireSession := deriveResponsesWireIdentity(sessionKey, 0, false).sessionID
+			wantID := baseInstructionsItemID(wireSession, "You are helpful.")
+			prewarmInput, ok := requests[0]["input"].([]any)
+			if !ok || len(prewarmInput) != 2 {
+				t.Fatalf("prewarm input = %#v, want developer prefix and user message", requests[0]["input"])
+			}
+			prefix, ok := prewarmInput[0].(map[string]any)
+			if !ok || prefix["role"] != responsesDeveloperItemRole || prefix["id"] != wantID || inputItemText(prefix) != "You are helpful." {
+				t.Fatalf("prewarm input[0] = %#v, want the deterministic developer prefix", prewarmInput[0])
+			}
+			assertCodexWSFullInputWithoutPreviousResponseID(t, requests[0], 2)
+
+			if got := requests[1]["previous_response_id"]; got != "prewarm-a" {
+				t.Fatalf("real request previous_response_id = %#v, want prewarm response", got)
+			}
+			if input, ok := requests[1]["input"].([]any); !ok || len(input) != 0 {
+				t.Fatalf("real request input = %#v, want empty incremental input after prewarm", requests[1]["input"])
+			}
+
+			for i, body := range requests {
+				gotKey, hasKey := body["prompt_cache_key"]
+				if hasKey != tc.wantKey {
+					t.Fatalf("request %d prompt_cache_key present=%v, want %v", i, hasKey, tc.wantKey)
+				}
+				if tc.wantKey && gotKey != wireSession {
+					t.Fatalf("request %d prompt_cache_key = %#v, want %q", i, gotKey, wireSession)
+				}
+				_, hasMetadata := body["client_metadata"]
+				if hasMetadata != tc.wantKey {
+					t.Fatalf("request %d client_metadata present=%v, want %v", i, hasMetadata, tc.wantKey)
+				}
+			}
+		})
+	}
+}
+
 // WebSocket dial headers must carry the caller's stable session identity.
 func TestApplyCodexWebSocketHeadersSendsCanonicalSessionID(t *testing.T) {
 	h := http.Header{}

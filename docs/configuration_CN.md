@@ -165,6 +165,7 @@ openai:
   - "$OPENAI_API_KEY"
 ```
 
+- Chord 把系统提示作为 `input` 的首项发送 —— 一条 developer 消息，id 由会话与指令文本推导，重试和 resume 重建出同一段可缓存前缀 —— 不再使用顶层 `instructions` 字段。GPT-6.2 及之后的模型不缓存顶层字段，这样系统提示不会在每一步都按未缓存输入重复计费。
 - `gpt-5.6-terra` 和 `gpt-5.6-luna` 的配法相同；`models` 的 key 与 `model_pools` 的 ref 要用同一个模型 ID。
 - 这份片段面向**官方 OpenAI API**，因此直接声明 `1050000` 全窗口且不写
   `input`：Chord 按 `context` 减去实际请求输出预算推导可用输入预算
@@ -719,7 +720,9 @@ providers:
 兼容字段：
 
 - `compat.request_overrides.body`：递归合并任意 JSON 到最终协议请求中。
-  值为 `null` 时删除对应字段。
+  值为 `null` 时删除对应字段。对于 Responses，Chord 的系统提示仍作为
+  developer input 项；非 `null` 的显式 `body.instructions` 覆盖会额外添加顶层
+  字段，而不是替换该提示。
 - `compat.request_overrides.rename_body_fields`：重命名最终请求字段，同时保留
   Chord 动态计算的值，例如 `max_completion_tokens: max_tokens`。
 - `compat.request_overrides.headers`：设置任意请求 header。值为 `null` 时
@@ -865,7 +868,6 @@ providers:
 
 `emulation.codex` 只需要一个字段 `version`：要模拟的 Codex 客户端版本。Codex 不在 wire 的其他位置报告版本，Chord 也不会替你猜一个。模拟叠加在 `preset: codex` 已选好的传输之上，只有 `type: responses` 的 provider 生效。这样的 provider 会发送：
 
-- 把基础指令作为 `input` 的首项 —— 一条 developer 消息，id 由会话与指令文本推导，重试和 resume 重建出同一段前缀 —— 取代顶层 `instructions` 字段；
 - `tool_choice` 与 `parallel_tool_calls`，包括没有声明任何工具的请求（摘要、压缩）；
 - `User-Agent: codex-tui/<version> (<OS> <os version>; <arch>) <terminal> (codex-tui; <version>)`，按 Chord 所在机器生成：macOS 的产品版本号，或 Linux 从 `/etc/os-release` 读到的发行版与版本，CPU 架构，以及终端 —— 先 `TERM_PROGRAM`，再是能穿透复用器的终端标记，最后才 `TERM`；
 - `originator: codex-tui`，Codex TUI 在 wire 上报告的客户端名 —— 未选择客户端的 provider 仍发送 `originator: codex_cli_rs`。

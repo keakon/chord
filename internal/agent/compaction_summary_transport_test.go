@@ -34,9 +34,13 @@ func TestSummarizeCompactionHeadCodexUsesOrdinaryResponses(t *testing.T) {
 			t.Error("request advertises remote compaction")
 		}
 		var body struct {
-			Instructions string `json:"instructions"`
-			Input        []struct {
-				Type string `json:"type"`
+			Input []struct {
+				Type    string `json:"type"`
+				Role    string `json:"role"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
 			} `json:"input"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -44,8 +48,11 @@ func TestSummarizeCompactionHeadCodexUsesOrdinaryResponses(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if body.Instructions != compactionSystemPrompt || len(body.Input) == 0 {
-			t.Errorf("request lacks compaction instructions or input: %+v", body)
+		if len(body.Input) == 0 {
+			t.Errorf("request lacks compaction input: %+v", body)
+		} else if head := body.Input[0]; head.Type != "message" || head.Role != "developer" ||
+			len(head.Content) == 0 || head.Content[0].Text != compactionSystemPrompt {
+			t.Errorf("input[0] = %+v, want the compaction system prompt as the developer base-instructions item", head)
 		}
 		for _, item := range body.Input {
 			if item.Type == "compaction_trigger" {

@@ -170,6 +170,7 @@ openai:
   - "$OPENAI_API_KEY"
 ```
 
+- Chord sends the system prompt as the first `input` item — a developer message whose id is derived from the session and the text, so retries and resumed sessions rebuild the same cached prefix — instead of a top-level `instructions` field. GPT-6.2 and later models do not prompt-cache the top-level field, so this keeps the system prompt out of every step's uncached input.
 - `gpt-5.6-terra` and `gpt-5.6-luna` are wired the same way; keep the `models` key and the `model_pools` ref on the same model ID.
 - This snippet targets the **official OpenAI API**, so it declares the full
   `1050000` window with no `input`: Chord then derives the usable input budget
@@ -798,7 +799,10 @@ Model field semantics:
 Compatibility fields:
 
 - `compat.request_overrides.body`: recursively merges arbitrary JSON into the
-  final protocol request. A `null` value deletes that field.
+  final protocol request. A `null` value deletes that field. For Responses,
+  Chord's system prompt remains the developer input item; a non-null explicit
+  `body.instructions` override adds the top-level field rather than replacing
+  that prompt.
 - `compat.request_overrides.rename_body_fields`: renames a final request field
   while preserving Chord's dynamically computed value. Use this for differences
   such as `max_completion_tokens: max_tokens`.
@@ -1032,9 +1036,6 @@ default to assume. The emulation rides on the transport `preset: codex`
 selects, and only a `type: responses` provider acts on it. Such a provider
 sends:
 
-- the base instructions as the first `input` item — a developer message whose id
-  is derived from the session and the text, so retries and resumed sessions
-  rebuild the same prefix — instead of a top-level `instructions` field;
 - `tool_choice` and `parallel_tool_calls` in every body, including requests that
   declare no tools (summarization, compaction);
 - `User-Agent: codex-tui/<version> (<OS> <os version>; <arch>) <terminal> (codex-tui; <version>)`,

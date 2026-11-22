@@ -85,7 +85,6 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 type codexWSResponseCreate struct {
 	Type              string               `json:"type"`
 	Model             string               `json:"model"`
-	Instructions      *string              `json:"instructions,omitzero"`
 	Input             []responsesInputItem `json:"input"`
 	Tools             []responsesTool      `json:"tools"`
 	ToolChoice        string               `json:"tool_choice,omitempty"`
@@ -775,7 +774,6 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		prewarmEnv := codexWSResponseCreate{
 			Type:               "response.create",
 			Model:              req.Model,
-			Instructions:       req.Instructions,
 			Input:              fullInput,
 			Tools:              req.Tools,
 			ToolChoice:         req.ToolChoice,
@@ -784,7 +782,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			Generate:           &generate,
 			Stream:             true,
 			Include:            req.Include,
-			PromptCacheKey:     sessionKey,
+			PromptCacheKey:     req.PromptCacheKey,
 			Reasoning:          req.Reasoning,
 			Text:               req.Text,
 			ClientMetadata:     req.ClientMetadata,
@@ -820,7 +818,6 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	env := codexWSResponseCreate{
 		Type:               "response.create",
 		Model:              req.Model,
-		Instructions:       req.Instructions,
 		Input:              wireInput,
 		Tools:              req.Tools,
 		ToolChoice:         req.ToolChoice,
@@ -828,7 +825,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		Store:              req.Store,
 		Stream:             true,
 		Include:            req.Include,
-		PromptCacheKey:     sessionKey,
+		PromptCacheKey:     req.PromptCacheKey,
 		PreviousResponseID: prevID,
 		Reasoning:          req.Reasoning,
 		Text:               req.Text,

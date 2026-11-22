@@ -24,6 +24,10 @@ func testOAuthJWT(payload string) string {
 }
 
 func newOpenAITestOAuthProvider(t *testing.T, apiURL string) (*ProviderConfig, string) {
+	return newOpenAITestOAuthProviderWithResponsesCompat(t, apiURL, nil)
+}
+
+func newOpenAITestOAuthProviderWithResponsesCompat(t *testing.T, apiURL string, responsesCompat *config.ResponsesCompatConfig) (*ProviderConfig, string) {
 	t.Helper()
 
 	accessToken := testOAuthJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acc-test","chatgpt_user_id":"user-test"}}`)
@@ -43,6 +47,7 @@ func newOpenAITestOAuthProvider(t *testing.T, apiURL string) (*ProviderConfig, s
 		APIURL:             apiURL,
 		Models:             map[string]config.ModelConfig{},
 		ResponsesWebsocket: &responsesWSOff, // httptest only speaks HTTP POST, not WSS
+		Compat:             &config.ProviderCompatConfig{Responses: responsesCompat},
 	}, config.ExtractAPIKeys(creds))
 	auth := config.AuthConfig{"openai": creds}
 	var authMu sync.Mutex
@@ -179,9 +184,6 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 		t.Fatalf("unexpected Accept header: %q", gotHeaders.Get("Accept"))
 	}
 
-	if gotBody["instructions"] != "system prompt" {
-		t.Fatalf("expected instructions=system prompt, got %#v", gotBody["instructions"])
-	}
 	if gotBody["store"] != false {
 		t.Fatalf("expected explicit store=false, got %#v", gotBody["store"])
 	}
@@ -212,16 +214,17 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 	if text["verbosity"] != "medium" {
 		t.Fatalf("expected text.verbosity=medium, got %#v", text["verbosity"])
 	}
+	assertDeveloperInstructionsPrefix(t, gotBody, "session-oauth-1", "system prompt")
 	input, ok := gotBody["input"].([]any)
-	if !ok || len(input) != 1 {
-		t.Fatalf("expected one input item, got %#v", gotBody["input"])
+	if !ok || len(input) != 2 {
+		t.Fatalf("expected the instructions prefix plus one input item, got %#v", gotBody["input"])
 	}
-	first, ok := input[0].(map[string]any)
+	first, ok := input[1].(map[string]any)
 	if !ok {
-		t.Fatalf("expected first input item to be an object, got %#v", input[0])
+		t.Fatalf("expected second input item to be an object, got %#v", input[1])
 	}
 	if first["role"] != "user" {
-		t.Fatalf("expected first input role=user, got %#v", first["role"])
+		t.Fatalf("expected input role=user after the instructions prefix, got %#v", first["role"])
 	}
 }
 
@@ -345,9 +348,7 @@ func TestResponsesProvider_ResponsesWireOmitsMaxOutputTokens(t *testing.T) {
 	if _, ok := gotBody["max_output_tokens"]; ok {
 		t.Fatalf("did not expect max_output_tokens in responses request: %#v", gotBody["max_output_tokens"])
 	}
-	if gotBody["instructions"] != "system prompt" {
-		t.Fatalf("expected instructions=system prompt, got %#v", gotBody["instructions"])
-	}
+	assertDeveloperInstructionsPrefix(t, gotBody, "", "system prompt")
 	store, ok := gotBody["store"].(bool)
 	if !ok || store {
 		t.Fatalf("expected explicit store=false for responses request, got %#v", gotBody["store"])
@@ -445,9 +446,7 @@ func TestOpenAIProvider_OpenAIOAuthDelegatesToResponses(t *testing.T) {
 	if _, ok := gotBody["input"]; !ok {
 		t.Fatalf("expected OAuth request to include responses input field, got %#v", gotBody)
 	}
-	if gotBody["instructions"] != "system prompt" {
-		t.Fatalf("expected instructions=system prompt, got %#v", gotBody["instructions"])
-	}
+	assertDeveloperInstructionsPrefix(t, gotBody, "", "system prompt")
 }
 
 func TestResponsesProvider_ToolOnlyFieldsGatedOnTools(t *testing.T) {
@@ -611,9 +610,7 @@ func TestResponsesProvider_CodexPresetCompactionUsesOrdinaryResponsesRequest(t *
 	if got := gotHeaders.Get("originator"); got != openAICodexOriginator {
 		t.Fatalf("compaction request originator = %q, want %q", got, openAICodexOriginator)
 	}
-	if gotBody["instructions"] != "system prompt" {
-		t.Fatalf("expected instructions=system prompt, got %#v", gotBody["instructions"])
-	}
+	assertDeveloperInstructionsPrefix(t, gotBody, "", "system prompt")
 }
 
 func TestResolveResponsesReasoningEffort(t *testing.T) {

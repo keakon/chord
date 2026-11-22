@@ -11,13 +11,14 @@ import (
 )
 
 // responsesHostedRequest is the minimal sub-request shape used by the local
-// hosted tools: one user message and one raw hosted tool declaration, with an
-// optional raw tool_choice that forces the call. The hint-only shape forces
-// nothing and lets the prompt ask for the tool instead; targets emulating a
-// client that always sends a choice (Codex sends "auto") still receive it.
+// hosted tools: the developer base-instructions item, one user message and one
+// raw hosted tool declaration, with an optional raw tool_choice that forces
+// the call. The hint-only shape forces nothing and lets the prompt ask for the
+// tool instead; targets emulating a client that always sends a choice (Codex
+// sends "auto") still receive it. Optional session cache identity and client
+// metadata follow the target's Responses compatibility settings.
 type responsesHostedRequest struct {
 	Model             string               `json:"model"`
-	Instructions      *string              `json:"instructions,omitzero"`
 	Input             []responsesInputItem `json:"input"`
 	Tools             []json.RawMessage    `json:"tools"`
 	ToolChoice        json.RawMessage      `json:"tool_choice,omitzero"`
@@ -27,43 +28,49 @@ type responsesHostedRequest struct {
 	Stream            bool                 `json:"stream"`
 	Include           []string             `json:"include,omitempty"`
 	ServiceTier       string               `json:"service_tier,omitempty"`
+	PromptCacheKey    string               `json:"prompt_cache_key,omitempty"`
+	ClientMetadata    map[string]string    `json:"client_metadata,omitempty"`
 }
 
 // newResponsesHostedRequest builds the wire request for a hosted sub-request.
 // The declaration and tool_choice are placed verbatim: Chord does not
 // interpret the declaration's version or options. Arguments travel only in
 // the wire fields, never folded into the prompt text, so a fallback to
-// another target cannot silently drop them. rc mirrors the target's Responses
+// another target cannot silently drop them. The system prompt opens the input
+// as the developer base-instructions item, like every other Responses
+// request. rc mirrors the target's Responses
 // compat so a gateway that rejects an optional field does not reject the
 // sub-request either.
-func newResponsesHostedRequest(model, systemPrompt, query string, ht *HostedToolRequest, maxTokens int, store bool, rc *config.ResponsesCompatConfig) (responsesHostedRequest, error) {
+func newResponsesHostedRequest(model, systemPrompt, query, sessionKey string, ht *HostedToolRequest, maxTokens int, store bool, rc *config.ResponsesCompatConfig) (responsesHostedRequest, error) {
 	if ht == nil || len(ht.Declaration) == 0 {
 		return responsesHostedRequest{}, fmt.Errorf("hosted tool %q has no Responses declaration", hostedRequestName(ht))
 	}
 	if query == "" {
 		return responsesHostedRequest{}, fmt.Errorf("hosted tool %q sub-request requires a user message", ht.Name)
 	}
-	var sendStore, sendInclude, sendMaxOutputTokens *bool
+	var sendStore, sendInclude, sendMaxOutputTokens, sendPromptCacheKey *bool
 	if rc != nil {
 		sendStore = rc.SendStore
 		sendInclude = rc.SendReasoningInclude
 		sendMaxOutputTokens = rc.SendMaxOutputTokens
+		sendPromptCacheKey = rc.SendPromptCacheKey
+	}
+	input := []responsesInputItem{{
+		Type:    "message",
+		Role:    "user",
+		Content: []responsesContentBlock{{Type: "input_text", Text: query}},
+	}}
+	if systemPrompt != "" {
+		input = append([]responsesInputItem{responsesDeveloperInstructionsItem(sessionKey, systemPrompt)}, input...)
 	}
 	req := responsesHostedRequest{
-		Model: model,
-		Input: []responsesInputItem{{
-			Type:    "message",
-			Role:    "user",
-			Content: []responsesContentBlock{{Type: "input_text", Text: query}},
-		}},
+		Model:  model,
+		Input:  input,
 		Tools:  []json.RawMessage{ht.Declaration},
 		Stream: true,
 	}
 	if len(ht.Force) > 0 {
 		req.ToolChoice = ht.Force
-	}
-	if systemPrompt != "" {
-		req.Instructions = new(systemPrompt)
 	}
 	if maxTokens > 0 && compatBool(sendMaxOutputTokens, true) {
 		req.MaxOutputTokens = maxTokens
@@ -74,6 +81,9 @@ func newResponsesHostedRequest(model, systemPrompt, query string, ht *HostedTool
 	if compatBool(sendInclude, true) && len(ht.Include) > 0 {
 		req.Include = ht.Include
 	}
+	if sessionKey != "" && compatBool(sendPromptCacheKey, true) {
+		req.PromptCacheKey = sessionKey
+	}
 	return req, nil
 }
 
@@ -81,12 +91,7 @@ func newResponsesHostedRequest(model, systemPrompt, query string, ht *HostedTool
 // request shape that are independent of the hosted declaration. The hosted
 // tool's raw declaration and forced choice stay untouched; a missing choice is
 // filled with Codex's default only when the compatibility surface allows it.
-func applyResponsesHostedCodexShape(req *responsesHostedRequest, systemPrompt, sessionKey string, parallelToolCalls *bool, rc *config.ResponsesCompatConfig) {
-	req.Instructions = nil
-	if systemPrompt != "" {
-		req.Input = append([]responsesInputItem{responsesDeveloperInstructionsItem(sessionKey, systemPrompt)}, req.Input...)
-	}
-
+func applyResponsesHostedCodexShape(req *responsesHostedRequest, parallelToolCalls *bool, rc *config.ResponsesCompatConfig) {
 	var sendToolChoice, sendParallelToolCalls *bool
 	if rc != nil {
 		sendToolChoice = rc.SendToolChoice

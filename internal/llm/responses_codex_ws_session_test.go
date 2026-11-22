@@ -65,9 +65,8 @@ func TestCodexWebSocketSessionIdentityControlsConnectionReuse(t *testing.T) {
 				}
 				for i := firstRequest; i < requestCount; i++ {
 					body := requests[i]
-					key, _ := body["prompt_cache_key"].(string)
-					if key != sid {
-						t.Fatalf("request %d: prompt_cache_key = %q, want %q", i, key, sid)
+					if _, ok := body["prompt_cache_key"]; ok {
+						t.Fatalf("request %d unexpectedly carries prompt_cache_key without request compatibility enabling it: %#v", i, body["prompt_cache_key"])
 					}
 					if !step.reuse && i == firstRequest {
 						assertCodexWSFullInputWithoutPreviousResponseID(t, body, len(input))

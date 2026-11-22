@@ -128,12 +128,14 @@ func TestResponsesCacheOptionsOnlyForExplicitMode(t *testing.T) {
 
 func TestResponsesProviderMetadataIdentityOnWire(t *testing.T) {
 	var seen []map[string]string
+	var cacheKeys []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request responsesRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 		}
 		seen = append(seen, request.ClientMetadata)
+		cacheKeys = append(cacheKeys, request.PromptCacheKey)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
@@ -152,5 +154,12 @@ func TestResponsesProviderMetadataIdentityOnWire(t *testing.T) {
 	}
 	if seen[0][responsesClientMetadataTurnID] == seen[2][responsesClientMetadataTurnID] {
 		t.Fatal("wire metadata reused across turns")
+	}
+	// The cache key rides on every request regardless of the instructions shape.
+	wantCacheKey := deriveResponsesWireIdentity("session-a", 0, false).sessionID
+	for i, got := range cacheKeys {
+		if got != wantCacheKey {
+			t.Fatalf("request %d prompt_cache_key = %q, want the derived session identity %q", i, got, wantCacheKey)
+		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -81,15 +82,15 @@ func TestResponsesHostedRequestBodyShape(t *testing.T) {
 	}
 
 	var body struct {
-		Model        string   `json:"model"`
-		Instructions *string  `json:"instructions"`
-		Stream       bool     `json:"stream"`
-		Store        *bool    `json:"store"`
-		ToolChoice   string   `json:"tool_choice"`
-		ServiceTier  string   `json:"service_tier"`
-		Include      []string `json:"include"`
-		Input        []struct {
+		Model       string   `json:"model"`
+		Stream      bool     `json:"stream"`
+		Store       *bool    `json:"store"`
+		ToolChoice  string   `json:"tool_choice"`
+		ServiceTier string   `json:"service_tier"`
+		Include     []string `json:"include"`
+		Input       []struct {
 			Type    string `json:"type"`
+			ID      string `json:"id"`
 			Role    string `json:"role"`
 			Content []struct {
 				Type string `json:"type"`
@@ -104,12 +105,19 @@ func TestResponsesHostedRequestBodyShape(t *testing.T) {
 	if body.Model != "gpt-5.5" || !body.Stream {
 		t.Fatalf("model/stream = %q/%v", body.Model, body.Stream)
 	}
-	if body.Instructions == nil || *body.Instructions != "search system" {
-		t.Fatalf("instructions = %v", body.Instructions)
+	if len(body.Input) != 2 {
+		t.Fatalf("input = %#v, want the instructions prefix and the user query", body.Input)
 	}
-	if len(body.Input) != 1 || body.Input[0].Type != "message" || body.Input[0].Role != "user" ||
-		len(body.Input[0].Content) != 1 || body.Input[0].Content[0].Type != "input_text" || body.Input[0].Content[0].Text != "find the sample docs" {
-		t.Fatalf("input = %#v, want the last user message as the query", body.Input)
+	if body.Input[0].Type != "message" || body.Input[0].Role != responsesDeveloperItemRole ||
+		len(body.Input[0].Content) != 1 || body.Input[0].Content[0].Type != "input_text" || body.Input[0].Content[0].Text != "search system" {
+		t.Fatalf("input[0] = %#v, want the system prompt as the developer item", body.Input[0])
+	}
+	if body.Input[0].ID != "" {
+		t.Fatalf("sessionless hosted developer item carries an id: %q", body.Input[0].ID)
+	}
+	if body.Input[1].Type != "message" || body.Input[1].Role != "user" ||
+		len(body.Input[1].Content) != 1 || body.Input[1].Content[0].Type != "input_text" || body.Input[1].Content[0].Text != "find the sample docs" {
+		t.Fatalf("input[1] = %#v, want the last user message as the query", body.Input[1])
 	}
 	if body.ToolChoice != "required" {
 		t.Fatalf("tool_choice = %q, want required", body.ToolChoice)
@@ -193,6 +201,13 @@ func TestResponsesHostedCodexEmulationUsesCodexBodyShape(t *testing.T) {
 		if _, ok := body["instructions"]; ok {
 			t.Fatalf("body %d still carries top-level instructions: %#v", i, body["instructions"])
 		}
+		if body["prompt_cache_key"] != wireSession {
+			t.Fatalf("body %d prompt_cache_key = %#v, want %q", i, body["prompt_cache_key"], wireSession)
+		}
+		metadata, ok := body["client_metadata"].(map[string]any)
+		if !ok || metadata[responsesClientMetadataSessionID] != wireSession {
+			t.Fatalf("body %d client_metadata = %#v, want the session routing identity", i, body["client_metadata"])
+		}
 		input, ok := body["input"].([]any)
 		if !ok || len(input) != 2 {
 			t.Fatalf("body %d input = %#v, want developer prefix and user query", i, body["input"])
@@ -223,10 +238,47 @@ func TestResponsesHostedCodexEmulationUsesCodexBodyShape(t *testing.T) {
 	}
 }
 
+func TestResponsesHostedPromptCacheKeyCompat(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		rc          *config.ResponsesCompatConfig
+		wantKey     string
+		wantPresent bool
+	}{
+		{name: "default", wantKey: "session-123", wantPresent: true},
+		{name: "disabled", rc: &config.ResponsesCompatConfig{SendPromptCacheKey: new(false)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := newResponsesHostedRequest("sample/test-model", "system", "query", "session-123", &HostedToolRequest{
+				Name:        "sample_tool",
+				Declaration: json.RawMessage(sampleResponsesDeclaration),
+			}, 128, false, tc.rc)
+			if err != nil {
+				t.Fatalf("newResponsesHostedRequest: %v", err)
+			}
+			raw, err := jsonx.Marshal(req)
+			if err != nil {
+				t.Fatalf("marshal hosted request: %v", err)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(raw, &body); err != nil {
+				t.Fatalf("decode hosted request: %v", err)
+			}
+			got, present := body["prompt_cache_key"]
+			if present != tc.wantPresent {
+				t.Fatalf("prompt_cache_key present = %v, want %v", present, tc.wantPresent)
+			}
+			if tc.wantPresent && got != tc.wantKey {
+				t.Fatalf("prompt_cache_key = %#v, want %q", got, tc.wantKey)
+			}
+		})
+	}
+}
+
 // TestResponsesHostedRequestHintOnlyOmitsToolChoice pins the degraded shape:
 // the hosted tool stays declared, but nothing forces the call.
 func TestResponsesHostedRequestHintOnlyOmitsToolChoice(t *testing.T) {
-	req, err := newResponsesHostedRequest("gpt-5", "system", "sample query", &HostedToolRequest{
+	req, err := newResponsesHostedRequest("gpt-5", "system", "sample query", "", &HostedToolRequest{
 		Name:        "sample_tool",
 		Declaration: json.RawMessage(sampleResponsesDeclaration),
 	}, 1024, true, nil)
@@ -246,10 +298,10 @@ func TestResponsesHostedRequestHintOnlyOmitsToolChoice(t *testing.T) {
 }
 
 func TestResponsesHostedRequestRejectsMissingInputs(t *testing.T) {
-	if _, err := newResponsesHostedRequest("gpt-5", "system", "sample query", &HostedToolRequest{Name: "sample_tool"}, 1024, true, nil); err == nil {
+	if _, err := newResponsesHostedRequest("gpt-5", "system", "sample query", "", &HostedToolRequest{Name: "sample_tool"}, 1024, true, nil); err == nil {
 		t.Fatal("missing declaration must fail before any request is sent")
 	}
-	if _, err := newResponsesHostedRequest("gpt-5", "system", "", &HostedToolRequest{Name: "sample_tool", Declaration: json.RawMessage(sampleResponsesDeclaration)}, 1024, true, nil); err == nil {
+	if _, err := newResponsesHostedRequest("gpt-5", "system", "", "", &HostedToolRequest{Name: "sample_tool", Declaration: json.RawMessage(sampleResponsesDeclaration)}, 1024, true, nil); err == nil {
 		t.Fatal("missing user message must fail before any request is sent")
 	}
 }
