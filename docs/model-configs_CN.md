@@ -52,7 +52,7 @@ chord doctor models --model mygw/claude-gw
 
 ## Gemini 4 Argon
 
-内嵌目录快照 [v2026-11-11.1](https://github.com/keakon/chord-models/tree/v2026-11-11.1) 包含 `google/gemini-4-argon`。已有安装可先刷新目录，再使用 `GEMINI_API_KEY` 接入官方 API：
+内嵌目录快照 [v2026-11-19.1](https://github.com/keakon/chord-models/tree/v2026-11-19.1) 包含 `google/gemini-4-argon`。已有安装可先刷新目录，再使用 `GEMINI_API_KEY` 接入官方 API：
 
 ```bash
 chord config refresh-catalog
@@ -104,7 +104,7 @@ Argon 需要有可用额度的付费 API 账号。免费层额度为 0 时会返
 
 ## Gemini 4 Carbon
 
-内嵌目录快照 [v2026-11-11.1](https://github.com/keakon/chord-models/tree/v2026-11-11.1) 同样包含 `google/gemini-4-carbon`。Carbon 是 Google 最强的模型，面向复杂多步编码与长程智能体任务；大多数日常软件工程仍以 Argon 为宜。接入与 Argon 同一路由和 `GEMINI_API_KEY`：
+内嵌目录快照 [v2026-11-19.1](https://github.com/keakon/chord-models/tree/v2026-11-19.1) 同样包含 `google/gemini-4-carbon`。Carbon 是 Google 最强的模型，面向复杂多步编码与长程智能体任务；大多数日常软件工程仍以 Argon 为宜。接入与 Argon 同一路由和 `GEMINI_API_KEY`：
 
 ```bash
 chord config refresh-catalog
@@ -115,6 +115,19 @@ chord doctor models --model google/gemini-4-carbon
 Carbon 的容量规格与 Argon 一致：输入、思考和输出共享 1,048,576 token 窗口，没有单独的输入上限；官方 `gemini` 绑定将流式请求限制在 65,536 token；思考档位为 `low`、`medium`（默认）和 `high`；输入支持文本、图片、视频、音频和 PDF。上一节 Argon 的 `compat.generate_content.automatic_continuation` 配置原样适用，把模型名换成 `gemini-4-carbon` 即可。
 
 Carbon 以 Argon 的首发价上线：2026 年 11 月 30 日前每百万输入/输出 token 2/10 美元，此后为 4/20 美元。免费层额度为 0 时与 Argon 一样返回 HTTP 429；2026-11-11 的冒烟检查已到达 API 但被配额拦截，请用 `doctor models` 自行验证接入。
+
+## Gemini 4 Neon
+
+内嵌目录快照 [v2026-11-19.1](https://github.com/keakon/chord-models/tree/v2026-11-19.1) 包含 `google/gemini-4-neon`。使用 `GEMINI_API_KEY` 接入官方 API：
+
+```bash
+chord config add google/gemini-4-neon --api-key-env GEMINI_API_KEY
+chord doctor models --model google/gemini-4-neon
+```
+
+输入、思考和输出共享 1,048,576 token 上下文窗口，没有单独的输入上限。模型文档列出的输出容量为 1,048,576 token，但官方 `gemini` 绑定将每个 REST 请求的输出限制在 65,536 token。更长生成需要后台执行或客户端续传，Chord 尚未为此绑定实现这些能力。目录将思考默认档位设为 `high`，可用变体为 `low`、`medium`、`high` 和 `xhigh`。输入支持文本、图片、视频、音频和 PDF。
+
+标准付费层价格为每百万输入/输出 token 3/15 美元，输出费用包含思考 token。长度至少为 4,096 token 的提示词命中隐式缓存时，每百万缓存输入 token 收费 0.15 美元。Neon 没有免费层。目录收录不代表账号已有调用额度，请用 `doctor models` 检查接入。
 
 ## 自定义端点：借用目录事实
 

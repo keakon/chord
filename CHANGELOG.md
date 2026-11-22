@@ -56,6 +56,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Read-classified shell calls no longer inherit Bash function exports or `BASH_ENV`, and their environment cannot enable `xtrace`. This prevents startup hooks and function overrides from introducing unclassified side effects while read-only calls run concurrently; other shell calls keep their inherited environment.
 - Cancelling an MCP stdio call while it waits for another stdin write now returns without sending the queued request. Other calls keep using the same server connection.
 - Multi-file `apply_patch` previews draw a full-width separator above every file section except the first and every hunk except its file's first, keeping `Add File` groups and long paths distinct. `Move to` stays unseparated because it renames the preceding Update. The same separators appear in live previews, failed-patch cards, and the `Requested patch` fallback.
 - In the permission rule picker, the selected rule row keeps its highlight across the whole line; the path and summary after the tool name no longer fall back to the dialog background.

@@ -92,7 +92,7 @@ chord doctor models --model mygw/claude-gw
 
 ## Gemini 4 Argon
 
-The embedded catalog snapshot, [v2026-11-11.1](https://github.com/keakon/chord-models/tree/v2026-11-11.1), includes `google/gemini-4-argon`. Existing installations can refresh the catalog before connecting to the official API with `GEMINI_API_KEY`:
+The embedded catalog snapshot, [v2026-11-19.1](https://github.com/keakon/chord-models/tree/v2026-11-19.1), includes `google/gemini-4-argon`. Existing installations can refresh the catalog before connecting to the official API with `GEMINI_API_KEY`:
 
 ```bash
 chord config refresh-catalog
@@ -144,7 +144,7 @@ Argon requires a paid API account with available quota. A free-tier quota of zer
 
 ## Gemini 4 Carbon
 
-The embedded catalog snapshot, [v2026-11-11.1](https://github.com/keakon/chord-models/tree/v2026-11-11.1), includes `google/gemini-4-carbon` as well. Carbon is Google's strongest model for complex, multi-step coding and long-horizon agentic work, while Argon remains the everyday choice for most software engineering. The connection shares the Argon route and `GEMINI_API_KEY`:
+The embedded catalog snapshot, [v2026-11-19.1](https://github.com/keakon/chord-models/tree/v2026-11-19.1), includes `google/gemini-4-carbon` as well. Carbon is Google's strongest model for complex, multi-step coding and long-horizon agentic work, while Argon remains the everyday choice for most software engineering. The connection shares the Argon route and `GEMINI_API_KEY`:
 
 ```bash
 chord config refresh-catalog
@@ -155,6 +155,19 @@ chord doctor models --model google/gemini-4-carbon
 Carbon matches the Argon capacity profile: input, thinking, and output share a 1,048,576-token window with no separate input cap, the official `gemini` binding caps the streaming request at 65,536 tokens, and thinking variants are `low`, `medium` (default) and `high`. Input accepts text, image, video, audio and PDF. The same `compat.generate_content.automatic_continuation` setup from the Argon section above applies unchanged, with `gemini-4-carbon` in place of `gemini-4-argon`.
 
 Carbon launched at Argon's introductory rates: $2/$10 per million input/output tokens through November 30, 2026, then $4/$20. A free-tier quota of zero returns HTTP 429 exactly as on Argon; the 2026-11-11 smoke check reached the API and was quota-blocked, so verify your own connection with `doctor models`.
+
+## Gemini 4 Neon
+
+The embedded catalog snapshot, [v2026-11-19.1](https://github.com/keakon/chord-models/tree/v2026-11-19.1), includes `google/gemini-4-neon`. Connect to the official API with `GEMINI_API_KEY`:
+
+```bash
+chord config add google/gemini-4-neon --api-key-env GEMINI_API_KEY
+chord doctor models --model google/gemini-4-neon
+```
+
+Input, thinking and output share a 1,048,576-token context window, with no separate input cap. The model's documented output capacity is 1,048,576 tokens, but the official `gemini` binding caps each REST request at 65,536 output tokens. Longer generations require background execution or client-side continuation, which Chord does not implement for this binding. The catalog sets the thinking default to `high`; the available variants are `low`, `medium`, `high` and `xhigh`. Input accepts text, images, video, audio and PDF.
+
+Standard paid-tier pricing is $3/$15 per million input/output tokens; output pricing includes thinking tokens. Implicit cache hits cost $0.15 per million input tokens for prompts of at least 4,096 tokens. Neon has no free tier. Check your account and connection with `doctor models`; catalog inclusion does not establish account access.
 
 ## Custom endpoints: borrowing catalog facts
 
