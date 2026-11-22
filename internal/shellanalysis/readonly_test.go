@@ -178,6 +178,17 @@ func TestShellReadOnlyNegativeCases(t *testing.T) {
 		"git log $(rm -rf x)",
 		"git log `rm -rf x`",
 		"cat < $f",
+		// Expansion vectors beyond the parameter/command-substitution shapes
+		// above: the classifier never reads a value out of an expansion,
+		// wherever it hides.
+		"ls $((1+1))",
+		`ls "$((1+1))"`,
+		`grep -rn "$(cat /etc/host.conf)" .`,
+		"wc -l `cat /etc/host.conf` f",
+		"cat \"`cat /etc/host.conf`\"",
+		"diff <(cat a) <(cat b)",
+		"sort < <(cat f)",
+		"ls $'docs'",
 		"rm -rf x",
 		"go test ./...",
 		"git commit -m test",
