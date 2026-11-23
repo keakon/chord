@@ -272,7 +272,9 @@ lsp:
 
 这种 LSP 反馈是编辑后的增量检查，不能替代 CI 中的全仓门禁。若项目要在 CI 中采用独立的 `modernize` 命令，应先清理并审查现有发现，再固定命令版本，而不是使用 `@latest`；部分建议修复（例如把 `omitempty` 改为 `omitzero`）会有意改变序列化行为，必须人工审查。
 
-需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 会从 LSP workspace root 向上寻找最近的有效虚拟环境，不越过该文件所属仓库或工作区的边界；类 Unix 查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`，Windows 查找对应的 `Scripts\python.exe`。同一 workspace root 的发现结果会随 LSP client 缓存，避免重复探测。
+需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 从 LSP 工作区根向上查找最近的 `.venv`、`venv` 或 `env`，到文件所属的 checkout 或工作区边界为止。类 Unix 系统检查 `bin/python`，Windows 检查 `Scripts\python.exe`。
+
+如果本地没有找到，Chord 会到同一 Git 仓库的主工作树和其他关联工作树中查找同一相对项目目录，优先用主工作树。候选环境须有 `pyvenv.cfg`，且未被 Git 跟踪。项目的依赖清单、锁文件及 Python 版本文件（如存在）须逐字节一致；requirements 文件通过 `-r` 或 `-c` 递归引用的本地文件也必须一致。不支持或不安全的 include 会阻止跨工作树复用。手工创建的虚拟环境也可以复用，无需运行 uv。解释器在 Pyright 实例启动时选定；Chord 不会执行 `uv sync`，也不会校验已安装的包。如果复用的环境没有同步，或可编辑安装指向另一工作树，请改用本地环境。
 
 TypeScript 服务器还要求能跑起一个 TypeScript：`typescript-language-server` 会加载工作区 `node_modules` 里的 `lib/tsserver.js`，工作区里没有才退回全局安装。两处都取不到时，服务器在 `initialize` 阶段直接失败，Chord 把该 server 标为启动失败（信息面板红点），原因写进日志。给它一个 TypeScript 有两条路：
 

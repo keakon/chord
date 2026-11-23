@@ -120,7 +120,7 @@ Press <kbd>Esc</kbd> to enter Normal mode, then press <kbd>q</kbd> twice within 
 - [Usage](./docs/usage.md): everyday controls, session recovery, long tasks, and parallel work
 - [Model configuration](./docs/model-configs.md) · [Configuration examples](./docs/examples/index.md): connect models or custom gateways
 - [Permissions & Safety](./docs/permissions-and-safety.md): choose which actions need approval
-- [Customization](./docs/customization.md): configure multiple agents, skills, code diagnostics, and external tools
+- [Customization](./docs/customization.md): configure multiple agents, skills, [code diagnostics and Python environment discovery](./docs/customization.md#lsp), and external tools
 - [Headless](./docs/headless.md): control Chord from another interface with `chord headless`
 - [ACP agent mode](./docs/acp.md): drive Chord from ACP clients such as Zed with `chord acp`
 - [Troubleshooting](./docs/troubleshooting.md) · [Full documentation index](./docs/index.md)

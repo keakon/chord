@@ -107,8 +107,8 @@ type typescriptVersionParams struct {
 	Source  string `json:"source"`
 }
 
-func newClient(name string, cfg config.LSPServerConfig, cwd, projectRoot string, debug bool) (*Client, error) {
-	cfg.Options = prepareWorkspaceSettingsBounded(name, cfg, cwd, projectRoot)
+func newClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd, projectRoot string, debug bool) (*Client, error) {
+	cfg.Options = prepareWorkspaceSettings(ctx, name, cfg, cwd, projectRoot)
 	c := &Client{
 		name:         name,
 		cwd:          normalizeWaiterPath(cwd),
@@ -317,7 +317,7 @@ func settingsForSection(settings map[string]any, section string) any {
 	return current
 }
 
-func prepareWorkspaceSettingsBounded(name string, cfg config.LSPServerConfig, cwd, projectRoot string) map[string]any {
+func prepareWorkspaceSettings(ctx context.Context, name string, cfg config.LSPServerConfig, cwd, projectRoot string) map[string]any {
 	settings := cloneSettings(cfg.Options)
 	if !isPyrightServer(name, cfg) {
 		return settings
@@ -337,8 +337,12 @@ func prepareWorkspaceSettingsBounded(name string, cfg config.LSPServerConfig, cw
 	}
 	// Auto-discovery below is deliberately anchored at the nested workspace
 	// root: a venv inside the nested package is preferred over a repository
-	// one. Only explicit config paths resolve against the config root.
+	// one. If this checkout has no environment, an identical Python project
+	// in another linked worktree may supply its environment.
 	pythonPath := discoverPythonInterpreterBounded(cwd, projectRoot)
+	if pythonPath == "" {
+		pythonPath = discoverPythonInterpreterInLinkedWorktrees(ctx, cwd)
+	}
 	if pythonPath == "" {
 		return settings
 	}
@@ -443,16 +447,8 @@ func discoverPythonInterpreterBoundedForGOOS(cwd, projectRoot, goos string) stri
 		return ""
 	}
 	for current := filepath.Clean(cwd); ; current = filepath.Dir(current) {
-		for _, dir := range []string{".venv", "venv", "env"} {
-			if goos == "windows" {
-				if p := filepath.Join(current, dir, "Scripts", "python.exe"); executableFileExistsForGOOS(p, goos) {
-					return p
-				}
-				continue
-			}
-			if p := filepath.Join(current, dir, "bin", "python"); executableFileExistsForGOOS(p, goos) {
-				return p
-			}
+		if python := discoverPythonInterpreterAt(current, goos, nil); python != "" {
+			return python
 		}
 		parent := filepath.Dir(current)
 		if parent == current || current == projectRoot {
@@ -462,9 +458,24 @@ func discoverPythonInterpreterBoundedForGOOS(cwd, projectRoot, goos string) stri
 	return ""
 }
 
+func discoverPythonInterpreterAt(root, goos string, accept func(venv, python string) bool) string {
+	bin, exe := "bin", "python"
+	if goos == "windows" {
+		bin, exe = "Scripts", "python.exe"
+	}
+	for _, name := range []string{".venv", "venv", "env"} {
+		venv := filepath.Join(root, name)
+		python := filepath.Join(venv, bin, exe)
+		if executableFileExistsForGOOS(python, goos) && (accept == nil || accept(venv, python)) {
+			return python
+		}
+	}
+	return ""
+}
+
 func executableFileExistsForGOOS(path, goos string) bool {
 	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
+	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
 	if goos == "windows" {

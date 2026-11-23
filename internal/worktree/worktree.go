@@ -399,10 +399,9 @@ func List(ctx context.Context, repoRoot, branchPrefix string) ([]Info, error) {
 }
 
 // CheckoutPathsInMain returns the canonical path of every worktree of the
-// repository whose main worktree is mainRoot, including checkouts chord did not
-// create (a branch without the chord prefix, or one added by hand with `git
-// worktree add`). Callers resolve mainRoot first, so this avoids the extra
-// `git rev-parse` a repo-root parameter would need.
+// repository, including checkouts added by hand with `git worktree add`.
+// Pass the resolved main worktree root or Git common directory so the list
+// does not depend on the caller's working directory.
 //
 // This is the policy-root view, not the management view: every checkout of one
 // repository contributes to a single set of relative roots, so the set must not
@@ -411,8 +410,8 @@ func List(ctx context.Context, repoRoot, branchPrefix string) ([]Info, error) {
 // in the main checkout — the cwd-dependent drift the merged-roots design exists
 // to remove. Use List when the caller needs chord's own worktrees with their
 // slug, branch, and repo metadata.
-func CheckoutPathsInMain(ctx context.Context, mainRoot string) ([]string, error) {
-	out, err := runGit(ctx, mainRoot, "worktree", "list", "--porcelain")
+func CheckoutPathsInMain(ctx context.Context, mainOrCommonDir string) ([]string, error) {
+	out, err := runGit(ctx, mainOrCommonDir, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}

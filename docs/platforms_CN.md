@@ -123,14 +123,14 @@ Chord 当前自动检测并启用：
 
 ### Pyright venv 自动探测
 
-未在配置中手动指定 Python 解释器时，Chord 从 LSP root 向上按以下顺序查找最近的项目 venv，且不会越过 Chord 项目根：
+未手动指定 Pyright 解释器时，Chord 先从 LSP 工作区根向上查找本地 venv，到 checkout 或工作区边界为止。每层依次检查：
 
 - 类 Unix（macOS、Linux、WSL）：`.venv/bin/python` → `venv/bin/python` → `env/bin/python`
 - Windows：`.venv\Scripts\python.exe` → `venv\Scripts\python.exe` → `env\Scripts\python.exe`
 
 WSL 自动探测不会选 `Scripts\python.exe` 里的 Windows venv。WSL 内开发请在 WSL 里建 Linux venv，或在 `lsp.pyright.options` 中显式设置 `python.pythonPath`。
 
-详见 [扩展与定制：LSP](./customization_CN.md#lsp)。
+本地找不到 venv 时，Chord 可以复用[依赖文件一致的关联 Git 工作树](./customization_CN.md#lsp)中的环境。
 
 ## 终端兼容
 

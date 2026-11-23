@@ -120,7 +120,7 @@ chord
 - [使用指南](./docs/usage_CN.md)：日常操作、恢复会话、长任务和并行工作
 - [模型配置](./docs/model-configs_CN.md) · [配置示例](./docs/examples/index_CN.md)：接入模型或自定义网关
 - [权限与安全](./docs/permissions-and-safety_CN.md)：决定哪些操作需要确认
-- [扩展与定制](./docs/customization_CN.md)：配置多 Agent、技能、代码诊断和外部工具
+- [扩展与定制](./docs/customization_CN.md)：配置多 Agent、技能、[代码诊断和 Python 环境发现](./docs/customization_CN.md#lsp)及外部工具
 - [Headless 集成](./docs/headless_CN.md)：通过 `chord headless` 从其他入口操控
 - [ACP Agent 模式](./docs/acp_CN.md)：通过 `chord acp` 让 ACP 客户端（如 Zed）直接调用 Chord
 - [排障](./docs/troubleshooting_CN.md) · [完整文档目录](./docs/index_CN.md)

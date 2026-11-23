@@ -584,7 +584,7 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 	delete(m.startFail, key)
 	m.startFailMu.Unlock()
 
-	client, err := newClient(key.name, srvCfg, key.root, m.settingsBoundary(key.root), false)
+	client, err := newClient(ctx, key.name, srvCfg, key.root, m.settingsBoundary(key.root), false)
 	if err != nil {
 		log.Errorf("lsp: create client name=%v root=%v error=%v", key.name, key.root, err)
 		// A Stop that cancelled this launch's start era is the cause, not the

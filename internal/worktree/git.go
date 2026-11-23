@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -102,6 +103,13 @@ func runGitText(ctx context.Context, cwd string, args ...string) (string, error)
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// HasTrackedFiles reports whether the Git index contains path or any file
+// beneath it. Path is relative to dir.
+func HasTrackedFiles(ctx context.Context, dir, path string) (bool, error) {
+	out, err := runGit(ctx, dir, "-c", "core.fsmonitor=false", "ls-files", "--cached", "-z", "--", ":(literal)"+filepath.ToSlash(path))
+	return len(out) != 0, err
 }
 
 // porcelainEntry represents one worktree as reported by

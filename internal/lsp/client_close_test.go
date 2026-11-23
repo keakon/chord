@@ -213,10 +213,10 @@ func TestPrepareWorkspaceSettingsUsesDiscoveredPyrightVirtualenv(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver"}, root, root)
+	got := prepareWorkspaceSettings(t.Context(), "pyright", config.LSPServerConfig{Command: "pyright-langserver"}, root, root)
 	want := map[string]any{"python": map[string]any{"pythonPath": pythonPath}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, want)
+		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
 	}
 }
 
@@ -231,29 +231,29 @@ func TestPrepareWorkspaceSettingsKeepsExplicitInterpreter(t *testing.T) {
 	}
 
 	explicit := map[string]any{"python": map[string]any{"pythonPath": "/custom/python"}}
-	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
+	got := prepareWorkspaceSettings(t.Context(), "pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
 	if !reflect.DeepEqual(got, explicit) {
-		t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, explicit)
+		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, explicit)
 	}
 }
 
 func TestPrepareWorkspaceSettingsMakesExplicitRelativeInterpreterAbsolute(t *testing.T) {
 	root := resolvedTempDir(t)
 	explicit := map[string]any{"python": map[string]any{"pythonPath": ".venv/bin/python"}}
-	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
+	got := prepareWorkspaceSettings(t.Context(), "pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
 	want := map[string]any{"python": map[string]any{"pythonPath": filepath.Join(root, ".venv", "bin", "python")}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, want)
+		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
 	}
 }
 
 func TestPrepareWorkspaceSettingsMakesExplicitRelativeVenvPathAbsolute(t *testing.T) {
 	root := resolvedTempDir(t)
 	explicit := map[string]any{"python": map[string]any{"venvPath": ".venvs", "venv": "py311"}}
-	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
+	got := prepareWorkspaceSettings(t.Context(), "pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
 	want := map[string]any{"python": map[string]any{"venvPath": filepath.Join(root, ".venvs"), "venv": "py311"}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, want)
+		t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
 	}
 }
 
@@ -267,10 +267,10 @@ func TestPrepareWorkspaceSettingsResolvesExplicitRelativeInterpreterAgainstConfi
 	for _, key := range []string{"pythonPath", "defaultInterpreterPath"} {
 		t.Run(key, func(t *testing.T) {
 			explicit := map[string]any{"python": map[string]any{key: ".venv/bin/python"}}
-			got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, nested, root)
+			got := prepareWorkspaceSettings(t.Context(), "pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, nested, root)
 			want := map[string]any{"python": map[string]any{key: filepath.Join(root, ".venv", "bin", "python")}}
 			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("prepareWorkspaceSettingsBounded() = %#v, want %#v", got, want)
+				t.Fatalf("prepareWorkspaceSettings() = %#v, want %#v", got, want)
 			}
 		})
 	}
