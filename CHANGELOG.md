@@ -13,6 +13,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Breaking Changes
 
+- Explicit provider retry settings (`retry_backoff` or `retry_delay_ms`) override `Retry-After`. To follow the server's rate-limit advice, omit both fields. The default `retry_after_max_s` for non-Codex providers rises from 60 seconds to one hour; set it to `60` to keep the previous cap. The Codex default remains one day. A model pool can retry another model as soon as its own wait ends.
 - Streaming gateways must separate SSE events with a blank line. Consecutive `data:` lines are one payload; gateways sending separate JSON messages on consecutive lines must add event delimiters. Incomplete MCP SSE frames are reported as outcome unknown.
 - Session imports and streaming provider responses now reject unescaped control characters inside JSON strings. Exporters and providers must encode tabs and line breaks as `\t` and `\n`.
 - `chord import --json` now emits snake_case top-level keys (`project_root`, `session_id`, `session_dir`, `messages`, `report`) instead of the Go field names (`ProjectRoot`, `SessionID`, `SessionDir`, `Messages`, `Report`), matching the snake_case keys inside the nested `report` object and the rest of Chord's machine-readable outputs. Scripts that consume the JSON summary must read the new key names.

@@ -204,6 +204,59 @@ func TestClientMixedFallbackErrorsDoNotReportAllAttemptedCandidatesContextLength
 	}
 }
 
+func TestClientContextLengthDoesNotStopWhileSiblingRetryIsDeferred(t *testing.T) {
+	primaryCfg := NewProviderConfig("primary-prov", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffFixed,
+		RetryDelayMS: new(100),
+		Models: map[string]config.ModelConfig{
+			"primary-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k1"})
+	fallbackCfg := NewProviderConfig("fallback-prov", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffNone,
+		Models: map[string]config.ModelConfig{
+			"fallback-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k2"})
+
+	primaryImpl := &recordingProvider{calls: []scriptedCall{
+		{err: &APIError{StatusCode: 503, Message: "temporary primary failure"}},
+		{resp: &message.Response{Content: "recovered primary"}},
+	}}
+	fallbackImpl := &recordingProvider{calls: []scriptedCall{
+		{err: &APIError{StatusCode: 503, Message: "temporary fallback failure"}},
+		{err: &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "prompt is too long"}},
+	}}
+
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+		InputLimit:     128000,
+	}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	resp, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "recovered primary" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := primaryImpl.CallCount(); got != 2 {
+		t.Fatalf("primary calls = %d, want 2 (deferred retry must remain eligible)", got)
+	}
+	if got := fallbackImpl.CallCount(); got != 2 {
+		t.Fatalf("fallback calls = %d, want 2 (initial transient failure plus context-length result)", got)
+	}
+}
+
 func TestClientContextLengthExceededStillTriesSameNamedFallbackOnDifferentProvider(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "openai/gpt-5.5", []string{"k1"})
 	dupCfg := testProviderConfig("dup-prov", "gpt-5.5")

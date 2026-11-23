@@ -48,7 +48,7 @@ func TestConnectLadderKeepsServerResponseAcrossKeys(t *testing.T) {
 	})
 }
 
-func TestConnectLadderDistinguishesLocalAndServerContextRejection(t *testing.T) {
+func TestConnectLadderPacesSiblingAfterLocalAndServerContextRejection(t *testing.T) {
 	for _, local := range []bool{false, true} {
 		name := "server"
 		if local {
@@ -101,8 +101,8 @@ func TestConnectLadderDistinguishesLocalAndServerContextRejection(t *testing.T) 
 				if primaryImpl.CallCount() != wantCalls || siblingImpl.CallCount() != 2 {
 					t.Fatalf("provider calls=%d/%d, want %d/2", primaryImpl.CallCount(), siblingImpl.CallCount(), wantCalls)
 				}
-				if retry.Deadline.IsZero() == local {
-					t.Fatalf("local=%v retry deadline=%v", local, retry.Deadline)
+				if retry.Deadline.IsZero() {
+					t.Fatalf("local=%v: sibling connect failure should retain its own retry deadline", local)
 				}
 			})
 		})

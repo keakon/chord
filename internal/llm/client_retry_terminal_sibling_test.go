@@ -4,10 +4,127 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
+
+func TestCompleteStreamEndpointFailureDoesNotDiscardDeferredTarget(t *testing.T) {
+	transient := &APIError{StatusCode: 503, Message: "temporary overload"}
+	notFound := &APIError{StatusCode: 404, Message: "model not found"}
+	gone := &APIError{StatusCode: 410, Message: "model is gone"}
+	recovered := &message.Response{Content: "fallback recovered"}
+	for _, tc := range []struct {
+		name          string
+		rounds        int
+		fallbackRetry scriptedCall
+		want          *message.Response
+		wantErr       error
+		wantCalls     int
+		wantWait      time.Duration
+	}{
+		{"fallback recovers", 0, scriptedCall{resp: recovered}, recovered, nil, 2, 300 * time.Millisecond},
+		{"both endpoints fail", 0, scriptedCall{err: gone}, nil, gone, 2, 300 * time.Millisecond},
+		{"retry cap stops before fallback is ready", 2, scriptedCall{resp: recovered}, nil, notFound, 1, 100 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				makeConfig := func(name string, delayMS int) *ProviderConfig {
+					return NewProviderConfig(name, config.ProviderConfig{
+						Type:         config.ProviderTypeChatCompletions,
+						RetryBackoff: config.RetryBackoffFixed,
+						RetryDelayMS: new(delayMS),
+					}, []string{"k1"})
+				}
+				primary := &recordingProvider{calls: []scriptedCall{{err: transient}, {err: notFound}}}
+				fallback := &recordingProvider{calls: []scriptedCall{{err: transient}, tc.fallbackRetry}}
+				c := NewClient(makeConfig("sample-a", 100), primary, "test-model", 4096, "sys")
+				defer c.Close()
+				c.SetFallbackModels([]FallbackModel{{
+					ProviderConfig: makeConfig("sample-b", 300), ProviderImpl: fallback, ModelID: "test-model", MaxTokens: 4096,
+				}})
+				c.SetStreamRetryRounds(tc.rounds)
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+
+				start := time.Now()
+				resp, err := c.CompleteStream(ctx, []message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, nil)
+				if !errors.Is(err, tc.wantErr) || (resp != nil) != (tc.want != nil) || resp != nil && resp.Content != tc.want.Content {
+					t.Fatalf("response = %+v, error = %v; want %+v, %v", resp, err, tc.want, tc.wantErr)
+				}
+				if elapsed := time.Since(start); elapsed != tc.wantWait {
+					t.Fatalf("elapsed = %v, want %v", elapsed, tc.wantWait)
+				}
+				if primary.CallCount() != 2 || fallback.CallCount() != tc.wantCalls {
+					t.Fatalf("calls = (%d, %d), want (2, %d)", primary.CallCount(), fallback.CallCount(), tc.wantCalls)
+				}
+			})
+		})
+	}
+}
+
+func TestCompleteStreamEndpointFailureLeavesRecoverableTargets(t *testing.T) {
+	notFound := &APIError{StatusCode: 404, Message: "model not found"}
+	transient := &APIError{StatusCode: 503, Message: "temporary overload"}
+	for _, tc := range []struct {
+		name          string
+		terminalFirst bool
+		cooling       bool
+		noKeys        bool
+	}{
+		{name: "transient first"},
+		{name: "terminal first", terminalFirst: true},
+		{name: "cooling sibling", terminalFirst: true, cooling: true},
+		{name: "unavailable sibling", terminalFirst: true, noKeys: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const model = "test-model"
+				terminalCfg := testProviderConfigWithKeys("sample-a", model, []string{"a"})
+				siblingCfg := testProviderConfigWithKeys("sample-b", model, []string{"b"})
+				disableRetryDelayForTest(terminalCfg)
+				disableRetryDelayForTest(siblingCfg)
+				terminal := &constantErrProvider{err: notFound}
+				success := scriptedCall{resp: &message.Response{Content: "recovered"}}
+				sibling := &recordingProvider{calls: []scriptedCall{{err: transient}, success}}
+				wantCalls := 2
+				var wantErr error
+				if tc.cooling {
+					siblingCfg.MarkCooldown("b", time.Second)
+					sibling.calls = []scriptedCall{success}
+					wantCalls = 1
+				}
+				if tc.noKeys {
+					siblingCfg.MarkInvalidated("b")
+					wantCalls, wantErr = 0, notFound
+				}
+
+				var startCfg, fallbackCfg = siblingCfg, terminalCfg
+				var startImpl, fallbackImpl Provider = sibling, terminal
+				if tc.terminalFirst {
+					startCfg, fallbackCfg = terminalCfg, siblingCfg
+					startImpl, fallbackImpl = terminal, sibling
+				}
+				c := NewClient(startCfg, startImpl, model, 4096, "sys")
+				defer c.Close()
+				c.SetFallbackModels([]FallbackModel{{
+					ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: model, MaxTokens: 4096,
+				}})
+				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+				defer cancel()
+				resp, err := c.CompleteStream(ctx, []message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, nil)
+				if !errors.Is(err, wantErr) || (wantErr == nil && (resp == nil || resp.Content != "recovered")) {
+					t.Fatalf("response=%+v error=%v, want successful sibling or %v", resp, err, wantErr)
+				}
+				if terminal.calls != 1 || sibling.CallCount() != wantCalls {
+					t.Fatalf("calls=(%d,%d), want (1,%d)", terminal.calls, sibling.CallCount(), wantCalls)
+				}
+			})
+		})
+	}
+}
 
 // A provider-scoped parameter rejection (a nonstandard field one relay refuses
 // but another accepts) must not end the request while a sibling target is still
@@ -38,7 +155,7 @@ func TestTerminalPoolFailureKeepsRetrying(t *testing.T) {
 		{"structural400 keeps its meaning with an explicit code", relay, structural400WithCode, 1, false},
 		{"relay client-contract refusal is request-scoped", relay, contract400, 1, false},
 		{"context length is request-scoped", relay, contextLength400, 1, false},
-		{"deterministic 4xx always stops", relay, notFound, 1, false},
+		{"endpoint refusal is not a relay rejection", relay, notFound, 1, false},
 		{"non-API error is not withheld", relay, context.DeadlineExceeded, 1, false},
 	}
 	for _, tc := range cases {

@@ -191,9 +191,10 @@ func isAccountInvalidated(apiErr *APIError) bool {
 }
 
 // RetryAfterForProvider returns the Retry-After hint bounded by the provider's
-// retry_after_max_s cap. The header always applies as the key cooldown; the
-// cap (60s by default, a day for preset codex) only bounds how long a
-// hostile or stale hint can block a key.
+// retry_after_max_s cap. Without explicit retry pacing, the header applies as
+// the key cooldown; explicit retry pacing overrides it. The cap (1h by
+// default, a day for preset codex) bounds how long a hostile or stale hint can
+// block a key.
 func RetryAfterForProvider(provider *ProviderConfig, apiErr *APIError) time.Duration {
 	if provider == nil || apiErr == nil {
 		return 0
@@ -216,18 +217,18 @@ func serverDirectedRetryCooldown(provider *ProviderConfig, err error) time.Durat
 }
 
 // applyCodexQuotaOrCooldown marks the key unavailable until the confirmed
-// Codex reset window when available, otherwise applies a generic cooldown: a
-// Retry-After hint (bounded by retry_after_max_s) is honored verbatim, and
-// defaultCooldown seeds the exponential backoff when the error carries no
-// hint. Returns markKeyCooldownResult so callers can return directly.
+// Codex reset window when available, otherwise applies configured retry pacing
+// or a bounded Retry-After hint. defaultCooldown seeds exponential backoff
+// when the error carries no hint. Returns markKeyCooldownResult so callers can
+// return directly.
 func applyCodexQuotaOrCooldown(provider *ProviderConfig, key string, apiErr *APIError, defaultCooldown time.Duration, quotaLogPrefix, cooldownLogPrefix string) markKeyCooldownResult {
 	if result, ok := applyConfirmedCodexQuotaReset(provider, key, apiErr, quotaLogPrefix); ok {
 		return result
 	}
 	if cooldown := RetryAfterForProvider(provider, apiErr); cooldown > 0 {
-		log.Warnf("%s, honoring Retry-After key_id=%v cooldown=%v", cooldownLogPrefix, keyLogID(key), cooldown)
-		provider.MarkServerDirectedCooldown(key, cooldown)
-		return markKeyCooldownResult{cooldownApplied: true}
+		applied := provider.MarkServerDirectedCooldown(key, cooldown)
+		log.Warnf("%s, applying retry pacing key_id=%v configured=%v retry_after=%v cooldown_applied=%v", cooldownLogPrefix, keyLogID(key), provider.retryPacingExplicit, cooldown, applied)
+		return markKeyCooldownResult{cooldownApplied: applied}
 	}
 	log.Warnf("%s, marking cooldown key_id=%v cooldown=%v", cooldownLogPrefix, keyLogID(key), defaultCooldown)
 	provider.MarkCooldown(key, defaultCooldown)
@@ -287,9 +288,9 @@ func applyKeyCooldown(ctx context.Context, provider *ProviderConfig, key string,
 	// Stream events may not have an HTTP status. Retry advice paces a key only
 	// after normal classification has confirmed that the failure is retryable.
 	if cooldown := serverDirectedRetryCooldown(provider, err); cooldown > 0 {
-		log.Warnf("API key temporarily unavailable, honoring Retry-After key_id=%v cooldown=%v", keyLogID(key), cooldown)
-		provider.MarkServerDirectedCooldown(key, cooldown)
-		return markKeyCooldownResult{cooldownApplied: true}
+		applied := provider.MarkServerDirectedCooldown(key, cooldown)
+		log.Warnf("API key temporarily unavailable, applying retry pacing key_id=%v configured=%v retry_after=%v cooldown_applied=%v", keyLogID(key), provider.retryPacingExplicit, cooldown, applied)
+		return markKeyCooldownResult{cooldownApplied: applied}
 	}
 	switch apiErr.StatusCode {
 	case 400:
@@ -297,9 +298,9 @@ func applyKeyCooldown(ctx context.Context, provider *ProviderConfig, key string,
 			return markKeyCooldownResult{}
 		}
 		if cooldown := RetryAfterForProvider(provider, apiErr); cooldown > 0 {
-			log.Warnf("compatible API key returned 400, honoring Retry-After key_id=%v cooldown=%v", keyLogID(key), cooldown)
-			provider.MarkServerDirectedCooldown(key, cooldown)
-			return markKeyCooldownResult{cooldownApplied: true}
+			applied := provider.MarkServerDirectedCooldown(key, cooldown)
+			log.Warnf("compatible API key returned 400, applying retry pacing key_id=%v configured=%v retry_after=%v cooldown_applied=%v", keyLogID(key), provider.retryPacingExplicit, cooldown, applied)
+			return markKeyCooldownResult{cooldownApplied: applied}
 		}
 		log.Warnf("compatible API key returned 400, marking cooldown key_id=%v cooldown=%v", keyLogID(key), time.Second)
 		provider.MarkCooldown(key, time.Second)

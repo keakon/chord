@@ -234,8 +234,6 @@ func TestDeepSeekReplayRejectionDoesNotWeakenRequest(t *testing.T) {
 		cb:               nil,
 		fallbackEnabled:  false,
 		fallbackModels:   nil,
-		currentRoundWait: roundCoolingWait{},
-		hasNextTarget:    false,
 		status:           &CallStatus{},
 		systemPrompt:     "",
 		outputCapSetting: 0,

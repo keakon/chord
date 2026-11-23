@@ -51,12 +51,11 @@ func TestMarkKeyCooldown429CodexOAuthQuotaExhaustedUsesResetWindow(t *testing.T)
 	}
 }
 
-func TestMarkKeyCooldown429CodexOAuthRetryHintOutranksExplicitPacingWithoutExhaustedSnapshot(t *testing.T) {
+func TestMarkKeyCooldown429CodexOAuthRetryHintAppliesWithoutExplicitPacingOrExhaustedSnapshot(t *testing.T) {
 	ctx := context.Background()
 	p := NewProviderConfig("p", config.ProviderConfig{
-		Type:         config.ProviderTypeResponses,
-		Preset:       config.ProviderPresetCodex,
-		RetryBackoff: config.RetryBackoffNone,
+		Type:   config.ProviderTypeResponses,
+		Preset: config.ProviderPresetCodex,
 	}, []string{"oauth-key"})
 	p.mu.Lock()
 	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
@@ -69,7 +68,7 @@ func TestMarkKeyCooldown429CodexOAuthRetryHintOutranksExplicitPacingWithoutExhau
 		RetryAfter: 2 * time.Minute,
 	})
 	if !res.cooldownApplied {
-		t.Fatal("server-directed Retry-After must apply even under retry_backoff=none")
+		t.Fatal("expected Retry-After cooldown without explicit retry pacing")
 	}
 	p.mu.Lock()
 	ks := *p.keyStates[0]

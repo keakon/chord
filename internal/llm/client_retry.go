@@ -17,26 +17,36 @@ type streamRoundAttemptSummary struct {
 	contextLengthExceededTargets int
 	lastContextLengthErr         error
 	retriableTargets             int
+	deferredTargets              int
+	retryWaitTargets             []roundRetryWaitTarget
 	lastRelayRejectionErr        error
 	lastRelayRejectionProvider   *ProviderConfig
 	// Request defects prevent another round only after every target has failed.
 	requestDefectTargets      int
 	lastRequestDefectErr      error
 	lastRequestDefectProvider *ProviderConfig
-	// connectPhaseFailure records that some target of the round failed before
-	// reaching the server (DNS resolution, dial, TLS verification).
-	connectPhaseFailure bool
-	// reachedServer includes responses from earlier keys and internal retries,
-	// even when the target's final outcome was a connection failure.
-	reachedServer bool
 }
 
-func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) {
+type roundRetryWaitTarget struct {
+	index        int
+	provider     *ProviderConfig
+	observed     time.Time
+	connectDelay time.Duration
+	coolingWait  roundCoolingWait
+	coolingCause *keyCooldownCause
+}
+
+type roundRetryWaitPlan struct {
+	delay        time.Duration
+	cooling      bool
+	recovery     time.Duration
+	coolingCause *keyCooldownCause
+}
+
+func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) (terminalTarget bool) {
 	if s == nil {
-		return
+		return false
 	}
-	s.connectPhaseFailure = s.connectPhaseFailure || result.connectPhaseFailure
-	s.reachedServer = s.reachedServer || result.reachedServer
 	if !result.hadRequestAttempt {
 		// A cooling target never reached the wire, but its sibling can recover
 		// once the window passes; it still counts as a retriable sibling when
@@ -44,7 +54,7 @@ func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) {
 		if isAllKeysCoolingError(result.lastErr) {
 			s.retriableTargets++
 		}
-		return
+		return false
 	}
 	s.attemptedTargets++
 	if IsContextLengthExceeded(result.lastErr) {
@@ -52,14 +62,14 @@ func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) {
 		s.lastContextLengthErr = result.lastErr
 		// Context length is request-scoped: the round-level all-attempted check
 		// turns it into compaction recovery, and it is never a retriable sibling.
-		return
+		return false
 	}
 	if result.lastErr == nil {
-		return
+		return false
 	}
 	if !isTerminalModelPoolFailureForProvider(result.lastErrProvider, result.lastErr) {
 		s.retriableTargets++
-		return
+		return false
 	}
 	if requestDefect(result.lastErrProvider, result.lastErr) {
 		s.requestDefectTargets++
@@ -68,11 +78,59 @@ func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) {
 	} else if relayScopedRequestRejection(result.lastErrProvider, result.lastErr) {
 		s.lastRelayRejectionErr = result.lastErr
 		s.lastRelayRejectionProvider = result.lastErrProvider
+	} else {
+		// A terminal endpoint failure must not suppress a sibling's retry.
+		return true
 	}
+	return false
+}
+
+func (s streamRoundAttemptSummary) nextRetryWaitPlan(retryCount int, fallbackDelay time.Duration, retryAt map[int]time.Time) roundRetryWaitPlan {
+	var plan roundRetryWaitPlan
+	set := false
+	now := time.Now()
+	consider := func(delay, recovery time.Duration, cooling bool, cause *keyCooldownCause) {
+		delay, recovery = max(0, delay), max(0, recovery)
+		if !set || delay < plan.delay {
+			plan.delay = delay
+		}
+		if !set || recovery < plan.recovery {
+			plan.cooling, plan.recovery, plan.coolingCause = cooling, recovery, cause
+		}
+		set = true
+	}
+	// Previously deferred targets were not attempted in this round.
+	for _, deadline := range retryAt {
+		wait := deadline.Sub(now)
+		consider(wait, wait, false, nil)
+	}
+	for _, target := range s.retryWaitTargets {
+		if target.coolingWait.waiting() {
+			elapsed := now.Sub(target.observed)
+			connectWait := target.connectDelay - elapsed
+			if connectWait > 0 {
+				// A key may become usable early, but it cannot bypass this target's connect backoff.
+				retryAt[target.index] = target.observed.Add(target.connectDelay)
+			}
+			consider(max(target.coolingWait.sleep-elapsed, connectWait), max(target.coolingWait.recovery-elapsed, connectWait), true, target.coolingCause)
+			continue
+		}
+		deadline := target.observed.Add(max(target.connectDelay, target.provider.GetRetryDelay(retryCount)))
+		retryAt[target.index] = deadline
+		wait := deadline.Sub(now)
+		consider(wait, wait, false, nil)
+	}
+	if !set {
+		return roundRetryWaitPlan{delay: fallbackDelay}
+	}
+	return plan
 }
 
 func (s streamRoundAttemptSummary) allAttemptedTargetsContextLengthExceeded() bool {
-	return s.attemptedTargets > 0 && s.contextLengthExceededTargets == s.attemptedTargets && s.lastContextLengthErr != nil
+	return s.attemptedTargets > 0 &&
+		s.contextLengthExceededTargets == s.attemptedTargets &&
+		s.retriableTargets == 0 &&
+		s.lastContextLengthErr != nil
 }
 
 // completeStreamWithRetry walks the model pool (cursor-start entry + optional
@@ -108,8 +166,10 @@ func (c *Client) completeStreamWithRetry(
 	prepareAttempt func(context.Context, RequestAttempt) (context.Context, error),
 ) (resp *message.Response, err error) {
 	var lastErr error
-	var lastErrProvider *ProviderConfig
-	var pendingRoundWait roundCoolingWait
+	var lastTerminalTargetErr error
+	var pendingRoundPlan roundRetryWaitPlan
+	retryAt := make(map[int]time.Time)
+	connectFailureCounts := make(map[int]int)
 	// withheldTerminalSince is set when a relay-scoped terminal rejection was
 	// withheld to give a retriable sibling time to recover, so the wait stays
 	// bounded by withheldTerminalFailureBudget across rounds.
@@ -185,18 +245,8 @@ func (c *Client) completeStreamWithRetry(
 	variantForStart := validVariantForModel(startProvider, startModelID, startVariant)
 
 	retryCount := 0
-	// consecutiveConnectFailures counts consecutive rounds that kept failing
-	// before reaching the server; any round that reached the wire restarts
-	// the connect-failure ladder from its first rung.
-	consecutiveConnectFailures := 0
-	// lastRoundConnectFailed is the previous round's ladder verdict — the
-	// round failed connect-phase and no target reached the server. The next
-	// round's pacing reads it before this round's targets run; the verdict is
-	// round-level because the last target's error cannot represent the round
-	// (a sibling that never went out would otherwise mask it either way).
-	lastRoundConnectFailed := false
 	replayEchoRejectedTargets := make(map[replayEchoTarget]struct{})
-	continuationExhaustedTargets := make(map[replayEchoTarget]struct{})
+	exhaustedTargets := make(map[replayEchoTarget]struct{})
 
 	// Public CompleteStream defaults to unlimited full-round retries. Callers can
 	// pass a positive maxAttempts for the historical soft cap (cooling /
@@ -224,26 +274,13 @@ func (c *Client) completeStreamWithRetry(
 		c.noteAttemptModelRef(startDisplayRef)
 		// Apply backoff delay only between full retry rounds.
 		if round > 0 {
-			waitingForCooling := isAllKeysCoolingError(lastErr) && pendingRoundWait.waiting()
-			delay := roundRetryDelay(startProvider.GetRetryDelay(retryCount), pendingRoundWait.sleep)
-			if waitingForCooling {
-				delay = pendingRoundWait.sleep
-			} else if lastRoundConnectFailed {
-				// The previous round never reached the server, so its failure
-				// carries no new information and the condition behind it
-				// (network down, resolver down) changes on the scale of
-				// seconds. Pace the re-probe on the connect ladder regardless
-				// of provider backoff: a none or fixed 0 setting would
-				// otherwise spin at whatever speed failures return.
-				if laddered := connectFailureRetryDelay(consecutiveConnectFailures); laddered > delay {
-					delay = laddered
-				}
-			}
+			waitingForCooling := pendingRoundPlan.cooling
+			delay := pendingRoundPlan.delay
 			if withheldTerminalErr != nil {
 				delay = min(delay, max(0, withheldTerminalFailureBudget-time.Since(withheldTerminalSince)))
 			}
 			if waitingForCooling {
-				recovery := pendingRoundWait.recovery
+				recovery := pendingRoundPlan.recovery
 				log.Infof("waiting for API keys to cool before next LLM request round attempt=%v delay=%v recovery_in=%v error=%v", round+1, delay, recovery, lastErr)
 				if cb != nil {
 					if err := abortIfCancelled(); err != nil {
@@ -252,9 +289,7 @@ func (c *Client) completeStreamWithRetry(
 					// The countdown must promise when a request can really go
 					// out, not when this round wakes up to re-probe the pool.
 					emitStreamStatusDelta(cb, message.StatusDelta{Type: message.StatusDeltaCooling, Detail: recovery.Round(time.Second).String(), ModelRef: startDisplayRef, Deadline: time.Now().Add(recovery)})
-					if cooling, ok := errors.AsType[*AllKeysCoolingError](lastErr); ok {
-						reportCoolingCause(cb, cooling.cause)
-					}
+					reportCoolingCause(cb, pendingRoundPlan.coolingCause)
 				}
 			} else {
 				log.Infof("retrying LLM request round attempt=%v retry_count=%v delay=%v error=%v", round+1, retryCount, delay, lastErr)
@@ -273,8 +308,8 @@ func (c *Client) completeStreamWithRetry(
 					// counts down to that attempt instead of showing only how long
 					// the retry streak has run. A zero-delay round re-probes
 					// immediately and has no deadline to promise.
-					if delay > 0 {
-						status.Deadline = time.Now().Add(delay)
+					if wait := max(delay, pendingRoundPlan.recovery); wait > 0 {
+						status.Deadline = time.Now().Add(wait)
 					}
 					emitStreamStatusDelta(cb, status)
 				}
@@ -305,7 +340,6 @@ func (c *Client) completeStreamWithRetry(
 				return nil, withheldTerminalErr
 			}
 		}
-		pendingRoundWait = roundCoolingWait{}
 		// roundHadRequestAttempt tracks whether this round reached the provider API
 		// at least once. If every target fails key selection with NoUsableKeysError,
 		// a full-round retry cannot make progress without external state changes.
@@ -335,10 +369,12 @@ func (c *Client) completeStreamWithRetry(
 			}
 			t := targets[ti]
 			replayTarget := replayEchoTarget{provider: t.provider, modelID: t.modelID, variant: t.variant}
-			if _, exhausted := continuationExhaustedTargets[replayTarget]; exhausted {
+			if _, exhausted := exhaustedTargets[replayTarget]; exhausted {
+				delete(retryAt, ti)
 				continue
 			}
 			if _, rejected := replayEchoRejectedTargets[replayTarget]; rejected {
+				delete(retryAt, ti)
 				log.Infof("skipping model: target repeated replay evidence in this request provider=%v model=%v variant=%v", t.provider.Name(), t.modelID, t.variant)
 				continue
 			}
@@ -349,6 +385,14 @@ func (c *Client) completeStreamWithRetry(
 			if oversizeSeen.seen(t.provider.Name(), t.modelID, t.variant) {
 				log.Infof("skipping model: oversize already confirmed for this provider/model target in this round provider=%v model=%v variant=%v", t.provider.Name(), t.modelID, t.variant)
 				continue
+			}
+			if deadline, ok := retryAt[ti]; ok {
+				if time.Now().Before(deadline) {
+					roundAttemptSummary.retriableTargets++
+					roundAttemptSummary.deferredTargets++
+					continue
+				}
+				delete(retryAt, ti)
 			}
 			// The target is fixed before request preparation and its status events.
 			c.noteAttemptModelRef(t.displayRef())
@@ -385,8 +429,6 @@ func (c *Client) completeStreamWithRetry(
 				cb:               cb,
 				fallbackEnabled:  fallbackEnabled,
 				fallbackModels:   fallbackModels,
-				currentRoundWait: pendingRoundWait,
-				hasNextTarget:    ti < len(targets)-1,
 				status:           status,
 				systemPrompt:     systemPrompt,
 				outputCapSetting: outputCapSetting,
@@ -417,17 +459,31 @@ func (c *Client) completeStreamWithRetry(
 				}
 				return nil, targetErr
 			} else {
-				if _, repeatedEcho := errors.AsType[*ReplayEvidenceEchoError](targetResult.lastErr); repeatedEcho {
-					replayEchoRejectedTargets[replayTarget] = struct{}{}
-				}
-				if targetResult.continuationExhausted {
-					continuationExhaustedTargets[replayTarget] = struct{}{}
+				var connectDelay time.Duration
+				if targetResult.reachedServer {
+					delete(connectFailureCounts, ti)
+				} else if targetResult.connectPhaseFailure {
+					connectFailureCounts[ti]++
+					connectDelay = connectFailureRetryDelay(connectFailureCounts[ti])
 				}
 				lastInputTokens = updatedLastInputTokens
 				lastErr = targetResult.lastErr
-				lastErrProvider = targetResult.lastErrProvider
-				pendingRoundWait = mergePendingCoolingWait(pendingRoundWait, targetResult.pendingRoundWait)
-				roundAttemptSummary.record(targetResult)
+				previous := roundAttemptSummary.retriableTargets
+				terminalTarget := roundAttemptSummary.record(targetResult)
+				if terminalTarget {
+					lastTerminalTargetErr = lastErr
+				}
+				if _, repeatedEcho := errors.AsType[*ReplayEvidenceEchoError](lastErr); repeatedEcho {
+					replayEchoRejectedTargets[replayTarget] = struct{}{}
+				} else if terminalTarget || targetResult.continuationExhausted {
+					exhaustedTargets[replayTarget] = struct{}{}
+				}
+				if roundAttemptSummary.retriableTargets > previous && !targetResult.continuationExhausted {
+					roundAttemptSummary.retryWaitTargets = append(roundAttemptSummary.retryWaitTargets, roundRetryWaitTarget{
+						index: ti, provider: t.provider, observed: time.Now(), connectDelay: connectDelay,
+						coolingWait: targetResult.pendingRoundWait, coolingCause: targetResult.coolingCause,
+					})
+				}
 				if targetResult.hadRequestAttempt {
 					roundHadRequestAttempt = true
 				}
@@ -446,7 +502,7 @@ func (c *Client) completeStreamWithRetry(
 		allExhausted := len(targets) > 0
 		for _, target := range targets {
 			key := replayEchoTarget{provider: target.provider, modelID: target.modelID, variant: target.variant}
-			_, exhausted := continuationExhaustedTargets[key]
+			_, exhausted := exhaustedTargets[key]
 			_, rejected := replayEchoRejectedTargets[key]
 			if !exhausted && !rejected {
 				allExhausted = false
@@ -485,7 +541,7 @@ func (c *Client) completeStreamWithRetry(
 			log.Infof("request defect ended the round despite retriable siblings provider=%v error=%v request_defect_targets=%v retriable_targets=%v", providerLogName(roundAttemptSummary.lastRequestDefectProvider), roundAttemptSummary.lastRequestDefectErr, roundAttemptSummary.requestDefectTargets, roundAttemptSummary.retriableTargets)
 			return nil, roundAttemptSummary.lastRequestDefectErr
 		}
-		if isTerminalModelPoolFailureForProvider(lastErrProvider, lastErr) && !relayScopedRequestRejection(lastErrProvider, lastErr) {
+		if IsContextLengthExceeded(lastErr) && roundAttemptSummary.deferredTargets == 0 {
 			return nil, lastErr
 		}
 		if roundAttemptSummary.lastRelayRejectionErr != nil {
@@ -498,6 +554,11 @@ func (c *Client) completeStreamWithRetry(
 				withheldTerminalSince = time.Now()
 			}
 		}
+		// Key selection can overwrite the endpoint error without providing
+		// another retry candidate. Preserve the error that exhausted the target.
+		if lastTerminalTargetErr != nil && len(retryAt) == 0 && len(roundAttemptSummary.retryWaitTargets) == 0 {
+			return nil, lastTerminalTargetErr
+		}
 		// A transient-only later round must not erase an earlier relay rejection
 		// or restart its recovery budget.
 		if withheldTerminalErr != nil {
@@ -506,19 +567,8 @@ func (c *Client) completeStreamWithRetry(
 			}
 			log.Infof("relay rejection withheld while sibling recovery budget remains provider=%v error=%v budget_left=%v", providerLogName(withheldTerminalProvider), withheldTerminalErr, withheldTerminalFailureBudget-time.Since(withheldTerminalSince))
 		}
-		// Advance the connect-failure ladder only while the round kept failing
-		// before the server; a round that reached the wire — whatever its
-		// outcome — restarts the ladder from the first rung. A round with no
-		// wire evidence either way (every target failed key selection or is
-		// cooling) holds the ladder: it neither advances nor restarts it.
-		switch {
-		case roundAttemptSummary.reachedServer:
-			consecutiveConnectFailures = 0
-		case roundAttemptSummary.connectPhaseFailure:
-			consecutiveConnectFailures++
-		}
-		lastRoundConnectFailed = !roundAttemptSummary.reachedServer && roundAttemptSummary.connectPhaseFailure
 		retryCount = nextRetryCount(retryCount, roundHadRequestAttempt, roundHadUsableReply, lastErr, hardCap)
+		pendingRoundPlan = roundAttemptSummary.nextRetryWaitPlan(retryCount, startProvider.GetRetryDelay(retryCount), retryAt)
 	} // end attempts loop
 
 	log.Errorf("LLM all retries exhausted max_attempts=%v provider=%v model=%v error=%v", maxAttempts, startProvider.Name(), startModelID, lastErr)

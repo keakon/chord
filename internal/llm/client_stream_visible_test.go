@@ -577,7 +577,7 @@ func TestCompleteStreamApplies429PacingAfterVisibleOutput(t *testing.T) {
 	}
 }
 
-func TestCompleteStreamThirdParty429PacingAfterVisibleOutputCapsRetryAfter(t *testing.T) {
+func TestCompleteStreamExplicitRetryPacingOverridesRetryAfterAfterVisibleOutput(t *testing.T) {
 	cfg := NewProviderConfig("sample", config.ProviderConfig{
 		Type:         config.ProviderTypeChatCompletions,
 		RetryBackoff: config.RetryBackoffFixed,
@@ -604,7 +604,7 @@ func TestCompleteStreamThirdParty429PacingAfterVisibleOutputCapsRetryAfter(t *te
 	cfg.mu.Unlock()
 	remain := time.Until(end)
 	if remain < 55*time.Second || remain > 61*time.Second {
-		t.Fatalf("cooldown remaining = %v, want ~1m (third-party Retry-After capped at the default retry_after_max_s)", remain)
+		t.Fatalf("cooldown remaining = %v, want configured ~1m instead of the 5m Retry-After", remain)
 	}
 }
 

@@ -82,7 +82,7 @@ curl -I https://api.openai.com/v1
 
 ### OpenAI 兼容网关的 400 与超时
 
-遵循官方 API 错误语义的端点请设置 `trust_http_400: true`，Chord 会把 HTTP 400 视为终止性请求错误。对于可重试的错误，`Retry-After` 头作为 key 冷却时长生效，并优先于任何已配置的重试节奏；`retry_after_max_s` 限制最长采纳的等待时间（第三方网关默认 60 秒，`preset: codex` 默认 86400 秒）。聚合或代理网关可能把上游故障包装成 HTTP 400；这类端点可设置 `trust_http_400: false` 或省略该字段，让未知 400 进入正常的重试和备用模型流程。
+遵循官方 API 错误语义的端点请设置 `trust_http_400: true`，Chord 会把 HTTP 400 视为终止性请求错误。对于可重试的错误，显式配置的 `retry_backoff` 或 `retry_delay_ms` 决定该目标的等待；未显式配置时，Chord 遵循 `Retry-After`，并受 `retry_after_max_s` 限制（第三方 provider 默认 3600 秒，`preset: codex` 默认 86400 秒）。模型池中其它更早可重试的目标可以先行重试。聚合或代理网关可能把上游故障包装成 HTTP 400；这类端点可设置 `trust_http_400: false` 或省略该字段，让未知 400 进入正常的重试和备用模型流程。
 
 如果请求长时间停在 `connecting` 后重试，请直接测试端点、检查代理设置并查看错误面板。Chord 会限制连接等待时间，避免单个不可用密钥或网关无限阻塞。
 

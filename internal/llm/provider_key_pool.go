@@ -117,10 +117,10 @@ func (p *ProviderConfig) MarkTransportCooldown(key string, base, cap time.Durati
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.keyStates) == 0 {
-		p.keylessCooldownCount++
-		effective := saturatingDoublingDuration(base, cap, p.keylessCooldownCount-1)
-		if end := time.Now().Add(effective); end.After(p.keylessCooldownEnd) {
-			p.keylessCooldownEnd = end
+		p.keylessTransportCooldownCount++
+		effective := saturatingDoublingDuration(base, cap, p.keylessTransportCooldownCount-1)
+		if end := time.Now().Add(effective); end.After(p.keylessTransportCooldownEnd) {
+			p.keylessTransportCooldownEnd = end
 		}
 		return
 	}
@@ -140,15 +140,14 @@ func (p *ProviderConfig) MarkTransportCooldown(key string, base, cap time.Durati
 //
 // For a keyed provider it clears only the growth counter, leaving any wait
 // already in flight to expire like every other cooldown. A keyless provider
-// also has its wait cleared: there is no second credential to rotate to, so
-// keeping the door shut after the endpoint proved healthy would stall the next
-// request for nothing.
+// clears only its transport wait: a server-directed rate-limit wait belongs to
+// a separate state and must survive an unrelated successful request.
 func (p *ProviderConfig) ClearTransportCooldown(key string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.keyStates) == 0 {
-		p.keylessCooldownCount = 0
-		p.keylessCooldownEnd = time.Time{}
+		p.keylessTransportCooldownCount = 0
+		p.keylessTransportCooldownEnd = time.Time{}
 		return
 	}
 	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
@@ -405,7 +404,7 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 		// A provider-scoped cooldown still gates the call: with no credential to
 		// rotate to, waiting it out is the only way a transport backoff can
 		// apply here (see MarkTransportCooldown).
-		if wait := time.Until(p.keylessCooldownEnd); wait > 0 {
+		if wait := p.keylessCooldownWaitLocked(time.Now()); wait > 0 {
 			p.mu.Unlock()
 			return "", false, &AllKeysCoolingError{RetryAfter: wait}
 		}
@@ -552,49 +551,72 @@ func (p *ProviderConfig) MarkCooldown(key string, d time.Duration) {
 	})
 }
 
-// MarkServerDirectedCooldown puts the key into cooldown for exactly the given
-// duration: no exponential doubling and no 60s cap. It carries a
-// server-directed wait (a Retry-After hint already bounded by
-// retry_after_max_s), which must be honored verbatim.
+// MarkServerDirectedCooldown applies the bounded server hint unless explicit
+// provider retry pacing overrides it.
 
-func (p *ProviderConfig) MarkServerDirectedCooldown(key string, d time.Duration) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
-		p.markCooldownWithModeLocked(ks, d, false)
-	})
+func (p *ProviderConfig) MarkServerDirectedCooldown(key string, d time.Duration) bool {
+	if d <= 0 {
+		return false
+	}
+	return p.MarkRateLimitCooldown(key, d)
 }
 
-// MarkRateLimitCooldown applies provider pacing, preferring bounded server advice.
+// MarkRateLimitCooldown applies explicit provider pacing when configured;
+// otherwise it honors bounded server advice and falls back to generated pacing.
 func (p *ProviderConfig) MarkRateLimitCooldown(key string, retryAfter time.Duration) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if len(p.keyStates) == 0 {
+		var delay time.Duration
+		exponential := false
+		if p.retryPacingExplicit {
+			switch p.retryBackoff {
+			case config.RetryBackoffNone:
+				return false
+			case config.RetryBackoffFixed:
+				delay = p.retryDelay
+			default:
+				delay = p.retryDelay
+				exponential = true
+			}
+		} else if retryAfter > 0 {
+			delay = retryAfter
+		} else {
+			delay = time.Second
+			exponential = true
+		}
+		p.keylessRateLimitCooldownCount++
+		effective := delay
+		if exponential {
+			effective = saturatingDoublingDuration(delay, maxProviderRetryDelay, p.keylessRateLimitCooldownCount-1)
+		}
+		if end := time.Now().Add(effective); end.After(p.keylessRateLimitCooldownEnd) {
+			p.keylessRateLimitCooldownEnd = end
+		}
+		return true
+	}
 	applied := false
 	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
-		// Server-directed pacing wins: a Retry-After hint (already bounded by
-		// retry_after_max_s) applies verbatim whether or not explicit retry
-		// pacing is configured. retry_backoff / retry_delay_ms only govern
-		// Chord-generated delays when the error carries no hint.
+		if p.retryPacingExplicit {
+			switch p.retryBackoff {
+			case config.RetryBackoffNone:
+				p.markRecoveringLocked(ks)
+			case config.RetryBackoffFixed:
+				p.markCooldownWithModeLocked(ks, p.retryDelay, false)
+				applied = true
+			default:
+				p.markCooldownWithModeLocked(ks, p.retryDelay, true)
+				applied = true
+			}
+			return
+		}
 		if retryAfter > 0 {
 			p.markCooldownWithModeLocked(ks, retryAfter, false)
 			applied = true
 			return
 		}
-		if !p.retryPacingExplicit {
-			p.markCooldownWithModeLocked(ks, time.Second, true)
-			applied = true
-			return
-		}
-		switch p.retryBackoff {
-		case config.RetryBackoffNone:
-			p.markRecoveringLocked(ks)
-		case config.RetryBackoffFixed:
-			p.markCooldownWithModeLocked(ks, p.retryDelay, false)
-			applied = true
-		default:
-			p.markCooldownWithModeLocked(ks, p.retryDelay, true)
-			applied = true
-		}
+		p.markCooldownWithModeLocked(ks, time.Second, true)
+		applied = true
 	})
 	return applied
 }
@@ -776,6 +798,11 @@ func (p *ProviderConfig) MarkQuotaExhaustedUntil(key string, until time.Time) {
 
 func (p *ProviderConfig) MarkKeySuccess(key string) {
 	if key == "" {
+		p.mu.Lock()
+		if len(p.keyStates) == 0 && !p.keylessRateLimitCooldownEnd.After(time.Now()) {
+			p.keylessRateLimitCooldownCount = 0
+		}
+		p.mu.Unlock()
 		return
 	}
 	p.mu.Lock()
@@ -931,6 +958,62 @@ func keyStateSelectable(now time.Time, ks *KeyState) bool {
 		return false
 	}
 	return !ratelimit.SnapshotBlocksKeyAt(ks.RateLimit, now)
+}
+
+func (p *ProviderConfig) allKeysCoolingWait() (time.Duration, *keyCooldownCause) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.maybeReloadAuthStateLocked()
+	now := time.Now()
+	if len(p.keyStates) == 0 {
+		if wait := p.keylessCooldownWaitLocked(now); wait > 0 {
+			return wait, nil
+		}
+		return 0, nil
+	}
+
+	selectableTotal := 0
+	var earliest time.Duration
+	var coolingOwner *KeyState
+	for _, ks := range p.keyStates {
+		if ks.Invalid {
+			continue
+		}
+		selectableTotal++
+		if keyStateSelectable(now, ks) {
+			return 0, nil
+		}
+		recovery := ks.CooldownEnd
+		if ks.ExhaustedUntil.After(recovery) {
+			recovery = ks.ExhaustedUntil
+		}
+		if !recovery.After(now) {
+			continue
+		}
+		wait := recovery.Sub(now)
+		if earliest == 0 || wait < earliest {
+			earliest = wait
+			coolingOwner = ks
+		}
+	}
+	if selectableTotal == 0 {
+		return 0, nil
+	}
+	if earliest <= 0 {
+		return 10 * time.Second, nil
+	}
+	return earliest, coolingOwner.cooldownCause
+}
+
+func (p *ProviderConfig) keylessCooldownWaitLocked(now time.Time) time.Duration {
+	wait := p.keylessTransportCooldownEnd.Sub(now)
+	if rateLimitWait := p.keylessRateLimitCooldownEnd.Sub(now); rateLimitWait > wait {
+		wait = rateLimitWait
+	}
+	if wait > 0 {
+		return wait
+	}
+	return 0
 }
 
 // KeyPoolNextTransition returns the shortest time until some key may transition

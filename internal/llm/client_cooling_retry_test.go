@@ -187,7 +187,7 @@ func TestCompleteStreamWithRetryKeepsRetryingWhileAllKeysCooling(t *testing.T) {
 	}
 }
 
-func TestCompleteStreamRetryRoundUsesCursorProviderBackoff(t *testing.T) {
+func TestCompleteStreamRetryRoundUsesEarliestTargetPacing(t *testing.T) {
 	primaryCfg := NewProviderConfig("primary-prov", config.ProviderConfig{
 		Type:         config.ProviderTypeChatCompletions,
 		RetryBackoff: config.RetryBackoffFixed,
@@ -209,6 +209,7 @@ func TestCompleteStreamRetryRoundUsesCursorProviderBackoff(t *testing.T) {
 	}}
 	fallbackImpl := &recordingProvider{calls: []scriptedCall{
 		{err: &APIError{StatusCode: 503, Message: "temporary fallback failure"}},
+		{resp: &message.Response{Content: "fallback ready"}},
 	}}
 	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
 	c.SetModelPool([]FallbackModel{
@@ -216,17 +217,124 @@ func TestCompleteStreamRetryRoundUsesCursorProviderBackoff(t *testing.T) {
 		{ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "fallback-model", MaxTokens: 4096, ContextLimit: 128000},
 	}, 0)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("CompleteStream() error = %v, want context deadline during cursor-provider backoff", err)
+	resp, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil || resp == nil || resp.Content != "fallback ready" {
+		t.Fatalf("CompleteStream() = %v, %v; want retry on the ready fallback", resp, err)
 	}
 	if got := primaryImpl.CallCount(); got != 1 {
 		t.Fatalf("primary calls = %d, want 1 before round backoff completes", got)
 	}
-	if got := fallbackImpl.CallCount(); got != 1 {
-		t.Fatalf("fallback calls = %d, want 1 within the first round", got)
+	if got := fallbackImpl.CallCount(); got != 2 {
+		t.Fatalf("fallback calls = %d, want 2", got)
+	}
+}
+
+func TestCompleteStreamRetryAfterSetsSingleTargetCountdown(t *testing.T) {
+	const retryAfter = 5 * time.Second
+	cfg := testProviderConfigWithKeys("provider", "model-1", []string{"k1"})
+	impl := &constantErrProvider{err: &APIError{StatusCode: 429, Message: "rate limited", RetryAfter: retryAfter}}
+	c := NewClient(cfg, impl, "model-1", 4096, "sys")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	var cooling []message.StatusDelta
+	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaStatus && delta.Status != nil && delta.Status.Type == message.StatusDeltaCooling {
+			cooling = append(cooling, *delta.Status)
+			cancel()
+		}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CompleteStream error = %v, want cancellation after the cooling status", err)
+	}
+	if got := impl.calls; got != 1 {
+		t.Fatalf("provider calls = %d, want one before the Retry-After wait", got)
+	}
+	if len(cooling) != 1 {
+		t.Fatalf("cooling statuses = %d, want exactly one", len(cooling))
+	}
+	if d := cooling[0].Deadline.Sub(start); d < retryAfter-time.Second || d > retryAfter+time.Second {
+		t.Fatalf("cooling deadline is %v after start, want about the server's %v Retry-After", d, retryAfter)
+	}
+}
+
+func TestCompleteStreamExplicitRetryPacingOverridesRetryAfterWait(t *testing.T) {
+	const configuredDelay = 200 * time.Millisecond
+	cfg := NewProviderConfig("provider", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffFixed,
+		RetryDelayMS: new(200),
+		Models: map[string]config.ModelConfig{
+			"model-1": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k1"})
+	impl := &constantErrProvider{err: &APIError{StatusCode: 429, Message: "rate limited", RetryAfter: 10 * time.Second}}
+	c := NewClient(cfg, impl, "model-1", 4096, "sys")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	var cooling []message.StatusDelta
+	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaStatus && delta.Status != nil && delta.Status.Type == message.StatusDeltaCooling {
+			cooling = append(cooling, *delta.Status)
+			cancel()
+		}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CompleteStream error = %v, want cancellation after the cooling status", err)
+	}
+	if len(cooling) != 1 {
+		t.Fatalf("cooling statuses = %d, want exactly one", len(cooling))
+	}
+	if d := cooling[0].Deadline.Sub(start); d < configuredDelay/2 || d > time.Second {
+		t.Fatalf("cooling deadline is %v after start, want configured %v instead of Retry-After", d, configuredDelay)
+	}
+}
+
+func TestCompleteStreamRetriesEarlierSiblingBeforeRetryAfterExpires(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary", "model-primary", []string{"k1"})
+	fallbackCfg := NewProviderConfig("fallback", config.ProviderConfig{
+		Type:         config.ProviderTypeChatCompletions,
+		RetryBackoff: config.RetryBackoffFixed,
+		RetryDelayMS: new(100),
+		Models: map[string]config.ModelConfig{
+			"model-fallback": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+		},
+	}, []string{"k2"})
+	primaryImpl := &constantErrProvider{err: &APIError{StatusCode: 429, Message: "rate limited", RetryAfter: time.Minute}}
+	fallbackImpl := &recordingProvider{calls: []scriptedCall{
+		{err: &APIError{StatusCode: 503, Message: "temporarily unavailable"}},
+		{resp: &message.Response{Content: "recovered on fallback"}},
+	}}
+	c := NewClient(primaryCfg, primaryImpl, "model-primary", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "model-fallback",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+	}})
+
+	start := time.Now()
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "recovered on fallback" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("elapsed = %v, want fallback retry before primary Retry-After expires", elapsed)
+	}
+	if got := primaryImpl.calls; got != 1 {
+		t.Fatalf("primary calls = %d, want 1 while its key remains in cooldown", got)
+	}
+	if got := fallbackImpl.CallCount(); got != 2 {
+		t.Fatalf("fallback calls = %d, want retry after its configured 100ms delay", got)
 	}
 }
 
@@ -369,9 +477,6 @@ func TestCompleteStreamWithRetryPrefersShortestRoundWaitAcrossModels(t *testing.
 }
 
 func TestMergeRoundWaitPrefersShortestCoolingWindow(t *testing.T) {
-	if got := roundRetryDelay(0, 30*time.Millisecond); got != 30*time.Millisecond {
-		t.Fatalf("roundRetryDelay(0, 30ms) = %v, want mandatory cooling wait", got)
-	}
 	got := mergeCoolingWindow(roundCoolingWait{}, time.Minute, maxCoolingWait)
 	got = mergeCoolingWindow(got, time.Second, maxCoolingWait)
 	if got.sleep != time.Second || got.recovery != time.Second {
@@ -406,20 +511,6 @@ func TestMergeRoundWaitPrefersShortestCoolingWindow(t *testing.T) {
 		t.Fatalf("merged recovery = %v, want the shortest real window", got.recovery)
 	}
 
-	if got := mergePendingCoolingWait(roundCoolingWait{}, roundCoolingWait{}); got.waiting() {
-		t.Fatalf("mergePendingCoolingWait(zero, zero) = %+v, want no synthetic wait", got)
-	}
-	current := roundCoolingWait{sleep: 2 * time.Second, recovery: 2 * time.Second}
-	if got := mergePendingCoolingWait(current, roundCoolingWait{}); got != current {
-		t.Fatalf("mergePendingCoolingWait(2s, zero) = %+v, want %+v preserved", got, current)
-	}
-	got = mergePendingCoolingWait(
-		roundCoolingWait{sleep: maxCoolingWait, recovery: 30 * time.Minute},
-		roundCoolingWait{sleep: 5 * time.Second, recovery: 5 * time.Second},
-	)
-	if got.sleep != 5*time.Second || got.recovery != 5*time.Second {
-		t.Fatalf("mergePendingCoolingWait picked %+v, want the shorter target's window", got)
-	}
 }
 
 func TestCoolingWaitCapDependsOnPoolShape(t *testing.T) {

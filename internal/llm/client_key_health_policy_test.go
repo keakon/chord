@@ -68,8 +68,8 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		end := p.keyStates[0].ExhaustedUntil
 		p.mu.Unlock()
 		remain := time.Until(end)
-		if remain < 55*time.Second || remain > 65*time.Second {
-			t.Fatalf("expected ~1m capped cooldown from Retry-After, got remaining %v", remain)
+		if remain < 115*time.Second || remain > 125*time.Second {
+			t.Fatalf("expected ~2m cooldown from Retry-After, got remaining %v", remain)
 		}
 	})
 
@@ -118,10 +118,10 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}
 	})
 
-	t.Run("third_party_429_caps_retry_after_at_one_minute", func(t *testing.T) {
+	t.Run("third_party_429_caps_retry_after_at_one_hour", func(t *testing.T) {
 		p := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1"})
 		for attempt := range 2 {
-			res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+			res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Hour})
 			if !res.cooldownApplied {
 				t.Fatal("expected cooldownApplied=true for third-party 429")
 			}
@@ -130,8 +130,8 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			count := p.keyStates[0].CooldownCount
 			p.mu.Unlock()
 			remain := time.Until(end)
-			if remain < 55*time.Second || remain > 65*time.Second {
-				t.Fatalf("attempt %d cooldown remaining = %v, want capped ~1m third-party Retry-After", attempt+1, remain)
+			if remain < time.Hour-time.Minute || remain > time.Hour+time.Minute {
+				t.Fatalf("attempt %d cooldown remaining = %v, want capped ~1h third-party Retry-After", attempt+1, remain)
 			}
 			if count != attempt+1 {
 				t.Fatalf("attempt %d CooldownCount = %d, want %d", attempt+1, count, attempt+1)
@@ -221,27 +221,28 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit_none_429_still_honors_retry_after", func(t *testing.T) {
+	t.Run("explicit_none_429_overrides_retry_after", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{
 			Type:         config.ProviderTypeChatCompletions,
 			RetryBackoff: config.RetryBackoffNone,
 		}, []string{"k1", "k2"})
 		res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 30 * time.Second})
-		if !res.cooldownApplied {
-			t.Fatal("server-directed Retry-After must apply even under retry_backoff=none")
+		if res.cooldownApplied {
+			t.Fatal("explicit retry_backoff=none must not apply a timed cooldown")
 		}
 		p.mu.Lock()
 		end := p.keyStates[0].CooldownEnd
+		recovering := p.keyStates[0].Recovering
 		p.mu.Unlock()
-		if remain := time.Until(end); remain < 25*time.Second || remain > 31*time.Second {
-			t.Fatalf("cooldown remaining = %v, want ~30s verbatim Retry-After", remain)
+		if !end.IsZero() || !recovering {
+			t.Fatalf("key state = (%v, Recovering=%v), want no timed cooldown and recovery tracking", end, recovering)
 		}
 		key, _, err := p.SelectKeyWithContext(ctx)
 		if err != nil {
 			t.Fatalf("SelectKeyWithContext() error = %v", err)
 		}
-		if key != "k2" {
-			t.Fatalf("selected key = %q, want healthy alternative k2", key)
+		if key == "" {
+			t.Fatal("SelectKeyWithContext() returned an empty key")
 		}
 	})
 
@@ -384,7 +385,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit_pacing_429_still_honors_retry_after", func(t *testing.T) {
+	t.Run("explicit_pacing_429_overrides_retry_after", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{
 			Type:         config.ProviderTypeChatCompletions,
 			RetryBackoff: config.RetryBackoffFixed,
@@ -392,13 +393,13 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		}, []string{"k1"})
 		res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 30 * time.Second})
 		if !res.cooldownApplied {
-			t.Fatal("expected Retry-After cooldown despite explicit pacing")
+			t.Fatal("expected cooldown from explicit retry pacing")
 		}
 		p.mu.Lock()
 		end := p.keyStates[0].CooldownEnd
 		p.mu.Unlock()
-		if remain := time.Until(end); remain < 25*time.Second || remain > 31*time.Second {
-			t.Fatalf("cooldown remaining = %v, want ~30s: server-directed Retry-After outranks retry_backoff", remain)
+		if remain := time.Until(end); remain < 4*time.Second || remain > 6*time.Second {
+			t.Fatalf("cooldown remaining = %v, want configured ~5s instead of Retry-After", remain)
 		}
 	})
 
@@ -478,5 +479,103 @@ func TestClientCompleteEmptyResponseMarksKeyRecovering(t *testing.T) {
 	}
 	if !switched {
 		t.Fatal("expected recovering empty-response key to yield a slot switch to k2")
+	}
+}
+
+func TestKeylessRateLimitCooldownUsesRetryAfterOrExplicitPacing(t *testing.T) {
+	t.Run("retry-after", func(t *testing.T) {
+		provider := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, nil)
+		result := markKeyCooldown(context.Background(), provider, "", "sample-model", &APIError{
+			StatusCode: 429,
+			Message:    "rate limited",
+			RetryAfter: 30 * time.Second,
+		})
+		if !result.cooldownApplied {
+			t.Fatal("expected keyless Retry-After to create a provider cooldown")
+		}
+		wait, _ := provider.allKeysCoolingWait()
+		if wait < 29*time.Second || wait > 31*time.Second {
+			t.Fatalf("keyless cooldown = %v, want about 30s", wait)
+		}
+	})
+
+	t.Run("explicit-pacing", func(t *testing.T) {
+		provider := NewProviderConfig("sample", config.ProviderConfig{
+			Type:         config.ProviderTypeChatCompletions,
+			RetryBackoff: config.RetryBackoffFixed,
+			RetryDelayMS: new(5000),
+		}, nil)
+		result := markKeyCooldown(context.Background(), provider, "", "sample-model", &APIError{
+			StatusCode: 429,
+			Message:    "rate limited",
+			RetryAfter: 30 * time.Second,
+		})
+		if !result.cooldownApplied {
+			t.Fatal("expected explicit keyless retry pacing to create a cooldown")
+		}
+		wait, _ := provider.allKeysCoolingWait()
+		if wait < 4*time.Second || wait > 6*time.Second {
+			t.Fatalf("keyless cooldown = %v, want configured about 5s instead of Retry-After", wait)
+		}
+	})
+}
+
+func TestKeylessRateLimitCooldownSurvivesTransportClear(t *testing.T) {
+	provider := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, nil)
+	result := markKeyCooldown(context.Background(), provider, "", "sample-model", &APIError{
+		StatusCode: 429,
+		Message:    "rate limited",
+		RetryAfter: 30 * time.Second,
+	})
+	if !result.cooldownApplied {
+		t.Fatal("expected keyless Retry-After to create a provider cooldown")
+	}
+
+	provider.MarkTransportCooldown("", time.Millisecond, time.Millisecond)
+	provider.ClearTransportCooldown("")
+
+	wait, _ := provider.allKeysCoolingWait()
+	if wait < 29*time.Second || wait > 31*time.Second {
+		t.Fatalf("keyless rate-limit cooldown after transport clear = %v, want about 30s", wait)
+	}
+}
+
+func TestMarkKeySuccessKeylessResetsOnlyExpiredRateLimitCooldown(t *testing.T) {
+	provider := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, nil)
+	provider.mu.Lock()
+	provider.keylessRateLimitCooldownCount = 2
+	provider.keylessRateLimitCooldownEnd = time.Now().Add(-time.Second)
+	provider.mu.Unlock()
+
+	provider.MarkKeySuccess("")
+
+	provider.mu.Lock()
+	gotCount := provider.keylessRateLimitCooldownCount
+	provider.mu.Unlock()
+	if gotCount != 0 {
+		t.Fatalf("keyless rate-limit cooldown count after success = %d, want 0 after its deadline expired", gotCount)
+	}
+
+	if !provider.MarkRateLimitCooldown("", 0) {
+		t.Fatal("expected a new keyless rate-limit cooldown")
+	}
+	provider.mu.Lock()
+	gotCount = provider.keylessRateLimitCooldownCount
+	provider.mu.Unlock()
+	if gotCount != 1 {
+		t.Fatalf("keyless rate-limit cooldown count after next failure = %d, want 1", gotCount)
+	}
+
+	provider.mu.Lock()
+	provider.keylessRateLimitCooldownCount = 2
+	provider.keylessRateLimitCooldownEnd = time.Now().Add(time.Minute)
+	provider.mu.Unlock()
+	provider.MarkKeySuccess("")
+
+	provider.mu.Lock()
+	gotCount = provider.keylessRateLimitCooldownCount
+	provider.mu.Unlock()
+	if gotCount != 2 {
+		t.Fatalf("keyless rate-limit cooldown count during an active deadline = %d, want 2", gotCount)
 	}
 }

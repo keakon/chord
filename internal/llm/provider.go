@@ -279,13 +279,13 @@ type ProviderConfig struct {
 	oauthProfile                 string
 	authScheme                   string // resolved request auth scheme; set once at construction, then read-only
 	keyStates                    []*KeyState
-	// keylessCooldownEnd/keylessCooldownCount back the same cooldown pacing for
-	// providers configured without any API key (local gateways, public
-	// endpoints). Those providers have no KeyState to carry the wait, so a
-	// key-scoped cooldown would silently be a no-op and leave the caller free
-	// to restart back-to-back.
-	keylessCooldownEnd   time.Time
-	keylessCooldownCount int
+	// Keyless providers have no KeyState to carry cooldowns. Keep transport
+	// restart pacing separate from server-directed rate-limit pacing so a
+	// successful request cannot clear a 429 wait created by another request.
+	keylessTransportCooldownEnd   time.Time
+	keylessTransportCooldownCount int
+	keylessRateLimitCooldownEnd   time.Time
+	keylessRateLimitCooldownCount int
 	// pendingCauses queues recorded cooldown causes until a request with a
 	// stream callback drains them (see drainPendingKeyReports).
 	pendingCauses []*keyCooldownCause

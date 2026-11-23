@@ -13,6 +13,7 @@
 
 ### 不兼容变更
 
+- 显式配置的 `retry_backoff` 或 `retry_delay_ms` 会覆盖 `Retry-After`；要遵循服务端的限流提示，请省略这两个字段。非 Codex provider 的 `retry_after_max_s` 默认值从 60 秒提高到 1 小时，要保留原上限可将它设为 `60`。Codex 仍默认 1 天。模型池中的其他模型只需等到自己的重试时间即可再试。
 - 流式网关必须用空行分隔 SSE 事件。连续的 `data:` 行属于同一份数据；逐行发送独立 JSON 消息的网关需要补上事件分隔符。未完整结束的 MCP SSE 帧会被标为结果未知。
 - 会话导入和模型流式响应不再接受 JSON 字符串中的裸控制字符。导出程序和服务端须把制表符、换行编码为 `\t`、`\n`。
 - `chord import --json` 的顶层键改为 snake_case（`project_root`、`session_id`、`session_dir`、`messages`、`report`），不再使用 Go 字段名（`ProjectRoot`、`SessionID`、`SessionDir`、`Messages`、`Report`），与嵌套 `report` 对象内部及 Chord 其他机器可读输出的键名风格一致。消费该 JSON 输出的脚本需要改用新键名。

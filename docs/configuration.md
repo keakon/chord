@@ -1091,14 +1091,14 @@ An explicit provider `user_agent` still wins over a generated one.
 
 ## Provider retry delays
 
-Provider-level retry settings control the generated delay between complete
-retry rounds. A round starts at the current sticky model-pool cursor and walks
-the remaining pool entries and their eligible keys without sleeping between
-fallback targets. The cursor provider's settings own the delay before the next
-round; if a fallback later succeeds and becomes the sticky cursor, its settings
-apply to subsequent requests. The same settings also control ordinary HTTP 429
-key cooldown when the response carries no `Retry-After` hint; a valid hint
-(bounded by `retry_after_max_s`) always outranks them.
+Provider-level retry settings control the target's generated delay between
+complete retry rounds. A round starts at the current sticky model-pool cursor
+and walks the remaining pool entries and their eligible keys without sleeping
+between fallback targets. The next round uses the earliest eligible target
+retry time: an unconfigured target honors a valid `Retry-After` bounded by
+`retry_after_max_s`, while an explicitly configured target uses its configured
+retry pacing instead. A fallback that becomes the sticky cursor uses its own
+provider settings on subsequent requests.
 
 Retry advice in Responses stream errors and WebSocket error frames follows
 the same cap as HTTP headers. Retryable stream errors and HTTP 5xx responses
@@ -1117,8 +1117,8 @@ providers:
   (default `1000`) and doubles each round, capped at 60 seconds.
 - `retry_backoff: fixed` uses `retry_delay_ms` for every round.
 - `retry_backoff: none` disables generated round backoff for rounds where the
-  server responded. An ordinary 429 without a `Retry-After` hint marks the
-  failed key as recovering without a timed cooldown, so healthy keys and
+  server responded. An ordinary 429 marks the failed key as recovering
+  without a timed cooldown, including when it carries `Retry-After`, so healthy keys and
   fallback targets still take priority. Rounds are unlimited by default, so
   with `none` a fast-failing upstream is retried back-to-back without delay.
   Requests that never reach the server (DNS resolution, dial, TLS
@@ -1136,7 +1136,17 @@ bar as a countdown to the attempt (`↺ round 12 · retry in 45s`). A round with
 delay re-probes immediately and keeps showing how long the retry has been
 running, since it has no wait to count down.
 
-For an ordinary 429, the key cooldown follows a single priority order: a confirmed quota reset window wins, then a valid `Retry-After` (bounded by `retry_after_max_s`) applies verbatim, and only a hint-less 429 falls to the retry pacing above: the configured `exponential`/`fixed`/`none` mode, or the one-second exponential default when neither field is set. Invalid or deactivated credentials, and cooldowns already established by other hard states, are never shortened or cleared.
+For an ordinary 429, a confirmed quota reset window wins. Otherwise, explicit
+`exponential`/`fixed`/`none` retry pacing overrides `Retry-After`; when no retry
+pacing is configured, a valid hint is bounded by `retry_after_max_s`. A
+hint-less 429 uses configured retry pacing or the one-second exponential
+default. Invalid or deactivated credentials, and cooldowns already established
+by other hard states, are never shortened or cleared.
+
+When no retry pacing is configured, the default `retry_after_max_s` is one
+hour for third-party providers and one day for the Codex preset. It can be set
+per provider from 1 second to 1 day. In a model pool, a target with an earlier
+retry time can be tried before another target's cooldown expires.
 
 This 429 pacing applies before and after visible streaming output alike: a 429 that interrupts a visible stream cools the key down and rotates to the next one.
 
@@ -1165,10 +1175,11 @@ the next foreground request. Each failure is recorded once: a failure already
 reported as a retry error by the attempt that caused it is not repeated.
 
 Codex OAuth follows the same rules: every Codex 429 is an ordinary 429. A
-retry hint (`Retry-After` or WebSocket `resets_in_seconds`) is honored ahead
-of explicit settings, and a usage-limit 429 carrying neither a hint nor an
-exhausted quota snapshot uses the ordinary defaults above, not the one-minute
-cooldown of the `codex` preset, which still covers non-429 usage-limit errors.
+retry hint (`Retry-After` or WebSocket `resets_in_seconds`) is honored when no
+retry pacing is explicitly configured; explicit settings override it. A
+usage-limit 429 carrying neither a hint nor an exhausted quota snapshot uses
+the ordinary defaults above, not the one-minute cooldown of the `codex` preset,
+which still covers non-429 usage-limit errors.
 When a Codex rate-limit snapshot shows an exhausted window with a future
 reset, Chord treats that as confirmed quota exhaustion and keeps the provider
 reset authoritative.
@@ -2068,10 +2079,10 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `api_url`      | string | Endpoint URL. Chord detects provider type from the URL path, ignoring query strings and fragments. For Gemini, the native API version root (such as `/v1beta/`); Chord appends `/models/{model}:streamGenerateContent?alt=sse`. For Azure Responses, `?api-version=...` is optional and can be used to pin a specific API version. |
 | `preset`       | string | `openai`, `anthropic`, `gemini`, or `codex` (OpenAI Codex / ChatGPT OAuth), each selecting its official endpoint contract. Azure OpenAI Responses uses a plain `type: responses` provider with `auth_scheme: api-key`, `store: true`, and `compat.request_overrides.headers` set to `null` for the Codex identity headers. |
 | `trust_http_400` | bool   | Treat HTTP 400 as a terminal request error. `preset: codex` defaults to `true`; aggregating/proxy gateways default to `false` because they often wrap upstream overload as 400. |
-| `retry_after_max_s` | int    | Longest `Retry-After` wait honored, in seconds (1-86400). The header always applies as the key cooldown, ahead of `retry_backoff`/`retry_delay_ms`; this only bounds how long a single hint may block a key. `preset: codex` defaults to `86400`; third-party gateways, which can echo arbitrary values, default to `60`. |
+| `retry_after_max_s` | int    | Longest `Retry-After` wait honored, in seconds (1-86400), when retry pacing is not explicitly configured. `preset: codex` defaults to `86400`; third-party providers default to `3600`. |
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
-| `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown without valid `Retry-After` advice. Valid server advice, confirmed quota resets, and hard credential states still win. Requests that never reach the server (DNS resolution, dial, TLS verification) are paced by the built-in connect ladder — 1s doubling per consecutive failure, the ladder itself capped at 20s — regardless of this setting; the final wait is the longer of the ladder and the configured backoff. |
+| `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, overrides `Retry-After` for that provider's retryable target. Confirmed quota resets and hard credential states still win. Requests that never reach the server (DNS resolution, dial, TLS verification) are paced by the built-in connect ladder — 1s doubling per consecutive failure, the ladder itself capped at 20s — regardless of this setting; the final wait is the longer of the ladder and the configured backoff. |
 | `retry_delay_ms`| int   | Base/fixed round and ordinary-429 delay in milliseconds, from `0` through `60000`; `0` / omitted defaults to 1000ms. Setting the field—including explicit `0`—is an override even when `retry_backoff` is omitted. Ignored for `none`. Out-of-range values are logged and fall back to the default instead of failing startup. |
 | `compress`     | string | Upstream request body compression encoding: `off`, `gzip` or `zstd`; unset = the preset default — `preset: codex` sends `zstd`, other presets send the body uncompressed. Applies only when compression shrinks the payload. The boolean `compress: true` form is gone — it is ignored and reported by `chord doctor config` (migrate to `compress: gzip`). |
 | `proxy`        | string | Three-state — omitted (default) inherits the global `proxy`; `""` (empty string) forces direct connections and bypasses proxy environment variables; `http://...` / `https://...` / `socks5://...` uses that proxy. See [Network proxy](./environment.md#network-proxy). |

@@ -107,7 +107,7 @@ func TestServerDirectedRetryCooldownPolicies(t *testing.T) {
 		{"policy", &APIError{StatusCode: 400, Origin: APIErrorOriginHTTPResponse, Code: "invalid_request_error"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeResponses, RetryAfterMaxS: new(2), RetryBackoff: config.RetryBackoffNone}, []string{"key-a"})
+			cfg := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeResponses, RetryAfterMaxS: new(2)}, []string{"key-a"})
 			before := isRetriable(tc.err)
 			tc.err.RetryAfter = time.Hour
 			if isRetriable(tc.err) != before {

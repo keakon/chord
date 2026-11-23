@@ -180,27 +180,9 @@ func mergeCoolingWindow(current roundCoolingWait, candidate, cap time.Duration) 
 	return current
 }
 
-// mergePendingCoolingWait folds one target's accumulated window into the
-// round's, ignoring targets that reported no cooling at all.
-func mergePendingCoolingWait(current, candidate roundCoolingWait) roundCoolingWait {
-	current.sleep = minPositiveDuration(current.sleep, candidate.sleep)
-	current.recovery = minPositiveDuration(current.recovery, candidate.recovery)
-	return current
-}
-
-func roundRetryDelay(backoffDelay, pendingRoundWait time.Duration) time.Duration {
-	if backoffDelay <= 0 {
-		return pendingRoundWait
-	}
-	if pendingRoundWait > 0 && pendingRoundWait < backoffDelay {
-		return pendingRoundWait
-	}
-	return backoffDelay
-}
-
-// connectFailureRetryBase and connectFailureRetryCeiling shape the retry
-// ladder for rounds whose requests never reached the server. They are vars so
-// tests can shrink the waits instead of sleeping them out; production keeps
+// connectFailureRetryBase and connectFailureRetryCeiling shape the per-target
+// retry ladder for requests that fail before reaching the server. They are vars
+// so tests can shrink the waits instead of sleeping them out; production keeps
 // 1s doubling to a 20s cap.
 var (
 	connectFailureRetryBase    = time.Second
@@ -212,16 +194,16 @@ var (
 	connectFailureRetryJitter = true
 )
 
-// connectFailureRetryDelay returns the wait before the next round after n
-// consecutive rounds that never reached the server: base doubling per
-// consecutive failure up to the ceiling, with equal jitter (lower half plus a
+// connectFailureRetryDelay returns the wait before the same target's next
+// request after n consecutive failures before reaching the server: base
+// doubling per failure up to the ceiling, with equal jitter (lower half plus a
 // random share of the rest). The condition behind such failures — network
 // down, resolver down — changes on the scale of seconds, so probing faster
 // than the first rung only spins; the ladder stays unlimited in rounds, which
 // is what lets an in-flight turn ride out a minutes-long outage.
-func connectFailureRetryDelay(consecutiveFailures int) time.Duration {
+func connectFailureRetryDelay(consecutiveTargetFailures int) time.Duration {
 	d := connectFailureRetryBase
-	for i := 1; i < consecutiveFailures && d < connectFailureRetryCeiling; i++ {
+	for i := 1; i < consecutiveTargetFailures && d < connectFailureRetryCeiling; i++ {
 		d *= 2
 	}
 	if d > connectFailureRetryCeiling {

@@ -77,7 +77,6 @@ func (c *Client) probeWithoutForcedToolChoice(a streamTargetAttempt) (streamTarg
 	probe.target.tuning.Gemini.ToolChoice = ""
 	probe.fallbackEnabled = false
 	probe.fallbackModels = nil
-	probe.hasNextTarget = false
 	log.Warnf("retrying request without forced tool choice after terminal 400 provider=%v model=%v", a.target.provider.Name(), a.target.modelID)
 	result, tokens, err := c.completeStreamTarget(probe)
 	if err == nil && result.resp != nil {

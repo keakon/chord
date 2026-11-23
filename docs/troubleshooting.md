@@ -82,7 +82,7 @@ curl -I https://api.openai.com/v1
 
 ### OpenAI-compatible 400s and timeouts
 
-Set `trust_http_400: true` for endpoints that follow official API error semantics: Chord then treats HTTP 400 as a terminal request error. For retryable errors, the `Retry-After` header applies as the key cooldown hint, ahead of any configured retry pacing; `retry_after_max_s` bounds the longest honored wait (default 60 seconds for third-party gateways, 86400 for `preset: codex`). For aggregating or proxy gateways that may wrap upstream failures as HTTP 400, set `trust_http_400: false` or omit the field so unknown 400s can use the normal retry and fallback path.
+Set `trust_http_400: true` for endpoints that follow official API error semantics: Chord then treats HTTP 400 as a terminal request error. For retryable errors, an explicitly configured `retry_backoff` or `retry_delay_ms` controls the target's retry wait; otherwise, Chord honors the `Retry-After` header up to `retry_after_max_s` (default 3600 seconds for third-party providers, 86400 for `preset: codex`). In a model pool, another target with an earlier retry time can be tried first. For aggregating or proxy gateways that may wrap upstream failures as HTTP 400, set `trust_http_400: false` or omit the field so unknown 400s can use the normal retry and fallback path.
 
 If requests remain in `connecting` and then retry, test the endpoint directly, check proxy settings, and inspect the error panel. Chord applies a connection timeout so one unavailable key or gateway does not wait indefinitely.
 

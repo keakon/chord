@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/keakon/chord/internal/config"
@@ -764,7 +765,7 @@ func shrinkConnectFailureLadder(t *testing.T, base, ceiling time.Duration, jitte
 
 func TestConnectFailureRetryDelayLadder(t *testing.T) {
 	shrinkConnectFailureLadder(t, time.Second, 20*time.Second, false)
-	// One rung per consecutive connect-failed round: 1s doubling to the 20s cap.
+	// One rung per consecutive failure for the same target: 1s doubling to the 20s cap.
 	for _, tc := range []struct {
 		failures int
 		want     time.Duration
@@ -933,11 +934,53 @@ func TestClientCompleteStreamAPIErrorRetryKeepsZeroDelay(t *testing.T) {
 	}
 }
 
-// TestClientCompleteStreamConnectLadderIgnoresNeverSentSibling guards the
-// round-level ladder verdict: a sibling target that never went on the wire
-// (no usable keys) is the round's last target, so its error used to become
-// the round's lastErr and bypass the connect ladder — zero-wait retries on
-// the DNS-failing sibling, exactly the storm the ladder exists to stop.
+func TestClientCompleteStreamConnectFailureDoesNotDelayEarlierCoolingTarget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
+		if !primaryCfg.MarkRateLimitCooldown("k1", 20*time.Millisecond) {
+			t.Fatal("expected to set the primary target's short rate-limit cooldown")
+		}
+		primaryImpl := &recordingProvider{calls: []scriptedCall{
+			{resp: &message.Response{Content: "primary recovered"}},
+		}}
+		fallbackCfg := testProviderConfigWithKeys("fallback-prov", "fallback-model", []string{"k2"})
+		disableRetryDelayForTest(fallbackCfg)
+		fallbackImpl := &recordingProvider{calls: []scriptedCall{
+			{err: unresolvedHostErr()},
+		}}
+
+		client := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+		client.SetModelPool([]FallbackModel{
+			{ProviderConfig: primaryCfg, ProviderImpl: primaryImpl, ModelID: "primary-model", MaxTokens: 4096, ContextLimit: 128000},
+			{ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "fallback-model", MaxTokens: 4096, ContextLimit: 128000},
+		}, 0)
+		shrinkConnectFailureLadder(t, 120*time.Millisecond, 120*time.Millisecond, false)
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		start := time.Now()
+		resp, err := client.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Fatalf("CompleteStream err = %v", err)
+		}
+		if resp == nil || resp.Content != "primary recovered" {
+			t.Fatalf("unexpected response: %#v", resp)
+		}
+		if elapsed >= 100*time.Millisecond {
+			t.Fatalf("earlier cooling target retried after %v, want before the sibling's 120ms connect deadline", elapsed)
+		}
+		if got := primaryImpl.CallCount(); got != 1 {
+			t.Fatalf("primary calls = %d, want 1 after its cooldown", got)
+		}
+		if got := fallbackImpl.CallCount(); got != 1 {
+			t.Fatalf("fallback calls = %d, want 1 while its connect deadline remains active", got)
+		}
+	})
+}
+
+// TestClientCompleteStreamConnectLadderIgnoresNeverSentSibling guards that a
+// target's connect ladder still paces it when a sibling has no usable keys.
 func TestClientCompleteStreamConnectLadderIgnoresNeverSentSibling(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
 	disableRetryDelayForTest(primaryCfg)
@@ -991,11 +1034,9 @@ func TestClientCompleteStreamConnectLadderIgnoresNeverSentSibling(t *testing.T) 
 	}
 }
 
-// TestClientCompleteStreamConnectLadderResetsWhenSiblingReachesServer mirrors
-// the reset direction: the round's last target failed connect-phase (DNS), but
-// an earlier sibling reached the server and got a 500. A lastErr-based verdict
-// counts that round as connect-failed and lets the ladder climb; the
-// round-level verdict restarts it, so the next connect wait is the first rung.
+// TestClientCompleteStreamConnectLadderResetsWhenSiblingReachesServer verifies
+// that each target's ladder resets when that target reaches the server; a
+// sibling's connection failure does not preserve the first target's failures.
 func TestClientCompleteStreamConnectLadderResetsWhenSiblingReachesServer(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1"})
 	disableRetryDelayForTest(primaryCfg)
@@ -1019,8 +1060,8 @@ func TestClientCompleteStreamConnectLadderResetsWhenSiblingReachesServer(t *test
 		{ProviderConfig: siblingCfg, ProviderImpl: siblingImpl, ModelID: "sibling-model", MaxTokens: 4096, ContextLimit: 128000},
 	}, 0)
 
-	// Jitter off: each rung is exact, so the wait after the server round must
-	// be the first rung (10ms), not the second (20ms).
+	// Jitter off: each rung is exact, so primary's next connect wait must be
+	// the first rung (10ms), not the second (20ms), after its 500 response.
 	shrinkConnectFailureLadder(t, 10*time.Millisecond, 40*time.Millisecond, false)
 
 	type retryStatus struct {
@@ -1044,8 +1085,8 @@ func TestClientCompleteStreamConnectLadderResetsWhenSiblingReachesServer(t *test
 	if got := primaryImpl.CallCount(); got != 3 {
 		t.Fatalf("primary calls = %d, want 3", got)
 	}
-	if got := siblingImpl.CallCount(); got != 2 {
-		t.Fatalf("sibling calls = %d, want 2", got)
+	if got := siblingImpl.CallCount(); got != 1 {
+		t.Fatalf("sibling calls = %d, want 1 before primary recovery makes it unnecessary", got)
 	}
 	if len(statuses) != 2 {
 		t.Fatalf("round retry statuses = %d, want 2", len(statuses))

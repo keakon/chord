@@ -26,7 +26,7 @@ func providerTrustsHTTP400(p *ProviderConfig) bool {
 // provider. The explicit retry_after_max_s config wins when set (the loader
 // validates its 1-86400s range); otherwise the official preset (codex) honors
 // up to a day while third-party gateways, which can echo arbitrary values,
-// are bounded to one minute.
+// are bounded to one hour.
 func resolveRetryAfterMax(cfg config.ProviderConfig) time.Duration {
 	if cfg.RetryAfterMaxS != nil {
 		seconds := min(max(*cfg.RetryAfterMaxS, 1), config.MaxRetryAfterMaxS)

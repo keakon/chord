@@ -72,7 +72,7 @@ func TestImageRateLimitUsesServerCooldown(t *testing.T) {
 	target, _ := imagegen.ResolveTarget(imagegen.PresetOpenAI, "gpt-image-1.5", server.URL)
 	target.Provider = "sample"
 	a := &MainAgent{globalConfig: config.DefaultConfig(), governor: newResourceGovernor(config.OrchestrationConfig{})}
-	backend, err := NewImageGenerationBackend(a, target, time.Minute, config.ProviderConfig{RetryBackoff: config.RetryBackoffFixed, RetryDelayMS: new(30000)}, []string{"key"}, "")
+	backend, err := NewImageGenerationBackend(a, target, time.Minute, config.ProviderConfig{}, []string{"key"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

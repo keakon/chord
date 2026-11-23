@@ -35,14 +35,14 @@ const (
 	// RetryBackoff modes for ProviderConfig.
 	RetryBackoffExponential = "exponential" // default: exponential doubling, base = retry_delay_ms (default 1s), cap 60s
 	RetryBackoffFixed       = "fixed"       // fixed delay per round = retry_delay_ms (default 1s), max 60s
-	RetryBackoffNone        = "none"        // no generated round or ordinary-429 delay; hard key state still applies
+	RetryBackoffNone        = "none"        // no generated round or 429 retry delay; hard key state still applies
 
 	DefaultProviderRetryDelayMS = 1000
 	MaxProviderRetryDelayMS     = 60_000
 
-	// retry_after_max_s bounds. The header is always honored as the key
-	// cooldown; this only caps how long a single hint may block a key.
-	DefaultRetryAfterMaxS  = 60
+	// retry_after_max_s bounds the server hint when no explicit retry pacing
+	// overrides it.
+	DefaultRetryAfterMaxS  = 3_600
 	OfficialRetryAfterMaxS = 86_400 // preset codex default
 	MaxRetryAfterMaxS      = 86_400
 

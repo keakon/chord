@@ -904,7 +904,7 @@ provider 显式配了 `user_agent`，它仍优先于生成的头部。
 
 ## Provider 重试延迟
 
-Provider 级重试配置控制完整重试轮之间由 Chord 生成的等待。一轮从当前 sticky 模型池游标开始，继续尝试模型池剩余候选及其可用 key；切换 fallback target 时不会单独等待。下一轮开始前使用游标所指 provider 的策略；某个 fallback 成功并成为新游标后，后续请求自然改用它的配置。同一策略也控制**未携带** `Retry-After` 提示的普通 HTTP 429 的 key 冷却；合法的 `Retry-After`（受 `retry_after_max_s` 限制）始终优先于它。
+Provider 级重试配置控制目标之间完整重试轮的等待。一轮从当前 sticky 模型池游标开始，继续尝试模型池剩余候选及其可用 key；切换 fallback target 时不会单独等待。下一轮使用池内最早可重试目标的时间：未配置重试节奏的目标遵循合法的 `Retry-After`，并受 `retry_after_max_s` 限制；显式配置的目标使用自己的重试节奏。fallback 成功并成为新游标后，后续请求使用它的 provider 配置。
 
 Responses 流式错误和 WebSocket 错误帧中的重试提示，与 HTTP 响应头使用相同的等待上限。可重试的流式错误或 HTTP 5xx 带有合法提示时，Chord 会冷却失败的 key，其他健康 key 和备用模型仍可继续使用。提示不会把终止性错误变成可重试错误。WebSocket 错误中，合法的 `Retry-After` 优先于 `resets_in_seconds`。
 
@@ -917,18 +917,20 @@ providers:
 
 - `retry_backoff: exponential` 是默认策略，从 `retry_delay_ms`（默认 `1000`）开始逐轮翻倍，最多等待 60 秒；
 - `retry_backoff: fixed` 每轮固定等待 `retry_delay_ms`；
-- `retry_backoff: none` 关闭 Chord 生成的轮间退避。没有 `Retry-After` 提示的普通 429 不给失败 key 设置定时冷却，只把它标为 recovering，让健康 key 和 fallback target 保持优先；默认轮次没有上限，服务器有响应的失败在 `none` 下零间隔连续重试。从未到达服务器的请求（DNS 解析、连接建立、TLS 验证）不受该设置约束，按内置梯子节奏探测：等待从 1s 起每连续失败翻倍，梯子自身封顶 20s；最终等待取梯子与所配置退避中较大者，`exponential` 下会超过 20s、直到该模式的 60s 上限；
+- `retry_backoff: none` 关闭 Chord 生成的轮间退避。普通 429 不给失败 key 设置定时冷却，包括携带 `Retry-After` 的响应；key 只会标为 recovering，让健康 key 和 fallback target 保持优先；默认轮次没有上限，服务器有响应的失败在 `none` 下零间隔连续重试。从未到达服务器的请求（DNS 解析、连接建立、TLS 验证）不受该设置约束，按内置梯子节奏探测：等待从 1s 起每连续失败翻倍，梯子自身封顶 20s；最终等待取梯子与所配置退避中较大者，`exponential` 下会超过 20s、直到该模式的 60s 上限；
 - `retry_delay_ms` 可取 `0` 到 `60000`；`0` / 省略表示 1000ms。策略拼错、负数或超过上限都会作为配置错误暴露。
 
 带停顿的重试轮会把这段等待以倒计时显示在状态栏，指向下一次尝试的时刻（`↺ round 12 · retry in 45s`）。没有停顿、立刻重新探测的重试轮没有可倒数的等待，继续显示已经重试了多久。
 
-普通 429 的 key 冷却遵循单一优先级：已确认的配额重置窗口最优先，其次是合法的 `Retry-After`（受 `retry_after_max_s` 限制、按原值生效），只有不带提示的 429 才落到上面的重试节奏：已配置的 `exponential` / `fixed` / `none`，或两个字段都没配置时的 1 秒起步指数退避。失效或停用凭据，以及其它硬状态已经建立的冷却，永远不会被缩短或清除。这套 429 节奏在可见流式输出前后一致：打断可见输出流的 429 会冷却该 key 并轮换到下一个。
+普通 429 的 key 冷却遵循以下规则：已确认的配额重置窗口最优先；未配置重试节奏时，合法的 `Retry-After` 受 `retry_after_max_s` 限制并作为冷却时长；显式配置了 `exponential` / `fixed` / `none` 时，则使用对应配置；没有提示且没有显式配置时使用 1 秒起步指数退避。失效或停用凭据，以及其它硬状态已经建立的冷却，永远不会被缩短或清除。这套 429 节奏在可见流式输出前后一致：打断可见输出流的 429 会冷却该 key 并轮换到下一个。
+
+未显式配置重试节奏时，第三方 provider 的 `retry_after_max_s` 默认值为 1 小时，Codex preset 为 1 天；每个 provider 都可将其设为 1 秒到 1 天。模型池中某个目标更早可重试时，不会被其它目标更长的冷却拖住。
 
 所有模型的所有 key 都在冷却时，Chord 会等待而不是发请求，等多久取决于模型池的形态。只配了一个模型时没有别的可试，就一直等到最早的 key 恢复时刻——可能是 Provider 自己定义的已确认配额重置时刻，也可能是已被 `retry_after_max_s` 限过的 `Retry-After` 提示。这段等待期间不会重新探测模型池，因此等待中途新增的凭据要等这次等待结束才会被用上。配了 fallback 模型时，至少每分钟重新检查一次模型池：兄弟模型、新加的凭据或刷新后的限流快照，都可能让请求比最长那个冷却结束得更早。两种情况下状态栏倒计时都指向「真正能发出请求」的时刻，而不是下一次内部检查。池里最短的冷却始终说话：已经恢复的模型不会被另一个模型更长的冷却拖住；每分钟重新检查的那种模型池会立刻用上它。
 
 某个 key 进入冷却后，导致冷却的那次 API 失败会记入错误面板（`Ctrl+E`）：由显示冷却等待的那次请求记录，或由下一个前台请求（agent 的一轮对话或一次上下文压缩）记录，先到先记。记忆抽取、思考翻译等后台工作造成的失败也包括在内。被 Provider 永久判废的凭据（刷新令牌过期、账号失效或停用）会在下一个前台请求上提示。每条失败只记一次：已经由触发它的那次尝试作为重试错误上报过的失败不会重复记录。
 
-Codex OAuth 遵循同样的规则：Codex 的所有 429 都算普通 429。重试提示（`Retry-After` 或 WebSocket 的 `resets_in_seconds`）优先于显式配置生效；既没有提示、也没有已耗尽额度快照的 usage-limit 429 使用上文的普通默认值，而不是 `codex` preset 的 1 分钟冷却（后者仍用于非 429 的 usage-limit 错误）。若 Codex 额度快照显示某个窗口已耗尽，并带有未来重置时间，Chord 会确认额度耗尽，仍以服务端重置时间为准。
+Codex OAuth 遵循同样的规则：Codex 的所有 429 都算普通 429。未显式配置重试节奏时，重试提示（`Retry-After` 或 WebSocket 的 `resets_in_seconds`）生效并受上限约束；显式配置时使用对应节奏。既没有提示、也没有已耗尽额度快照的 usage-limit 429 使用上文的普通默认值，而不是 `codex` preset 的 1 分钟冷却（后者仍用于非 429 的 usage-limit 错误）。若 Codex 额度快照显示某个窗口已耗尽，并带有未来重置时间，Chord 会确认额度耗尽，仍以服务端重置时间为准。
 
 项目级 `.chord/config.yaml` 可以单独覆盖某个 provider 的这些字段。
 
@@ -1732,10 +1734,10 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `api_url`     | string | 接口地址。Chord 根据 URL path 自动识别 provider type，忽略 query string 和 fragment。Gemini 用原生 API 版本根（如 `/v1beta/`），Chord 自动附加 `/models/{model}:streamGenerateContent?alt=sse`。Azure Responses 的 `?api-version=...` 是可选项，可用于固定特定 API 版本。 |
 | `preset`      | string | 可选 `openai`、`anthropic`、`gemini` 或 `codex`（OpenAI Codex / ChatGPT OAuth），分别选择对应的官方端点契约。Azure OpenAI Responses 使用普通 `type: responses` provider，配合 `auth_scheme: api-key`、`store: true`，并在 `compat.request_overrides.headers` 中将 Codex 身份 header 置为 `null`。 |
 | `trust_http_400`| bool   | 是否把 HTTP 400 视为终止性请求错误。`preset: codex` 默认 `true`；聚合/代理网关默认 `false`，因为常把上游过载包装成 400。 |
-| `retry_after_max_s`| int    | 采纳 `Retry-After` 头的最长等待秒数（1-86400）。该头始终作为 key 冷却时长生效，优先于 `retry_backoff`/`retry_delay_ms`；本参数只限制单次提示最长能占用 key 多久。`preset: codex` 默认 `86400`；第三方网关可能回显任意值，默认 `60`。 |
+| `retry_after_max_s`| int    | 未显式配置重试节奏时，`Retry-After` 的最长等待秒数（1-86400）。`preset: codex` 默认 `86400`；第三方 provider 默认 `3600`。 |
 | `key_rotation`| string | `on_failure`（默认）/ `per_request`。控制何时重新选择 credential / API key。                                                                    |
 | `key_order`   | string | `sequential`（非 Codex 默认）/ `random` / `smart`（仅 Codex）。控制在候选 key 中如何选择。                                               |
-| `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制未携带合法 `Retry-After` 提示的普通 HTTP 429 的 key 冷却。合法服务端提示、已确认的配额重置与凭据硬状态仍然优先。从未到达服务器的请求（DNS 解析、连接建立、TLS 验证）按内置连接梯子调度——1s 起每连续失败翻倍、梯子自身封顶 20s——不受本设置约束；最终等待取梯子与所配置退避中较大者。 |
+| `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后会覆盖该 provider 可重试目标收到的 `Retry-After`。已确认的配额重置与凭据硬状态仍然优先。从未到达服务器的请求（DNS 解析、连接建立、TLS 验证）按内置连接梯子调度——1s 起每连续失败翻倍、梯子自身封顶 20s——不受本设置约束；最终等待取梯子与所配置退避中较大者。 |
 | `retry_delay_ms`| int   | 轮间退避和普通 429 冷却的基准值或固定值，单位毫秒，可取 `0` 到 `60000`；`0` / 省略默认 1000ms。即使省略 `retry_backoff`，只要写出该字段（包括显式 `0`）就算覆盖。`none` 模式下忽略。超出范围的值会记录日志并回退默认值，不会中断启动。 |
 | `compress`    | string | 上游请求体的压缩编码：`off`、`gzip` 或 `zstd`；不设即用 preset 默认值——`preset: codex` 发送 `zstd`，其他 preset 按原文发送。只在压缩能缩小体积时生效。旧的布尔写法 `compress: true` 已删除——会被忽略并由 `chord doctor config` 报告（改成 `compress: gzip` 即可）。 |
 | `proxy`       | string | 三态 — 省略（默认）继承全局 `proxy`；`""`（空字符串）强制直连并绕过代理环境变量；`http://...` / `https://...` / `socks5://...` 使用指定代理。见 [网络代理](./environment_CN.md#网络代理)。 |

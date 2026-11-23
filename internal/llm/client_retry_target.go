@@ -21,6 +21,7 @@ type streamTargetAttemptResult struct {
 	lastErr               error
 	lastErrProvider       *ProviderConfig
 	pendingRoundWait      roundCoolingWait
+	coolingCause          *keyCooldownCause
 	hadRequestAttempt     bool
 	roundHadUsableReply   bool
 	skipProvider          bool
@@ -108,8 +109,6 @@ type streamTargetAttempt struct {
 	cb               StreamCallback
 	fallbackEnabled  bool
 	fallbackModels   []FallbackModel
-	currentRoundWait roundCoolingWait
-	hasNextTarget    bool
 	status           *CallStatus
 	systemPrompt     string
 	outputCapSetting int
@@ -133,8 +132,6 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 	cb := a.cb
 	fallbackEnabled := a.fallbackEnabled
 	fallbackModels := a.fallbackModels
-	currentRoundWait := a.currentRoundWait
-	hasNextTarget := a.hasNextTarget
 	status := a.status
 	systemPrompt := a.systemPrompt
 	outputCapSetting := a.outputCapSetting
@@ -298,26 +295,7 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 				waitCap := coolingWaitCap(fallbackEnabled, fallbackModels)
 				result.setLastErr(t.provider, err)
 				result.pendingRoundWait = mergeCoolingWindow(result.pendingRoundWait, cooling.RetryAfter, waitCap)
-				if hasNextTarget {
-					log.Infof("all API keys cooling; trying next model provider=%v model=%v", t.provider.Name(), t.modelID)
-				} else {
-					wait := mergeCoolingWindow(currentRoundWait, cooling.RetryAfter, waitCap)
-					log.Infof("all API keys cooling; waiting before retry provider=%v model=%v attempt=%v sleep=%v recovery_in=%v", t.provider.Name(), t.modelID, round+1, wait.sleep, wait.recovery)
-					if cb != nil {
-						if err := abortIfCancelled(); err != nil {
-							return result, lastInputTokens, err
-						}
-						// Detail and Deadline describe when a request can
-						// really go out, not when this round wakes up to
-						// re-probe the pool.
-						emitStreamStatusDelta(cb, message.StatusDelta{
-							Type:     message.StatusDeltaCooling,
-							Detail:   wait.recovery.Round(time.Second).String(),
-							Deadline: time.Now().Add(wait.recovery),
-						})
-					}
-					reportCoolingCause(cb, cooling.cause)
-				}
+				result.coolingCause = cooling.cause
 			} else {
 				result.setLastErr(t.provider, err)
 			}
@@ -821,6 +799,12 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 			return result, lastInputTokens, interruptedErr
 		}
 		result.resp = resp
+	}
+	if result.resp == nil && result.lastErr != nil && !result.pendingRoundWait.waiting() {
+		if wait, cause := t.provider.allKeysCoolingWait(); wait > 0 {
+			result.pendingRoundWait = mergeCoolingWindow(result.pendingRoundWait, wait, coolingWaitCap(fallbackEnabled, fallbackModels))
+			result.coolingCause = cause
+		}
 	}
 	return result, lastInputTokens, nil
 }
