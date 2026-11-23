@@ -798,10 +798,12 @@ func TestResponsesToolCallsToInputItems_SanitizesMalformedArgs(t *testing.T) {
 // restored session, or an accumulated payload that recorded a truncated
 // arguments string — is guarded on replay the same way ToolCalls are. An item
 // with no arguments keeps the required-field fallback instead.
-func TestResponsesOutputToInputItems_SanitizesMalformedArgs(t *testing.T) {
-	items := responsesOutputToInputItems([]responsesOutputEntry{
-		{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "shell", Arguments: `{"cmd":`},
-		{Type: "function_call", ID: "fc_2", CallID: "call_2", Name: "shell"},
+func TestResponsesResponseToInputItems_SanitizesMalformedArgs(t *testing.T) {
+	items := responsesResponseToInputItems(&message.Response{
+		ResponsesOutput: []message.ResponsesOutputItem{
+			{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "shell", Arguments: `{"cmd":`},
+			{Type: "function_call", ID: "fc_2", CallID: "call_2", Name: "shell"},
+		},
 	}, false)
 	if len(items) != 2 {
 		t.Fatalf("items = %+v, want both calls", items)

@@ -134,9 +134,9 @@ func TestResponsesAdditionalToolsMatchesWebSocketIncrementalBaseline(t *testing.
 		Role:    "assistant",
 		Content: []responsesContentBlock{{Type: "output_text", Text: "done"}},
 	}}
-	_, baselineLen, baselineSig := codexWSBuildBaseline(firstInput, responsesOutputToInputItems(output, false), false)
 	response := &message.Response{}
 	collectResponsesOutput(response, output)
+	_, baselineLen, baselineSig := codexWSBuildBaseline(firstInput, responsesResponseToInputItems(response, false), false)
 
 	nextMessages := []message.Message{
 		{Role: message.RoleUser, Content: "first"},

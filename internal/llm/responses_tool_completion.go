@@ -28,45 +28,59 @@ func omitIncompleteResponsesToolOutput(output []responsesOutputEntry, incomplete
 	})
 }
 
-func preserveCompletedResponsesCallsOnTruncation(resp *message.Response, output []responsesOutputEntry) {
-	if len(resp.ResponsesOutput) > 0 || len(resp.ToolCalls) == 0 {
-		return
+// Truncated snapshots can omit arguments of calls already finalized on the
+// stream. Replay the finalized arguments, but distrust a contradictory snapshot.
+func collectTruncatedResponsesOutput(resp *message.Response, output []responsesOutputEntry) (conflicts bool) {
+	finalized := make(map[string]message.ToolCall, len(resp.ToolCalls))
+	for _, call := range resp.ToolCalls {
+		finalized[call.ID] = call
 	}
-	var completed map[string]responsesOutputEntry
+	replay := make([]responsesOutputEntry, 0, len(output)+1)
+	hasMessage := false
 	for _, out := range output {
-		if out.Type == "function_call" && out.Status == responsesToolStatusCompleted {
-			if completed == nil {
-				completed = make(map[string]responsesOutputEntry)
-			}
-			completed[responsesToolCallID(responsesStreamItem{ID: out.ID, CallID: out.CallID})] = out
+		if !isResponsesCallItemType(out.Type) {
+			hasMessage = hasMessage || out.Type == "message" && len(out.Content) > 0
+			replay = append(replay, out)
+			continue
 		}
+		id := responsesToolCallID(responsesStreamItem{ID: out.ID, CallID: out.CallID})
+		call, ok := finalized[id]
+		if !ok || !responsesToolItemCompleted(out.Status) {
+			// An unmatched call with omitted status is ambiguous on a
+			// truncated response. Do not execute it or reuse that chain.
+			conflicts = conflicts || ok || responsesToolItemCompleted(out.Status)
+			continue
+		}
+		if out.Name != "" && out.Name != call.Name {
+			conflicts = true
+			continue
+		}
+		if out.Type == "custom_tool_call" {
+			if out.Input != "" && string(canonicalApplyPatchArgs(json.RawMessage(out.Input))) != string(call.Args) {
+				conflicts = true
+			}
+			out.Status = ""
+		} else if out.Arguments != "" && string(unwrapJSONString(json.RawMessage(out.Arguments))) != string(call.Args) {
+			conflicts = true
+		}
+		out.Type, out.CallID, out.Name, out.Arguments = "function_call", call.ID, call.Name, string(call.Args)
+		replay = append(replay, out)
+		delete(finalized, id)
 	}
-	if len(completed) == 0 {
-		return
-	}
-	// On truncation, only calls the stream already finalized are eligible
-	// for replay. Keep the fallback text and call order while adding the
-	// status confirmed by the terminal snapshot.
-	items := make([]message.ResponsesOutputItem, 0, len(resp.ToolCalls)+1)
-	if resp.Content != "" {
-		items = append(items, message.ResponsesOutputItem{
-			Type: "message", Role: string(message.RoleAssistant),
-			Content: []message.ResponsesOutputContent{{Type: "output_text", Text: resp.Content}},
+	if !hasMessage && resp.Content != "" {
+		replay = slices.Insert(replay, 0, responsesOutputEntry{
+			Type: "message", Content: []responsesContentBlock{{Type: "output_text", Text: resp.Content}},
 		})
 	}
-	confirmed := false
 	for _, call := range resp.ToolCalls {
-		item := message.ResponsesOutputItem{Type: "function_call", CallID: call.ID, Name: call.Name, Arguments: string(call.Args)}
-		if out, ok := completed[call.ID]; ok && out.Name == call.Name {
-			item.ID = out.ID
-			item.Status = out.Status
-			confirmed = true
+		if _, ok := finalized[call.ID]; ok {
+			replay = append(replay, responsesOutputEntry{
+				Type: "function_call", CallID: call.ID, Name: call.Name, Arguments: string(call.Args),
+			})
 		}
-		items = append(items, item)
 	}
-	if confirmed {
-		resp.ResponsesOutput = items
-	}
+	collectResponsesOutput(resp, replay)
+	return conflicts
 }
 
 // completeResponsesToolCallsFromOutput settles pending calls using the terminal

@@ -697,6 +697,7 @@ type responsesEventState struct {
 	captureHosted bool
 	truncated     *bool
 	outputItems   *[]responsesInputItem
+	chainConflict *bool
 	partial       *responsesPartialCompletionState
 	cb            StreamCallback
 	phaser        chunkPhaser
@@ -1298,19 +1299,12 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, fmt.Errorf("parse incomplete: %w", err)
 		}
 		respObj := incomplete.Response
-		respObj.Output = omitIncompleteResponsesToolOutput(respObj.Output, state.incompleteCalls)
 		applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
-		if len(state.incompleteCalls) > 0 {
-			state.resp.StopReason = "length"
-		}
 		if state.captureHosted {
 			recordResponsesHostedOutputItems(state.resp, state.hostedCalls, eventData)
 		}
-		*state.outputItems = responsesOutputToInputItems(respObj.Output, state.freeform)
-		if respObj.IncompleteDetails != nil {
-			state.resp.StopReason = "length"
-			*state.truncated = true
-		}
+		state.resp.StopReason = "length"
+		*state.truncated = true
 		discardUnfinishedResponsesToolCalls(state.toolCalls, state.resp, *state.truncated)
 		flushContent()
 		// Same terminal reconciliation as response.completed: the incomplete
@@ -1319,8 +1313,10 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		if text, ok := responsesTerminalOutputText(respObj.Output); ok {
 			state.resp.Content = text
 		}
-		preserveCompletedResponsesCallsOnTruncation(state.resp, respObj.Output)
-		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp, state.freeform)
+		if conflict := collectTruncatedResponsesOutput(state.resp, respObj.Output); state.chainConflict != nil {
+			*state.chainConflict = conflict
+		}
+		*state.outputItems = responsesResponseToInputItems(state.resp, state.freeform)
 		finalizeHostedObservation(state.resp)
 		return state.resp, *state.outputItems, true, nil
 	}

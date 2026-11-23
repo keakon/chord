@@ -374,13 +374,15 @@ func TestApplyResponsesCompletionPayload_CustomToolCall(t *testing.T) {
 	}
 }
 
-func TestResponsesOutputToInputItems_CustomToolCallReplaysAsFunctionCall(t *testing.T) {
+func TestResponsesCustomToolOutputReplaysAsFunctionCall(t *testing.T) {
 	// Under a function-shape target (freeform=false) custom tool history
 	// unifies to function_call with canonical {patch} arguments.
-	items := responsesOutputToInputItems([]responsesOutputEntry{
+	resp := &message.Response{}
+	collectResponsesOutput(resp, []responsesOutputEntry{
 		{Type: "custom_tool_call", ID: "item_1", Name: toolname.ApplyPatch, Input: "*** Begin Patch\n*** End Patch"},
 		{Type: "custom_tool_call", ID: "item_2", Name: toolname.ApplyPatch, Input: "*** Begin Patch\n*** Update File: b.txt\n@@\n-x\n+y\n*** End Patch"},
-	}, false)
+	})
+	items := responsesResponseToInputItems(resp, false)
 	if len(items) != 2 {
 		t.Fatalf("got %d input items, want 2", len(items))
 	}
@@ -404,10 +406,12 @@ func TestResponsesMixedHistoryReplaysAsFunctionCalls(t *testing.T) {
 	// Replay must unify both to function_call with canonical arguments and
 	// keep the paired tool results as function_call_output (no orphaned
 	// outputs), regardless of emission form.
-	items := responsesOutputToInputItems([]responsesOutputEntry{
+	output := &message.Response{}
+	collectResponsesOutput(output, []responsesOutputEntry{
 		{Type: "function_call", ID: "item_r", CallID: "c_read", Name: "Read", Arguments: `{"path":"a.go"}`},
 		{Type: "custom_tool_call", ID: "item_p", CallID: "c_patch", Name: toolname.ApplyPatch, Input: "*** Begin Patch\n*** End Patch"},
-	}, false)
+	})
+	items := responsesResponseToInputItems(output, false)
 	if len(items) != 2 {
 		t.Fatalf("got %d input items, want 2", len(items))
 	}
@@ -454,10 +458,12 @@ func TestResponsesMixedHistoryReplaysAsFunctionCalls(t *testing.T) {
 // legacy function_call items and freeform custom items replay in the custom
 // tool shape with raw patch text in input.
 func TestResponsesMixedHistoryReplaysAsFreeformCustomCalls(t *testing.T) {
-	items := responsesOutputToInputItems([]responsesOutputEntry{
+	output := &message.Response{}
+	collectResponsesOutput(output, []responsesOutputEntry{
 		{Type: "function_call", ID: "item_r", CallID: "c_read", Name: "read", Arguments: `{"path":"a.go"}`},
 		{Type: "function_call", ID: "item_p", CallID: "c_patch", Name: toolname.ApplyPatch, Arguments: `{"patch":"*** Begin Patch\n*** End Patch"}`},
-	}, true)
+	})
+	items := responsesResponseToInputItems(output, true)
 	if len(items) != 2 {
 		t.Fatalf("got %d input items, want 2", len(items))
 	}

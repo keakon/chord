@@ -351,6 +351,11 @@ func (r *ResponsesProvider) codexWSCanUseIncrementalLocked(
 	return true, n, "ok"
 }
 
+type codexWSOutput struct {
+	items         []responsesInputItem
+	chainConflict bool
+}
+
 func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	ctx context.Context,
 	apiKey string,
@@ -363,10 +368,10 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	turnState *ResponsesTurnState,
 	turnStateIdentity string,
 	freeform bool,
-) (*message.Response, []responsesInputItem, error) {
+) (*message.Response, codexWSOutput, error) {
 	payload, err := jsonx.Marshal(env)
 	if err != nil {
-		return nil, nil, fmt.Errorf("codex ws marshal: %w", err)
+		return nil, codexWSOutput{}, fmt.Errorf("codex ws marshal: %w", err)
 	}
 	dumpWriter := r.dumpWriter.Load()
 
@@ -391,7 +396,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 
 	if err := r.codexWSConn.SetWriteDeadline(time.Now().Add(60 * time.Second)); err != nil {
 		r.codexWSCloseConnUnlocked("write_deadline")
-		return nil, nil, fmt.Errorf("codex ws write deadline: %w", err)
+		return nil, codexWSOutput{}, fmt.Errorf("codex ws write deadline: %w", err)
 	}
 	if env.PreviousResponseID != "" {
 		diagnosticServerContextReuse(ctx)
@@ -400,13 +405,13 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 	markRequestPrepared(ctx)
 	lease, err := executiongate.Begin(ctx, executiongate.LLM)
 	if err != nil {
-		return nil, nil, err
+		return nil, codexWSOutput{}, err
 	}
 	defer lease.Finish()
 	markRequestSent(ctx)
 	if err := r.codexWSConn.WriteMessage(websocket.TextMessage, payload); err != nil {
 		r.codexWSCloseConnUnlocked("write_failed")
-		return nil, nil, fmt.Errorf("codex ws write: %w", err)
+		return nil, codexWSOutput{}, fmt.Errorf("codex ws write: %w", err)
 	}
 
 	waitingHeaderBytes := responseHeaderBytes(&http.Response{Header: http.Header{"Upgrade": []string{"websocket"}}})
@@ -420,7 +425,7 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 		})
 	}
 
-	resp, outputItems, parseErr := r.codexWSReadResponseLocked(streamCtx, apiKey, cb, newCodexWSProgressTracker(waitingHeaderBytes), turnState, turnStateIdentity, freeform)
+	resp, output, parseErr := r.codexWSReadResponseLocked(streamCtx, apiKey, cb, newCodexWSProgressTracker(waitingHeaderBytes), turnState, turnStateIdentity, freeform)
 	streamCancel()
 
 	if collectDump && dumpWriter != nil {
@@ -444,9 +449,9 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 
 	if parseErr != nil {
 		r.codexWSCloseConnUnlocked(codexWSParseFailureReason(parseErr))
-		return nil, nil, parseErr
+		return nil, codexWSOutput{}, parseErr
 	}
-	return resp, outputItems, nil
+	return resp, output, nil
 }
 
 func (r *ResponsesProvider) codexWSReadResponseLocked(
@@ -457,7 +462,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 	turnState *ResponsesTurnState,
 	turnStateIdentity string,
 	freeform bool,
-) (*message.Response, []responsesInputItem, error) {
+) (*message.Response, codexWSOutput, error) {
 	var (
 		resp            message.Response
 		textItems       responsesItemTexts
@@ -466,7 +471,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		finalizedCalls  = make(map[string]bool)
 		incompleteCalls = make(map[string]bool)
 		truncated       bool
-		outputItems     []responsesInputItem
+		output          codexWSOutput
 		gotData         bool
 	)
 
@@ -504,15 +509,15 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 	for {
 		select {
 		case <-streamCtx.Done():
-			return nil, nil, websocketStreamContextError(streamCtx)
+			return nil, codexWSOutput{}, websocketStreamContextError(streamCtx)
 		default:
 		}
 		msg, err := r.codexWSReadMessageWithIdleTimeoutLocked(streamCtx)
 		if err != nil {
 			if timeout, ok := errors.AsType[*StreamTotalTimeoutError](err); ok {
-				return nil, nil, timeout
+				return nil, codexWSOutput{}, timeout
 			}
-			return nil, nil, fmt.Errorf("reading websocket stream: %w", err)
+			return nil, codexWSOutput{}, fmt.Errorf("reading websocket stream: %w", err)
 		}
 		if cb != nil {
 			snap := progress.addMessageFrame(msg)
@@ -527,12 +532,12 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		// Reuse the envelope's event type instead of decoding it separately.
 		eventType, eventData, err := parseResponsesEvent(msg, "", streamDiag)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %v", errCodexWSInvalidEventJSON, err)
+			return nil, codexWSOutput{}, fmt.Errorf("%w: %v", errCodexWSInvalidEventJSON, err)
 		}
 		// Non-JSON frames never carried a type and were rejected before any
 		// processing; keep rejecting them instead of treating them as events.
 		if len(msg) == 0 || msg[0] != '{' {
-			return nil, nil, fmt.Errorf("%w: event is not a JSON object", errCodexWSInvalidEventJSON)
+			return nil, codexWSOutput{}, fmt.Errorf("%w: event is not a JSON object", errCodexWSInvalidEventJSON)
 		}
 		now := time.Now()
 		if eventType == "error" {
@@ -547,9 +552,9 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 						}
 					}
 				}
-				return nil, nil, apiErr
+				return nil, codexWSOutput{}, apiErr
 			}
-			return nil, nil, fmt.Errorf("codex ws api error: %s", string(msg))
+			return nil, codexWSOutput{}, fmt.Errorf("codex ws api error: %s", string(msg))
 		}
 		if eventType == "codex.rate_limits" {
 			snap := ratelimit.ParseCodexRateLimitWebSocketEvent(msg)
@@ -598,18 +603,19 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			finalizedCalls:    finalizedCalls,
 			incompleteCalls:   incompleteCalls,
 			truncated:         &truncated,
-			outputItems:       &outputItems,
+			outputItems:       &output.items,
+			chainConflict:     &output.chainConflict,
 			cb:                cb,
 			turnState:         turnState,
 			turnStateID:       turnStateIdentity,
 			freeform:          freeform,
 		}
-		outResp, outItems, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
+		outResp, _, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
 		if err != nil {
-			return nil, nil, err
+			return nil, codexWSOutput{}, err
 		}
 		if done {
-			return outResp, outItems, nil
+			return outResp, output, nil
 		}
 		maybeWakeUsagePoll(now)
 	}
@@ -767,6 +773,25 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		newConnection = true
 	}
 
+	advanceChain := func(resp *message.Response, output codexWSOutput) {
+		if output.chainConflict {
+			// Keep the handshake identity so full replay can reuse the connection.
+			r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, sessionKey, "", 0, "", "")
+			log.Debug("responses codex ws baseline discarded: conflicting truncated output")
+			return
+		}
+		_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, output.items, req.Store)
+		respID := ""
+		if resp != nil {
+			respID = resp.ProviderResponseID
+		}
+		r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, sessionKey, reqSig, baselineLen, baselineSig, respID)
+		if respID == "" {
+			log.Debugf("responses: codex ws completed without response id; incremental chain not advanced model=%v", model)
+		}
+		log.Debugf("responses codex ws baseline updated model=%v baseline_len=%v output_items=%v request_signature_set=%v", model, baselineLen, len(output.items), reqSig != "")
+	}
+
 	// Match Codex behavior: prewarm the first request on a fresh websocket so the
 	// following real request can reuse previous_response_id with an empty delta.
 	if newConnection && !opts.SkipPrewarm {
@@ -788,18 +813,13 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			ClientMetadata:     req.ClientMetadata,
 			PromptCacheOptions: req.PromptCacheOptions,
 		}
-		prewarmResp, prewarmOutputItems, prewarmErr := r.codexWSExecuteRequestLocked(
+		prewarmResp, prewarmOutput, prewarmErr := r.codexWSExecuteRequestLocked(
 			withoutRequestDiagnostics(ctx), apiKey, model, prewarmEnv, nil, false, start, false, opts.TurnState, opts.TurnStateIdentity, freeform,
 		)
 		if prewarmErr != nil {
 			return nil, false, prewarmErr
 		}
-		_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, prewarmOutputItems, req.Store)
-		prewarmRespID := ""
-		if prewarmResp != nil {
-			prewarmRespID = prewarmResp.ProviderResponseID
-		}
-		r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, sessionKey, reqSig, baselineLen, baselineSig, prewarmRespID)
+		advanceChain(prewarmResp, prewarmOutput)
 	}
 
 	useIncremental := false
@@ -836,7 +856,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	// connection is already established; if we reused an existing connection,
 	// it was already live. Either way, "connecting" has already been emitted
 	// (either above for new connections, or was emitted on the original dial).
-	resp, outputItems, reqErr := r.codexWSExecuteRequestLocked(
+	resp, output, reqErr := r.codexWSExecuteRequestLocked(
 		ctx, apiKey, model, env, cb, true, start, true, opts.TurnState, opts.TurnStateIdentity, freeform,
 	)
 	if reqErr != nil {
@@ -844,16 +864,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		return nil, useIncremental, reqErr
 	}
 
-	_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, outputItems, req.Store)
-	respID := ""
-	if resp != nil {
-		respID = resp.ProviderResponseID
-	}
-	r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, sessionKey, reqSig, baselineLen, baselineSig, respID)
-	if resp == nil || resp.ProviderResponseID == "" {
-		log.Debugf("responses: codex ws completed without response id; incremental chain not advanced model=%v", model)
-	}
-	log.Debugf("responses codex ws baseline updated model=%v baseline_len=%v output_items=%v request_signature_set=%v", model, baselineLen, len(outputItems), reqSig != "")
+	advanceChain(resp, output)
 
 	return resp, useIncremental, nil
 }

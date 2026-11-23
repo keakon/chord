@@ -586,22 +586,6 @@ func convertToolsToResponses(tools []message.ToolDefinition) []responsesTool {
 	return result
 }
 
-// responsesOutputToInputItems always retains item IDs; the incremental
-// baseline is normalized for the store mode in one place, codexWSBuildBaseline.
-func responsesOutputToInputItems(output []responsesOutputEntry, freeform bool) []responsesInputItem {
-	if len(output) == 0 {
-		return nil
-	}
-	items := make([]responsesInputItem, 0, len(output))
-	for _, out := range output {
-		converted, ok := convertResponsesOutputItem(responsesOutputEntryToMessageItem(out), true, freeform)
-		if ok {
-			items = append(items, converted)
-		}
-	}
-	return items
-}
-
 func responsesOutputEntryToMessageItem(out responsesOutputEntry) message.ResponsesOutputItem {
 	var status string
 	if out.Type == "function_call" && out.Status == responsesToolStatusCompleted {

@@ -19,6 +19,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/jsonx"
 	"github.com/keakon/chord/internal/logtest"
 	"github.com/keakon/chord/internal/message"
 )
@@ -397,12 +398,8 @@ func TestCodexWSBuildBaselineMatchesStoreItemIDShape(t *testing.T) {
 	}
 }
 
-// TestCodexWSBaselineSignatureMatchesNextTurnConversion feeds one provider
-// output payload through both production paths — the chain-side baseline
-// (responsesOutputToInputItems → codexWSBuildBaseline) and the next turn's
-// message-side conversion (collectResponsesOutput → convertMessagesWithMap) — and
-// asserts the prefix signatures agree. If these paths ever drift again, the
-// incremental WebSocket reuse silently degrades to full-input resends.
+// The terminal parser's output items must match the prefix of the next turn's
+// history conversion, or the WebSocket will fall back to full-input replay.
 func TestCodexWSBaselineSignatureMatchesNextTurnConversion(t *testing.T) {
 	output := []responsesOutputEntry{
 		{Type: "reasoning", ID: "rs_1", EncryptedContent: "enc-1", Summary: []responsesReasoningSummaryPayload{{Type: "summary_text", Text: "s"}}},
@@ -410,15 +407,23 @@ func TestCodexWSBaselineSignatureMatchesNextTurnConversion(t *testing.T) {
 		{Type: "reasoning", ID: "rs_2"},                                    // summary-only reasoning: stateless replay drops it
 		{Type: "function_call", ID: "fc_1", Name: "read", Arguments: `{}`}, // missing call_id: falls back to id
 	}
+	frame, err := jsonx.Marshal(map[string]any{
+		"type":     "response.completed",
+		"response": map[string]any{"output": output},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream([]string{string(frame)}), nil, nil, nil, "", false, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	userTurn := []message.Message{{Role: message.RoleUser, Content: "hello"}}
 
 	for _, cacheBreakpoints := range []bool{false, true} {
 		for _, store := range []bool{false, true} {
 			fullInput := convertMessagesToResponsesWithItemIDs("", userTurn, store, false, cacheBreakpoints)
-			_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, responsesOutputToInputItems(output, store), store)
-
-			resp := &message.Response{}
-			collectResponsesOutput(resp, output)
+			_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, items, store)
 			next := append(append([]message.Message(nil), userTurn...),
 				message.Message{Role: message.RoleAssistant, ResponsesOutput: resp.ResponsesOutput},
 				message.Message{Role: message.RoleUser, Content: "next"},
@@ -720,6 +725,111 @@ func assertCodexWSFullInputWithoutPreviousResponseID(t *testing.T, body map[stri
 	}
 	if len(input) != wantLen {
 		t.Fatalf("input len = %d, want full len %d", len(input), wantLen)
+	}
+}
+
+func TestCodexWSIncompleteToolCallReplay(t *testing.T) {
+	const model = "sample/test-model"
+	const call = `"type":"function_call","id":"fc_1","call_id":"call_1","name":"sample_tool"`
+	const args = `{"value":1}`
+	for _, tc := range []struct {
+		name        string
+		output      string
+		incremental bool
+	}{
+		{"omitted arguments", `[{` + call + `,"status":"completed"}]`, true},
+		{"conflicting arguments", `[{` + call + `,"status":"completed","arguments":"{\"value\":2}"}]`, false},
+		{"conflicting status", `[{` + call + `,"status":"incomplete"}]`, false},
+		{"ambiguous sibling", `[{` + call + `},{"type":"function_call","call_id":"call_2","name":"sample_tool"}]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := make(chan map[string]any, 2)
+			upgrader := websocket.Upgrader{}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				conn, err := upgrader.Upgrade(w, req, nil)
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				for _, frames := range [][]string{
+					{
+						`{"type":"response.output_item.added","output_index":0,"item":{` + call + `}}`,
+						`{"type":"response.output_item.done","output_index":0,"item":{` + call + `,"status":"completed","arguments":"{\"value\":1}"}}`,
+						`{"type":"response.incomplete","response":{"id":"resp-1","incomplete_details":{"reason":"max_output_tokens"},"output":` + tc.output + `}}`,
+					},
+					{`{"type":"response.completed","response":{"id":"resp-2","status":"completed","output":[]}}`},
+				} {
+					_, raw, err := conn.ReadMessage()
+					if err != nil {
+						return
+					}
+					var request map[string]any
+					if err := json.Unmarshal(raw, &request); err != nil {
+						return
+					}
+					select {
+					case requests <- request:
+					default:
+						return
+					}
+					for _, frame := range frames {
+						if err := conn.WriteMessage(websocket.TextMessage, []byte(frame)); err != nil {
+							return
+						}
+					}
+				}
+			}))
+			defer srv.Close()
+			r := &ResponsesProvider{}
+			defer r.resetCodexWebSocketChain("test_finished")
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			send := func(msgs []message.Message) (*message.Response, bool) {
+				t.Helper()
+				input := convertMessagesToResponsesWithItemIDs("", msgs, false, false, false)
+				resp, incremental, err := r.completeStreamCodexWebSocket(ctx, srv.URL+"/v1/responses", "test-key", model,
+					testCodexWSResponsesRequest(model, input), input, nil, time.Now(), codexWSCompleteOptions{SkipPrewarm: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return resp, incremental
+			}
+
+			msgs := []message.Message{{Role: message.RoleUser, Content: "hello"}}
+			resp, _ := send(msgs)
+			if resp.ProviderResponseID != "resp-1" || resp.StopReason != "length" ||
+				len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_1" || string(resp.ToolCalls[0].Args) != args {
+				t.Fatalf("truncated response = %+v, want the finalized call and response ID", resp)
+			}
+			msgs = append(msgs,
+				message.Message{Role: message.RoleAssistant, ResponsesOutput: resp.ResponsesOutput, ToolCalls: resp.ToolCalls, StopReason: resp.StopReason},
+				message.Message{Role: message.RoleTool, ToolCallID: "call_1", Content: "result"},
+			)
+			conn := r.codexWSConn
+			if _, incremental := send(msgs); incremental != tc.incremental || r.codexWSConn != conn {
+				t.Fatalf("incremental=%t, same connection=%t; want incremental=%t on the same connection", incremental, r.codexWSConn == conn, tc.incremental)
+			}
+			if len(requests) != 2 {
+				t.Fatalf("captured %d requests, want 2", len(requests))
+			}
+			<-requests
+			followUp := <-requests
+			if tc.incremental {
+				delta, _ := followUp["input"].([]any)
+				if followUp["previous_response_id"] != "resp-1" || len(delta) != 1 ||
+					delta[0].(map[string]any)["type"] != "function_call_output" || delta[0].(map[string]any)["call_id"] != "call_1" {
+					t.Fatalf("follow-up = %v, want only the result of call_1 chained to resp-1", followUp)
+				}
+				return
+			}
+			assertCodexWSFullInputWithoutPreviousResponseID(t, followUp, 3)
+			input := followUp["input"].([]any)
+			replayed, _ := input[1].(map[string]any)
+			if replayed["type"] != "function_call" || replayed["call_id"] != "call_1" || replayed["arguments"] != args ||
+				input[2].(map[string]any)["type"] != "function_call_output" {
+				t.Fatalf("full input = %v, want one finalized call followed by its result", input)
+			}
+		})
 	}
 }
 

@@ -112,6 +112,67 @@ func TestResponsesIncompleteItemKeepsCompletedSibling(t *testing.T) {
 	}
 }
 
+func TestResponsesIncompleteBaselineMatchesHistoryWithMissingArguments(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		call     string
+		doneArgs string
+		status   string
+		args     string
+		freeform bool
+	}{
+		{"completed function", `"type":"function_call","name":"sample_tool"`, `,"arguments":"{\"value\":1}"`, "completed", `{"value":1}`, false},
+		{"function without status", `"type":"function_call","name":"sample_tool"`, `,"arguments":"{\"value\":1}"`, "", `{"value":1}`, false},
+		{"freeform patch", `"type":"custom_tool_call","name":"apply_patch"`, `,"input":"*** Begin Patch\n*** End Patch"`, "completed", `{"patch":"*** Begin Patch\n*** End Patch"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const identity = `"id":"item_1","call_id":"call_1",`
+			item := identity + tc.call
+			terminal := item
+			if tc.status != "" {
+				terminal += `,"status":"` + tc.status + `"`
+			}
+			events := []string{
+				`{"type":"response.output_item.added","output_index":0,"item":{` + item + `}}`,
+				`{"type":"response.output_item.done","output_index":0,"item":{` + item + tc.doneArgs + `}}`,
+				`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"item_2","call_id":"call_2","name":"sample_tool"}}`,
+				`{"type":"response.incomplete","response":{"id":"resp_1","incomplete_details":{"reason":"max_output_tokens"},"output":[{` + terminal + `},{"type":"function_call","id":"item_2","call_id":"call_2","name":"sample_tool","status":"incomplete","arguments":"{}"}]}}`,
+			}
+			resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", tc.freeform, false, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StopReason != "length" || len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_1" || string(resp.ToolCalls[0].Args) != tc.args {
+				t.Fatalf("response = %+v, want the stream-finalized call only", resp)
+			}
+			history := []message.Message{
+				{Role: message.RoleUser, Content: "hello"},
+				{Role: message.RoleAssistant, ResponsesOutput: resp.ResponsesOutput, ToolCalls: resp.ToolCalls, StopReason: resp.StopReason},
+				{Role: message.RoleTool, ToolCallID: "call_1", Content: "success"},
+			}
+			for _, store := range []bool{false, true} {
+				input := convertMessagesToResponsesWithItemIDs("", history[:1], store, tc.freeform, false)
+				_, baselineLen, sig := codexWSBuildBaseline(input, items, store)
+				r := &ResponsesProvider{codexWSConn: &websocket.Conn{}}
+				const url, model, reqSig = "https://example.invalid/v1/responses", "test-model", "request"
+				r.codexWSStoreChainStateLocked("key", url, model, "", reqSig, baselineLen, sig, resp.ProviderResponseID)
+				next := convertMessagesToResponsesWithItemIDs("", history, store, tc.freeform, false)
+				ok, start, reason := r.codexWSCanUseIncrementalLocked("key", url, model, "", reqSig, next, false)
+				if !ok || start != len(input)+1 || len(next) != start+1 {
+					t.Errorf("store=%t incremental=%t start=%d reason=%q, baseline output=%+v, history output=%+v", store, ok, start, reason, items, next[len(input):])
+				}
+			}
+			wantStatus := tc.status
+			if tc.freeform {
+				wantStatus = ""
+			}
+			if len(resp.ResponsesOutput) != 1 || resp.ResponsesOutput[0].Status != wantStatus || resp.ResponsesOutput[0].Arguments != tc.args {
+				t.Fatalf("persisted output = %+v; want one call with status %q and args %s", resp.ResponsesOutput, wantStatus, tc.args)
+			}
+		})
+	}
+}
+
 func TestResponsesExplicitIncompleteItemBlocksTerminalRecovery(t *testing.T) {
 	// A proxy may append a terminal snapshot that omits the item's incomplete
 	// status. The explicit stream event is stronger evidence: never execute the

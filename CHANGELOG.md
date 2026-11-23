@@ -60,6 +60,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 ### Fixes
 
 - Full Responses requests preserve the completion status returned for function calls when resending conversation history, including after a session resume.
+- A truncated Responses reply whose final event omits a completed tool call's arguments can still continue over WebSocket without resending the conversation. Chord keeps the arguments from the completed call.
 - HTTP 5xx responses that carry gateway error bodies such as `invalid_request_error` now remain eligible for fallback-model retries and honor `Retry-After`, instead of being mistaken for client request errors.
 
 - Context compaction keeps the latest user request even when it starts with `[Context Summary]` or quotes a worker notification.
