@@ -355,6 +355,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.restoreQuestions(nil)
 	a.installContextNoticePresence(nil)
 	a.fileTrack = filelock.NewFileTracker()
+	a.lazyReadMemo.reset()
 	a.clearEvidenceCandidates()
 	a.ctxMgr.RestoreStats(message.TokenUsage{})
 	a.ctxMgr.ClearLastTokenUsage()

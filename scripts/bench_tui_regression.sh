@@ -47,7 +47,7 @@ else
   BENCH_PATTERN="$SMOKE_BENCH_PATTERN"
   : "${CHORD_BENCH_TIME:=1x}"
   PACED_BENCH_TIME=1x
-  CARD_BENCH_PATTERN='^(BenchmarkStreamingGrowingCard|BenchmarkLargeCardWindow)$/^(1|2|1024)$/^(64|first_window|scroll_window)$'
+  CARD_BENCH_PATTERN='^(BenchmarkStreamingGrowingCard|BenchmarkLargeCardWindow)$/^(1|2|1024)$/^(64|first_window|first_window_inline_code|scroll_window)$'
 fi
 
 if [[ "${CHORD_BENCH_SKIP_TESTS:-}" != "1" ]]; then

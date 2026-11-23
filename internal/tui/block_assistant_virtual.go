@@ -247,7 +247,7 @@ func assistantVirtualSegmentText(raw string) (heading bool, text string, ok bool
 	if raw == "" || raw != strings.TrimSpace(raw) || !utf8.ValidString(raw) {
 		return false, "", false
 	}
-	if strings.ContainsAny(raw, "\t\r\n\u2028\u2029") || strings.ContainsAny(raw, "*_`[]<>\\|~&") {
+	if strings.ContainsAny(raw, "\t\r\n\u2028\u2029") {
 		return false, "", false
 	}
 	for i := 0; i < len(raw); i++ {
@@ -275,7 +275,36 @@ func assistantVirtualSegmentText(raw string) (heading bool, text string, ok bool
 		assistantVirtualOrderedListPrefix(text) || assistantVirtualContainsEmojiShortcode(text) {
 		return false, "", false
 	}
-	return heading, text, true
+	text, ok = assistantVirtualInlineText(text)
+	return heading, text, ok
+}
+
+// Single-backtick code spans have no visible prefix or suffix in the card
+// style. Measure their literal text, but render the original Markdown.
+func assistantVirtualInlineText(text string) (string, bool) {
+	const markup = "*_[]<>\\|~&"
+	prefix, rest, found := strings.Cut(text, "`")
+	if !found {
+		return text, !strings.ContainsAny(text, markup)
+	}
+	var out strings.Builder
+	out.Grow(len(text))
+	for found {
+		code, tail, closed := strings.Cut(rest, "`")
+		if strings.ContainsAny(prefix, markup) || !closed || code == "" ||
+			strings.HasPrefix(tail, "`") || strings.ContainsAny(code, "&\\") ||
+			strings.HasPrefix(code, " ") || strings.HasSuffix(code, " ") {
+			return "", false
+		}
+		out.WriteString(prefix)
+		out.WriteString(code)
+		prefix, rest, found = strings.Cut(tail, "`")
+	}
+	if strings.ContainsAny(prefix, markup) {
+		return "", false
+	}
+	out.WriteString(prefix)
+	return out.String(), true
 }
 
 func assistantVirtualOrderedListPrefix(text string) bool {

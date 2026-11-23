@@ -25,6 +25,8 @@ func virtualAssistantTestContent(paragraphs int) string {
 func TestAssistantVirtualLayoutMatchesFullRender(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	content := virtualAssistantTestContent(220)
+	content = strings.ReplaceAll(content, "ordinary words", "`ordinary words`")
+	content = strings.ReplaceAll(content, "ordinary prose", "`sample_file.go` and `rows[0]`")
 	for _, width := range []int{20, 40, 100} {
 		virtual := &Block{Type: BlockAssistant, Content: content}
 		fullBlock := &Block{Type: BlockAssistant, Content: content}
@@ -35,7 +37,7 @@ func TestAssistantVirtualLayoutMatchesFullRender(t *testing.T) {
 			t.Fatalf("width %d: virtual line count = %d, full = %d", width, count, len(full))
 		}
 		layout := virtual.virtualAssistant
-		if layout == nil {
+		if layout == nil || !layout.valid {
 			t.Fatalf("width %d: expected a virtual layout", width)
 		}
 		_ = virtual.RenderRange(width, "", 0, min(40, count))
@@ -46,6 +48,9 @@ func TestAssistantVirtualLayoutMatchesFullRender(t *testing.T) {
 		}
 		if got := virtual.RenderRange(width, "", 0, count); !slices.Equal(got, full) {
 			t.Fatalf("width %d: full virtual range differs from full render", width)
+		}
+		if !layout.valid {
+			t.Fatalf("width %d: rendering code spans invalidated the layout", width)
 		}
 		for _, window := range [][2]int{
 			{0, min(40, count)},

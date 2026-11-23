@@ -24,20 +24,27 @@ import (
 // the verdict without re-reading the file; the content hash is recomputed only
 // when the stat changes.
 //
-// The memo is bounded: overflowing resets it wholesale, because it is only a
-// stat-comparison shortcut and the next pass re-verifies stat-first (cheap).
+// At capacity, existing entries remain reusable while new keys are verified
+// without being cached. Clearing the whole memo would make sequential history
+// scans just over capacity re-hash every file every time.
 type externalReadLazyMemo struct {
-	mu       sync.Mutex
-	verdicts map[string]externalReadLazyVerdict
-	// missing rate-limits re-stats of paths already seen not to exist; a
-	// missing read is stale by definition, so the interval only bounds how
-	// often a permanently deleted file costs a stat.
-	missing map[string]int64
+	mu         sync.Mutex
+	generation uint64
+	verdicts   map[string]externalReadLazyVerdict
 }
 
-// lazyReadMissingRecheckInterval bounds how often a path already observed
-// missing is re-stat'd.
-const lazyReadMissingRecheckInterval = 5 * time.Second
+func (m *externalReadLazyMemo) reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.generation++
+	m.verdicts = nil
+}
+
+func (m *externalReadLazyMemo) currentGeneration() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.generation
+}
 
 // lazyReadMemoMaxEntries bounds the lazy read-verification memo. Each entry
 // is a (path, expected-hash) verdict; a long session reading many distinct
@@ -155,10 +162,10 @@ func (a *MainAgent) externalReadsInvalidatedLazy(messages []message.Message, sca
 	if a == nil || a.tools == nil || len(messages) == 0 {
 		return nil
 	}
+	// Pin the generation for the whole scan so neither this file nor later
+	// files from a replaced session can populate its successor's memo.
+	generation := a.lazyReadMemo.currentGeneration()
 	callMeta := scan.CallMeta()
-	// Stat/hash I/O runs outside the memo mutex: holding it across the whole
-	// scan serialized concurrent prepares behind per-file disk I/O. The memo
-	// map is only touched under its lock inside lazyReadStatCheck.
 	var invalidated map[int]bool
 	for i := range messages {
 		msg := &messages[i]
@@ -177,7 +184,7 @@ func (a *MainAgent) externalReadsInvalidatedLazy(messages []message.Message, sca
 			if !filepath.IsAbs(path) && a.effectiveToolBaseDir() != "" {
 				path = filepath.Join(a.effectiveToolBaseDir(), path)
 			}
-			stale := a.lazyReadStatCheck(path, expected)
+			stale := a.lazyReadMemo.check(generation, path, expected)
 			if stale {
 				if invalidated == nil {
 					invalidated = make(map[int]bool)
@@ -190,7 +197,7 @@ func (a *MainAgent) externalReadsInvalidatedLazy(messages []message.Message, sca
 	return invalidated
 }
 
-// lazyReadStatCheck returns true when the file at path no longer matches the
+// check returns true when the file at path no longer matches the
 // hash captured at read time. The memo fast path compares the current stat
 // with the cached one and reuses the verdict; otherwise the content hash is
 // recomputed and the cache updated.
@@ -199,36 +206,18 @@ func (a *MainAgent) externalReadsInvalidatedLazy(messages []message.Message, sca
 // symlink path it was given, so keying the memo on the link's own mtime/size
 // would pin the verdict to metadata that does not change when the target is
 // edited, and the stale read would stay marked current forever.
-func (a *MainAgent) lazyReadStatCheck(path, expected string) bool {
+func (m *externalReadLazyMemo) check(generation uint64, path, expected string) bool {
 	key := path + "\x00" + expected
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Recorded content cannot be current: the read is stale. The
-			// missing verdict is rate-limited (re-stat at most once per
-			// interval) so a deleted file that stays deleted stops costing a
-			// stat per request; the entry expires and a reapplied file is
-			// picked up again.
-			a.lazyReadMemo.mu.Lock()
-			var missing int64
-			var ok bool
-			if a.lazyReadMemo.missing != nil {
-				missing, ok = a.lazyReadMemo.missing[key]
+			// A recreated file can have the same mtime and size as the
+			// deleted one. Verify its contents when it next appears.
+			m.mu.Lock()
+			if m.generation == generation {
+				delete(m.verdicts, key)
 			}
-			a.lazyReadMemo.mu.Unlock()
-			now := time.Now().UnixNano()
-			if ok && now-missing < int64(lazyReadMissingRecheckInterval) {
-				return true
-			}
-			a.lazyReadMemo.mu.Lock()
-			if a.lazyReadMemo.missing == nil {
-				a.lazyReadMemo.missing = make(map[string]int64)
-			}
-			if len(a.lazyReadMemo.missing) >= lazyReadMemoMaxEntries {
-				clear(a.lazyReadMemo.missing)
-			}
-			a.lazyReadMemo.missing[key] = now
-			a.lazyReadMemo.mu.Unlock()
+			m.mu.Unlock()
 			return true
 		}
 		// Transient stat error: unknown, do not assert stale or valid.
@@ -236,14 +225,11 @@ func (a *MainAgent) lazyReadStatCheck(path, expected string) bool {
 	}
 	mtimeNano := info.ModTime().UnixNano()
 	size := info.Size()
-	a.lazyReadMemo.mu.Lock()
-	var verdict externalReadLazyVerdict
-	var ok bool
-	if a.lazyReadMemo.verdicts != nil {
-		verdict, ok = a.lazyReadMemo.verdicts[key]
-	}
-	a.lazyReadMemo.mu.Unlock()
-	if ok && verdict.mtimeNano == mtimeNano && verdict.size == size {
+	m.mu.Lock()
+	verdict, ok := m.verdicts[key]
+	current := m.generation == generation
+	m.mu.Unlock()
+	if current && ok && verdict.mtimeNano == mtimeNano && verdict.size == size {
 		return verdict.changed
 	}
 	hash, exists, _, err := verifiedCurrentFileHash(path)
@@ -253,22 +239,23 @@ func (a *MainAgent) lazyReadStatCheck(path, expected string) bool {
 		return false
 	}
 	changed := !exists || hash != expected
-	a.lazyReadMemo.mu.Lock()
-	if a.lazyReadMemo.verdicts == nil {
-		a.lazyReadMemo.verdicts = make(map[string]externalReadLazyVerdict)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.generation != generation {
+		return changed
 	}
-	if len(a.lazyReadMemo.verdicts) >= lazyReadMemoMaxEntries {
-		// The memo is a stat shortcut, not a source of truth: resetting it
-		// costs at most one stat-only re-verification per entry on the next
-		// pass, so a wholesale reset is cheaper than eviction bookkeeping and
-		// keeps the map bounded in long sessions.
-		clear(a.lazyReadMemo.verdicts)
+	if m.verdicts == nil {
+		m.verdicts = make(map[string]externalReadLazyVerdict)
 	}
-	a.lazyReadMemo.verdicts[key] = externalReadLazyVerdict{
+	if len(m.verdicts) >= lazyReadMemoMaxEntries {
+		if _, exists := m.verdicts[key]; !exists {
+			return changed
+		}
+	}
+	m.verdicts[key] = externalReadLazyVerdict{
 		mtimeNano: mtimeNano,
 		size:      size,
 		changed:   changed,
 	}
-	a.lazyReadMemo.mu.Unlock()
 	return changed
 }

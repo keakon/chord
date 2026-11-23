@@ -17,7 +17,8 @@ func TestLazyReadValidationFollowsSymlinkTarget(t *testing.T) {
 		t.Skip("symlink creation is platform-specific")
 	}
 	dir := t.TempDir()
-	a := newTestMainAgent(t, dir)
+	var memo externalReadLazyMemo
+	generation := memo.currentGeneration()
 
 	target := filepath.Join(dir, "target.txt")
 	link := filepath.Join(dir, "link.txt")
@@ -33,7 +34,7 @@ func TestLazyReadValidationFollowsSymlinkTarget(t *testing.T) {
 		t.Fatalf("hash through symlink: exists=%v err=%v", exists, err)
 	}
 
-	if a.lazyReadStatCheck(link, expected) {
+	if memo.check(generation, link, expected) {
 		t.Fatal("unmodified symlink read reported as changed")
 	}
 
@@ -54,7 +55,7 @@ func TestLazyReadValidationFollowsSymlinkTarget(t *testing.T) {
 		t.Skip("platform updates the symlink's own stat on target writes")
 	}
 
-	if !a.lazyReadStatCheck(link, expected) {
+	if !memo.check(generation, link, expected) {
 		t.Fatal("edit to the symlink target was not detected: the stale read stays marked current")
 	}
 }

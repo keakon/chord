@@ -46,6 +46,11 @@ func TestAssistantVirtualWrapParity(t *testing.T) {
 func TestAssistantVirtualRejectsTransformedMarkdown(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	for name, unit := range map[string]string{
+		"unclosed code":    "The `sample file has an unmatched code delimiter.",
+		"escaped code":     "The \\`sample\\` is literal text.",
+		"multi tick code":  "The ``sample `value` `` has nested delimiters.",
+		"padded code":      "The ` sample ` has normalized whitespace.",
+		"mixed emphasis":   "A `sample` with **emphasis** in its paragraph.",
 		"definition":       "A term with ordinary words\n: A definition with enough ordinary words to wrap over several lines at narrow terminal widths.",
 		"loose definition": "A term with ordinary words\n\n: A definition with enough ordinary words to wrap over several lines at narrow terminal widths.",
 		"www paragraph":    "Visit www.example.invalid/long/path/for/details with enough ordinary words in this paragraph",

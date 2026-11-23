@@ -827,6 +827,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	restoredMessages := a.ctxMgr.Snapshot()
 	a.resetRuntimeEvidenceFromMessages(restoredMessages)
 	a.fileTrack = filelock.NewFileTracker()
+	a.lazyReadMemo.reset()
 	a.restoreMainTrackedFileState(restoredMessages)
 	a.ctxMgr.RestoreStats(loaded.ContextUsage)
 	if len(restoredMessages) > 0 {

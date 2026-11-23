@@ -19,6 +19,14 @@ func BenchmarkLargeCardWindow(b *testing.B) {
 				_ = block.RenderRange(100, "", 0, 40)
 			}
 		})
+		mixed := strings.Replace(content, "short", "`short`", 1)
+		b.Run(fmt.Sprintf("%d/first_window_inline_code", paragraphs), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				block := &Block{Type: BlockAssistant, Content: mixed}
+				_ = block.RenderRange(100, "", 0, 40)
+			}
+		})
 		b.Run(fmt.Sprintf("%d/scroll_window", paragraphs), func(b *testing.B) {
 			block := &Block{Type: BlockAssistant, Content: content}
 			count := block.LineCount(100)
