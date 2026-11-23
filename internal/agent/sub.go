@@ -1662,19 +1662,11 @@ func subAgentCoordinationPromptText(visible map[string]struct{}) string {
 	return strings.Join(lines, "\n")
 }
 
-// taskCompletionInstruction closes the "## Your Task" section. Blocker routing
-// is not restated here: the SubAgent Coordination section (rendered from the
-// live visibility snapshot) owns it, and SubAgent Task Closure already points
-// there, so a third copy would only drift.
-const taskCompletionInstruction = "Focus only on this task."
-
 // System prompt
 // ---------------------------------------------------------------------------
 
-// buildSystemPrompt constructs the SubAgent's system prompt. Unlike
-// MainAgent, it does NOT include git status (SubAgent focuses on a single
-// task, not repository-wide status) and includes a dedicated "Your Task"
-// section.
+// The delegation and subsequent owner instructions belong to the conversation,
+// not this system prompt: the owner can revise the task.
 func (s *SubAgent) buildSystemPrompt() string {
 	var parts []string
 
@@ -1703,12 +1695,9 @@ func (s *SubAgent) buildSystemPrompt() string {
 	// user message (mirrors MainAgent) to keep this system prompt static and
 	// prefix-cacheable.
 
-	// Task description (core difference from MainAgent).
-	taskSection := fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, taskCompletionInstruction)
 	if block := s.resultContractPromptBlock(); block != "" {
-		taskSection += "\n\n" + block
+		parts = append(parts, block)
 	}
-	parts = append(parts, taskSection)
 
 	// AGENTS.md contents are injected separately from the shared mechanism
 	// guidance, as in MainAgent.

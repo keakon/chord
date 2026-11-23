@@ -22,6 +22,35 @@ func TestLatestRecoverableUserIntentSkipsCompactionSummary(t *testing.T) {
 	}
 }
 
+func TestCompactionUsesMessageIdentityForQuotedMarkers(t *testing.T) {
+	for _, text := range []string{
+		"[Context Summary] is displayed twice. Explain why.",
+		"[SubAgent worker completed] is missing. Explain why.",
+		"[SubAgent worker requests intervention] is displayed twice. Explain why.",
+	} {
+		msg := message.Message{Role: message.RoleUser, Content: text}
+		history := []message.Message{
+			{Role: message.RoleUser, Content: "Review the parser."},
+			{Role: message.RoleUser, Content: "Earlier checkpoint", IsCompactionSummary: true},
+			msg,
+			{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "Context pressure"},
+		}
+		if got := resolveLatestUserRequestAnchor(history); got.Text != text || got.Kind != "user_request" {
+			t.Errorf("latest request = %+v, want %q", got, text)
+		}
+		if got := buildGoalAnchor(history); got != "- "+text {
+			t.Errorf("summary goal = %q, want %q", got, text)
+		}
+		a := &MainAgent{}
+		a.recordEvidenceFromMessage(msg)
+		for _, items := range [][]evidenceItem{a.evidence.snapshot(), collectEvidenceItems(history)} {
+			if len(items) != 1 || items[0].Kind != evidenceUserRequest || items[0].Excerpt != text {
+				t.Errorf("user evidence for %q = %+v", text, items)
+			}
+		}
+	}
+}
+
 func TestCollectEvidenceItemsPreservesLatestDoneRejectedReason(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "tool", Content: "Done rejected: older request"},

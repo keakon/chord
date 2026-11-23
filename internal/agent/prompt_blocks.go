@@ -71,7 +71,7 @@ func codingGuidelinesPrompt(audience capabilityPromptAudience) string {
 - Do not write comments that restate what the code already does or merely paraphrase identifier names; only comment a non-obvious WHY (hidden constraint, subtle invariant, workaround, surprising behavior)
 - Do not leave backwards-compatibility shims, re-exports, renamed stubs, or "removed for X" placeholder comments when the change can simply replace the old code
 - Do not remove pre-existing dead code unless asked; if you notice it, mention it but do not delete it
-- Do not modify files during analysis-only tasks unless the user requests a written deliverable
+- On analysis-only tasks, leave project files unchanged unless the user requests a written deliverable. Private recovery notes are allowed within file permissions unless the user asks for no writes.
 - Do not add comments, docstrings, or type annotations to unchanged code
 - Do not output formats that render poorly in a terminal (e.g. inline images, wide tables)
 - Do not add a final audit loop, re-review, or re-test pass only to demonstrate compliance with these rules`
@@ -180,9 +180,8 @@ var subAgentResponseClosurePrompt = `## SubAgent Task Closure
 // complete reports its coordination section describes (fileDeliveryShareRoute).
 func fileDeliveryPrompt(audience capabilityPromptAudience) string {
 	return `## File Delivery
-- Call present only when the user needs a file itself: a generated report, document, web page, image, PDF, or binary, a file outside the repository, or a specific file the user explicitly asked to receive. Do not present repository source, tests, changelog, or configuration files merely because you edited them; describe code changes in the response and leave them to the diff or commit. Do not call present when no file delivery is needed.
-- Files under .chord/ are private working state and should not be presented by default. ` + fileDeliveryShareRoute(audience) + `; present a .chord/ file only when the user explicitly asks to receive it and a present-specific permission rule allows its path.
-- present does not create files, open applications, or establish test success. Explain the file purpose and actual verification status in the final response.
+- Describe repository edits in the response. Use present when the user needs the file itself, following the tool's delivery rules.
+- ` + fileDeliveryShareRoute(audience) + `.
 - Workspace deliveries show the current file at its original location. For existing child-task artifacts, use the exact artifact reference and digest; do not reinterpret child paths relative to your working directory.`
 }
 

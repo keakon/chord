@@ -152,6 +152,21 @@ func TestCompactionAnchorsDoNotForgeMarkdownSections(t *testing.T) {
 	}
 }
 
+func TestCheckpointKeepsLaterUserRevisionAboveCarriedConstraints(t *testing.T) {
+	const earlier = "Do not edit the configuration."
+	const revision = "Update the configuration file now."
+	summary := withCompactionAnchors("## Current User Request\n- Latest user request: "+revision, compactionAnchors{Constraints: []string{earlier}})
+	for _, mode := range []string{message.CompactionSummaryModeModelSummary, message.CompactionSummaryModeModelDriven, message.CompactionSummaryModeStructuredFallback, message.CompactionSummaryModeTruncateOnly} {
+		body := buildCompactionCheckpointMessage(summary, nil, mode, nil)
+		view := projectCheckpointRequests([]message.Message{{Role: message.RoleUser, IsCompactionSummary: true, CompactionSummaryMode: mode, Content: body}})[0].Content
+		for _, want := range []string{revision, earlier, checkpointConstraintPriority} {
+			if !strings.Contains(view, want) {
+				t.Errorf("%s request view lost %q", mode, want)
+			}
+		}
+	}
+}
+
 func TestCheckpointWithAnchorsStillExtractsKeyFiles(t *testing.T) {
 	projectRoot := t.TempDir()
 	keyFile := filepath.Join(projectRoot, "parser.go")

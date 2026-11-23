@@ -31,7 +31,7 @@ func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, 
 	facts := buildSubAgentCheckpointRuntimeFacts(s, messages)
 	var b strings.Builder
 	fmt.Fprintf(&b, "[system] SubAgent context checkpoint: %d earlier messages were removed for %s.\n", removed, reason)
-	b.WriteString("- Task: ")
+	b.WriteString("- Initial assignment: ")
 	b.WriteString(facts.task)
 	b.WriteByte('\n')
 	b.WriteString("- Owner: ")
@@ -118,16 +118,11 @@ func firstLineOrUnknown(value string, max int) string {
 // declarative constraints so they survive with their semantics intact.
 // Synthetic user-role messages other than mailbox deliveries (compaction
 // summaries, pressure notices, loop notices, job results) carry no owner
-// instruction and are skipped. The [system] content prefix is checked
-// alongside the structured IsUserAuthored marker because checkpoints persisted
-// before that marker existed have no other discriminator; it also excludes the
-// context checkpoints this function renders. A real owner message that
-// happens to open with "[system]" is skipped too — an accepted limitation of
-// the legacy format.
+// instruction and are skipped.
 func latestOwnerInstructionForCheckpoint(messages []message.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := &messages[i]
-		if msg.Role != message.RoleUser || strings.HasPrefix(strings.TrimSpace(msg.Content), "[system]") {
+		if msg.Role != message.RoleUser {
 			continue
 		}
 		if !message.IsUserAuthored(*msg) && msg.Kind != message.KindSubAgentMailbox {

@@ -23,14 +23,14 @@ func TestBuildSessionContextReminder_OnlyDate(t *testing.T) {
 	if !strings.Contains(got, "<env>") {
 		t.Errorf("missing env block when Date set: %q", got)
 	}
-	if !strings.Contains(got, "Today's date: Apr 17 2026") {
+	if !strings.Contains(got, "Environment snapshot date: Apr 17 2026") {
 		t.Errorf("missing env date line: %q", got)
 	}
 	if strings.Contains(got, "# currentDate") {
 		t.Errorf("should not duplicate currentDate when env date is present: %q", got)
 	}
-	if strings.Contains(got, "Today's date is 2026-04-17") {
-		t.Errorf("should not duplicate ISO date when env date is present: %q", got)
+	if strings.Contains(got, "Today's date") {
+		t.Errorf("a cached snapshot must not claim its date is current: %q", got)
 	}
 	if strings.Contains(got, "AGENTS.md") {
 		t.Errorf("should not mention AGENTS.md when AGENTS.md empty: %q", got)
@@ -46,7 +46,7 @@ func TestBuildSessionContextReminder_IncludesSessionWorkingDirectory(t *testing.
 		"<env>",
 		"Working directory: /repo/session",
 		"Platform: test/os",
-		"Today's date: Apr 17 2026",
+		"Environment snapshot date: Apr 17 2026",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("reminder missing %q: %q", want, got)
@@ -90,7 +90,7 @@ func TestCallLLMInjectsWorkingDirectoryReminderIntoFirstProviderRequest(t *testi
 func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	facts := []message.DirectoryInstructionFact{directoryTestFact(".", "project rules body")}
 	got := buildSessionContextReminder(SessionEnvSnapshot{Date: "Apr 17 2026"}, facts)
-	for _, fragment := range []string{"# AGENTS.md", "<INSTRUCTIONS>\nproject rules body\n</INSTRUCTIONS>", "Scope: .", "Today's date"} {
+	for _, fragment := range []string{"# AGENTS.md", "<INSTRUCTIONS>\nproject rules body\n</INSTRUCTIONS>", "Scope: .", "Environment snapshot date: Apr 17 2026"} {
 		if !strings.Contains(got, fragment) {
 			t.Fatalf("missing %q in %q", fragment, got)
 		}

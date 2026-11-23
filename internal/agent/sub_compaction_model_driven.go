@@ -279,7 +279,7 @@ func (c subModelDrivenCheckpointContent) build(removed int, archiveRef string) s
 	b.WriteString(c.facts.skills)
 	b.WriteByte('\n')
 	b.WriteString("Runtime facts:\n")
-	b.WriteString("- Task: ")
+	b.WriteString("- Initial assignment: ")
 	b.WriteString(c.facts.task)
 	b.WriteByte('\n')
 	b.WriteString("- Owner: ")

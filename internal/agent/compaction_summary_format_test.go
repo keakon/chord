@@ -25,7 +25,9 @@ func TestCompactionSystemPromptKeepsContinuationRules(t *testing.T) {
 		"list at most 15 repository files or directories",
 		"Prefer short references over restating details",
 		"only while it remains unanswered or needs action",
-		"An answer that delivered findings or recommendations does not resolve them",
+		"A delivered review completes a review-only request",
+		`list implementation under "Open Problems" only if the user requested it`,
+		"unless a later user instruction explicitly revises them",
 	} {
 		if !strings.Contains(compactionSystemPrompt, want) {
 			t.Errorf("compaction system prompt missing %q", want)
@@ -58,7 +60,7 @@ func TestModelDrivenSummaryOrderIsDeliberate(t *testing.T) {
 	if nextStep < 0 || progress < 0 || constraints < 0 || objective < 0 {
 		t.Fatalf("model-driven summary lost a continuation section:\n%s", summary)
 	}
-	if !(constraints < objective && nextStep < progress) {
+	if constraints >= objective || nextStep >= progress {
 		t.Fatal("model-driven summary must keep Constraints before Active Objective and Next Step before Progress")
 	}
 }

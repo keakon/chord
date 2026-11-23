@@ -263,9 +263,8 @@ func TestPriorCheckpointSurfacedInSummarizePrompt(t *testing.T) {
 	prompt := buildCompactionPromptWithKeyFiles(input, "history-1.md", nil, nil, nil, nil)
 	for _, want := range []string{
 		"Prior durable checkpoint",
-		"Newer transcript takes precedence",
-		"drop resolved blockers, answered questions",
-		"Standing constraints in the durable session anchors outrank both",
+		"Use later user instructions to update the objective and constraints",
+		"Drop resolved blockers and answered questions",
 		"## Key Decisions\n- keep archival profile",
 	} {
 		if !strings.Contains(prompt, want) {

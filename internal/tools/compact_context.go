@@ -696,7 +696,7 @@ func compactContextToolProperties() map[string]any {
 			"type":        "array",
 			"maxItems":    MaxCompactContextOpenIssues,
 			"items":       map[string]any{"type": "string", "minLength": 1},
-			"description": "Unresolved blockers, risks, unfinished updates, or facts awaiting confirmation.",
+			"description": "Blockers, risks, unfinished work or facts to verify for the current request. A delivered review finding is not unfinished implementation unless implementation was requested.",
 		},
 		"open_issues_complete": map[string]any{
 			"type":        "boolean",

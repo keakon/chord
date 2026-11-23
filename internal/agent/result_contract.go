@@ -258,9 +258,7 @@ func (s *SubAgent) resultContractFailure() *TaskContractDiagnostics {
 }
 
 // resultContractPromptBlock tells the worker what the delegated result must look
-// like. It is appended to "## Your Task" because the contract is part of the
-// task definition, while the complete tool's own declaration stays
-// task-agnostic so the tool surface and its prompt prefix cache are unaffected.
+// like. The complete tool's own declaration stays task-agnostic.
 func (s *SubAgent) resultContractPromptBlock() string {
 	if !s.hasResultContract() || len(s.resultSchemaJSON) == 0 {
 		return ""

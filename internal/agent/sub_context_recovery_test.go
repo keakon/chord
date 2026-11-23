@@ -122,14 +122,14 @@ func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
 func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) {
 	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
-	sub.taskDesc = "preserve the task contract"
+	sub.taskDesc = "Preserve the task contract.\nKeep the reporting format unchanged."
 	sub.ownerAgentID = "main"
 	parent.globalConfig = config.DefaultConfig()
 	parent.globalConfig.Context.Compaction.Threshold = 0.5
 	sub.llmClient.Close()
 	sub.llmClient = nil // This test supplies its own token budgets.
 	sub.ctxMgr.SetTokenBudgets(3000, 2400, 2400, 0)
-	messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
+	messages := []message.Message{{Role: message.RoleUser, Content: sub.taskDesc}}
 	for range 12 {
 		messages = append(messages,
 			message.Message{Role: message.RoleAssistant, Content: strings.Repeat("analysis ", 160)},
@@ -154,9 +154,12 @@ func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) 
 	if orchestration.SubAgentCompactions != 1 || orchestration.SubAgentTokensSaved == 0 {
 		t.Fatalf("orchestration stats = %+v, want one compaction with savings", orchestration)
 	}
+	if len(prepared) == 0 || prepared[0].Content != sub.taskDesc {
+		t.Fatal("proactive compression lost the full initial owner message")
+	}
 	foundCheckpoint := false
 	for _, msg := range prepared {
-		if strings.Contains(msg.Content, "Task: preserve the task contract") && strings.Contains(msg.Content, "Full pre-checkpoint history") {
+		if msg.IsCompactionSummary && strings.Contains(msg.Content, "Initial assignment: Preserve the task contract.") && strings.Contains(msg.Content, "Full pre-checkpoint history") {
 			foundCheckpoint = true
 			break
 		}

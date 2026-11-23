@@ -27,22 +27,6 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 	switch msg.Role {
 	case message.RoleUser:
 		switch {
-		case isEscalateMessage(text):
-			a.addEvidenceCandidate(buildEvidenceItem(
-				evidenceEscalate,
-				"SubAgent requested main-agent help",
-				"This unresolved intervention request may still determine the next action.",
-				"runtime user message",
-				requesttrim.TextSnippet(text, 700),
-			))
-		case isSubAgentDoneMessage(text):
-			a.addEvidenceCandidate(buildEvidenceItem(
-				evidenceSubAgentDone,
-				"SubAgent completion summary",
-				"The main agent may need this exact completion summary before continuing.",
-				"runtime user message",
-				requesttrim.TextSnippet(text, 700),
-			))
 		case looksLikeUserCorrection(text):
 			a.addEvidenceCandidate(buildUserCorrectionEvidence("runtime user message", text))
 		case looksLikeStatedConstraint(text):

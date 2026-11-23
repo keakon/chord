@@ -797,7 +797,7 @@ shell: allow
 	s.setRuleset(ruleset)
 
 	got := s.buildSystemPrompt()
-	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## Reasoning Discipline", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents when the target path is already known or has been verified.", "## Your Task", "surface the open product decisions to the owner agent (through the coordination tools available in this role)"} {
+	for _, want := range []string{subAgentIdentityPrompt, sharedAgentValuesPrompt, "## Guidelines", "## Reasoning Discipline", "## SubAgent Coordination", "## SubAgent Task Closure", "## Custom SubAgent Role", "## Tool Selection", "Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.", "Use `read` for file contents when the target path is already known or has been verified.", "surface the open product decisions to the owner agent (through the coordination tools available in this role)"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing %q in %q", want, got)
 		}
@@ -860,10 +860,8 @@ shell: allow
 			t.Fatalf("subagent prompt missing %q in %q", want, got)
 		}
 	}
-	// The Coordination section is the single blocker route; the task section
-	// does not repeat it.
-	if !strings.Contains(got, "## Your Task\n\nInspect the parser and report findings.\n\nFocus only on this task.") || strings.Contains(got, "if you are blocked") {
-		t.Fatalf("task section should defer blocker routing to Coordination: %q", got)
+	if strings.Contains(got, s.taskDesc) {
+		t.Fatal("initial owner assignment was promoted into the system prompt")
 	}
 
 	reg.Register(tools.NewEscalateTool(nil))

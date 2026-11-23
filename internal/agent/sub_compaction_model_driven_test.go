@@ -165,7 +165,7 @@ func TestSubAgentModelDrivenCheckpointAppliesAtBatchClose(t *testing.T) {
 		"- Open problems:\n  - flaky retry test",
 		"- State files: notes/20261030-refactor.md",
 		subAgentCheckpointSkillsPrefix,
-		"- Task: preserve the delegated task",
+		"- Initial assignment: preserve the delegated task",
 		"- Owner: main/",
 		"Full pre-checkpoint history: ",
 	} {
@@ -340,7 +340,7 @@ func TestSubAgentModelDrivenCheckpointContentKeepsSkillsContract(t *testing.T) {
 	for _, want := range []string{
 		"[system] SubAgent context checkpoint: 7 earlier messages were removed for " + subModelDrivenApplyReason,
 		"- Skills loaded earlier: none",
-		"- Task: do work",
+		"- Initial assignment: do work",
 		"Full pre-checkpoint history: archives/worker-1.md.",
 	} {
 		if !strings.Contains(content, want) {

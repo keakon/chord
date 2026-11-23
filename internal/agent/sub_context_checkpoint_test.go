@@ -36,7 +36,7 @@ func TestSubAgentStructuredCheckpointExtractsAuthoritativeState(t *testing.T) {
 
 	for _, want := range []string{
 		"SubAgent context checkpoint: 40 earlier messages were removed for context_length_exceeded",
-		"Task: Refactor the parser and keep the CLI output format unchanged",
+		"Initial assignment: Refactor the parser and keep the CLI output format unchanged",
 		"Owner: main/task-7",
 		"Latest owner/user instruction: 输出格式保持不变，只调整内部实现 (constraint)",
 		"Files read or changed: internal/parser/lexer.go, internal/parser/parser.go",
@@ -58,7 +58,7 @@ func TestSubAgentStructuredCheckpointMarksUnknownFields(t *testing.T) {
 	sub.taskDesc = ""
 	sub.runtimeState.set(SubAgentStateRunning, "")
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 5, "proactive", "archives/sub-2.md")
-	for _, field := range []string{"Task", "Owner", "Latest owner/user instruction", "Files read or changed", "Completed actions", "Known failures", "Open blocker"} {
+	for _, field := range []string{"Initial assignment", "Owner", "Latest owner/user instruction", "Files read or changed", "Completed actions", "Known failures", "Open blocker"} {
 		if !strings.Contains(checkpoint, "- "+field+": unknown") {
 			t.Errorf("field %q should be 'unknown' when no source exists:\n%s", field, checkpoint)
 		}
@@ -111,6 +111,13 @@ func TestSubAgentStructuredCheckpointSkipsSyntheticUserMessages(t *testing.T) {
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, messages, 12, "proactive", "archives/sub-5.md")
 	if !strings.Contains(checkpoint, "Latest owner/user instruction: owner: use cursor pagination") {
 		t.Errorf("mailbox owner instruction lost:\n%s", checkpoint)
+	}
+	revised := "[system] is a display label. Review its wording only."
+	messages = append(messages, message.Message{Role: message.RoleUser, Content: revised},
+		message.Message{Role: message.RoleUser, IsCompactionSummary: true, Content: "[system] SubAgent context checkpoint"})
+	checkpoint = buildSubAgentStructuredCheckpoint(sub, messages, 14, "proactive", "archives/sub-6.md")
+	if !strings.Contains(checkpoint, "Latest owner/user instruction: "+revised) || !strings.Contains(checkpoint, "Initial assignment: Add pagination") {
+		t.Fatalf("checkpoint lost or conflated owner instructions:\n%s", checkpoint)
 	}
 	sub.cancel()
 }

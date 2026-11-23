@@ -144,8 +144,9 @@ func TestIsChordInternalDeliveryTargetResolvesSymlinkedRoot(t *testing.T) {
 func TestPresentDescriptionRejectsEditedRepositoryFiles(t *testing.T) {
 	description := (PresentTool{}).Description()
 	for _, want := range []string{
-		"Use it only when the user needs a file itself",
-		"Do not declare repository source, tests, changelog, or configuration files merely because you edited them",
+		"Use it only when the user needs the file itself",
+		"Do not declare repository files merely because you edited them",
+		"only when the user explicitly requests it and a present-specific path rule permits it",
 	} {
 		if !strings.Contains(description, want) {
 			t.Fatalf("description missing %q: %q", want, description)

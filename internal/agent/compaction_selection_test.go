@@ -230,11 +230,11 @@ func TestCompactionHeadSplitFallsBackToFullHeadWhenSafeTailIsTooLarge(t *testing
 	}
 }
 
-func TestSplitMessagesForCompaction_FallsBackToLegacyExtractionHelper(t *testing.T) {
+func TestSelectEvidenceItemsRecognizesMailboxIntervention(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "user", Content: "Earlier discussion."},
 		{Role: "assistant", Content: "working"},
-		{Role: "user", Content: "[SubAgent agent-2 requests intervention]\n\nReason: merge conflict in auth flow\n\nDecide how to help this agent."},
+		{Role: message.RoleUser, Kind: message.KindSubAgentMailbox, Mailbox: &message.MailboxMetadata{Kind: string(SubAgentMailboxKindDecisionRequired)}, Content: "The worker needs a decision about the merge."},
 		{Role: "assistant", Content: "ok"},
 	}
 

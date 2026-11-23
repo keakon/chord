@@ -181,7 +181,7 @@ func TestBuildSystemPrompt_OmitsDynamicEnvFromSystemPrompt(t *testing.T) {
 	for _, want := range []string{
 		"<env>",
 		"Working directory:",
-		"Today's date:",
+		"Environment snapshot date:",
 		"Python virtual environment:",
 	} {
 		if strings.Contains(got, want) {
@@ -208,7 +208,7 @@ func TestSessionEnvSnapshot_RendersVenvRelativeToWorkDir(t *testing.T) {
 	if !strings.Contains(block, "Platform: ") {
 		t.Fatalf("env block missing platform, got:\n%s", block)
 	}
-	if !strings.Contains(block, "Today's date: ") {
+	if !strings.Contains(block, "Environment snapshot date: ") {
 		t.Fatalf("env block missing date, got:\n%s", block)
 	}
 }
@@ -239,7 +239,7 @@ func TestSubAgentBuildSystemPrompt_OmitsDynamicEnv(t *testing.T) {
 	for _, want := range []string{
 		"<env>",
 		"Working directory:",
-		"Today's date:",
+		"Environment snapshot date:",
 		"Python virtual environment:",
 	} {
 		if strings.Contains(got, want) {

@@ -66,7 +66,7 @@ func (e SessionEnvSnapshot) renderEnvBlock() string {
 	return fmt.Sprintf(`<env>
   Working directory: %s%s%s
   Platform: %s
-  Today's date: %s%s
+  Environment snapshot date: %s%s
 </env>`, workDir, worktreeLine, gitLine, e.Platform, e.Date, venvLine)
 }
 

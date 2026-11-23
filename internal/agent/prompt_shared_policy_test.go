@@ -661,9 +661,8 @@ func TestFileDeliveryPromptRejectsEditedRepositoryFiles(t *testing.T) {
 	for _, audience := range []capabilityPromptAudience{capabilityPromptAudienceMain, capabilityPromptAudienceSub} {
 		got := fileDeliveryPrompt(audience)
 		for _, want := range []string{
-			"Call present only when the user needs a file itself",
-			"Do not present repository source, tests, changelog, or configuration files merely because you edited them",
-			"a specific file the user explicitly asked to receive",
+			"Describe repository edits in the response",
+			"Use present when the user needs the file itself",
 		} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("fileDeliveryPrompt(audience=%d) missing %q in %q", audience, want, got)
