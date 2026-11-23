@@ -8,10 +8,12 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+const responsesToolStatusCompleted = "completed"
+
 // The completion event supplies evidence when status is omitted. An explicit
 // non-completed status overrides that evidence for the individual tool item.
 func responsesToolItemCompleted(status string) bool {
-	return status == "" || status == "completed"
+	return status == "" || status == responsesToolStatusCompleted
 }
 
 // An explicitly unfinished item cannot become executable or enter replay just
@@ -24,6 +26,47 @@ func omitIncompleteResponsesToolOutput(output []responsesOutputEntry, incomplete
 		return (out.Type == "function_call" || out.Type == "custom_tool_call") &&
 			responsesToolCallMarked(incomplete, responsesStreamItem{ID: out.ID, CallID: out.CallID})
 	})
+}
+
+func preserveCompletedResponsesCallsOnTruncation(resp *message.Response, output []responsesOutputEntry) {
+	if len(resp.ResponsesOutput) > 0 || len(resp.ToolCalls) == 0 {
+		return
+	}
+	var completed map[string]responsesOutputEntry
+	for _, out := range output {
+		if out.Type == "function_call" && out.Status == responsesToolStatusCompleted {
+			if completed == nil {
+				completed = make(map[string]responsesOutputEntry)
+			}
+			completed[responsesToolCallID(responsesStreamItem{ID: out.ID, CallID: out.CallID})] = out
+		}
+	}
+	if len(completed) == 0 {
+		return
+	}
+	// On truncation, only calls the stream already finalized are eligible
+	// for replay. Keep the fallback text and call order while adding the
+	// status confirmed by the terminal snapshot.
+	items := make([]message.ResponsesOutputItem, 0, len(resp.ToolCalls)+1)
+	if resp.Content != "" {
+		items = append(items, message.ResponsesOutputItem{
+			Type: "message", Role: string(message.RoleAssistant),
+			Content: []message.ResponsesOutputContent{{Type: "output_text", Text: resp.Content}},
+		})
+	}
+	confirmed := false
+	for _, call := range resp.ToolCalls {
+		item := message.ResponsesOutputItem{Type: "function_call", CallID: call.ID, Name: call.Name, Arguments: string(call.Args)}
+		if out, ok := completed[call.ID]; ok && out.Name == call.Name {
+			item.ID = out.ID
+			item.Status = out.Status
+			confirmed = true
+		}
+		items = append(items, item)
+	}
+	if confirmed {
+		resp.ResponsesOutput = items
+	}
 }
 
 // completeResponsesToolCallsFromOutput settles pending calls using the terminal

@@ -79,10 +79,16 @@ func TestResponsesProvider_HTTPSendsFullInputOnSecondRound(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		mu.Lock()
 		requestBodies = append(requestBodies, body)
+		round := len(requestBodies)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-2","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2}}}`+"\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		if round == 1 {
+			_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[`+
+				`{"type":"function_call","id":"fc-1","call_id":"call-1","name":"read","arguments":"{}","status":"completed"},`+
+				`{"type":"function_call","id":"fc-2","call_id":"call-2","name":"read","arguments":"{}"}]}}`+"\n\n")
+			return
+		}
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-2","status":"completed","output":[]}}`+"\n\n")
 	}))
 	defer server.Close()
 
@@ -98,28 +104,46 @@ func TestResponsesProvider_HTTPSendsFullInputOnSecondRound(t *testing.T) {
 		client:   server.Client(),
 	}
 
-	// Second round: full input must always be sent on HTTP path.
-	msgs2 := []message.Message{
-		{Role: "user", Content: "hello"},
-		{Role: "user", Content: "follow up"},
-	}
-	_, err := r.CompleteStream(
-		context.Background(), "test-key", "gpt-5", "",
-		msgs2, nil, 128, RequestTuning{},
-		func(message.StreamDelta) {},
-	)
+	msgs := []message.Message{{Role: message.RoleUser, Content: "hello"}}
+	resp, err := r.CompleteStream(t.Context(), "test-key", "gpt-5", "", msgs, nil, 128, RequestTuning{}, nil)
 	if err != nil {
-		t.Fatalf("CompleteStream: %v", err)
+		t.Fatalf("first CompleteStream: %v", err)
+	}
+	msgs = append(msgs,
+		message.Message{Role: message.RoleAssistant, ResponsesOutput: resp.ResponsesOutput, ToolCalls: resp.ToolCalls},
+		message.Message{Role: message.RoleTool, ToolCallID: "call-1", Content: "first result"},
+		message.Message{Role: message.RoleTool, ToolCallID: "call-2", Content: "second result"},
+	)
+	_, err = r.CompleteStream(t.Context(), "test-key", "gpt-5", "", msgs, nil, 128, RequestTuning{}, nil)
+	if err != nil {
+		t.Fatalf("second CompleteStream: %v", err)
 	}
 	mu.Lock()
-	body := requestBodies[0]
-	mu.Unlock()
+	defer mu.Unlock()
+	if len(requestBodies) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(requestBodies))
+	}
+	body := requestBodies[1]
 	if _, ok := body["previous_response_id"]; ok {
 		t.Errorf("second round: unexpected previous_response_id = %v", body["previous_response_id"])
 	}
 	input, _ := body["input"].([]any)
-	if len(input) != 2 {
-		t.Errorf("second round: sent %d input items, want 2 (full)", len(input))
+	if len(input) != 5 {
+		t.Fatalf("second round input = %+v, want user message and two call/output pairs", input)
+	}
+	firstCall, _ := input[1].(map[string]any)
+	firstOutput, _ := input[2].(map[string]any)
+	secondCall, _ := input[3].(map[string]any)
+	secondOutput, _ := input[4].(map[string]any)
+	if firstCall["status"] != "completed" {
+		t.Errorf("first call = %v, want provider's completed status", firstCall)
+	}
+	if _, ok := secondCall["status"]; ok {
+		t.Errorf("second call = %v, want no synthesized status", secondCall)
+	}
+	if firstCall["call_id"] != "call-1" || firstOutput["call_id"] != "call-1" ||
+		secondCall["call_id"] != "call-2" || secondOutput["call_id"] != "call-2" {
+		t.Errorf("call/output pairing changed: %v", input)
 	}
 }
 

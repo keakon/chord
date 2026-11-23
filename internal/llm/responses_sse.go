@@ -106,11 +106,12 @@ type responsesStreamItem struct {
 // responsesCompletedPayload captures the subset of response.completed / response.incomplete
 // payload we need during SSE parsing.
 type responsesCompletedPayload struct {
-	ID                string                 `json:"id"`
-	Status            string                 `json:"status"`
-	Output            []responsesOutputEntry `json:"output"`
-	Usage             *responsesUsagePayload `json:"usage,omitzero"`
-	IncompleteDetails *struct {
+	ID                   string                 `json:"id"`
+	Status               string                 `json:"status"`
+	Output               []responsesOutputEntry `json:"output"`
+	Usage                *responsesUsagePayload `json:"usage,omitzero"`
+	InputTransformations json.RawMessage        `json:"input_transformations,omitzero"`
+	IncompleteDetails    *struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details,omitempty"`
 }
@@ -1252,11 +1253,9 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 
 	case "response.completed":
 		var completed responseCompleted
-		// The completion payload has no raw captures (arguments are strings),
-		// so strict decoding only rejects genuinely malformed provider data.
-		// A rejected terminal payload fails the stream explicitly rather than
-		// hanging: the caller surfaces the parse error and the retry layer
-		// decides, same as any other mid-stream parse failure.
+		// Keep terminal output strict while capturing optional diagnostic data
+		// without interpreting its shape. A rejected terminal payload surfaces
+		// a parse error so the retry layer can settle the stream.
 		if err := jsonv2.Unmarshal(eventData, &completed); err != nil {
 			return nil, nil, false, fmt.Errorf("parse completed: %w", err)
 		}
@@ -1320,6 +1319,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		if text, ok := responsesTerminalOutputText(respObj.Output); ok {
 			state.resp.Content = text
 		}
+		preserveCompletedResponsesCallsOnTruncation(state.resp, respObj.Output)
 		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp, state.freeform)
 		finalizeHostedObservation(state.resp)
 		return state.resp, *state.outputItems, true, nil

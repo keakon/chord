@@ -175,7 +175,7 @@ func toCustomApplyPatchCallItem(item responsesInputItem, freeform bool) response
 		return item
 	}
 	item.Type = "custom_tool_call"
-	item.Status = "completed"
+	item.Status = responsesToolStatusCompleted
 	item.Input = applyPatchFreeformInput(json.RawMessage(item.Arguments))
 	item.Arguments = ""
 	return item
@@ -504,6 +504,9 @@ func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID 
 			return responsesInputItem{}, false
 		}
 		converted.Arguments = string(sanitizeReplayedToolArgs(item.Name, item.CallID, json.RawMessage(item.Arguments)))
+		if item.Status == responsesToolStatusCompleted {
+			converted.Status = item.Status
+		}
 		// Freeform-targeted requests replay apply_patch history in the custom
 		// tool shape so the model sees the same wire form it is asked to emit.
 		converted = toCustomApplyPatchCallItem(converted, freeform)
@@ -600,6 +603,10 @@ func responsesOutputToInputItems(output []responsesOutputEntry, freeform bool) [
 }
 
 func responsesOutputEntryToMessageItem(out responsesOutputEntry) message.ResponsesOutputItem {
+	var status string
+	if out.Type == "function_call" && out.Status == responsesToolStatusCompleted {
+		status = out.Status
+	}
 	out = normalizeResponsesOutputEntry(out)
 	role := out.Role
 	if strings.TrimSpace(role) == "" && out.Type == "message" {
@@ -616,6 +623,7 @@ func responsesOutputEntryToMessageItem(out responsesOutputEntry) message.Respons
 		Role:             role,
 		Name:             out.Name,
 		Arguments:        out.Arguments,
+		Status:           status,
 		Phase:            out.Phase,
 		EncryptedContent: out.EncryptedContent,
 	}

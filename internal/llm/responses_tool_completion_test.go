@@ -88,10 +88,10 @@ func TestResponsesIncompleteItemKeepsCompletedSibling(t *testing.T) {
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"sample_tool","status":"completed","arguments":"{\"value\":1}"}}`,
 		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_2","call_id":"call_2","name":"sample_tool"}}`,
 		`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_2","call_id":"call_2","name":"sample_tool","status":"incomplete","arguments":"{\"value\":2}"}}`,
-		`{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}`,
+		`{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"sample_tool","status":"completed","arguments":"{\"value\":1}"},{"type":"function_call","id":"fc_2","call_id":"call_2","name":"sample_tool","status":"incomplete","arguments":"{\"value\":2}"}]}}`,
 	}
 	var ended []string
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), func(delta message.StreamDelta) {
+	resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), func(delta message.StreamDelta) {
 		if delta.Type == message.StreamDeltaToolUseEnd && delta.ToolCall != nil {
 			ended = append(ended, delta.ToolCall.ID)
 		}
@@ -104,6 +104,11 @@ func TestResponsesIncompleteItemKeepsCompletedSibling(t *testing.T) {
 	}
 	if len(ended) != 1 || ended[0] != "call_1" {
 		t.Fatalf("ended = %v, want completed sibling only", ended)
+	}
+	replayed := responsesResponseToInputItems(resp, false)
+	if len(items) != 1 || len(replayed) != 1 || replayed[0].Status != "completed" ||
+		responsesInputSignature(items) != responsesInputSignature(replayed) {
+		t.Fatalf("incremental baseline = %+v, want the same completed call as history replay %+v", items, replayed)
 	}
 }
 

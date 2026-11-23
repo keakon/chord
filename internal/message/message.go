@@ -717,6 +717,7 @@ type ResponsesOutputItem struct {
 	Role             string                      `json:"role,omitempty"`
 	Name             string                      `json:"name,omitempty"`
 	Arguments        string                      `json:"arguments,omitempty"`
+	Status           string                      `json:"status,omitempty"`
 	Phase            string                      `json:"phase,omitempty"`
 	Content          []ResponsesOutputContent    `json:"content,omitempty"`
 	EncryptedContent string                      `json:"encrypted_content,omitempty"`

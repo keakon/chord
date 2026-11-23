@@ -193,9 +193,16 @@ func TestPersistAndLoad_Roundtrip(t *testing.T) {
 
 	msgs := []message.Message{
 		{Role: "user", Content: "Hello"},
-		{Role: "assistant", Content: "Hi there", ToolCalls: []message.ToolCall{
-			{ID: "tc-1", Name: "Read", Args: json.RawMessage(`{"path":"main.go"}`)},
-		}},
+		{
+			Role:    "assistant",
+			Content: "Hi there",
+			ToolCalls: []message.ToolCall{
+				{ID: "tc-1", Name: "Read", Args: json.RawMessage(`{"path":"main.go"}`)},
+			},
+			ResponsesOutput: []message.ResponsesOutputItem{
+				{Type: "function_call", CallID: "tc-1", Name: "Read", Arguments: `{"path":"main.go"}`, Status: "completed"},
+			},
+		},
 		{Role: "tool", ToolCallID: "tc-1", Content: "file contents..."},
 	}
 
@@ -228,6 +235,9 @@ func TestPersistAndLoad_Roundtrip(t *testing.T) {
 		if len(got.ToolCalls) != len(want.ToolCalls) {
 			t.Errorf("msg[%d].ToolCalls len = %d, want %d", i, len(got.ToolCalls), len(want.ToolCalls))
 		}
+	}
+	if items := loaded[1].ResponsesOutput; len(items) != 1 || items[0].Status != "completed" {
+		t.Errorf("loaded ResponsesOutput = %+v, want the recorded tool call completion status", items)
 	}
 }
 

@@ -178,7 +178,7 @@ type responsesInputItem struct {
 	Arguments string          `json:"arguments,omitempty"` // JSON object as string per API spec
 	// Input carries the freeform text of a custom_tool_call input item.
 	Input  string          `json:"input,omitempty"`
-	Status string          `json:"status,omitempty"` // custom_tool_call replay status, e.g. "completed"
+	Status string          `json:"status,omitempty"` // tool call replay status
 	Phase  string          `json:"phase,omitempty"`
 	Tools  []responsesTool `json:"tools,omitempty"`
 	// Summary is a pointer so a reasoning item can serialize an explicit empty

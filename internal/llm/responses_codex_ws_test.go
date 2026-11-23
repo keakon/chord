@@ -575,7 +575,7 @@ type codexWSCaptureServer struct {
 	handshakeHeaders []http.Header
 }
 
-func newCodexWSCaptureServer(t *testing.T, responseIDs []string) *codexWSCaptureServer {
+func newCodexWSCaptureServer(t *testing.T, responseIDs []string, firstOutput ...responsesOutputEntry) *codexWSCaptureServer {
 	t.Helper()
 
 	c := &codexWSCaptureServer{responseIDs: append([]string(nil), responseIDs...)}
@@ -621,6 +621,12 @@ func newCodexWSCaptureServer(t *testing.T, responseIDs []string) *codexWSCapture
 			}
 			if respID != "" {
 				completed["response"].(map[string]any)["id"] = respID
+			}
+			if idx == 0 && len(firstOutput) > 0 {
+				completed["response"].(map[string]any)["output"] = firstOutput
+				completed["response"].(map[string]any)["input_transformations"] = []map[string]string{
+					{"type": "reasoning", "action": "removed", "reason": "prefix_mismatch"},
+				}
 			}
 			payload, err := json.Marshal(completed)
 			if err != nil {
@@ -742,6 +748,66 @@ func TestCompleteStreamCodexWebSocketMissingResponseIDRequiresFullFollowUp(t *te
 		t.Fatalf("captured %d requests, want 2", len(requests))
 	}
 	assertCodexWSFullInputWithoutPreviousResponseID(t, requests[1], len(input2))
+}
+
+func TestCodexWSCompletedToolCallSurvivesFullReplay(t *testing.T) {
+	const model = "sample/test-model"
+	srv := newCodexWSCaptureServer(t, []string{"resp-1", "resp-2", "resp-3"}, responsesOutputEntry{
+		Type: "function_call", ID: "fc-1", CallID: "call-1", Name: "read", Arguments: `{}`, Status: "completed",
+	})
+	defer srv.Close()
+	r := &ResponsesProvider{}
+	defer r.resetCodexWebSocketChain("test_finished")
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	send := func(msgs []message.Message) (*message.Response, bool) {
+		t.Helper()
+		input := convertMessagesToResponsesWithItemIDs("", msgs, false, false, false)
+		resp, incremental, err := r.completeStreamCodexWebSocket(ctx, srv.ResponsesURL(), "test-key", model,
+			testCodexWSResponsesRequest(model, input), input, nil, time.Now(), codexWSCompleteOptions{SkipPrewarm: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp, incremental
+	}
+
+	msgs := []message.Message{{Role: message.RoleUser, Content: "hello"}}
+	var resp *message.Response
+	var logs bytes.Buffer
+	logtest.WithDefault(logtest.NewLogger(&logs, golog.DebugLevel), func() {
+		resp, _ = send(msgs)
+	})
+	if !strings.Contains(logs.String(), `response_id="resp-1" input_transformations=reported reasoning_items_removed=1 removals_by_reason=map[prefix_mismatch:1]`) {
+		t.Errorf("missing WebSocket diagnostics: %q", logs.String())
+	}
+	msgs = append(msgs,
+		message.Message{Role: message.RoleAssistant, ResponsesOutput: resp.ResponsesOutput, ToolCalls: resp.ToolCalls},
+		message.Message{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+	)
+	if _, incremental := send(msgs); !incremental {
+		t.Error("follow-up should extend the completed tool call over the same connection")
+	}
+	r.resetCodexWebSocketChain("test_reconnect")
+	if _, incremental := send(msgs); incremental {
+		t.Error("reconnect should replay full input")
+	}
+
+	requests := srv.Requests()
+	if len(requests) != 3 {
+		t.Fatalf("captured %d requests, want 3", len(requests))
+	}
+	if prev := requests[1]["previous_response_id"]; prev != "resp-1" {
+		t.Errorf("follow-up previous_response_id = %v, want resp-1", prev)
+	}
+	delta, _ := requests[1]["input"].([]any)
+	if len(delta) != 1 || delta[0].(map[string]any)["type"] != "function_call_output" {
+		t.Errorf("follow-up sent %v, want only the function call output", delta)
+	}
+	assertCodexWSFullInputWithoutPreviousResponseID(t, requests[2], 3)
+	call, _ := requests[2]["input"].([]any)[1].(map[string]any)
+	if call["call_id"] != "call-1" || call["status"] != "completed" {
+		t.Errorf("replayed call = %v, want call-1 with the provider's completed status", call)
+	}
 }
 
 func TestCompleteStreamCodexWebSocketKeyOrModelChangeRequiresFullRequest(t *testing.T) {

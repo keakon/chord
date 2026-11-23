@@ -90,6 +90,7 @@ func normalizeResponsesOutputEntry(out responsesOutputEntry) responsesOutputEntr
 
 func applyResponsesCompletionPayload(resp *message.Response, payload responsesCompletedPayload, truncated *bool) {
 	resp.ProviderResponseID = payload.ID
+	logResponsesReasoningRemovals(payload.ID, payload.InputTransformations)
 	if payload.Usage != nil {
 		u := payload.Usage
 		cacheWriteTokens := 0
