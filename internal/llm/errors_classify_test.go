@@ -28,6 +28,57 @@ func TestIsRetriable5xxRotatesKeysBeforeFallback(t *testing.T) {
 	}
 }
 
+func TestIsRetriable5xxWinsOverRequestErrorBody(t *testing.T) {
+	t.Parallel()
+	for _, code := range []int{500, 502, 503, 504, 529} {
+		err := &APIError{
+			StatusCode: code,
+			Code:       "model_not_found",
+			Type:       "invalid_request_error",
+			Message:    "Request body buffering capacity is exhausted; retry later",
+			RetryAfter: time.Second,
+		}
+		if !isRetriable(err) {
+			t.Fatalf("status %d with transient server error body should be retriable", code)
+		}
+		if got := serverDirectedRetryCooldown(testProviderConfig("sample", "model"), err); got != time.Second {
+			t.Fatalf("status %d Retry-After cooldown = %v, want 1s", code, got)
+		}
+	}
+}
+
+func TestIsRetriable5xxRequestShapeErrorIsTerminal(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		err  *APIError
+	}{
+		{
+			name: "structured missing parameter code",
+			err: &APIError{
+				StatusCode: 503,
+				Code:       "missing_required_parameter",
+				Message:    "missing required parameter: capacity",
+			},
+		},
+		{
+			name: "missing parameter text beats generic capacity",
+			err: &APIError{
+				StatusCode: 503,
+				Type:       "invalid_request_error",
+				Message:    "missing required parameter: capacity",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if isRetriable(tc.err) {
+				t.Fatalf("request-shape 5xx should not rotate keys: %v", tc.err)
+			}
+		})
+	}
+}
+
 func TestIsRetriable4xxNotRetriableExceptAuth(t *testing.T) {
 	t.Parallel()
 	if isRetriable(&APIError{StatusCode: 400, Message: "bad"}) {

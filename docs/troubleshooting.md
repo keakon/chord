@@ -84,7 +84,38 @@ curl -I https://api.openai.com/v1
 
 Set `trust_http_400: true` for endpoints that follow official API error semantics: Chord then treats HTTP 400 as a terminal request error. For retryable errors, an explicitly configured `retry_backoff` or `retry_delay_ms` controls the target's retry wait; otherwise, Chord honors the `Retry-After` header up to `retry_after_max_s` (default 3600 seconds for third-party providers, 86400 for `preset: codex`). In a model pool, another target with an earlier retry time can be tried first. For aggregating or proxy gateways that may wrap upstream failures as HTTP 400, set `trust_http_400: false` or omit the field so unknown 400s can use the normal retry and fallback path.
 
+For model-pool failures, cancellation, shutdown, unknown external outcomes,
+and confirmed request-shape or permission errors stop the pool. A target-only
+compatibility failure skips that target; temporary 429, 5xx, capacity, and
+connection failures try other eligible targets. HTTP 5xx remains temporary
+even when the gateway body says `invalid_request_error` or `model_not_found`.
+
+If every dump still has the same `provider/model`, the second model was not
+part of the agent's effective model pool or was skipped before dispatch. Check
+the agent's `models`/`model_pools` selection and pool order. A provider
+`models` definition alone does not add every model to the active pool.
+When several targets are configured, the error panel records each failure that
+reaches retry reporting; a model that is cooling, skipped at provider scope,
+or never in the effective pool does not produce a second wire error.
+
 If requests remain in `connecting` and then retry, test the endpoint directly, check proxy settings, and inspect the error panel. Chord applies a connection timeout so one unavailable key or gateway does not wait indefinitely.
+
+### A 5xx response does not try the fallback model
+
+Check the saved LLM dump for both the HTTP status and the error body. HTTP
+500–599 responses are normally treated as temporary upstream failures even
+when a gateway labels a capacity response `invalid_request_error` or
+`model_not_found`; they should keep the fallback path eligible and honor
+`Retry-After`. An explicit Responses client-contract refusal or a clear
+request-shape signal remains terminal.
+
+If every dump still has the same `provider/model`, the second model was not
+part of the agent's effective model pool or was skipped before dispatch. Check
+the agent's `models`/`model_pools` selection and the pool order. A provider
+`models` definition alone does not add every model to the active pool.
+When several targets are configured, the error panel records each failure that
+reaches retry reporting; a model that is cooling, skipped at provider scope, or
+never in the effective pool does not produce a second wire error.
 
 ### Responses client-contract errors
 

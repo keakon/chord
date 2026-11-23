@@ -261,6 +261,129 @@ func TestCompleteStreamRetryAfterSetsSingleTargetCountdown(t *testing.T) {
 	}
 }
 
+func TestCompleteStream503RequestErrorBodyFallsBack(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary", "model-primary", []string{"k1"})
+	fallbackCfg := testProviderConfigWithKeys("fallback", "model-fallback", []string{"k2"})
+	primaryImpl := &recordingProvider{calls: []scriptedCall{
+		{err: &APIError{
+			StatusCode: 503,
+			Code:       "model_not_found",
+			Type:       "invalid_request_error",
+			Message:    "Request body buffering capacity is exhausted; retry later",
+			RetryAfter: time.Second,
+		}},
+	}}
+	fallbackImpl := &recordingProvider{calls: []scriptedCall{
+		{resp: &message.Response{Content: "fallback response"}},
+	}}
+	c := NewClient(primaryCfg, primaryImpl, "model-primary", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "model-fallback",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+	}})
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "fallback response" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := primaryImpl.CallCount(); got != 1 {
+		t.Fatalf("primary calls = %d, want 1", got)
+	}
+	if got := fallbackImpl.CallCount(); got != 1 {
+		t.Fatalf("fallback calls = %d, want 1 after transient 503", got)
+	}
+}
+
+func TestCompleteStream503MissingRequiredParameterDoesNotRotateKeys(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary", "model-primary", []string{"k1", "k2"})
+	fallbackCfg := testProviderConfig("fallback", "model-fallback")
+	primaryImpl := &constantErrProvider{err: &APIError{
+		StatusCode: 503,
+		Code:       "missing_required_parameter",
+		Message:    "missing required parameter: capacity",
+	}}
+	fallbackImpl := &recordingProvider{calls: []scriptedCall{
+		{resp: &message.Response{Content: "fallback response"}},
+	}}
+	c := NewClient(primaryCfg, primaryImpl, "model-primary", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "model-fallback",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+	}})
+
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || resp.Content != "fallback response" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if got := primaryImpl.calls; got != 1 {
+		t.Fatalf("primary calls = %d, want 1 for a request-shape failure", got)
+	}
+	if got := fallbackImpl.CallCount(); got != 1 {
+		t.Fatalf("fallback calls = %d, want 1", got)
+	}
+}
+
+func TestCompleteStream503ResponsesContractDoesNotStartAnotherRound(t *testing.T) {
+	cfg := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1"})
+	disableRetryDelayForTest(cfg)
+	fallbackCfg := testCompatibleResponsesProviderConfigWithKeys("fallback", "gpt-test", []string{"k2"})
+	disableRetryDelayForTest(fallbackCfg)
+	impl := &recordingProvider{calls: []scriptedCall{{
+		err: &APIError{
+			StatusCode: 503,
+			Code:       invalidResponsesRequestCode,
+			Message:    "request shape rejected",
+		},
+	}}}
+	fallbackImpl := &constantErrProvider{err: &APIError{StatusCode: 503, Message: "temporary overload"}}
+	client := NewClient(cfg, impl, "gpt-test", 4096, "sys")
+	client.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "gpt-test",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+	}})
+	retryRoundCalls := 0
+
+	_, err := client.CompleteStreamWithOptions(
+		context.Background(),
+		[]message.Message{{Role: "user", Content: "hi"}},
+		nil,
+		nil,
+		CompleteStreamOptions{
+			BeforeRetryRound: func(context.Context, []message.Message) (*RequestSnapshot, error) {
+				retryRoundCalls++
+				return nil, errors.New("unexpected retry round")
+			},
+		},
+	)
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.StatusCode != 503 || apiErr.Code != invalidResponsesRequestCode {
+		t.Fatalf("CompleteStream error = %v, want the original 503 API error", err)
+	}
+	if retryRoundCalls != 0 {
+		t.Fatalf("retry-round callback calls = %d, want 0 for a Responses contract refusal", retryRoundCalls)
+	}
+	if got := impl.CallCount(); got != 1 {
+		t.Fatalf("provider calls = %d, want 1 for a Responses contract refusal", got)
+	}
+	if got := fallbackImpl.calls; got != 1 {
+		t.Fatalf("fallback calls = %d, want 1 before returning the pool's contract refusal", got)
+	}
+}
+
 func TestCompleteStreamExplicitRetryPacingOverridesRetryAfterWait(t *testing.T) {
 	const configuredDelay = 200 * time.Millisecond
 	cfg := NewProviderConfig("provider", config.ProviderConfig{

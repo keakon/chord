@@ -84,7 +84,18 @@ curl -I https://api.openai.com/v1
 
 遵循官方 API 错误语义的端点请设置 `trust_http_400: true`，Chord 会把 HTTP 400 视为终止性请求错误。对于可重试的错误，显式配置的 `retry_backoff` 或 `retry_delay_ms` 决定该目标的等待；未显式配置时，Chord 遵循 `Retry-After`，并受 `retry_after_max_s` 限制（第三方 provider 默认 3600 秒，`preset: codex` 默认 86400 秒）。模型池中其它更早可重试的目标可以先行重试。聚合或代理网关可能把上游故障包装成 HTTP 400；这类端点可设置 `trust_http_400: false` 或省略该字段，让未知 400 进入正常的重试和备用模型流程。
 
+模型池失败中，取消、关闭进程、外部操作结果未知，以及已确认的请求格式或权限错误会结束整个模型池；只影响当前目标的兼容性错误会跳过当前目标；临时的 429、5xx、容量错误和连接错误会尝试其它可用目标。即使网关错误体写了 `invalid_request_error` 或 `model_not_found`，HTTP 5xx 仍按临时错误处理。
+
+如果所有 dump 中的 `provider/model` 都相同，说明第二个模型没有真正进入本 agent 的有效模型池，或在派发前被 provider 级规则跳过。检查 agent 的 `models` / `model_pools` 选择和模型池顺序。仅在 provider 的 `models` 定义模型，不会自动把所有模型加入当前有效池。配置了多个 target 时，错误面板会记录实际进入重试上报的每个失败；正在冷却、被 provider 级规则跳过，或根本不在有效模型池中的模型不会产生第二条 wire 错误。
+
 如果请求长时间停在 `connecting` 后重试，请直接测试端点、检查代理设置并查看错误面板。Chord 会限制连接等待时间，避免单个不可用密钥或网关无限阻塞。
+
+### 返回 5xx 后没有尝试备用模型
+
+同时检查会话 LLM dump 中的 HTTP 状态和错误体。HTTP 500–599 通常按临时上游错误处理；即使网关在容量错误的 JSON 错误体中写了 `invalid_request_error` 或 `model_not_found`，也不应阻止 fallback，并应遵循 `Retry-After`。明确的 Responses 客户端契约拒绝或清晰的请求结构错误仍属于终态。
+
+如果所有 dump 中的 `provider/model` 都相同，说明第二个模型没有真正进入本 agent 的有效模型池，或在派发前被 provider 级规则跳过。检查 agent 的 `models` / `model_pools` 选择和模型池顺序。仅在 provider 的 `models` 定义模型，不会自动把所有模型加入当前有效池。
+配置了多个 target 时，错误面板会记录实际进入重试上报的每个失败；正在冷却、被 provider 级规则跳过，或根本不在有效模型池中的模型不会产生第二条 wire 错误。
 
 ### Responses 客户端契约错误
 

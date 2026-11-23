@@ -853,6 +853,23 @@ func isRetriable(err error) bool {
 		return false
 	}
 
+	// HTTP server failures normally describe a transient upstream condition
+	// even when a compatible gateway reuses an invalid_request_error type or
+	// code in the response body. A specific structured request-shape signal
+	// takes precedence over generic capacity wording: rotating credentials
+	// cannot repair the request.
+	if apiErr.StatusCode >= 500 && apiErr.StatusCode < 600 {
+		if hasStructuredRequestShapeSignal(apiErr) || hasStrongRequestShapeTextSignal(apiErr) {
+			return false
+		}
+		if apiErrorSignalContains(apiErr, "invalid_request") &&
+			!hasTransientProviderCapacitySignal(apiErr) &&
+			!apiErrMessageContainsAny(apiErr, "try again later", "temporarily", "capacity", "overload", "busy") {
+			return false
+		}
+		return true
+	}
+
 	// 401/403 are always per-key; try next key regardless of message (e.g. "plan not supported").
 	switch apiErr.StatusCode {
 	case 401:
@@ -879,13 +896,6 @@ func isRetriable(err error) bool {
 	case 402, 429, 529:
 		return true // Payment/quota exhausted / Rate limited / Overloaded → retry (respect Retry-After)
 	default:
-		// Any other 5xx (500, 502, 522, 523, Cloudflare edges, etc.): prefer rotating
-		// to another key on the same model before advancing to the next model in the
-		// fallback pool. Quota headers showing ~100% must not block keys (see
-		// ratelimit.SnapshotBlocksKeyAt); only real API failures drive rotation.
-		if apiErr.StatusCode >= 500 && apiErr.StatusCode < 600 {
-			return true
-		}
 		return false // 4xx etc. are not retriable
 	}
 }
@@ -920,12 +930,29 @@ func isRequestOrParamError(apiErr *APIError) bool {
 	if apiErr.StatusCode == 400 {
 		return hasExplicitRequestOrParamSignal(apiErr)
 	}
+	return apiErrorSignalContains(apiErr, "invalid_request") || hasStructuredRequestShapeSignal(apiErr)
+}
+
+func hasStructuredRequestShapeSignal(apiErr *APIError) bool {
 	return apiErrorSignalContains(apiErr,
-		"invalid_request",
 		"invalid_parameter",
 		"invalid_argument",
 		"missing_required_parameter",
 		invalidResponsesRequestCode,
+	)
+}
+
+func hasStrongRequestShapeTextSignal(apiErr *APIError) bool {
+	return apiErrMessageContainsAny(apiErr,
+		"missing required parameter",
+		"unsupported parameter",
+		"unknown field",
+		"invalid parameter",
+		"invalid argument",
+		// Strict Gemini backends reject malformed tool declarations before generation.
+		"property is not defined",
+		"only allowed for object type",
+		"schema didn't specify the schema type field",
 	)
 }
 
@@ -938,32 +965,13 @@ func hasExplicitRequestOrParamSignal(apiErr *APIError) bool {
 		isCodexWSChainStateMismatch(apiErr) {
 		return false
 	}
-	if apiErrorSignalContains(apiErr,
-		"invalid_request",
-		"invalid_parameter",
-		"invalid_argument",
-		"missing_required_parameter",
-	) {
+	if apiErrorSignalContains(apiErr, "invalid_request") ||
+		hasStructuredRequestShapeSignal(apiErr) ||
+		apiErrMessageContainsAny(apiErr, invalidCodexRequestMessage) ||
+		hasStrongRequestShapeTextSignal(apiErr) {
 		return true
 	}
-	if hasResponsesClientContractSignal(apiErr) {
-		return true
-	}
-	// Keep the text markers intentionally narrow. Compatible gateways often wrap
-	// transient upstream/provider failures as HTTP 400, so broad text matching
-	// would recreate the original false-terminal problem.
-	return apiErrMessageContainsAny(apiErr,
-		"missing required parameter",
-		"unsupported parameter",
-		"unknown field",
-		"invalid parameter",
-		"invalid argument",
-		// Strict Gemini backends reject a tool declaration before generation.
-		// The declaration is ours, so rotating keys cannot change the verdict.
-		"property is not defined",
-		"only allowed for object type",
-		"schema didn't specify the schema type field",
-	)
+	return false
 }
 
 func hasTerminalNonRetriable400Signal(apiErr *APIError) bool {
@@ -1004,7 +1012,8 @@ func hasTerminalStructural400Signal(apiErr *APIError) bool {
 // incompatible gateway responses (where retrying will keep failing the same
 // way). Other non-official 400s remain retryable across pool passes because
 // compatible gateways often mis-map upstream overload/rate-limit/provider
-// failures to 400.
+// failures to 400. An explicit Responses contract code remains terminal for
+// 5xx responses, while generic capacity failures can still reach another key.
 //
 // 404/405/410/414/415 are terminal regardless of provider: no upstream
 // overload maps to them, so they mean the model or endpoint does not exist,
@@ -1027,11 +1036,9 @@ func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) 
 	switch apiErr.StatusCode {
 	case 404, 405, 410, 414, 415:
 		return true
-	case 422:
+	case 400, 422:
 		return providerTrustsHTTP400(provider) || hasTerminalNonRetriable400Signal(apiErr)
+	default:
+		return hasServerResponsesContractRefusal(apiErr)
 	}
-	if apiErr.StatusCode != 400 {
-		return false
-	}
-	return providerTrustsHTTP400(provider) || hasTerminalNonRetriable400Signal(apiErr)
 }

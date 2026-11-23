@@ -1106,6 +1106,35 @@ with valid advice cool the failed key; healthy keys and fallback models remain
 eligible. Advice does not make a terminal error retryable. In WebSocket errors,
 a valid `Retry-After` takes precedence over `resets_in_seconds`.
 
+Model-pool retry classification follows the scope of the failure:
+
+- A user cancellation, session switch, shutdown, unknown external outcome, or
+  another non-replayable operation stops the request. Chord does not replay it
+  against another model.
+- A request-shape or permission failure that is independent of the target
+  model stops the pool. Examples include malformed message/tool history,
+  missing required fields, and a confirmed tenant or account denial.
+- A target-specific incompatibility skips that target and tries the next
+  eligible pool entry. Examples include a real `model_not_found`, unsupported
+  tool/reasoning capability, an insufficient context window, or a protocol
+  contract that only that target rejects.
+- Temporary upstream failures try the remaining eligible targets immediately.
+  This includes HTTP 429, 500, 502, 503, 504, 529, provider capacity
+  exhaustion, and connection failures. After the pool is exhausted, each
+  target's own retry or cooling deadline determines the next round.
+- A 401/403/429 caused by one credential is handled at key scope first. Chord
+  rotates keys on that target; when no key can proceed, it advances to other
+  targets. An account-wide revocation, deactivation, or quota reset remains
+  authoritative and is not fixed by retrying the same account.
+
+The HTTP status is authoritative for server failures unless the response
+contains an explicit client-contract refusal or a clear request-shape signal.
+A compatible gateway may return `invalid_request_error` or `model_not_found`
+in the body of a 5xx capacity response; Chord still treats that capacity
+failure as temporary and keeps the fallback path eligible. A client-error
+status such as 400 or 422 is classified by its request and target signals
+instead.
+
 ```yaml
 providers:
   gateway:

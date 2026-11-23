@@ -95,4 +95,7 @@ func TestResponsesClientContractErrorGuidance(t *testing.T) {
 	if !isRetriable(&APIError{StatusCode: 500, Message: invalidCodexRequestMessage}) {
 		t.Fatal("server failure text alone must remain retryable")
 	}
+	if isRetriable(&APIError{StatusCode: 400, Message: invalidCodexRequestMessage}) {
+		t.Fatal("client error text identifies a Responses contract refusal")
+	}
 }

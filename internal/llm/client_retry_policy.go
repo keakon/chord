@@ -129,8 +129,9 @@ func requestDefect(provider *ProviderConfig, err error) bool {
 	switch apiErr.StatusCode {
 	case 400, 422:
 		return providerTrustsHTTP400(provider) || hasTerminalNonRetriable400Signal(apiErr)
+	default:
+		return hasServerResponsesContractRefusal(apiErr)
 	}
-	return false
 }
 
 // clampCoolingWait bounds one reported cooling window to cap. cap <= 0 keeps
