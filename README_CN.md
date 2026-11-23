@@ -109,7 +109,7 @@ chord
 
 - [多 Agent 并行](./docs/usage_CN.md#多-agent-与焦点切换)：[定义子 Agent 角色并授予主 Agent 委派权限](./docs/configuration_CN.md#agent-配置)后，主 Agent 可把子任务交给子 Agent 并行处理，按 <kbd>Shift</kbd>+<kbd>Tab</kbd> 切换查看。
 - [模型自动切换](./docs/configuration_CN.md#模型池)：用模型池组合多个服务商和模型，请求失败时自动换下一个。
-- [长会话不爆上下文](./docs/context-management_CN.md)：每次请求前剪掉旧的大块工具输出，上下文接近上限时压缩成摘要。
+- Chord 每次请求前都会剪裁过时的工具输出。模型记录好续跑状态后可以主动提交 checkpoint，用量达到阈值时由自动压缩兜底。[上下文管理](./docs/context-management_CN.md)
 - [执行前可审批](./docs/permissions-and-safety_CN.md)：按工具和命令设置 `allow` / `ask` / `deny` 规则，决定哪些操作要先确认。
 - [导入已有会话](./docs/usage_CN.md#导入外部会话)：导入 Claude Code、Codex 或 OpenCode 的会话历史，在 Chord 中继续工作。
 - [无界面控制](./docs/headless_CN.md)与 [ACP 接入](./docs/acp_CN.md)：通过 `chord headless` 接入其他界面，或用 `chord acp` 在 Zed 等编辑器中使用。

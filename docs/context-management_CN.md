@@ -2,7 +2,7 @@
 
 <!-- description: 长会话如何留在模型上下文窗口内：请求剪裁、持久压缩，以及模型驱动 checkpoint。 -->
 
-Chord 提供两层互补的上下文管理机制：**上下文压缩**（Compaction）调用 LLM 生成摘要并持久化改写会话历史，**上下文剪裁**（Reduction）在每次请求前用启发式规则剪裁 prompt。两者分别作用于持久化历史和单次请求，各司其职。
+**上下文压缩**（Compaction）用模型提交的 checkpoint 或自动生成的摘要缩短持久化会话历史。**上下文剪裁**（Reduction）在每次请求前剪掉过时的工具输出。
 
 两者都通过 `config.yaml` 顶层的 `context:` 配置。配置文件本身的组织方式（文件、层级、provider 等）见[配置与认证](./configuration_CN.md)。
 
@@ -23,15 +23,15 @@ Chord 提供两层互补的上下文管理机制：**上下文压缩**（Compact
 
 | 特性 | 上下文压缩（Compaction） | 上下文剪裁（Reduction） |
 |------|-------------------------|------------------------|
-| 做了什么 | 调用 LLM 生成结构化摘要，归档旧历史，用摘要替代原文 | 按规则剪裁本次请求中过时的工具输出 |
+| 做了什么 | 归档旧消息，用 checkpoint 替换旧历史 | 按规则剪裁本次请求中过时的工具输出 |
 | 是否落盘 | ✅ 改写 session 文件 | ❌ 对话历史不变（被丢弃的载荷会归档） |
-| 是否调用模型 | ✅（可配置专用模型池） | ❌（纯启发式规则） |
-| 触发时机 | 达到阈值且即将发起下一次主模型请求 / 手动 `/compact` / 异常恢复 | 每次 LLM 请求前自动执行 |
-| 典型耗时 | 数秒到数十秒（需等待 LLM 回复） | 毫秒级（内存内规则匹配） |
+| 是否调用模型 | 模型驱动 checkpoint 使用当前模型提交的结构化参数。生成摘要可配置专用模型池。 | ❌（纯启发式规则） |
+| 触发时机 | 模型主动请求 checkpoint / 达到阈值且即将发起下一次主模型请求 / 手动 `/compact` / 异常恢复 | 每次 LLM 请求前自动执行 |
+| 典型耗时 | 生成摘要需数秒到数十秒 | 毫秒级（内存内规则匹配） |
 | 用户感知 | TUI 显示「Compacting context...」进度 | 静默执行；可用 `/context` 查看最近请求 |
 | loop 模式 | 启用；压缩仍可运行，让长会话继续推进 | 启用；loop 模式不改变剪裁行为，详见 [Loop 模式](#loop-模式) |
 
-**两者的关系**：Reduction 是轻量级的第一道防线，每次请求前自动剪裁过时的工具输出，减缓上下文膨胀速度。当 Reduction 仍不够、上下文持续增长到 Compaction 阈值时，Compaction 启动做深度压缩。大多数用户只需关注 Compaction 配置；Reduction 的默认值已经适配常见场景，通常无需调整。
+剪裁在每次请求前去掉过时的工具输出，减缓上下文增长。压缩会缩短后续请求使用的会话历史。大多数会话可以沿用默认的剪裁设置。
 
 Compaction 在把历史交给摘要模型之前，会先对其应用一次 Reduction 规则以节省摘要调用的开销，并且遵循你配置的 Reduction 参数：调高了保留阈值的会话，其持久摘要也会基于保留更多的输入生成。归档到 `history-N.md` 的原文不受此影响，始终是完整无损的。
 
@@ -41,7 +41,7 @@ Compaction 在把历史交给摘要模型之前，会先对其应用一次 Reduc
 
 ## 上下文压缩（Compaction）
 
-主会话上下文使用量接近模型上限时，Chord 会准备自动压缩，并在准备下一次主模型请求时启动。压缩过程调用 LLM 分析当前对话，生成结构化摘要（目标、进度、关键决策、文件证据等），归档旧消息，用摘要替换对话历史。压缩结果持久保存到磁盘，会话文件体积显著缩小。
+默认情况下，主模型可以在用量达到压缩阈值前，通过 `compact_context` 记录续跑状态并提交 checkpoint。用量达到阈值时，Chord 可用自动压缩兜底，调用 LLM 生成包含目标、进度、关键决策和文件证据等内容的结构化摘要。两条路径都会归档旧消息，并将压缩后的会话保存到磁盘。
 
 **最小配置**（启用自动压缩）：
 
@@ -51,7 +51,7 @@ context:
     threshold: 0.8
 ```
 
-不指定 `model_pool` 时，压缩沿用当前 Agent 的模型池。需要单独选择压缩模型时，将 `model_pool` 设为已经定义的池名，并优先选择上下文窗口足够大的模型。
+摘要默认使用当前 Agent 的模型池。需要单独选择摘要模型时，将 `model_pool` 设为已经定义的池名，并优先选择上下文窗口足够大的模型。
 
 ### 保留最近消息
 
@@ -75,14 +75,14 @@ context:
 | `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从固定压缩预算中扣除，再应用 `threshold`。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 | `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；等于或高于 threshold 的 reminder 不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本就携带上阈值通知。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
-| `model_driven` | 布尔 | `true` | 向模型提供 `compact_context` 工具，让它记录续跑所需状态后主动请求压缩，可早于用量阈值；节省空间不足的请求会跳过。压力提醒遵循 `threshold` 与 `reminder` 设置。设为 `false` 会关闭该工具及相关提醒，自动压缩仍按配置的阈值触发。 |
+| `model_driven` | 布尔 | `true` | 提供 `compact_context`，让模型提前请求 checkpoint。节省空间不足的请求会跳过。压力提醒遵循 `threshold` 和 `reminder`。设为 `false` 会关闭该工具和发给模型的压力提醒，压缩由运行时按配置的阈值触发。 |
 | `retain_recent_tokens` | 整数 | `4096`（内置） | 每个压缩 checkpoint 内嵌的最近真实用户消息的估计 token 预算（见上文的「保留最近消息」）；`0` 或缺省使用内置默认值。没有关闭用的取值：`0` 不等于关闭，要缩小保留窗口请设置一个较小的正整数。预算只算消息正文，从上个 checkpoint 带过来的消息同样占用这份预算。需要跨压缩保住更多最近轮次就调大，想让压缩多回收上下文就调小；保留段不替代摘要，只把最新指令边界原样钉住（与当前请求完全相同的重复消息只渲染一次）。 |
 
 按模型覆盖写在**模型定义**上（`ModelConfig.compaction`，含 `threshold` 与 `reminder` 两个子字段），可经 `model_templates` 用 `<<:` 共享；**没有** `context.compaction.models` 这张表。
 
 主代理和子代理共用有效压缩阈值：显式模型配置优先，其次是显式全局配置、目录建议和内置默认值。子代理在每次请求前按模型池当前游标重新解析阈值和预算，使用本地 token 估算与轻量 checkpoint；`threshold: 0` 关闭两类代理的主动压缩；子代理仍可在超长请求错误后恢复，主代理会停止超长请求并提示使用 `/compact`。启用 `model_driven` 时，`reminder` 对两类代理都驱动压力提醒——SubAgent 用本地 token 估算（而非 provider usage）测量用量，同样收到接近/达到两级通知。Haiku 5.5 目录建议 `threshold: 0.10`、`reminder: 0.08`，约在 87K token 压缩、主代理约在 70K 提醒，面向小任务和子任务的成本控制；这不是保证低于 100K 的计费上限。
 
-`threshold` / `reminder`（全局或按模型）驱动 usage-driven 压缩路径和上下文配色，对**所有**用户生效，与 `model_driven` 无关：后者只注册 `compact_context` 工具。TUI 的上下文用量显示（侧边栏 Context 数值与进度条、状态栏百分比 pill）用这两条线取色：reminder 以下为绿色，reminder 到 threshold 之间为橙/黄色，达到 threshold 为红色。请求面的 reminder / warning overlay 则只在启用 `model_driven` 时注入（见下文）。
+`threshold` 和 `reminder`（全局或按模型）为所有会话设置自动压缩阈值和上下文压力提醒线。TUI 的上下文用量显示（侧边栏 Context 数值与进度条、状态栏百分比 pill）用这两条线取色：reminder 以下为绿色，reminder 到 threshold 之间为橙/黄色，达到 threshold 为红色。请求面的 reminder / warning overlay 则只在启用 `model_driven` 时注入（见下文）。
 
 上述阈值判定使用服务商上报的用量：最近一次响应带用量时用它；否则用最近一次用量样本校准出的单份冻结估算（模型切换或恢复会话后，该读数作为估算按新预算折算）。没有任何可用样本时——首个请求尚未应答，或在报告用量前就已失败——大小读作 0，不越任何线：不论粘贴或组装出的请求多大，都不提醒、不自动压缩。唯一例外是服务商真实返回的上下文超长错误，它无视本地测量直接强制压缩。
 
@@ -152,7 +152,9 @@ checkpoint 的停点按上下文压力调整，不要求每次都等完整阶段
 
 #### 与自动压缩的关系
 
-自动压缩不会把模型的 checkpoint 锁死。当 usage-driven 压缩已在运行（threshold 越线启动了后台 worker，或 draft 已 ready、正在等 continuation barrier）时，与它并行的那次请求仍可提交 `compact_context`。模型是自己挑的边界，所以它的 checkpoint 优先：runtime 丢弃自动 draft，改应用模型 checkpoint。自动压缩是兜底而不是锁：threshold 越线不会夺走正在收尾的模型的 reset 机会。上阈值通知不会提及这种覆盖（模型不需要知道有自动压缩在跑，只需要知道当前上下文即将结束）；模型之前主动提交的 checkpoint 照常工作。
+用量触发的自动压缩正在运行或等待应用时，主模型仍可提交 `compact_context`。如果最近一次用量读数达到可用输入预算的 95%，Chord 会跳过这次 checkpoint，让自动压缩继续。
+
+读数低于 95% 时，通过初步策略检查的请求可以接管自动压缩，再接受常规的收益检查。在自动压缩启动前提交的 checkpoint 也按常规规则评估。
 
 #### 跳过与上下文提醒
 
@@ -186,7 +188,7 @@ skip 是正常的策略结果：立即用相同请求重试会被短暂冷却，
 
 `evidence_refs` 可引用 checkpoint evidence pack 中已知的稳定证据 ID，Chord 会在 barrier 前校验 ID。`claim_kinds` 将每条 claim 标记为 observed、derived、assumed 或 proposed。claim 键是自然语言断言，通常是对 `completed`/`decisions` 中某条结论的浓缩重述：允许改写，从不要求逐字一致，完全独立的 claim 也允许。合并上一 checkpoint 的 claim 时以键为单位：只有新提交沿用同一键重述，旧 claim 才会被覆盖；换个键改写，旧 claim 原样保留，与新 claim 并存。`observed` 必须有 `claim_evidence`；Chord 自动将其中的 ID 汇总到 `evidence_refs`，不必重复填写。证据仍必须真实可解析、包含分类且未失效。provisional checkpoint 里，没有 `claim_evidence`、或引用了任何负面、未分类、已失效证据（即使同时引用了有效证据）的 observed claim 会降为 derived，工具结果会列出这些 claim，它们引用的失效 ID 也会被去掉；ID 根本解析不到，或在 committed / completed checkpoint 里出现这类 claim，仍会拒绝整个请求。引用只证明来源，不代表模型结论已经得到验证。`state_files` 只是当前外部状态的路径引用；`planned_state_files` 用于尚未写入、仅供后续动作参考的路径。
 
-两者在构建 checkpoint 时都不会被 Chord 读取或校验存在性（因此该工具无法绕过 Read 权限，也不可能被当成存在性探针使用），只在 reset 后按当前 read 权限规则决定是否自动载入。实际载入前会再次按解析后的项目根校验路径；指向项目外的符号链接会被拒绝。条目通常写成相对项目根的路径（如 `docs/usage.md`）；绝对路径以及 `~`、`./`、`../` 开头的写法，只要词法解析后落在项目根内也一样接受，并在构建 checkpoint 前统一归一成相对项目根的路径。每个条目始终是模型声明的引用：过期或不存在的路径只在真正读取时才会暴露（read 工具会报告文件缺失），而不是靠 checkpoint 时刻的静默探测。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败时会继续使用旧上下文，usage-driven 自动压缩兜底保持生效。
+两者在构建 checkpoint 时都不会被 Chord 读取或校验存在性（因此该工具无法绕过 Read 权限，也不可能被当成存在性探针使用），只在 reset 后按当前 read 权限规则决定是否自动载入。实际载入前会再次按解析后的项目根校验路径；指向项目外的符号链接会被拒绝。条目通常写成相对项目根的路径（如 `docs/usage.md`）；绝对路径以及 `~`、`./`、`../` 开头的写法，只要词法解析后落在项目根内也一样接受，并在构建 checkpoint 前统一归一成相对项目根的路径。每个条目始终是模型声明的引用：过期或不存在的路径只在真正读取时才会暴露（read 工具会报告文件缺失），而不是靠 checkpoint 时刻的静默探测。checkpoint 的 `Current User Request` 永远来自你的真实消息，不会采用模型参数。工具 success 只表示请求被接受；之后出现的 model-driven `[Context Summary]` checkpoint 才表示 reset 已应用。请求被跳过或失败后，会话沿用当前上下文，直到另一轮压缩应用。用量触发的自动压缩仍可接手。
 
 #### 可观测性
 

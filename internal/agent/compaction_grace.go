@@ -61,7 +61,7 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 		a.endCompactionGrace("abrupt_crossing", current)
 		return false
 	}
-	if float64(decision.EffectiveInputTokens) >= float64(decision.UsableInputBudget)*compactionGraceHardCeilingRatio {
+	if compactionGraceHardCeilingReached(decision) {
 		a.endCompactionGrace("hard_ceiling", current)
 		return false
 	}
@@ -80,6 +80,11 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 	}
 	a.endCompactionGrace("expired", current)
 	return false
+}
+
+func compactionGraceHardCeilingReached(decision ctxmgr.AutoCompactDecision) bool {
+	return decision.UsableInputBudget > 0 &&
+		float64(decision.EffectiveInputTokens) >= float64(decision.UsableInputBudget)*compactionGraceHardCeilingRatio
 }
 
 // contextPressureAbruptCrossing reports whether the current observation

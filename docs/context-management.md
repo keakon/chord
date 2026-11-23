@@ -2,11 +2,9 @@
 
 <!-- description: How Chord keeps long sessions inside the model's context window: request trimming, durable compaction, and the model-driven checkpoint. -->
 
-Chord provides two complementary context management layers:
-**context compaction** rewrites the session history with an LLM-generated
-summary, while **context reduction** trims stale tool output from each
-individual request prompt. They operate at different levels and serve different
-purposes.
+**Context compaction** shortens saved session history with a model-driven
+checkpoint or an automatic summary. **Context reduction** trims stale tool
+output from each request.
 
 Both are configured under the top-level `context:` key in `config.yaml`. For
 the surrounding configuration model (files, layers, providers), see
@@ -29,20 +27,17 @@ Start with the defaults for most sessions. For everyday use, remember:
 
 | Aspect | Context compaction | Context reduction |
 |--------|-----------|-----------|
-| What it does | Calls an LLM to generate a structured summary and replaces old history | Applies deterministic rules to trim stale tool output from the current request |
+| What it does | Archives old messages and replaces them with a checkpoint | Applies deterministic rules to trim stale tool output from the current request |
 | Writes to disk | ✅ Rewrites session files | ❌ Conversation unchanged (archives dropped payloads) |
-| Uses an LLM | ✅ (configurable model pool) | ❌ (heuristic rules only) |
-| When it fires | Threshold is reached and a main-model request is about to start / manual `/compact` / error recovery | Before every LLM request |
-| Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
+| Uses an LLM | Model-driven checkpoints use the active model's structured arguments. Summary generation uses a configurable model pool. | ❌ (heuristic rules only) |
+| When it fires | Model requests a checkpoint / usage threshold is reached before the next main-model request / manual `/compact` / error recovery | Before every LLM request |
+| Typical latency | Summary generation takes seconds to tens of seconds | Milliseconds (in-memory rule matching) |
 | User visibility | TUI shows "Compacting context..." progress | Silent; inspect the latest request with `/context` |
 | Loop mode | Enabled; compaction still runs so long sessions can continue | Enabled; loop mode does not change reduction, see [Loop mode](#loop-mode) |
 
-**How they work together**: Reduction is the lightweight first line of defense:
-it trims stale tool output before every request, slowing down context growth.
-When reduction alone is not enough and the context keeps growing past the
-compaction threshold, compaction steps in for a deep compression pass. Most
-users only need to care about compaction settings; reduction defaults are
-already tuned for common usage patterns.
+Reduction slows context growth by trimming stale tool output before every
+request. Compaction shortens the history that later requests build on. Most
+users can keep the default reduction settings.
 
 Before handing history to the summarize model, compaction applies the reduction
 rules to it to keep that call affordable, and it follows your configured
@@ -56,13 +51,12 @@ Automatic compaction primarily uses input usage reported by the provider, and fa
 
 ## Context compaction
 
-When the main conversation approaches the model context limit, Chord arms
-automatic context compaction and starts it while preparing the next main-model
-request. The compaction process calls an LLM to analyze the current
-conversation, generates a structured summary (covering goals, progress, key
-decisions, file evidence, etc.), archives old messages, and replaces the
-conversation history with the summary. The compacted session is persisted to
-disk.
+By default, the main model can call `compact_context` to save a checkpoint after
+recording the state needed to resume, even before reaching the compaction
+threshold. When usage reaches the threshold, Chord can fall back to automatic
+compaction. That path calls an LLM to summarize the conversation, including its
+goals, progress, decisions and file evidence. Both paths archive old messages
+and save the compacted session to disk.
 
 **Minimal config** (enable automatic compaction):
 
@@ -72,7 +66,7 @@ context:
     threshold: 0.8
 ```
 
-Without `model_pool`, compaction uses the current agent's model pool. To use a dedicated pool, set `model_pool` to a pool you have already defined and prefer a model with a sufficiently large context window.
+Summary generation uses the current agent's model pool by default. To use a dedicated pool, set `model_pool` to a pool you have already defined and prefer a model with a sufficiently large context window.
 
 ### Retained recent messages
 
@@ -96,7 +90,7 @@ Verbatim retention is bounded, and summaries can miss details. Put important req
 | `reserved` | int | `0` | Fixed token headroom added on top of the proportional headroom left by `threshold`, for tokenizer drift, tool schema overhead, and compaction/recovery safety. Usually omit it (leave it at `0`); a non-zero value is subtracted from the fixed compaction budget before applying `threshold`. |
 | `profile` | string | `auto` | Compaction strategy. Usually unnecessary. |
 | `reminder` | float | `0` (derived) | Context-pressure reminder line as a usage ratio. `0` (the default) derives the line as `min(0.60, threshold × 0.90)`; a fraction in `(0,1]` sets it explicitly; `-1` disables the pressure reminder while keeping automatic compaction on (per model as well). A reminder below the threshold fires when usage reaches it (`min(reminder, threshold)` — whichever line comes first); one at or above the threshold does not fire separately, because usage only reaches it on requests that already crossed the threshold, which carry the upper-threshold notice instead. `threshold: 0` disables both. Any other value (negative, above `1`, or NaN/±Inf) is rejected with a warning and falls back to the derived default. |
-| `model_driven` | bool | `true` | Give the model the `compact_context` tool to request compaction after recording the state needed to continue. It can request compaction before the usage threshold; requests with insufficient savings are skipped. Pressure notices follow the `threshold` and `reminder` settings. Set to `false` to disable the tool and these notices; automatic compaction still follows the configured threshold. |
+| `model_driven` | bool | `true` | Give the model `compact_context` to request an early checkpoint. Requests with insufficient savings are skipped. Pressure notices follow `threshold` and `reminder`. Set `model_driven: false` for runtime-managed compaction at the configured threshold, with the tool and its pressure notices disabled. |
 | `retain_recent_tokens` | int | `4096` (built-in) | Estimated-token budget for the newest real user messages kept verbatim inside every compaction checkpoint (see [Retained recent messages](#retained-recent-messages)); `0` or omitted uses the built-in default. There is no disable value: `0` is not "off", so set a small positive value to shrink the retained window. Only the message text counts toward the budget, and messages carried from the previous checkpoint consume the same budget. Set it higher to keep more of the latest turns across a compaction, or lower to reclaim more context; the retained section never replaces the summary — it pins the newest instruction boundary verbatim (an exact repeat of the current request is rendered once). |
 
 Per-model overrides live on the model definition (`ModelConfig.compaction`,
@@ -118,9 +112,8 @@ Haiku 5.5 profile recommends `threshold: 0.10` and `reminder: 0.08`: compaction
 near 87K tokens and main-agent reminders near 70K for small tasks and subtasks.
 This is not a hard billing cap that guarantees prompts below 100K.
 
-`threshold` and `reminder` (global or per-model) drive the usage-driven
-compaction path and the context-pressure reminder for **all** users; they do
-not depend on `model_driven`, which only registers the `compact_context` tool.
+`threshold` and `reminder` (global or per-model) set the usage-driven
+compaction threshold and context-pressure reminder line for all sessions.
 The TUI context usage display (sidebar Context value/gauge and the status-bar
 percentage pill) uses the same two lines for its colors: green below the
 reminder, orange/yellow from the reminder up to the threshold, red at the
@@ -255,9 +248,9 @@ The stopping point is pressure-aware rather than tied to a completed phase:
 
 #### Interaction with automatic compaction
 
-An automatic compaction never locks the model out of its checkpoint. When a usage-driven compaction is already running (a threshold crossing started its background worker, or its draft is ready and waiting at the continuation barrier), the request running alongside it may still submit `compact_context`. The model chose that boundary on purpose, so its checkpoint wins: the runtime discards the automatic draft and applies the model's checkpoint instead.
+The main model can submit `compact_context` while usage-driven compaction is running or waiting to apply. If the latest usage reading is at least 95% of the usable input budget, Chord skips the competing checkpoint and lets the automatic compaction continue.
 
-Automatic compaction is the fallback, not a lock: a threshold crossing never takes the reset away from a model that is wrapping up. The upper-threshold notice does not mention this override (the model does not need to know an automatic compaction is running, only that the current context is ending soon); a voluntary checkpoint made earlier on its own initiative keeps working exactly as before.
+Below 95%, a request that passes the initial policy checks can take over from usage-driven compaction and proceeds to the usual savings checks. A checkpoint requested before automatic compaction starts also follows the usual checks.
 
 #### Skips and context reminders
 
@@ -305,7 +298,7 @@ When merging with a prior checkpoint's claims, keys set identity: an earlier cla
 
 Entries are normally workspace-relative paths such as `docs/usage.md`; absolute, `~`-prefixed, `./`- or `../`-prefixed spellings are also accepted when they lexically resolve inside the project root, and are normalized to workspace-relative form before the checkpoint is built. Each entry stays a model-declared reference: a stale or missing path is surfaced only when the file is actually read (the read tool reports the missing file), rather than by a silent checkpoint-time probe.
 
-The checkpoint's `Current User Request` always comes from your real messages, never from the model's arguments. A success result only means the request was accepted; a later model-driven `[Context Summary]` checkpoint confirms the reset applied. If the request is skipped or fails, the session continues on the old context and the usage-driven automatic-compaction safety net stays armed.
+The checkpoint's `Current User Request` always comes from your real messages, never from the model's arguments. A success result only means the request was accepted; a later model-driven `[Context Summary]` checkpoint confirms the reset applied. If the request is skipped or fails, the session uses the current context until another compaction applies. The usage-driven fallback remains available.
 
 #### Observability
 

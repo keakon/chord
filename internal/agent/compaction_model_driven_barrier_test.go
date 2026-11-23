@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,8 +61,7 @@ func TestMaybeStartModelDrivenBarrierStartsWorker(t *testing.T) {
 
 func TestMaybeStartModelDrivenBarrierOverridesRunningUsageCompaction(t *testing.T) {
 	t.Parallel()
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := graceTestAgent(t, 0.85)
 	a.newTurn("")
 	for _, msg := range []message.Message{
 		{Role: message.RoleUser, Content: "first request"},
@@ -69,11 +69,8 @@ func TestMaybeStartModelDrivenBarrierOverridesRunningUsageCompaction(t *testing.
 	} {
 		a.ctxMgr.Append(msg)
 	}
-	// An automatic usage-driven compaction owns the slot (a threshold crossing
-	// started its async worker). The model's checkpoint request is accepted
-	// and the barrier discards the running compaction before the model-driven
-	// worker starts: the model chose this boundary on purpose, so it wins over
-	// the runtime's background summary.
+	// At 85% of the input budget, an eligible model checkpoint can still take
+	// over a usage-driven compaction started at the threshold.
 	cancelCalled := false
 	a.beginCompactionState(7, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue, turnID: 1}, 5, func() { cancelCalled = true })
 	ccID, args := testCompactContextCall()
@@ -97,10 +94,63 @@ func TestMaybeStartModelDrivenBarrierOverridesRunningUsageCompaction(t *testing.
 	}
 }
 
+func TestMaybeStartModelDrivenBarrierKeepsUsageCompactionAtHardCeiling(t *testing.T) {
+	t.Parallel()
+	for _, state := range []string{"running", "ready"} {
+		t.Run(state, func(t *testing.T) {
+			a := graceTestAgent(t, 0.95)
+			a.newTurn("")
+			ccID, args := testCompactContextCall()
+			a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
+			a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
+			a.armUsageDrivenAutoCompactRequest()
+			if a.usageDrivenCompactionGraceDefers(a.ctxMgr.Snapshot()) {
+				t.Fatal("the hard ceiling must bypass grace and let usage-driven compaction start")
+			}
+
+			planID, target := a.nextCompactionPlan()
+			cancelCalled := false
+			a.beginCompactionState(planID, target, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue, turnID: target.turnID}, 2, func() { cancelCalled = true })
+			var readyDraft *compactionDraft
+			if state == "ready" {
+				readyHistory := filepath.Join(t.TempDir(), "history-1.md")
+				if err := os.WriteFile(readyHistory, []byte("# archived"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				readyDraft = &compactionDraft{PlanID: planID, AbsHistoryPath: readyHistory}
+				a.compactionState.readyDraft = readyDraft
+			}
+
+			if _, err := a.tryArmModelDrivenCheckpoint(ccID, args); err != nil {
+				t.Fatalf("tryArm: %v", err)
+			}
+			if a.maybeStartModelDrivenBarrier() {
+				t.Fatal("model checkpoint must not take over usage-driven compaction at the hard ceiling")
+			}
+			if cancelCalled || a.compactionState.planID != planID || a.compactionState.readyDraft != readyDraft {
+				t.Fatalf("usage-driven plan changed: cancelled=%t plan=%d draft=%p", cancelCalled, a.compactionState.planID, a.compactionState.readyDraft)
+			}
+			if readyDraft != nil {
+				if _, err := os.Stat(readyDraft.AbsHistoryPath); err != nil {
+					t.Fatalf("the ready draft's archive must remain available: %v", err)
+				}
+			}
+			if a.pendingModelDriven != nil || a.modelDrivenProposal.status != CompactionStatusSkipped {
+				t.Fatal("the model checkpoint must settle as skipped")
+			}
+			if !strings.Contains(a.pendingModelDrivenNotice, "automatic compaction is already in progress") {
+				t.Fatalf("the next request must explain the skip, got %q", a.pendingModelDrivenNotice)
+			}
+			if !a.autoCompactRequested.Load() {
+				t.Fatal("the usage-driven safety net must remain armed")
+			}
+		})
+	}
+}
+
 func TestMaybeStartModelDrivenBarrierDiscardsReadyUsageDraft(t *testing.T) {
 	t.Parallel()
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := graceTestAgent(t, 0.85)
 	a.newTurn("")
 	for _, msg := range []message.Message{
 		{Role: message.RoleUser, Content: "first request"},

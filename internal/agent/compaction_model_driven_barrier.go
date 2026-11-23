@@ -169,17 +169,15 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 	}
 	snapshot := a.ctxMgr.Snapshot()
 	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
-	// Policy pre-verdict on the event loop: the interval
-	// and same-reason cooldown verdicts are deterministic from the bundle
-	// alone, so a request they reject must settle before the compaction slot
-	// is touched. A running or ready automatic compaction keeps its paid-for
-	// draft (a usage-driven worker or ready draft is only discarded when the
-	// model-driven request actually proceeds), and the worker never starts —
-	// the settle is synchronous with started + terminal events on the same
-	// plan id, and the caller continues into beginMainLLMAfterPreparation
-	// without a model-driven continuation. The worker re-checks the same
-	// verdict defensively for paths that could reach it without this gate.
-	if reason, skipReason, skip := a.modelDrivenCheckpointSkipVerdict(bundle, req); skip {
+	reason, skipReason, skip := a.modelDrivenCheckpointSkipVerdict(bundle, req)
+	// At the hard ceiling, replacing an active usage-driven plan with a
+	// checkpoint that could still fail preflight would delay the safety net.
+	if !skip && a.compactionState.isRunning() && !a.compactionState.discard &&
+		a.compactionState.trigger.isUsageDriven() && compactionGraceHardCeilingReached(a.ctxMgr.AutoCompactDecision()) {
+		reason, skip = "context usage has reached the safety limit and automatic compaction is already in progress", true
+	}
+	if skip {
+		// Settle under a separate plan ID without touching the compaction slot.
 		planID, target := a.nextCompactionPlan()
 		a.recordCompactionLifecycleEvent("started", map[string]string{
 			"trigger":        compactionTriggerModelDriven.analyticsName(),
@@ -202,14 +200,9 @@ func (a *MainAgent) maybeStartModelDrivenBarrier() bool {
 		turnID:    a.turn.ID,
 		turnEpoch: a.turn.Epoch,
 	}
-	// The model's explicit checkpoint overrides any automatic compaction
-	// currently owning the slot (usage-driven async started by a threshold
-	// crossing, an oversize recovery, or a ready draft waiting for the
-	// continuation barrier): the model chose this boundary on purpose, so its
-	// checkpoint wins over the runtime's background summary. The single slot
-	// cannot host two workers, so the running compaction is discarded first;
-	// its late terminal event is dropped by the plan-id stale guard in
-	// handleCompactionReady / handleCompactionFailed.
+	// Once eligible, the model's checkpoint takes over the single compaction
+	// slot. Late terminal events from the displaced plan are dropped by the
+	// plan-ID guard in handleCompactionReady / handleCompactionFailed.
 	a.discardCompactionForModelOverride()
 	a.startModelDrivenCompactionAsync(bundle, planID, target, continuation, req)
 	return true

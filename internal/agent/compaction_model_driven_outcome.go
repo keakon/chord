@@ -82,17 +82,8 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 	log.Infof("model-driven checkpoint settled status=%v reason=%q plan_id=%v request_id=%v current_tokens=%v projected_tokens=%v saved_tokens=%v saved_ratio_pct=%v retained_records=%v retained_tokens=%v", status, a.modelDrivenSkipNotice, eventPlanID, a.modelDrivenProposal.requestID, currentTokens, projectedTokens, savedTokens, savedRatioPct, retainedRecords, retainedTokens)
 }
 
-// settleModelDrivenSkip records a model-driven policy skip (low-gain, apply
-// interval, or same-reason cooldown) with the worker-computed preflight stats.
-// The verdict batch and reason from the draft update the skip-cooldown state
-// so a retry with the same reason short-circuits without re-running preflight;
-// structural skips ("not enough history") carry no verdict and do not touch
-// the cooldown state.
-//
-// draft must be non-nil: the only production caller reaches this through a
-// branch that has already dereferenced draft.Skip. Half-guarding it (as this
-// function once did) only hides a caller bug that the very next line would
-// trip over anyway.
+// settleModelDrivenSkip records the skip and any preflight stats. Only a draft
+// carrying a verdict batch and reason updates the skip-cooldown state.
 func (a *MainAgent) settleModelDrivenSkip(draft *compactionDraft) {
 	if draft.ModelDrivenSkipReason != "" && draft.ModelDrivenSkipBatch > 0 {
 		a.lastModelDrivenSkipBatch = draft.ModelDrivenSkipBatch
@@ -136,6 +127,6 @@ func (a *MainAgent) appendModelDrivenContinuationNotice() {
 	if !strings.HasSuffix(reason, ".") {
 		reason += "."
 	}
-	a.pendingModelDrivenNotice = "Context checkpoint not applied: " + reason + " The session continues on the previous context."
+	a.pendingModelDrivenNotice = "Context checkpoint not applied: " + reason
 	a.emitToTUI(ToastEvent{Message: "Context checkpoint not applied: " + strings.TrimSuffix(reason, "."), Level: "info"})
 }

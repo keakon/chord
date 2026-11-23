@@ -109,7 +109,7 @@ Press <kbd>Esc</kbd> to enter Normal mode, then press <kbd>q</kbd> twice within 
 
 - [Parallel agents](./docs/usage.md#multi-agent-focus-switching): after you [define subagent roles and grant the main role delegation permission](./docs/configuration.md#agent-config), the main agent can delegate subtasks to subagents that run in parallel; press <kbd>Shift</kbd>+<kbd>Tab</kbd> to switch between them.
 - [Automatic model fallback](./docs/configuration.md#model-pools-selecting-providermodel): model pools combine several providers and models and move to the next one when a request fails.
-- [Long sessions that fit](./docs/context-management.md): Chord trims old tool output before each request and compacts history into a summary near the context limit.
+- Chord trims old tool output before each request. The model can save a checkpoint when it has recorded enough to resume, and Chord falls back to automatic compaction when usage reaches its threshold. [Context management](./docs/context-management.md)
 - [Approve before it runs](./docs/permissions-and-safety.md): `allow` / `ask` / `deny` rules per tool and command decide which actions wait for confirmation.
 - [Import existing sessions](./docs/usage.md#importing-external-sessions): bring your Claude Code, Codex, or OpenCode history into Chord and continue working.
 - [Headless](./docs/headless.md) and [ACP](./docs/acp.md): use `chord headless` for external interfaces or `chord acp` with editors such as Zed.

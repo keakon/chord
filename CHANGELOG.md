@@ -61,6 +61,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - HTTP 5xx responses that carry gateway error bodies such as `invalid_request_error` now remain eligible for fallback-model retries and honor `Retry-After`, instead of being mistaken for client request errors.
 
 - Context compaction keeps the latest user request even when it starts with `[Context Summary]` or quotes a worker notification.
+- At 95% or more of the usable input budget, Chord keeps an automatic compaction that is running or waiting to apply. A competing model checkpoint yields so the automatic compaction can finish.
 - Parent agents receive failure notices from nested tasks. A parked parent can use reserved wake capacity to process a child's result when all ordinary runtime slots are busy.
 - Repeating a delegation with the same explicit `semantic_task_key` returns the existing task ID even when the parent has reached `max_children`.
 - Read-classified shell calls no longer inherit Bash function exports or `BASH_ENV`, and their environment cannot enable `xtrace`. This prevents startup hooks and function overrides from introducing unclassified side effects while read-only calls run concurrently; other shell calls keep their inherited environment.
