@@ -56,6 +56,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Parent agents receive failure notices from nested tasks. A parked parent can use reserved wake capacity to process a child's result when all ordinary runtime slots are busy.
+- Repeating a delegation with the same explicit `semantic_task_key` returns the existing task ID even when the parent has reached `max_children`.
 - Read-classified shell calls no longer inherit Bash function exports or `BASH_ENV`, and their environment cannot enable `xtrace`. This prevents startup hooks and function overrides from introducing unclassified side effects while read-only calls run concurrently; other shell calls keep their inherited environment.
 - Cancelling an MCP stdio call while it waits for another stdin write now returns without sending the queued request. Other calls keep using the same server connection.
 - Multi-file `apply_patch` previews draw a full-width separator above every file section except the first and every hunk except its file's first, keeping `Add File` groups and long paths distinct. `Move to` stays unseparated because it renames the preceding Update. The same separators appear in live previews, failed-patch cards, and the `Requested patch` fallback.

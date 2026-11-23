@@ -5,9 +5,51 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
+
+func TestParkedOwnerWakeUnderCapacityPressure(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 2)
+	g := newResourceGovernor(config.OrchestrationConfig{MaxLiveRuntimes: 1, MaxBorrowedRuntimes: 1, MaxBypassRuntimes: 1})
+	a.governor, a.sem = g, g.runtimeSlots
+	if !g.tryAcquireRuntime() || !g.tryBorrowRuntime() || !g.tryBypassRuntime() {
+		t.Fatal("could not occupy runtime pools")
+	}
+	owner := &DurableTaskRecord{TaskID: "parent", AgentDefName: "worker", LatestInstanceID: "parent-1", State: string(SubAgentStateWaitingDescendant), RuntimeParked: true}
+	child := &DurableTaskRecord{TaskID: "child", OwnerTaskID: owner.TaskID, OwnerAgentID: owner.LatestInstanceID, State: string(SubAgentStateCompleted)}
+	a.setTaskRecords(map[string]*DurableTaskRecord{owner.TaskID: owner, child.TaskID: child})
+	var clients []*llm.Client
+	a.llmFactory = func(string, []string, string) *llm.Client {
+		c := newTestLLMClient()
+		clients = append(clients, c)
+		return c
+	}
+	msg := lateChildCompletion(owner.LatestInstanceID, owner.TaskID, "child-1", child.TaskID, "child-result")
+	a.enqueueSubAgentMailbox(msg)
+	if queued := a.ownedSubAgentMailboxes[owner.LatestInstanceID]; len(queued) != 1 || queued[0].MessageID != msg.MessageID {
+		t.Fatalf("queued = %+v, want undelivered completion", queued)
+	}
+	g.releaseRuntime(true)
+	if _, _, err := a.rehydrateTask(owner); err == nil {
+		t.Fatal("ordinary activation used reserved wake capacity")
+	}
+	for _, client := range clients {
+		if !client.IsClosed() {
+			t.Fatal("refused reactivation left a client open")
+		}
+	}
+	if !a.drainOwnedSubAgentMailboxes(owner.LatestInstanceID) || a.subAgentByTaskID(owner.TaskID) == nil {
+		t.Fatal("available borrowed slot did not wake the parent")
+	}
+	if got := g.borrowed.Load(); got != 1 {
+		t.Fatalf("borrowed slots = %d, want 1", got)
+	}
+}
 
 // TestDescendantCompletionWakesParkedWaitingMainOwner pins the parked-owner
 // wake fix at the mailbox-routing level: an owner subagent parks in

@@ -84,14 +84,20 @@ func TestCreateSubAgentReturnsChildLimitReachedForDirectOwner(t *testing.T) {
 	parent.depth = 1
 	parent.delegation = config.DelegationConfig{MaxChildren: 1, MaxDepth: 2}
 
-	first, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child one", AgentType: "worker"})
+	ctx := tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID)
+	req := tools.SubAgentRequest{Description: "child one", AgentType: "worker", SemanticTaskKey: "first", PlanTaskRef: "plan"}
+	first, err := a.CreateSubAgent(ctx, req)
 	if err != nil {
 		t.Fatalf("CreateSubAgent(first): %v", err)
 	}
 	if first.Status != "started" {
 		t.Fatalf("first.Status = %q, want started", first.Status)
 	}
-	second, err := a.CreateSubAgent(tools.WithTaskID(tools.WithAgentID(context.Background(), parent.instanceID), parent.taskID), tools.SubAgentRequest{Description: "child two", AgentType: "worker"})
+	duplicate, err := a.CreateSubAgent(ctx, req)
+	if err != nil || duplicate.Status != "already_exists" || duplicate.TaskID != first.TaskID {
+		t.Fatalf("duplicate = (%+v, %v), want the active task", duplicate, err)
+	}
+	second, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "child two", AgentType: "worker", PlanTaskRef: "plan"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent(second): %v", err)
 	}
@@ -198,6 +204,7 @@ func TestConcurrentDuplicateCreateSharesAdmissionResult(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
+	a.activeConfig.Delegation.MaxChildren = 1
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var factoryCalls atomic.Int32

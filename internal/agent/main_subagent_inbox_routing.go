@@ -21,6 +21,7 @@ const (
 	ownedMailboxRouteLiveOwner
 	ownedMailboxRouteWakeParkedOwner
 	ownedMailboxRouteForwardToMain
+	ownedMailboxRouteDiscard
 )
 
 // resolveOwnedMailboxRoute decides where an owned-queue message goes, with no
@@ -32,6 +33,21 @@ func (a *MainAgent) resolveOwnedMailboxRoute(msg SubAgentMailboxMessage) (ownedM
 	ownerAgentID := strings.TrimSpace(msg.OwnerAgentID)
 	if ownerAgentID == "" {
 		return ownedMailboxRouteNone, nil, nil
+	}
+	switch msg.Kind {
+	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired, SubAgentMailboxKindRiskAlert, SubAgentMailboxKindDirectionChange:
+		// A settled child cannot act on an old request. Its actual failure,
+		// expiry, or notice of unread input still matters to its parent.
+		a.subs.mu.RLock()
+		sender := a.subs.taskRecords[msg.TaskID]
+		settled := sender != nil && isTerminalSubAgentState(SubAgentState(sender.State))
+		settlement := a.subs.settlements[taskAttemptKey{TaskID: msg.TaskID, Attempt: msg.Attempt}]
+		terminalNotice := !msg.ReportOnly && (terminalMailboxMatchesSettlement(msg, settlement) ||
+			(msg.Kind == SubAgentMailboxKindRiskAlert && msg.Subtype == agentMessageSubtypeUndeliveredInput))
+		a.subs.mu.RUnlock()
+		if settled && !terminalNotice {
+			return ownedMailboxRouteDiscard, nil, nil
+		}
 	}
 	if owner := unsettledMailboxOwner(a.subAgentByID(ownerAgentID)); owner != nil {
 		return ownedMailboxRouteLiveOwner, owner, nil
@@ -84,10 +100,17 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 	defer finish()
 	route, owner, rec := a.resolveOwnedMailboxRoute(msg)
 	switch route {
+	case ownedMailboxRouteDiscard:
+		if err := a.markSubAgentMailboxConsumed(msg.MessageID); err != nil {
+			log.Warnf("acknowledge stale owned mailbox message_id=%v error=%v", msg.MessageID, err)
+			return false
+		}
+		a.emitToTUI(MailboxDeliveryDroppedEvent{MessageID: msg.MessageID})
+		return true
 	case ownedMailboxRouteLiveOwner:
 	case ownedMailboxRouteWakeParkedOwner:
 		var err error
-		if owner, _, err = a.rehydrateTask(rec); err != nil {
+		if owner, _, _, err = a.activateTask(rec, true); err != nil {
 			return false
 		}
 	case ownedMailboxRouteForwardToMain:
@@ -259,15 +282,6 @@ func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
 		}
 		return enqueueForProcessing(text, "Child task completed; resuming")
 	case SubAgentMailboxKindBlocked, SubAgentMailboxKindDecisionRequired, SubAgentMailboxKindRiskAlert, SubAgentMailboxKindDirectionChange:
-		// A decision request or risk alert that lands after its task already
-		// settled is stale: the owner cannot act on a worker that is no
-		// longer running, and delivering it would surface a false "worker
-		// needs you" after the task completed (or failed). Drop the late
-		// delivery instead of replaying it.
-		if rec := a.taskRecordByTaskID(strings.TrimSpace(msg.TaskID)); rec != nil && !isNonTerminalTaskState(rec.State) {
-			log.Infof("dropping late %s mailbox for settled task task_id=%v agent_id=%v", msg.Kind, msg.TaskID, msg.AgentID)
-			return false
-		}
 		if owner.State() == SubAgentStateWaitingDescendant {
 			return reactivateOwner(text, "Child task requires parent decision", true)
 		}

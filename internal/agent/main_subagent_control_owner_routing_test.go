@@ -816,6 +816,53 @@ func TestNotifySubAgentUsesEventLoopWhenStarted(t *testing.T) {
 	}
 }
 
+func TestNestedTaskFailureReachesOwner(t *testing.T) {
+	t.Parallel()
+	a := newTestMainAgent(t, t.TempDir())
+	owner := newControllableTestSubAgent(t, a, "parent")
+	a.subs.mu.Lock()
+	delete(a.subs.subAgents, owner.instanceID)
+	owner.instanceID = "worker-parent"
+	a.subs.subAgents[owner.instanceID] = owner
+	a.subs.mu.Unlock()
+	owner.setState(SubAgentStateRunning, "working")
+	a.syncTaskRecordFromSub(owner, "")
+	child := newControllableTestSubAgent(t, a, "child")
+	child.ownerAgentID, child.ownerTaskID = owner.instanceID, owner.taskID
+	child.setState(SubAgentStateRunning, "working")
+	a.syncTaskRecordFromSub(child, "")
+	a.handleAgentError(Event{Type: EventAgentError, SourceID: child.instanceID, Payload: context.DeadlineExceeded})
+	select {
+	case evt := <-a.eventCh:
+		a.dispatch(evt)
+	case <-time.After(time.Second):
+		t.Fatal("no failure event")
+	}
+	select {
+	case input := <-owner.inputCh:
+		if input.MailboxAckID == "" || !strings.Contains(input.Content, context.DeadlineExceeded.Error()) {
+			t.Fatalf("owner input = %+v, want a failure notice with its cause", input)
+		}
+	default:
+		t.Fatal("failure notice did not reach the parent")
+	}
+
+	for _, msg := range []SubAgentMailboxMessage{
+		{MessageID: "stale-decision", Kind: SubAgentMailboxKindDecisionRequired},
+		{MessageID: "reported-failure", Kind: SubAgentMailboxKindRiskAlert, Subtype: agentMessageSubtypeTaskFailure, ReportOnly: true},
+	} {
+		msg.TaskID, msg.OwnerAgentID, msg.OwnerTaskID = child.taskID, owner.instanceID, owner.taskID
+		msg.Attempt = 1
+		a.enqueueOwnedSubAgentMailbox(msg)
+		if !a.drainOwnedSubAgentMailboxes(owner.instanceID) || !a.isSubAgentMailboxConsumed(msg.MessageID) {
+			t.Fatalf("stale mailbox %s was not consumed", msg.MessageID)
+		}
+	}
+	if len(owner.inputCh) != 0 {
+		t.Fatal("stale notices reached the parent")
+	}
+}
+
 func TestSubAgentTerminalErrorQueuesRiskAlertAndWakesMain(t *testing.T) {
 	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())

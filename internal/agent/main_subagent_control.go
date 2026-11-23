@@ -664,6 +664,10 @@ func (a *MainAgent) beginNextTaskAttemptForLiveSub(sub *SubAgent) error {
 }
 
 func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, string, bool, error) {
+	return a.activateTask(record, false)
+}
+
+func (a *MainAgent) activateTask(record *DurableTaskRecord, descendantWake bool) (*SubAgent, string, bool, error) {
 	finish, err := a.beginSessionStructural(a.parentCtx, false)
 	if err != nil {
 		return nil, "", false, err
@@ -693,7 +697,7 @@ func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, st
 			return nil, "", false, a.parentCtx.Err()
 		}
 	} else {
-		return a.rehydrateTaskAsActivationLeader(record, activation, admissionEpoch)
+		return a.rehydrateTaskAsActivationLeader(record, activation, admissionEpoch, descendantWake)
 	}
 }
 
@@ -702,7 +706,7 @@ func (a *MainAgent) rehydrateTask(record *DurableTaskRecord) (*SubAgent, string,
 	return sub, previousAgentID, err
 }
 
-func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, activation *subAgentActivation, admissionEpoch uint64) (sub *SubAgent, previousAgentID string, rehydrated bool, err error) {
+func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, activation *subAgentActivation, admissionEpoch uint64, descendantWake bool) (sub *SubAgent, previousAgentID string, rehydrated bool, err error) {
 	taskID := strings.TrimSpace(record.TaskID)
 	defer func() {
 		a.subs.completeTaskActivation(taskID, activation, sub, previousAgentID, err)
@@ -741,6 +745,12 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	if subLLMClient == nil {
 		return nil, "", false, fmt.Errorf("cannot initialize model pool for agent %q; check chord doctor config", agentDef.Name)
 	}
+	clientCommitted := false
+	defer func() {
+		if !clientCommitted {
+			subLLMClient.Close()
+		}
+	}()
 	a.applyServiceTierToClient(subLLMClient)
 	var extraMCPTools []tools.Tool
 	if len(agentDef.MCP) > 0 {
@@ -855,17 +865,11 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		cancel()
 		return nil, "", false, fmt.Errorf("task reactivation invalidated by session or lifecycle change")
 	}
-	if err := a.acquireSubAgentSlot(sub); err != nil {
+	if err := a.acquireSubAgentSlotWithBypass(sub, descendantWake); err != nil {
 		a.admissionMu.Unlock()
 		cancel()
 		return nil, "", false, err
 	}
-	clientCommitted := false
-	defer func() {
-		if !clientCommitted && subLLMClient != nil {
-			subLLMClient.Close()
-		}
-	}()
 	previousAgentID = strings.TrimSpace(record.LatestInstanceID)
 	a.subs.mu.Lock()
 	if a.subs.activations[taskID] != activation || activation.cancelled {
@@ -890,6 +894,13 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		baseRecord = record
 	}
 	baseWasTerminal := isTerminalSubAgentState(SubAgentState(strings.TrimSpace(baseRecord.State)))
+	if descendantWake && !baseRecord.allowsRehydrate(taskResumeByDescendantMailbox) {
+		a.subs.mu.Unlock()
+		a.releaseSubAgentSlot(sub)
+		a.admissionMu.Unlock()
+		cancel()
+		return nil, "", false, fmt.Errorf("task %s no longer accepts a descendant wake", taskID)
+	}
 	rehydratedRecord := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], "", a.explicitUserTurnCount.Load(), time.Now())
 	if baseWasTerminal {
 		rehydratedRecord.Attempt = baseRecord.Attempt + 1

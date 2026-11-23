@@ -956,15 +956,6 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 			return tools.TaskHandle{}, fmt.Errorf("delegate owner task is no longer active")
 		}
 	}
-	count := a.directNonTerminalChildCountLocked(caller.AgentID, caller.TaskID)
-	if count >= maxChildren {
-		a.subs.mu.Unlock()
-		a.admissionMu.Unlock()
-		return tools.TaskHandle{
-			Status:  "child_limit_reached",
-			Message: fmt.Sprintf("direct non-terminal child limit reached (max_children=%d)", maxChildren),
-		}, nil
-	}
 	existing, duplicate := a.findDuplicateTaskLocked(caller.AgentID, caller.TaskID, agentType, planTaskRef, semanticTaskKey)
 	// Only a confirmed duplicate — the identical explicit semantic_task_key —
 	// rejects the delegation here. A probable duplicate (a plan_task_ref match)
@@ -1003,6 +994,14 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 			}
 		}
 		return duplicateTaskHandle(existing), nil
+	}
+	if a.directNonTerminalChildCountLocked(caller.AgentID, caller.TaskID) >= maxChildren {
+		a.subs.mu.Unlock()
+		a.admissionMu.Unlock()
+		return tools.TaskHandle{
+			Status:  "child_limit_reached",
+			Message: fmt.Sprintf("direct non-terminal child limit reached (max_children=%d)", maxChildren),
+		}, nil
 	}
 	if !agentDef.IsExternalBackend() && a.llmFactory == nil {
 		a.subs.mu.Unlock()
