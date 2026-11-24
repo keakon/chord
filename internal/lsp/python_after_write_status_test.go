@@ -99,14 +99,14 @@ func TestPythonSemanticTimeoutFallbackStatus(t *testing.T) {
 			afterWriteHasReadyClient = func(*Manager, string) bool { return true }
 			afterWriteStart = func(*Manager, context.Context, string) {}
 			afterWriteWaitForClient = func(*Manager, context.Context, string, time.Duration) (*Client, bool) { return &Client{}, true }
-			afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+			afterWriteAwaitWaiter = func(m *Manager, _ context.Context, p string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) diagnosticsWaitResult {
 				m.waitersMu.Lock()
 				m.removeWaiter(p, ch)
 				m.waitersMu.Unlock()
 				if tc.cancel {
 					cancel()
 				}
-				return nil, false, 0, nil
+				return diagnosticsWaitResult{}
 			}
 			result := m.afterWritePythonToolResult(ctx, filepath.Join(root, "sample.py"), "x = 1", "", false, nil, WatchedFileChanged, root)
 			if result.Status != tc.want {

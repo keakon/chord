@@ -51,18 +51,23 @@ func (m *Manager) DiagnosticOutputConfigForPath(path string) config.DiagnosticOu
 // means no baseline information and omits the counts entirely. states reports
 // files whose diagnostics could not be verified; those files are described
 // even when they have no diagnostics, named individually once the batch has
-// more than one primary file.
-func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPaths []string, includeOtherFiles bool, baselines map[string][]Diagnostic, outputs map[string]config.DiagnosticOutputConfig, extras map[string][]Diagnostic, states map[string]FileWriteDiagnosticsState, displayBaseDir string) string {
+// more than one primary file. A snapshot replaces the cache for its path even
+// when empty. Unedited sibling files still use the session's cache.
+func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPaths []string, includeOtherFiles bool, baselines map[string][]Diagnostic, outputs map[string]config.DiagnosticOutputConfig, snapshots map[string][]Diagnostic, states map[string]FileWriteDiagnosticsState, displayBaseDir string) string {
 	if m == nil {
 		return base
 	}
 	baselines = normalizeDiagnosticPathMap(baselines)
 	outputs = normalizeDiagnosticPathMap(outputs)
 	states = normalizeDiagnosticPathMap(states)
-	byPath := m.diagnosticsForWritePaths(editedPaths, states)
-	for path, diags := range extras {
-		normalized := normalizeWaiterPath(path)
-		byPath[normalized] = append(byPath[normalized], diags...)
+	byPath := m.diagnosticsForPaths(editedPaths)
+	for path, diags := range snapshots {
+		byPath[normalizeWaiterPath(path)] = diags
+	}
+	for path, state := range states {
+		if state.withholdsDiagnostics() {
+			delete(byPath, path)
+		}
 	}
 	primaryPaths := make([]string, 0, len(editedPaths))
 	seen := make(map[string]struct{}, len(editedPaths))
@@ -84,7 +89,7 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	// backend diagnostics such as Ruff), every cached diagnostic belongs to
 	// files edited earlier in the session. Attaching them would misattribute
 	// unrelated errors to this tool call, so keep the base output as-is.
-	if len(extras) == 0 {
+	if len(snapshots) == 0 {
 		covered := slices.ContainsFunc(primaryPaths, m.HasServerForPath)
 		if !covered {
 			reportedFailure := slices.ContainsFunc(primaryPaths, func(path string) bool { return states[path].needsFileReport() })
@@ -104,7 +109,11 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 			return nil, len(diags)
 		}
 		output := outputs[path]
-		output.MaxTotalDiagnostics = remaining
+		if output.MaxTotalDiagnostics <= 0 {
+			output.MaxTotalDiagnostics = remaining
+		} else {
+			output.MaxTotalDiagnostics = min(output.MaxTotalDiagnostics, remaining)
+		}
 		selected, count := selectDiagnosticsByOutput(diags, output, nil)
 		remaining -= len(selected)
 		return selected, count
@@ -240,22 +249,6 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	return b.String()
 }
 
-func (m *Manager) diagnosticsForWritePaths(paths []string, states map[string]FileWriteDiagnosticsState) map[string][]Diagnostic {
-	merged, byServer := m.diagnosticsForPathsGrouped(paths)
-	for path, state := range states {
-		if len(state.FailedServers) == 0 {
-			continue
-		}
-		delete(merged, path)
-		for name, diags := range byServer[path] {
-			if !slices.Contains(state.FailedServers, name) {
-				merged[path] = append(merged[path], diags...)
-			}
-		}
-	}
-	return merged
-}
-
 func sortOtherFilePaths(paths []string, byPath map[string][]Diagnostic) {
 	// Severity is precomputed because the sort comparator runs O(n log n) times
 	// and worstSeverity would otherwise rescan the diagnostics per comparison.
@@ -283,8 +276,7 @@ func worstSeverity(diags []Diagnostic) int {
 	return worst
 }
 
-// ParseToolOutputDiagnostics extracts diagnostics produced by a non-LSP
-// backend (currently Ruff) from the common tool-output representation.
+// ParseToolOutputDiagnostics extracts diagnostics from stored tool-result text.
 func ParseToolOutputDiagnostics(text string) []Diagnostic {
 	var out []Diagnostic
 	for raw := range strings.SplitSeq(text, "\n") {
@@ -396,7 +388,11 @@ func (m *Manager) appendFileDiagnosticsToToolOutput(base, editedPath string, inc
 		return selected
 	}
 
-	primary := selectWithinRemaining(byPath[edited], ranges)
+	primaryDiags := byPath[edited]
+	if state.withholdsDiagnostics() {
+		primaryDiags = nil
+	}
+	primary := selectWithinRemaining(primaryDiags, ranges)
 	var others []otherFileDiagnostics
 	if includeOtherFiles && remaining > 0 {
 		otherPaths := make([]string, 0, len(byPath))
@@ -428,22 +424,21 @@ func formatFileDiagnosticsBlock(subject string, diags []Diagnostic, state FileWr
 	if !state.needsFileReport() {
 		return strings.Join(formatDiagnosticLines(diags), "\n")
 	}
-	verb, shown := "unavailable", "last known"
+	verb := "unavailable"
 	if state.Status == FileWriteStatusPartial {
-		verb, shown = "incomplete", "available"
+		verb = "incomplete"
 	}
 	header := subject + "diagnostics " + verb + " (" + state.reason() + ")"
-	if len(diags) == 0 {
+	if state.withholdsDiagnostics() || len(diags) == 0 {
 		return header + "."
 	}
-	return header + "; showing " + shown + " diagnostics:\n" + strings.Join(formatDiagnosticLines(diags), "\n")
+	return header + "; showing available diagnostics:\n" + strings.Join(formatDiagnosticLines(diags), "\n")
 }
 
-func (m *Manager) diagnosticsByAbsPath(owners map[clientKey]*Client) (map[string][]Diagnostic, map[string]map[string][]Diagnostic) {
+func (m *Manager) diagnosticsByAbsPath(owners map[clientKey]*Client) map[string][]Diagnostic {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 	merged := make(map[string][]Diagnostic)
-	byServer := make(map[string]map[string][]Diagnostic)
 	// ownersByPath caches, per absolute path and server name, the workspace
 	// roots of the clients that own that path. The key must pair the path with
 	// the server name: two servers can own the same file from different roots,
@@ -496,15 +491,11 @@ func (m *Manager) diagnosticsByAbsPath(owners map[clientKey]*Client) (map[string
 					Source:   d.Source,
 				}
 				merged[absP] = append(merged[absP], converted)
-				if byServer[absP] == nil {
-					byServer[absP] = make(map[string][]Diagnostic)
-				}
-				byServer[absP][key.name] = append(byServer[absP][key.name], converted)
 			}
 		}
 		c.diagnosticsMu.RUnlock()
 	}
-	return merged, byServer
+	return merged
 }
 
 func diagnosticsOmittedLine(count int) string {

@@ -253,9 +253,9 @@ func TestPythonQuickDiagnosticsNotifyReadyLSPClientWithoutSemanticSync(t *testin
 		t.Fatal("quick diagnostics should not send didChange semantic sync")
 		return nil, nil, nil
 	}
-	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) diagnosticsWaitResult {
 		t.Fatal("quick diagnostics should not await semantic diagnostics")
-		return nil, false, 0, nil
+		return diagnosticsWaitResult{}
 	}
 
 	root := resolvedTempDir(t)

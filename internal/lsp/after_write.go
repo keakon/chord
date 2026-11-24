@@ -82,9 +82,7 @@ var (
 	afterWriteNotifyWatchedFileChanged = func(m *Manager, ctx context.Context, path string, changeType pnprotocol.FileChangeType) map[string]error {
 		return m.NotifyWatchedFileChanged(ctx, path, changeType)
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return m.AwaitFreshWaiter(ctx, path, ch, req, timeout)
-	}
+	afterWriteAwaitWaiter = (*Manager).AwaitFreshWaiter
 )
 
 // afterWriteClientWaitTimeout bounds how long one write waits for its
@@ -226,11 +224,7 @@ func (m *Manager) prepareReadyAfterFileWrite(ctx context.Context, absPath, conte
 func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *afterWritePrepared, includeOtherFiles bool, displayBaseDir string) FileWriteResult {
 	if !prepared.wait {
 		m.logAfterWriteBreakdown(prepared, prepared.skipStatus, false, false, 0)
-		return FileWriteResult{
-			Output: prepared.base,
-			Status: prepared.skipStatus,
-			Detail: fileWriteStatusDetail(prepared.skipStatus),
-		}
+		return resultForFileWrite(prepared.base, prepared.skipStatus, fileWriteStatusDetail(prepared.skipStatus))
 	}
 
 	if prepared.coldStart || prepared.grace {
@@ -238,51 +232,37 @@ func (m *Manager) awaitPreparedAfterFileWrite(ctx context.Context, prepared *aft
 	}
 	req := diagnosticsWaitRequest{serverVersions: prepared.sync.serverVersions, after: prepared.sync.token.after, immediateServers: m.immediateDiagnosticsServers(prepared.sync.serverVersions), unversionedServers: m.unversionedDiagnosticsServers(prepared.sync.serverVersions)}
 	diagWaitStart := time.Now()
-	_, notified, lastSeq, baseline := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, req, prepared.waitTimeout)
+	waited := afterWriteAwaitWaiter(m, ctx, prepared.path, prepared.waiter, req, prepared.waitTimeout)
 	diagWait := time.Since(diagWaitStart)
-	if notified && prepared.sync.token.confirmable {
+	if waited.notified && len(waited.missingServers) == 0 && prepared.sync.token.confirmable {
 		m.confirmDiagnosticsSync(prepared.sync.token)
 	}
 	lateWatch := false
 	if ctx.Err() == nil && prepared.sync.token.confirmable {
-		lateWatch = m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, prepared.watchGenerations, baseline, lastSeq, prepared.writerAgentID, prepared.sync.token)
+		lateWatch = m.watchLateDiagnostics(prepared.path, prepared.sync.serverVersions, prepared.watchGenerations, diagnosticIdentitySet(waited.diagnostics), waited.lastSeq, prepared.writerAgentID, prepared.sync.token)
 	}
-	if !notified && ctx.Err() == nil {
+	var result FileWriteResult
+	switch {
+	case waited.notified:
+		m.recordReviewSnapshot(prepared.path)
+		result.FileWriteDiagnosticsState = verifiedFileWriteState(prepared.sync, waited)
+		result.Diagnostics = waited.diagnostics
+	case ctx.Err() != nil:
+		result = unavailableFileWrite(ctx, prepared.base, FileWriteStatusTimeout)
+		m.logAfterWriteBreakdown(prepared, result.Status, false, false, diagWait)
+		return result
+	default:
 		// A timeout is logged every time, and the result's diagnostics section
 		// reports it every time, so an unverified write is never mistaken for
 		// a clean one.
 		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", prepared.path, prepared.waitTimeout)
+		result = timeoutFileWrite(prepared.base, prepared.waitTimeout)
 	}
-	status := unavailableStatus(ctx, FileWriteStatusTimeout)
-	if notified {
-		status = synchronizedFileWrite("", prepared.sync).Status
-	}
-	m.logAfterWriteBreakdown(prepared, status, notified, lateWatch, diagWait)
-
-	if notified {
-		m.recordReviewSnapshot(prepared.path)
-	}
-	result := synchronizedFileWrite("", prepared.sync)
-	states := map[string]FileWriteDiagnosticsState{prepared.path: {FailedServers: result.FailedServers}}
-	if !notified && ctx.Err() == nil {
-		// The wait ran out, so nothing here verified this write. The section
-		// says so itself — naming the reason and the late watch that still
-		// claims the analysis — instead of an empty block reading as clean.
-		states[prepared.path] = FileWriteDiagnosticsState{
-			Status:        FileWriteStatusTimeout,
-			Detail:        deferredDiagnosticsDetail(prepared.waitTimeout),
-			FailedServers: result.FailedServers,
-		}
-	}
-	out := m.AppendLSPDiagnosticsToToolOutputForPaths(prepared.base, []string{prepared.path}, includeOtherFiles, nil, nil, nil, states, displayBaseDir)
-	result.Output = out
-	if notified {
-		return result
-	}
-	if ctx.Err() != nil {
-		return unavailableFileWrite(ctx, out, FileWriteStatusTimeout)
-	}
-	return timeoutFileWrite(out, prepared.waitTimeout)
+	m.logAfterWriteBreakdown(prepared, result.Status, waited.notified, lateWatch, diagWait)
+	states := map[string]FileWriteDiagnosticsState{prepared.path: result.FileWriteDiagnosticsState}
+	snapshots := map[string][]Diagnostic{prepared.path: result.Diagnostics}
+	result.Output = m.AppendLSPDiagnosticsToToolOutputForPaths(prepared.base, []string{prepared.path}, includeOtherFiles, nil, nil, snapshots, states, displayBaseDir)
+	return result
 }
 
 // logAfterWriteBreakdown records one write's after-write decomposition: the

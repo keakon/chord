@@ -57,9 +57,8 @@ type lateWatch struct {
 	// timed out: the path stays stale until a pending late publish is about
 	// to be delivered. Tokens from partially failed syncs never arrive here.
 	token diagnosticSyncToken
-	// baseline holds every diagnostic the path had when the wait returned
-	// plus every diagnostic already delivered as late; only identities outside
-	// it are reported.
+	// baseline holds diagnostics verified by the wait and later deliveries;
+	// unverified cached findings must not suppress a first confirmed publish.
 	baseline map[diagnosticIdentity]struct{}
 	// frozen holds the latest matching publish per server for the synced
 	// version. Late follow-ups read this instead of the live cache: a second
@@ -114,31 +113,6 @@ func diagnosticIdentitySet(diags []Diagnostic) map[diagnosticIdentity]struct{} {
 		set[diagnosticIdentityKey(d)] = struct{}{}
 	}
 	return set
-}
-
-func flattenDiagnosticBaseline(byServer map[string]map[diagnosticIdentity]struct{}) map[diagnosticIdentity]struct{} {
-	if len(byServer) == 0 {
-		return nil
-	}
-	baseline := make(map[diagnosticIdentity]struct{})
-	for _, set := range byServer {
-		for id := range set {
-			baseline[id] = struct{}{}
-		}
-	}
-	return baseline
-}
-
-// diagnosticBaselineByServer snapshots the diagnostics each synced server
-// already reports before a wait starts. Servers that publish during the wait
-// replace their entry with the set the wait observed.
-func (m *Manager) diagnosticBaselineByServer(path string, serverVersions map[string]int32) map[string]map[diagnosticIdentity]struct{} {
-	byServer := m.diagnosticsForPathsByServer([]string{path})[path]
-	baseline := make(map[string]map[diagnosticIdentity]struct{}, len(serverVersions))
-	for server := range serverVersions {
-		baseline[server] = diagnosticIdentitySet(byServer[server])
-	}
-	return baseline
 }
 
 // watchLateDiagnostics starts following path after its after-write wait

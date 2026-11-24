@@ -63,6 +63,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A truncated Responses reply whose final event omits a completed tool call's arguments can still continue over WebSocket without resending the conversation. Chord keeps the arguments from the completed call.
 - HTTP 5xx responses that carry gateway error bodies such as `invalid_request_error` now remain eligible for fallback-model retries and honor `Retry-After`, instead of being mistaken for client request errors.
 - An HTTP 5xx with a specific request error such as `missing_required_parameter` no longer starts another retry round after all available models fail.
+- Timed-out or otherwise unverified file writes no longer show diagnostics cached from an earlier write; partial results still include diagnostics from servers that verified the write.
 
 - Context compaction keeps the latest user request even when it starts with `[Context Summary]` or quotes a worker notification.
 - At 95% or more of the usable input budget, Chord keeps an automatic compaction that is running or waiting to apply. A competing model checkpoint yields so the automatic compaction can finish.

@@ -179,15 +179,15 @@ func collectDiagnostics(t *testing.T, ctx context.Context, mgr *Manager, path st
 	if len(errs) != 0 {
 		t.Fatalf("sync %s: %v", path, errs)
 	}
-	diags, notified, _, _ := mgr.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{serverVersions: versions, after: after}, 30*time.Second)
-	if !notified && len(diags) == 0 {
+	got := mgr.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{serverVersions: versions, after: after}, 30*time.Second)
+	if !got.notified {
 		t.Fatalf("no diagnostics were published for %s within 30s", path)
 	}
 	// AfterFileWriteToolResult records a review snapshot once the publish is
 	// settled; the sidebar aggregate and the model read that, not the raw
 	// diagnostics, so the helper must do the same.
 	mgr.recordReviewSnapshot(path)
-	return diags
+	return got.diagnostics
 }
 
 func hasDiagnosticMessage(diags []Diagnostic, message string) bool {

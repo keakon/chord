@@ -193,7 +193,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsCollapsesUniformMisses(t *testi
 	}
 }
 
-func TestAppendLSPDiagnosticsToToolOutputForPathsLabelsCachedDiagnosticsAfterFailure(t *testing.T) {
+func TestAppendLSPDiagnosticsToToolOutputForPathsOmitsDiagnosticsAfterSyncFailure(t *testing.T) {
 	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{"gopls": {Command: "gopls", FileTypes: []string{".go"}}},
@@ -213,8 +213,8 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsLabelsCachedDiagnosticsAfterFai
 	if !strings.Contains(out, pathA+" (1 new, 0 resolved):\n[E] 1:1 fresh") {
 		t.Fatalf("output = %q, want the verified file to keep its change counts", out)
 	}
-	if !strings.Contains(out, pathB+": diagnostics unavailable (file synchronization failed); showing last known diagnostics:\n[W] 4:1 stale") {
-		t.Fatalf("output = %q, want cached diagnostics labelled as last known", out)
+	if !strings.Contains(out, pathB+": diagnostics unavailable (file synchronization failed).") || strings.Contains(out, "stale") {
+		t.Fatalf("output = %q, want the sync failure without cached diagnostics", out)
 	}
 }
 
@@ -234,8 +234,8 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsDescribesStateForSingleFile(t *
 		t.Fatalf("output = %q, want the unnamed unverified line", out)
 	}
 	extras := map[string][]Diagnostic{pathA: {{Severity: 1, Line: 0, Message: "a"}}}
-	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA}, false, nil, nil, extras, states, ""); out != "Applied patch\n\nDiagnostics:\ndiagnostics unavailable (language server unavailable); showing last known diagnostics:\n[E] 1:1 a" {
-		t.Fatalf("output = %q, want cached diagnostics labelled as last known", out)
+	if out := mgr.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{pathA}, false, nil, nil, extras, states, ""); out != "Applied patch\n\nDiagnostics:\ndiagnostics unavailable (language server unavailable)." {
+		t.Fatalf("output = %q, want unavailable status without cached diagnostics", out)
 	}
 }
 

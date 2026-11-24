@@ -102,7 +102,7 @@ func TestAfterFileWriteToolResultCancelledWaitDoesNotAppendWaitNote(t *testing.T
 	_ = client
 }
 
-func TestAfterFileWriteToolResultAppendsCachedDiagnosticsWithoutWaitNote(t *testing.T) {
+func TestAfterFileWriteToolResultCancelledWaitOmitsCachedDiagnostics(t *testing.T) {
 	mgr, path, client := newAfterWriteTestManager(t)
 	uri := protocol.DocumentURI(client.pathToURI(path))
 	client.diagnostics[uri] = []protocol.Diagnostic{
@@ -121,8 +121,11 @@ func TestAfterFileWriteToolResultAppendsCachedDiagnosticsWithoutWaitNote(t *test
 	cancel()
 
 	out := mgr.AfterFileWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
-	if !strings.Contains(out, "[E] 1:1 expected package name") {
-		t.Fatalf("cached diagnostics should still be appended: %q", out)
+	if strings.Contains(out, "expected package name") {
+		t.Fatalf("cancelled output should omit cached diagnostics: %q", out)
+	}
+	if out != "Successfully wrote 12 bytes" {
+		t.Fatalf("cancelled output should keep the base result: %q", out)
 	}
 	if strings.Contains(out, "Failed to sync buffer") {
 		t.Fatalf("sync errors should not leak to tool output: %q", out)
@@ -170,12 +173,12 @@ func TestAfterFileWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *test
 		didChangeErr = gotCtx.Err()
 		return nil, nil, nil
 	}
-	afterWriteAwaitWaiter = func(_ *Manager, gotCtx context.Context, gotPath string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+	afterWriteAwaitWaiter = func(_ *Manager, gotCtx context.Context, gotPath string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) diagnosticsWaitResult {
 		if gotPath != path {
 			t.Fatalf("await path = %q, want %q", gotPath, path)
 		}
 		awaitErr = gotCtx.Err()
-		return nil, false, 0, nil
+		return diagnosticsWaitResult{}
 	}
 
 	out := mgr.AfterFileWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
@@ -226,8 +229,8 @@ func TestAfterFileWriteToolResultNotifiesWatchedFileBeforeDidChange(t *testing.T
 		order = append(order, "didChange")
 		return nil, nil, nil
 	}
-	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, true, 0, nil
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{notified: true}
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileCreated, "")
@@ -279,9 +282,9 @@ func TestAfterFileWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
 		t.Fatal("disabled gopls should not receive watched-file notifications after write")
 		return nil
 	}
-	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) diagnosticsWaitResult {
 		t.Fatal("disabled gopls diagnostics should not be awaited after write")
-		return nil, false, 0, nil
+		return diagnosticsWaitResult{}
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
@@ -404,11 +407,9 @@ func TestAfterFileWriteToolResultDidSaveFollowsServerCapability(t *testing.T) {
 	}
 }
 
-// TestAfterFileWriteTimeoutLabelsCachedDiagnostics guards the honesty rule: a
-// timed-out write that still shows the file's cached diagnostics must say the
-// wait ran out and that the set is last-known, so an unchanged diagnostic
-// block is never read as verification of the write that just timed out.
-func TestAfterFileWriteTimeoutLabelsCachedDiagnostics(t *testing.T) {
+// TestAfterFileWriteTimeoutOmitsCachedDiagnostics keeps diagnostics from a
+// previous write from being presented as the result of this timed-out write.
+func TestAfterFileWriteTimeoutOmitsCachedDiagnostics(t *testing.T) {
 	mgr, path, client := newAfterWriteTestManager(t)
 	uri := protocol.DocumentURI(client.pathToURI(path))
 	client.diagnostics[uri] = []protocol.Diagnostic{
@@ -421,16 +422,16 @@ func TestAfterFileWriteTimeoutLabelsCachedDiagnostics(t *testing.T) {
 
 	origAwait := afterWriteAwaitWaiter
 	t.Cleanup(func() { afterWriteAwaitWaiter = origAwait })
-	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, false, 0, nil
+	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{}
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
-	if !strings.Contains(out, "cached type error") {
-		t.Fatalf("timeout output should carry the cached diagnostics: %q", out)
+	if strings.Contains(out, "cached type error") {
+		t.Fatalf("timeout output should omit cached diagnostics: %q", out)
 	}
-	if !strings.Contains(out, "diagnostics unavailable (wait timed out; eligible versioned diagnostics may follow with the next request); showing last known diagnostics:\n[E]") {
-		t.Fatalf("timeout output should label the cached diagnostics: %q", out)
+	if !strings.Contains(out, "diagnostics unavailable (wait timed out; eligible versioned diagnostics may follow with the next request).") {
+		t.Fatalf("timeout output should report that diagnostics were unavailable: %q", out)
 	}
 }
 

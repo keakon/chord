@@ -64,6 +64,48 @@ func newBatchTestManager(t *testing.T) (*Manager, string, string) {
 	return mgr, filepath.Join(root, "alpha.go"), filepath.Join(root, "beta.go")
 }
 
+func TestAfterFileWritesToolResultUsesEmptySnapshotAndKeepsSiblingDiagnostics(t *testing.T) {
+	m, alpha, beta := newBatchTestManager(t)
+	dir := filepath.Dir(alpha)
+	sibling := filepath.Join(dir, "sibling.go")
+	client := m.clients[testKey(m, "gopls")]
+	const content = "package sample\n"
+	for path, text := range map[string]string{
+		alpha: "cached alpha diagnostic", beta: "cached beta diagnostic", sibling: "sibling diagnostic",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		client.diagnostics[protocol.DocumentURI(client.pathToURI(path))] = []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: text}}
+	}
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
+		publish := diagnosticsEvent{serverID: "gopls", version: req.serverVersions["gopls"]}
+		if path == beta {
+			publish.diagnostics = []Diagnostic{{Severity: int(protocol.SeverityError), Message: "current beta diagnostic"}}
+		}
+		ch <- publish
+		return m.AwaitFreshWaiter(ctx, path, ch, req, timeout)
+	}
+	results := m.AfterFileWritesToolResult(t.Context(), []FileWrite{
+		{Path: alpha, Content: content, ChangeType: WatchedFileChanged},
+		{Path: beta, Content: content, ChangeType: WatchedFileChanged},
+	}, dir)
+	snapshots := make(map[string][]Diagnostic, len(results))
+	for path, result := range results {
+		if result.Status != FileWriteStatusReported || strings.Contains(result.Output, "cached") {
+			t.Fatalf("result for %s = %+v", path, result)
+		}
+		snapshots[path] = result.Diagnostics
+	}
+	if clean, ok := snapshots[alpha]; !ok || len(clean) != 0 {
+		t.Fatalf("alpha snapshot = %v, present = %v; want a verified empty result", clean, ok)
+	}
+	out := m.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", []string{alpha, beta}, true, nil, nil, snapshots, nil, dir)
+	if strings.Contains(out, "cached") || !strings.Contains(out, "current beta diagnostic") || !strings.Contains(out, "sibling diagnostic") {
+		t.Fatalf("batch output = %q; want only the verified and untouched-file diagnostics", out)
+	}
+}
+
 // TestAfterFileWritesToolResultSyncsAllFilesBeforeWaiting guards the batch
 // invariant the pipeline exists for: no file's diagnostics wait may block
 // another file's content sync. The await hook blocks until both files' syncs
@@ -86,14 +128,14 @@ func TestAfterFileWritesToolResultSyncsAllFilesBeforeWaiting(t *testing.T) {
 		}
 		return m.didChangeVersions(ctx, path, content)
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
 		select {
 		case <-bothSynced:
 		case <-time.After(2 * time.Second):
 			t.Errorf("diagnostics wait for %s blocked before both files were synced", path)
-			return nil, true, 0, nil
+			return diagnosticsWaitResult{notified: true}
 		}
-		return nil, true, 0, nil
+		return diagnosticsWaitResult{notified: true}
 	}
 
 	results := mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
@@ -117,8 +159,8 @@ func TestAfterFileWritesToolResultSyncsAllFilesBeforeWaiting(t *testing.T) {
 // didChange goes out, so a fast server's publish is never missed.
 func TestAfterFileWritesToolResultRegistersWaiterBeforeSync(t *testing.T) {
 	mgr, alpha, beta := newBatchTestManager(t)
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, true, 0, nil
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{notified: true}
 	}
 
 	var mu sync.Mutex
@@ -157,8 +199,9 @@ func TestAfterFileWritesToolResultMatchesSingleFilePipeline(t *testing.T) {
 	client.diagnostics[uri] = []protocol.Diagnostic{
 		{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 2, Character: 0}}, Message: "undeclared name: sample"},
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, true, 0, nil
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
+		ch <- diagnosticsEvent{serverID: "gopls", version: req.serverVersions["gopls"], diagnostics: convertDiagnostics(client.diagnostics[uri])}
+		return m.AwaitFreshWaiter(ctx, path, ch, req, timeout)
 	}
 
 	ctx := context.Background()
@@ -173,7 +216,7 @@ func TestAfterFileWritesToolResultMatchesSingleFilePipeline(t *testing.T) {
 		t.Fatalf("batch result status = %v, want %v", batch[alpha].Status, FileWriteStatusReported)
 	}
 	if !strings.Contains(batch[alpha].Output, "undeclared name: sample") {
-		t.Fatalf("batch result should carry the cached diagnostic: %q", batch[alpha].Output)
+		t.Fatalf("batch result should carry the matching diagnostic: %q", batch[alpha].Output)
 	}
 }
 
@@ -182,8 +225,8 @@ func TestAfterFileWritesToolResultMatchesSingleFilePipeline(t *testing.T) {
 // session degradation note instead of reporting a clean result.
 func TestAfterFileWritesToolResultAppendsTimeoutNote(t *testing.T) {
 	mgr, alpha, _ := newBatchTestManager(t)
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, false, 0, nil
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{}
 	}
 
 	results := mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
@@ -245,8 +288,8 @@ func TestAfterFileWritesToolResultWaitsForClientsConcurrently(t *testing.T) {
 		<-release
 		return m.clients[testKey(m, "gopls")], true
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, true, 0, nil
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{notified: true}
 	}
 
 	done := make(chan map[string]FileWriteResult, 1)
@@ -306,11 +349,11 @@ func TestAfterFileWritesToolResultGivesEveryFileTheColdStartBudget(t *testing.T)
 	}
 	var mu sync.Mutex
 	timeouts := make(map[string]time.Duration)
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
 		mu.Lock()
 		timeouts[path] = timeout
 		mu.Unlock()
-		return nil, true, 0, nil
+		return diagnosticsWaitResult{notified: true}
 	}
 
 	mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
@@ -390,8 +433,8 @@ func TestAfterFileWritesBatchRegistersWatchForEveryFile(t *testing.T) {
 				mu.Unlock()
 				return v, g, errs
 			}
-			afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-				return nil, tc.notified, 0, nil
+			afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) diagnosticsWaitResult {
+				return diagnosticsWaitResult{notified: tc.notified}
 			}
 
 			results := mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{
@@ -502,8 +545,8 @@ func TestAfterFileWritesToolResultLogsBatchClientWait(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		return origWaitForClient(m, ctx, path, timeout)
 	}
-	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, true, 0, nil
+	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{notified: true}
 	}
 
 	mgr.AfterFileWritesToolResult(context.Background(), []FileWrite{

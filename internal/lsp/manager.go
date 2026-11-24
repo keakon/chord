@@ -3,8 +3,10 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1405,8 +1407,8 @@ func (m *Manager) PrepareWaiter(path string) chan diagnosticsEvent {
 // AwaitWaiter waits on a channel obtained from PrepareWaiter.
 // Returns (diags, true) if publishDiagnostics arrived; (cached diags, false) on timeout/cancel.
 func (m *Manager) AwaitWaiter(ctx context.Context, path string, ch chan diagnosticsEvent, timeout time.Duration) ([]Diagnostic, bool) {
-	diags, notified, _, _ := m.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{}, timeout)
-	return diags, notified
+	result := m.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{}, timeout)
+	return result.diagnostics, result.notified
 }
 
 type diagnosticsWaitRequest struct {
@@ -1450,24 +1452,22 @@ func (req diagnosticsWaitRequest) immediateWaitComplete(ev diagnosticsEvent, con
 	return true
 }
 
+type diagnosticsWaitResult struct {
+	diagnostics    []Diagnostic
+	notified       bool
+	missingServers []string
+	lastSeq        uint64
+}
+
 // AwaitFreshWaiter waits for diagnostics that match the current edit. If an LSP
 // server publishes diagnostics with a document version, stale versions are
 // ignored. Otherwise, only diagnostics published after the edit notification are
 // accepted. Once a fresh event arrives, the function waits briefly for additional
-// diagnostics to settle so multi-phase servers such as gopls do not expose a
-// transient first snapshot as final tool output.
-func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+// diagnostics to settle, keeping the latest accepted publish from each server.
+func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
 	path = normalizeWaiterPath(path)
 	if req.settle <= 0 {
 		req.settle = diagnosticsSettleDuration
-	}
-	// The baseline is the set the wait itself observed, captured per server as
-	// each publish arrives. Capturing it later, when the watch is registered,
-	// would make a publish that raced the registration look like it had always
-	// been there and silently drop its new findings.
-	var baseline map[string]map[diagnosticIdentity]struct{}
-	if len(req.serverVersions) > 0 {
-		baseline = m.diagnosticBaselineByServer(path, req.serverVersions)
 	}
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
@@ -1482,43 +1482,65 @@ func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan dia
 	logReturn := func(reason string) {
 		log.Debugf("lsp: diagnostics wait returned path=%v reason=%v elapsed=%v events=%v fresh_events=%v", path, reason, time.Since(started), events, freshEvents)
 	}
-	var gotFresh bool
-	var last []Diagnostic
-	var lastSeq uint64
+	var result diagnosticsWaitResult
+	observed := make(map[string][]Diagnostic, len(req.serverVersions))
+	finish := func() diagnosticsWaitResult {
+		if req.serverVersions != nil {
+			for _, name := range slices.Sorted(maps.Keys(req.serverVersions)) {
+				if diags, ok := observed[name]; ok {
+					result.diagnostics = append(result.diagnostics, diags...)
+				} else {
+					result.missingServers = append(result.missingServers, name)
+				}
+			}
+		}
+		return result
+	}
+	cancelled := func() diagnosticsWaitResult {
+		logReturn("cancelled")
+		if req.serverVersions != nil && result.notified {
+			return finish()
+		}
+		return diagnosticsWaitResult{}
+	}
 	var settle <-chan time.Time
 	confirmed := make(map[string]struct{}, len(req.serverVersions))
 	for {
 		select {
 		case ev := <-ch:
+			if ctx.Err() != nil {
+				return cancelled()
+			}
 			events++
 			if !diagnosticsEventFresh(ev, req) {
 				continue
 			}
 			freshEvents++
-			gotFresh = true
-			last = ev.diagnostics
-			lastSeq = ev.seq
-			if baseline != nil {
-				if _, tracked := req.serverVersions[ev.serverID]; tracked {
-					baseline[ev.serverID] = diagnosticIdentitySet(ev.diagnostics)
-				}
+			result.notified = true
+			result.lastSeq = ev.seq
+			if req.serverVersions == nil {
+				result.diagnostics = ev.diagnostics
+			} else {
+				observed[ev.serverID] = ev.diagnostics
 			}
 			if req.immediateWaitComplete(ev, confirmed) {
 				logReturn("versioned")
-				return last, true, lastSeq, flattenDiagnosticBaseline(baseline)
+				return finish()
 			}
 			settleTimer := time.NewTimer(req.settle)
 			defer settleTimer.Stop()
 			settle = settleTimer.C
 		case <-settle:
 			logReturn("settled")
-			return last, true, lastSeq, flattenDiagnosticBaseline(baseline)
+			return finish()
 		case <-ctx.Done():
-			logReturn("cancelled")
-			return nil, false, lastSeq, nil
+			return cancelled()
 		case <-deadline.C:
 			logReturn("timeout")
-			return m.Diagnostics(path), gotFresh, lastSeq, flattenDiagnosticBaseline(baseline)
+			if req.serverVersions == nil {
+				result.diagnostics = m.Diagnostics(path)
+			}
+			return finish()
 		}
 	}
 }

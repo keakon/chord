@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -41,11 +40,11 @@ func newPythonTimeoutTestManager(t *testing.T) (*Manager, string, *Client) {
 	afterWriteHasReadyClient = func(*Manager, string) bool { return true }
 	afterWriteStart = func(*Manager, context.Context, string) {}
 	afterWriteWaitForClient = func(*Manager, context.Context, string, time.Duration) (*Client, bool) { return client, true }
-	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, path string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+	afterWriteAwaitWaiter = func(m *Manager, _ context.Context, path string, ch chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) diagnosticsWaitResult {
 		m.waitersMu.Lock()
 		m.removeWaiter(path, ch)
 		m.waitersMu.Unlock()
-		return nil, false, 0, nil
+		return diagnosticsWaitResult{}
 	}
 	return m, filepath.Join(root, "sample.py"), client
 }
@@ -72,7 +71,6 @@ func TestPythonSemanticTimeoutReportsEveryWrite(t *testing.T) {
 						client.diagnostics[protocol.DocumentURI(client.pathToURI(path))] = []protocol.Diagnostic{
 							{Severity: protocol.SeverityError, Message: "cached diagnostic"},
 						}
-						want = tc.base + DiagnosticsSectionMarker + "diagnostics unavailable (wait timed out); showing last known diagnostics:\n[E] 1:1 cached diagnostic"
 					}
 					for i := range 2 {
 						out := m.AfterFileWriteToolResult(context.Background(), path, "value = 1", tc.base, tc.includeOtherFiles, WatchedFileChanged, filepath.Dir(path))
@@ -89,7 +87,7 @@ func TestPythonSemanticTimeoutReportsEveryWrite(t *testing.T) {
 	}
 }
 
-func TestPythonSemanticTimeoutPreservesRangeSelection(t *testing.T) {
+func TestPythonSemanticTimeoutOmitsCachedDiagnostics(t *testing.T) {
 	m, path, client := newPythonTimeoutTestManager(t)
 	m.cfg.Diagnostics.Python.Output = config.DiagnosticOutputConfig{
 		MaxTotalDiagnostics:   1,
@@ -103,9 +101,23 @@ func TestPythonSemanticTimeoutPreservesRangeSelection(t *testing.T) {
 		{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 10}}, Message: "near diagnostic"},
 	}
 	result := m.afterWritePythonToolResult(context.Background(), path, "value = 1", "Replaced one occurrence", false, []EditRange{{StartLine: 10, EndLine: 10}}, WatchedFileChanged, filepath.Dir(path))
-	const want = "Replaced one occurrence\n\nDiagnostics:\ndiagnostics unavailable (wait timed out); showing last known diagnostics:\n[E] 11:1 near diagnostic"
+	const want = "Replaced one occurrence\n\nDiagnostics:\ndiagnostics unavailable (wait timed out)."
 	if result.Output != want {
 		t.Fatalf("output = %q, want %q", result.Output, want)
+	}
+}
+
+func TestPythonSemanticCancellationOmitsCachedDiagnostics(t *testing.T) {
+	m, path, client := newPythonTimeoutTestManager(t)
+	client.diagnostics[protocol.DocumentURI(client.pathToURI(path))] = []protocol.Diagnostic{
+		{Severity: protocol.SeverityError, Message: "cached diagnostic"},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := m.afterWritePythonToolResult(ctx, path, "value = 1", "Successfully wrote file", false, nil, WatchedFileChanged, filepath.Dir(path))
+	if result.Status != FileWriteStatusCancelled || result.Output != "Successfully wrote file" {
+		t.Fatalf("cancelled result = %+v, want base output without cached diagnostics", result)
 	}
 }
 
@@ -137,7 +149,6 @@ func TestPythonSemanticTimeoutBatchReportsOnce(t *testing.T) {
 			for i := range 2 {
 				results := m.AfterFileWritesToolResult(context.Background(), writes, filepath.Dir(path))
 				states := make(map[string]FileWriteDiagnosticsState, len(writes))
-				extras := make(map[string][]Diagnostic, len(writes))
 				paths := make([]string, 0, len(writes))
 				for _, write := range writes {
 					result := results[write.Path]
@@ -147,21 +158,13 @@ func TestPythonSemanticTimeoutBatchReportsOnce(t *testing.T) {
 					if notes := DegradationNotes(result.Output); len(notes) != 0 {
 						t.Errorf("batch %d degradation notes = %q, want none", i+1, notes)
 					}
-					states[write.Path] = FileWriteDiagnosticsState{Status: result.Status, Detail: result.Detail, FailedServers: result.FailedServers}
-					extras[write.Path] = ParseToolOutputDiagnostics(result.Output)
+					states[write.Path] = result.FileWriteDiagnosticsState
 					paths = append(paths, write.Path)
 				}
-				out := m.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", paths, false, nil, nil, extras, states, filepath.Dir(path))
-				if tc.cached {
-					const want = "diagnostics unavailable (wait timed out); showing last known diagnostics:\n[E] 1:1 cached diagnostic"
-					if strings.Count(out, want) != tc.count || strings.Count(out, DiagnosticsSectionMarker) != 1 {
-						t.Errorf("batch %d output = %q, want one labeled cache per file in one section", i+1, out)
-					}
-				} else {
-					const want = "Applied patch\n\nDiagnostics:\ndiagnostics unavailable (wait timed out)."
-					if out != want {
-						t.Errorf("batch %d output = %q, want %q", i+1, out, want)
-					}
+				out := m.AppendLSPDiagnosticsToToolOutputForPaths("Applied patch", paths, false, nil, nil, nil, states, filepath.Dir(path))
+				const want = "Applied patch\n\nDiagnostics:\ndiagnostics unavailable (wait timed out)."
+				if out != want {
+					t.Errorf("batch %d output = %q, want %q", i+1, out, want)
 				}
 			}
 		})
@@ -202,13 +205,16 @@ func TestPythonSemanticChangeSummaryRequiresFreshDiagnostics(t *testing.T) {
 			uri := protocol.DocumentURI(client.pathToURI(path))
 			client.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "previous diagnostic"}}
 			await := afterWriteAwaitWaiter
-			afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, p string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+			afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, p string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
 				await(m, ctx, p, ch, req, timeout)
 				client.diagnostics[uri] = []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "current diagnostic"}}
-				return nil, notified, 0, nil
+				if !notified {
+					return diagnosticsWaitResult{}
+				}
+				return diagnosticsWaitResult{notified: true, diagnostics: convertDiagnostics(client.diagnostics[uri])}
 			}
 			result := m.afterWritePythonToolResult(context.Background(), path, "value = 1", "Successfully wrote file", false, nil, WatchedFileChanged, filepath.Dir(path))
-			want := "Successfully wrote file\n\nDiagnostics:\ndiagnostics unavailable (wait timed out); showing last known diagnostics:\n[E] 1:1 current diagnostic"
+			want := "Successfully wrote file\n\nDiagnostics:\ndiagnostics unavailable (wait timed out)."
 			if notified {
 				want = "Successfully wrote file\n\nDiagnostics:\n[E] 1:1 current diagnostic\nDiagnostics changed: 1 new, 1 resolved."
 			}

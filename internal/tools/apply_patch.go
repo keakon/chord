@@ -803,7 +803,7 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 	}
 	baselines := make(map[string][]lsp.Diagnostic)
 	outputs := make(map[string]config.DiagnosticOutputConfig)
-	extras := make(map[string][]lsp.Diagnostic)
+	snapshots := make(map[string][]lsp.Diagnostic)
 	type finalWrite struct {
 		path    string
 		content string
@@ -857,12 +857,10 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 	for _, path := range paths {
 		write := finalWrites[path]
 		result := results[write.path]
-		if parsed := lsp.ParseToolOutputDiagnostics(result.Output); len(parsed) > 0 {
-			extras[path] = parsed
+		if result.Status == lsp.FileWriteStatusReported || result.Status == lsp.FileWriteStatusPartial {
+			snapshots[path] = result.Diagnostics
 		}
-		if result.Status != lsp.FileWriteStatusReported {
-			states[path] = lsp.FileWriteDiagnosticsState{Status: result.Status, Detail: result.Detail, FailedServers: result.FailedServers}
-		}
+		states[path] = result.FileWriteDiagnosticsState
 		// Degradation lines are reported once per session, so the one this
 		// write produced must reach the patch result or it is lost for good.
 		for _, note := range lsp.DegradationNotes(result.Output) {
@@ -873,7 +871,7 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 		reviewedPaths = append(reviewedPaths, write.path)
 	}
 	slices.Sort(reviewedPaths)
-	out = t.LSP.AppendLSPDiagnosticsToToolOutputForPaths(out, reviewedPaths, true, baselines, outputs, extras, states, t.BaseDir)
+	out = t.LSP.AppendLSPDiagnosticsToToolOutputForPaths(out, reviewedPaths, true, baselines, outputs, snapshots, states, t.BaseDir)
 	if len(notes) > 0 {
 		out += "\n\n" + strings.Join(notes, "\n")
 	}

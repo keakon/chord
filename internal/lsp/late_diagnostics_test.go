@@ -464,11 +464,11 @@ func TestLateDiagnosticsKeepsSameServerNameRootsIsolated(t *testing.T) {
 	nestedClient.diagnostics[nestedURI] = []protocol.Diagnostic{nestedFinding}
 	nestedClient.diagnosticsMu.Unlock()
 
-	got := f.mgr.diagnosticsForPathsByServer([]string{f.path})[f.path]["gopls"]
+	got := f.mgr.diagnosticsForPaths([]string{f.path})[f.path]
 	if len(got) != 1 || got[0].Message != "root finding" {
 		t.Fatalf("root diagnostics = %+v, want only the root client finding", got)
 	}
-	got = f.mgr.diagnosticsForPathsByServer([]string{nestedPath})[nestedPath]["gopls"]
+	got = f.mgr.diagnosticsForPaths([]string{nestedPath})[nestedPath]
 	if len(got) != 1 || got[0].Message != "nested finding" {
 		t.Fatalf("nested diagnostics = %+v, want only the nested client finding", got)
 	}
@@ -768,8 +768,8 @@ func TestAwaitPreparedAfterFileWriteWatchesBothNotifiedAndTimedOutWrites(t *test
 			f := newLateDiagnosticsFixture(t)
 			restore := afterWriteAwaitWaiter
 			t.Cleanup(func() { afterWriteAwaitWaiter = restore })
-			afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-				return nil, tc.notified, 0, nil
+			afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) diagnosticsWaitResult {
+				return diagnosticsWaitResult{notified: tc.notified}
 			}
 			sync := afterWriteSync{serverVersions: map[string]int32{"gopls": 2}, generations: f.generations(map[string]int32{"gopls": 2})}
 			sync.token = diagnosticSyncToken{path: f.path, confirmable: true}
@@ -794,8 +794,8 @@ func TestAwaitPreparedAfterFileWriteNeverWatchesUnconfirmableSyncs(t *testing.T)
 	f := newLateDiagnosticsFixture(t)
 	restore := afterWriteAwaitWaiter
 	t.Cleanup(func() { afterWriteAwaitWaiter = restore })
-	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, true, 0, nil
+	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{notified: true}
 	}
 	sync := afterWriteSync{serverVersions: map[string]int32{"gopls": 2}, generations: f.generations(map[string]int32{"gopls": 2}), serverErrors: map[string]error{"gopls": context.DeadlineExceeded}}
 	sync.token = diagnosticSyncToken{path: f.path}

@@ -98,10 +98,10 @@ func (m *Manager) detachPreparedWrite(ctx context.Context, prepared *afterWriteP
 // section, same as a wait that ran its course.
 func (m *Manager) coldWriteBudgetResult(ctx context.Context, path, base string, includeOtherFiles bool, displayBaseDir string) FileWriteResult {
 	if ctx.Err() != nil {
-		return FileWriteResult{Output: base, Status: FileWriteStatusCancelled}
+		return unavailableFileWrite(ctx, base, FileWriteStatusTimeout)
 	}
 	result := timeoutFileWrite(base, coldStartWriteBudget)
-	states := map[string]FileWriteDiagnosticsState{path: {Status: result.Status, Detail: result.Detail}}
+	states := map[string]FileWriteDiagnosticsState{path: result.FileWriteDiagnosticsState}
 	result.Output = m.AppendLSPDiagnosticsToToolOutputForPaths(base, []string{path}, includeOtherFiles, nil, nil, nil, states, displayBaseDir)
 	return result
 }

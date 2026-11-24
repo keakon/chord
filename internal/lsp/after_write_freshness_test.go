@@ -98,3 +98,27 @@ func TestCleanLateReviewIsRestorableWithoutDiagnosticText(t *testing.T) {
 		t.Fatalf("clean result repeated after acknowledgement: %+v", again)
 	}
 }
+
+func TestLateDiagnosticsCanConfirmFindingFromUnverifiedCache(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newLateDiagnosticsFixture(t)
+		finding := lateDiag(protocol.SeverityError, 0, "undefined: sample")
+		f.publish("gopls", 1, finding)
+		token := f.mgr.beginDiagnosticsSync(f.path)
+		token.confirmable = true
+		versions := map[string]int32{"gopls": 2}
+		prepared := afterWritePrepared{
+			path: f.path, wait: true, waiter: f.mgr.PrepareWaiter(f.path), waitTimeout: time.Millisecond,
+			sync: afterWriteSync{serverVersions: versions, token: token}, watchGenerations: f.generations(versions),
+		}
+		result := f.mgr.awaitPreparedAfterFileWrite(t.Context(), &prepared, false, "")
+		if result.Status != FileWriteStatusTimeout || strings.Contains(result.Output, finding.Message) {
+			t.Fatalf("write result = %+v; want the cached finding withheld", result)
+		}
+		f.publish("gopls", 2, finding)
+		items := f.mgr.PendingLateDiagnostics([]string{f.path}, "", "")
+		if len(items) != 1 || !strings.Contains(items[0].Lines, finding.Message) {
+			t.Fatalf("late result = %+v; want the newly confirmed finding", items)
+		}
+	})
+}

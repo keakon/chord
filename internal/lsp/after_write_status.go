@@ -2,8 +2,6 @@ package lsp
 
 import (
 	"context"
-	"maps"
-	"slices"
 	"strings"
 	"time"
 )
@@ -17,7 +15,7 @@ const (
 	// produced the file's diagnostics for this write.
 	FileWriteStatusReported FileWriteStatus = iota
 	// FileWriteStatusPartial means fresh diagnostics arrived, but some owning
-	// servers missed the content synchronization.
+	// servers missed synchronization or did not publish for this write.
 	FileWriteStatusPartial
 	// FileWriteStatusTimeout means the diagnostics wait ended without a fresh
 	// publish.
@@ -38,24 +36,27 @@ const (
 // FileWriteResult is one file's after-write outcome. Detail names the failure
 // when Status is neither Reported nor NoServer.
 type FileWriteResult struct {
-	Output        string
-	Status        FileWriteStatus
-	Detail        string
-	FailedServers []string
+	Output string
+	FileWriteDiagnosticsState
+	// Diagnostics is the verified snapshot before tool-output limits.
+	Diagnostics []Diagnostic
 }
 
 // FileWriteDiagnosticsState is the batch formatter's view of one file's
 // diagnostics freshness.
 type FileWriteDiagnosticsState struct {
-	Status        FileWriteStatus
-	Detail        string
-	FailedServers []string
+	Status FileWriteStatus
+	Detail string
 }
 
 // needsFileReport reports whether the batch formatter should name this file
 // even when it has no diagnostics to show.
 func (s FileWriteDiagnosticsState) needsFileReport() bool {
 	return s.Status != FileWriteStatusReported && s.Status != FileWriteStatusNoServer
+}
+
+func (s FileWriteDiagnosticsState) withholdsDiagnostics() bool {
+	return s.needsFileReport() && s.Status != FileWriteStatusPartial
 }
 
 func (s FileWriteDiagnosticsState) reason() string {
@@ -80,20 +81,22 @@ func (s FileWriteDiagnosticsState) reason() string {
 	}
 }
 
-func reportedFileWrite(output string) FileWriteResult {
-	return FileWriteResult{Output: output, Status: FileWriteStatusReported}
+func resultForFileWrite(output string, status FileWriteStatus, detail string) FileWriteResult {
+	return FileWriteResult{Output: output, Status: status, Detail: detail}
 }
 
-func synchronizedFileWrite(output string, sync afterWriteSync) FileWriteResult {
-	if len(sync.serverErrors) == 0 {
-		return reportedFileWrite(output)
+func verifiedFileWriteState(sync afterWriteSync, result diagnosticsWaitResult) FileWriteDiagnosticsState {
+	var reasons []string
+	if len(sync.serverErrors) > 0 {
+		reasons = append(reasons, "file synchronization failed: "+formatServerErrors(sync.serverErrors))
 	}
-	return FileWriteResult{
-		Output:        output,
-		Status:        FileWriteStatusPartial,
-		Detail:        "file synchronization failed: " + formatServerErrors(sync.serverErrors),
-		FailedServers: slices.Sorted(maps.Keys(sync.serverErrors)),
+	if len(result.missingServers) > 0 {
+		reasons = append(reasons, "no fresh publish from "+strings.Join(result.missingServers, ", "))
 	}
+	if len(reasons) == 0 {
+		return FileWriteDiagnosticsState{Status: FileWriteStatusReported}
+	}
+	return FileWriteDiagnosticsState{Status: FileWriteStatusPartial, Detail: strings.Join(reasons, "; ")}
 }
 
 // unavailableStatus maps a failed stage to Cancelled when the tool call was
@@ -120,15 +123,11 @@ func fileWriteStatusDetail(status FileWriteStatus) string {
 
 func unavailableFileWrite(ctx context.Context, output string, status FileWriteStatus) FileWriteResult {
 	status = unavailableStatus(ctx, status)
-	return FileWriteResult{Output: output, Status: status, Detail: fileWriteStatusDetail(status)}
+	return resultForFileWrite(output, status, fileWriteStatusDetail(status))
 }
 
 func timeoutFileWrite(output string, timeout time.Duration) FileWriteResult {
-	return FileWriteResult{
-		Output: output,
-		Status: FileWriteStatusTimeout,
-		Detail: deferredDiagnosticsDetail(timeout),
-	}
+	return resultForFileWrite(output, FileWriteStatusTimeout, deferredDiagnosticsDetail(timeout))
 }
 
 // deferredDiagnosticsDetail is the model-facing reason one diagnostics wait

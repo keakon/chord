@@ -181,8 +181,8 @@ func TestAfterFileWriteToolResultReportsTimeoutInTheDiagnosticsSection(t *testin
 	afterWriteNotifyWatchedFileChanged = func(*Manager, context.Context, string, protocol.FileChangeType) map[string]error {
 		return nil
 	}
-	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, false, 0, nil
+	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{}
 	}
 
 	// The result's diagnostics section carries the timeout itself, on every
@@ -221,8 +221,8 @@ func TestAfterFileWriteToolResultCanceledContextAddsNoDegradationNote(t *testing
 	afterWriteNotifyWatchedFileChanged = func(*Manager, context.Context, string, protocol.FileChangeType) map[string]error {
 		return nil
 	}
-	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, false, 0, nil
+	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

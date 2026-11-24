@@ -532,11 +532,11 @@ func TestAfterFileWriteWaitBudgetSelection(t *testing.T) {
 
 			var mu sync.Mutex
 			var got time.Duration
-			afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+			afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
 				mu.Lock()
 				got = timeout
 				mu.Unlock()
-				return nil, true, 0, nil
+				return diagnosticsWaitResult{notified: true}
 			}
 
 			mgr.AfterFileWriteToolResult(context.Background(), path, "package main\n", "wrote", false, WatchedFileChanged, "")
@@ -572,9 +572,9 @@ func TestAfterFileWriteBudgetExhaustedStillWatches(t *testing.T) {
 	}
 	afterWriteDidSave = func(*Manager, context.Context, string, string) map[string]error { return nil }
 	var gotWait time.Duration
-	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
 		gotWait = timeout
-		return nil, false, 0, nil
+		return diagnosticsWaitResult{}
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main\n", "wrote", false, WatchedFileChanged, "")
@@ -629,11 +629,11 @@ func TestPythonAfterWriteKeepsColdStartDiagnosticsWait(t *testing.T) {
 
 	var mu sync.Mutex
 	var got time.Duration
-	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
 		mu.Lock()
 		got = timeout
 		mu.Unlock()
-		return nil, false, 0, nil
+		return diagnosticsWaitResult{}
 	}
 
 	result := mgr.afterWriteLSPToolResult(context.Background(), path, "x = 1\n", "wrote", false, nil, WatchedFileChanged, "")

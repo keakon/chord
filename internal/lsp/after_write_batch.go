@@ -78,7 +78,7 @@ func (m *Manager) AfterFileWritesToolResult(ctx context.Context, writes []FileWr
 		}
 		// Unassociated file type: skip LSP entirely (no Start, no note).
 		if !m.HasServerForPath(normalized) {
-			entry.result = FileWriteResult{Status: FileWriteStatusNoServer}
+			entry.result = resultForFileWrite("", FileWriteStatusNoServer, "")
 			continue
 		}
 		entry.coldStart, entry.base, entry.exited, _ = m.beginAfterFileWrite(ctx, normalized, "")

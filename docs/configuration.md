@@ -1961,7 +1961,9 @@ For every other file type a configured language server covers, Chord waits brief
 - A running server gets `diagnostics.lsp.wait_timeout_ms` (default `3000`).
 - A write that starts a server, or reaches one within 8 seconds of startup, has a total foreground budget of about 2.5 seconds for connection, synchronization and diagnostics. Synchronization that is still in progress finishes in the background. `wait_timeout_ms` caps the diagnostics portion of that budget; it does not shorten connection or synchronization time.
 
-After the wait or background synchronization completes, Chord keeps a 15-second follow-up window for the written version. Diagnostics within that window can reach the next request, provided the same server has not since synchronized another file and the file still matches that version. Servers that omit document versions, including TypeScript, cannot supply these follow-ups; TypeScript results use a short settling period during the initial wait. A timed-out result labels cached diagnostics as possibly predating the edit. Clean versioned follow-ups also update the file's saved review counts.
+For the edited file, the tool result shows only diagnostics confirmed for this edit. If only some servers produce a result, Chord shows their diagnostics and marks the result incomplete. A timeout without a confirmed result does not verify the edit.
+
+After the wait or background synchronization completes, Chord keeps a 15-second follow-up window for the written version. Diagnostics within that window can reach the next request, provided the same server has not since synchronized another file and the file still matches that version. Servers that omit document versions, including TypeScript, cannot supply these follow-ups; TypeScript results use a short settling period during the initial wait. Clean versioned follow-ups also update the file's saved review counts.
 
 `diagnostics.lsp.wait_timeout_ms` is a global-only key: it is read from the global config and ignored in project config. It accepts any positive value; `0` is rejected, so a write that should effectively not wait configures a small value such as `100`–`500`.
 

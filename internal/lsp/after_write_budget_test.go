@@ -75,13 +75,13 @@ func TestColdBatchDeductsAllSyncTimeAndConfiguredDiagnosticLimit(t *testing.T) {
 					time.Sleep(800 * time.Millisecond)
 					return m.didChangeVersions(ctx, path, content)
 				}
-				afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
+				afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, timeout time.Duration) diagnosticsWaitResult {
 					want := min(time.Duration(waitMS)*time.Millisecond, 900*time.Millisecond)
 					if timeout != want {
 						t.Errorf("diagnostic timeout = %v, want %v", timeout, want)
 					}
 					time.Sleep(timeout)
-					return nil, false, 0, nil
+					return diagnosticsWaitResult{}
 				}
 				began := time.Now()
 				m.AfterFileWritesToolResult(context.Background(), []FileWrite{
@@ -205,8 +205,8 @@ func TestColdBatchExternalSyncBeforeWatchInvalidatesBatch(t *testing.T) {
 		}
 		return versions, generations, failures
 	}
-	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) ([]Diagnostic, bool, uint64, map[diagnosticIdentity]struct{}) {
-		return nil, false, 0, nil
+	afterWriteAwaitWaiter = func(*Manager, context.Context, string, chan diagnosticsEvent, diagnosticsWaitRequest, time.Duration) diagnosticsWaitResult {
+		return diagnosticsWaitResult{}
 	}
 	for _, path := range []string{alpha, beta} {
 		if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {

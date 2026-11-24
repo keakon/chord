@@ -44,7 +44,7 @@ func (m *Manager) afterWriteLSPToolResult(ctx context.Context, absPath, content,
 func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Context, absPath, content, base string, includeOtherFiles bool, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) FileWriteResult {
 	// Unassociated file type: skip LSP entirely (no Start, no note).
 	if !m.HasServerForPath(absPath) {
-		return FileWriteResult{Output: base, Status: FileWriteStatusNoServer}
+		return resultForFileWrite(base, FileWriteStatusNoServer, "")
 	}
 
 	base, exited := m.appendExitedServerNotes(ctx, absPath, base)
@@ -72,11 +72,11 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 		waitTimeout = coldStartDiagnosticsWaitTimeout
 	}
 
-	_, notified, _, _ := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: sync.serverVersions, after: sync.token.after}, waitTimeout)
-	if notified && len(sync.serverErrors) == 0 {
+	waited := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: sync.serverVersions, after: sync.token.after}, waitTimeout)
+	if waited.notified && len(waited.missingServers) == 0 && sync.token.confirmable {
 		m.confirmDiagnosticsSync(sync.token)
 	}
-	if !notified && ctx.Err() == nil {
+	if !waited.notified && ctx.Err() == nil {
 		// A successful quick-backend fallback replaces the unverified semantic
 		// result; otherwise the diagnostics section reports the timeout.
 		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", absPath, waitTimeout)
@@ -89,26 +89,29 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 			}
 		}
 	}
-
-	m.recordReviewSnapshot(absPath)
-	result := synchronizedFileWrite("", sync)
-	states := map[string]FileWriteDiagnosticsState{absPath: {FailedServers: result.FailedServers}}
-	if !notified && ctx.Err() == nil {
-		result.Status = FileWriteStatusTimeout
+	var result FileWriteResult
+	switch {
+	case waited.notified:
+		m.recordReviewSnapshot(absPath)
+		result.FileWriteDiagnosticsState = verifiedFileWriteState(sync, waited)
+		result.Diagnostics = waited.diagnostics
+	case ctx.Err() != nil:
+		return unavailableFileWrite(ctx, base, FileWriteStatusTimeout)
+	default:
 		// This path does not register a late watch, so it cannot promise a
 		// diagnostic follow-up on the next request.
-		result.Detail = diagnosticsWaitDetail(waitTimeout)
-		states[absPath] = FileWriteDiagnosticsState{Status: result.Status, Detail: result.Detail, FailedServers: result.FailedServers}
+		result = resultForFileWrite(base, FileWriteStatusTimeout, diagnosticsWaitDetail(waitTimeout))
 	}
-	byPath := m.diagnosticsForWritePaths([]string{absPath}, states)
-	out := m.appendFileDiagnosticsToToolOutput(base, absPath, includeOtherFiles, ranges, diagnosticsOutputConfig(m.cfg, absPath), displayBaseDir, byPath, states[absPath])
-	if notified && len(sync.serverErrors) == 0 {
-		out = appendDiagnosticChangeSummary(out, baseline, byPath[absPath])
+	byPath := make(map[string][]Diagnostic, 1)
+	if includeOtherFiles {
+		byPath = m.diagnosticsForPaths([]string{absPath})
+	}
+	byPath[absPath] = result.Diagnostics
+	out := m.appendFileDiagnosticsToToolOutput(base, absPath, includeOtherFiles, ranges, diagnosticsOutputConfig(m.cfg, absPath), displayBaseDir, byPath, result.FileWriteDiagnosticsState)
+	if result.Status == FileWriteStatusReported {
+		out = appendDiagnosticChangeSummary(out, baseline, result.Diagnostics)
 	}
 	result.Output = out
-	if !notified && ctx.Err() != nil {
-		return unavailableFileWrite(ctx, out, FileWriteStatusTimeout)
-	}
 	return result
 }
 
@@ -133,7 +136,7 @@ func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, cont
 		}
 		return result
 	}
-	return reportedFileWrite(appendRuffDiagnostics(base, diags, pyCfg.Output, ranges))
+	return FileWriteResult{Output: appendRuffDiagnostics(base, diags, pyCfg.Output, ranges), Diagnostics: diags}
 }
 
 func appendPythonDiagnosticsSkipped(base string, selection pythonDiagnosticSelection) string {
