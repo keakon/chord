@@ -35,10 +35,8 @@ type geminiHopResult struct {
 	Accepted      bool
 	// Deferred tools become visible after the transport returns.
 	startedAt time.Time
-	// RequestNs and FirstOutputNs measure one successfully finished hop from
-	// its pre-submission start (geminiHop start) to its terminal, in int64
-	// nanoseconds. Zero marks "not measured": failed hops never carry timing,
-	// so they cannot contribute throughput or latency samples downstream.
+	// Both durations start at hop entry. FirstOutputNs can be measured even
+	// when the hop does not finish.
 	RequestNs     int64
 	FirstOutputNs int64
 }
@@ -289,11 +287,9 @@ func (g *GeminiProvider) streamGeminiHop(ctx context.Context, frozen geminiFroze
 			result.Err = io.ErrUnexpectedEOF
 		}
 	}
+	result.FirstOutputNs = firstOutputLatencyNs(start, state.firstContentAt)
 	if state.finish != "" && result.Err == nil {
 		result.RequestNs = time.Since(start).Nanoseconds()
-		if first := state.firstContentAt; !first.IsZero() && first.After(start) {
-			result.FirstOutputNs = first.Sub(start).Nanoseconds()
-		}
 	}
 	if state.finish != "" && result.Err == nil && state.terminalUsage {
 		result.Usage = mergeGeminiConfirmedUsage(state.latestUsage, state.hopCheckpointUsage)

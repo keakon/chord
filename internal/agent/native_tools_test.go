@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -80,6 +83,83 @@ func TestNativePolicyOnlyReleasesCompletedLocalContinuation(t *testing.T) {
 	}
 }
 
+func TestLateNativeReceiptUsageStaysInOriginalSession(t *testing.T) {
+	for _, kind := range []string{identity.MainAgentID, agentKindSub} {
+		t.Run(kind, func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			original := a.SessionDir()
+			var policy *llm.NativeToolPolicy
+			var turn *Turn
+			agentID, agentName, taskID, journalAgentID := identity.MainAgentID, a.currentAgentName(), "", identity.MainAgentID
+			if kind == agentKindSub {
+				sub := newControllableTestSubAgent(t, a, "task-1")
+				turn = sub.newTurn()
+				agentID, agentName, taskID, journalAgentID = sub.instanceID, sub.agentDefName, sub.taskID, sub.taskID
+				policy = sub.nativeRequestPolicy(turn, a.walltime.captureAt(agentID, agentName, turn.ID))
+			} else {
+				a.newTurn("")
+				turn = a.turn
+				policy = a.nativeRequestPolicy(turn, a.walltime.captureAt(agentID, agentName, turn.ID))
+			}
+			const selected, running = "sample/test-model", "sample/test-model@high"
+			const firstOutput = int64(40 * time.Millisecond)
+			id, err := policy.Begin(turn.Ctx, llm.NativeRequestRecord{Target: selected, RunningModelRef: running})
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn.Cancel()
+			a.resetSessionRuntimeState()
+			a.installSessionTarget(t.TempDir())
+			if err := policy.Finish(id, message.NativeRequestUnknown, &message.Response{FirstOutputNs: firstOutput}, context.Canceled); err != nil {
+				t.Fatal(err)
+			}
+
+			restored := &loadedSessionState{}
+			_, count := a.restoreSessionEvidence(restored, original)
+			stats := restored.UsageStats
+			byAgent := stats.ByAgent[agentID]
+			if !restored.UsageScanned || count != 1 || stats.LLMCalls != 1 ||
+				byAgent == nil || byAgent.LLMCalls != 1 {
+				t.Fatalf("original session: events=%d, stats=%+v, agent=%+v", count, stats, byAgent)
+			}
+			want := analytics.ModelStats{Calls: 1, FirstOutputTotalNs: firstOutput, FirstOutputSamples: 1}
+			if model := byAgent.ByModel[running]; model == nil || *model != want {
+				t.Fatalf("original session %s stats = %+v; want one latency sample and no throughput", running, model)
+			}
+			if taskID != "" {
+				task := stats.ByTask[taskID]
+				if task == nil || task.LLMCalls != 1 || task.ByModel[running] == nil || *task.ByModel[running] != want {
+					t.Fatalf("original session task stats = %+v", task)
+				}
+			}
+			journal := recovery.NativeRequestJournal{SessionDir: original, AgentID: journalAgentID}
+			receipt, err := journal.Check()
+			if err == nil || receipt == nil || !receipt.OutcomeUnknown ||
+				len(receipt.RequestIDs) != 1 || receipt.RequestIDs[0] != id {
+				t.Fatalf("original journal = %+v, err = %v", receipt, err)
+			}
+
+			a.SetUsageEventSink(func(event analytics.UsageEvent) {
+				t.Errorf("current session received old usage: %+v", event)
+			})
+			payload := waitForAgentEventType(t, a.eventCh, eventRequestUsage).Payload.(requestUsagePayload)
+			event := payload.event
+			if event.AgentID != agentID || event.AgentKind != kind || event.AgentName != agentName || event.TurnID != turn.ID ||
+				event.TaskID != taskID || event.SelectedModelRef != selected || event.RunningModelRef != running {
+				t.Fatalf("late native usage attribution = %+v", event)
+			}
+			a.handleRequestUsage(payload)
+			if got := a.usageTracker.SessionStats(); got.LLMCalls != 0 {
+				t.Fatalf("current tracker contains old usage: %+v", got)
+			}
+			_, count, err = a.usageLedger.BuildSessionStats()
+			if err != nil || count != 0 {
+				t.Fatalf("current ledger: events=%d, err=%v", count, err)
+			}
+		})
+	}
+}
+
 func TestNativePreflightBlocksOrdinaryRoutes(t *testing.T) {
 	for _, route := range []string{"permission", "disabled", "unconfigured", "required"} {
 		t.Run(route, func(t *testing.T) {
@@ -125,7 +205,7 @@ func TestNativeAuthorizationIndependentOfYolo(t *testing.T) {
 			turn := &Turn{ID: 1}
 			for _, yolo := range []bool{false, true, false} {
 				a.yoloEnabled.Store(yolo)
-				policy := a.nativeRequestPolicy(turn)
+				policy := a.nativeRequestPolicy(turn, nil)
 				if policy == nil || policy.Permitted(tools.NameWebSearch) != (action == permission.ActionAllow) {
 					t.Fatalf("YOLO=%v policy=%+v", yolo, policy)
 				}

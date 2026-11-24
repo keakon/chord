@@ -209,22 +209,33 @@ func TestNativePauseContinuationAndResultBarrier(t *testing.T) {
 				_, _ = io.WriteString(w, fixture)
 			}))
 			defer srv.Close()
-			provider := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL, Models: map[string]config.ModelConfig{"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}, NativeWebSearch: &config.NativeWebSearchConfig{Contract: config.NativeWebSearchMessages, APIURL: srv.URL, Preauthorized: true}}}}, []string{"key"})
+			provider := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL, Models: map[string]config.ModelConfig{"test-model": {
+				Limit:           config.ModelLimit{Context: 128000, Output: 4096},
+				Variants:        map[string]config.ModelVariant{"high": {}},
+				NativeWebSearch: &config.NativeWebSearchConfig{Contract: config.NativeWebSearchMessages, APIURL: srv.URL, Preauthorized: true},
+			}}}, []string{"key"})
 			impl, err := NewAnthropicProvider(provider, "")
 			if err != nil {
 				t.Fatal(err)
 			}
 			client := NewClient(provider, impl, "test-model", 1024, "")
 			defer client.Close()
+			client.SetVariant("high")
 			var recorded []int
 			policy := &NativeToolPolicy{Permitted: func(string) bool { return true }, Begin: func(_ context.Context, record NativeRequestRecord) (string, error) {
 				if record.Continuation != len(recorded) {
 					t.Errorf("continuation %d after %d receipts", record.Continuation, len(recorded))
 				}
+				if record.Target != "sample/test-model" || record.RunningModelRef != "sample/test-model@high" {
+					t.Errorf("journal target=%q, usage model=%q", record.Target, record.RunningModelRef)
+				}
 				return fmt.Sprintf("request-%d", record.Continuation), nil
 			}, Finish: func(_ string, _ message.NativeRequestOutcome, resp *message.Response, err error) error {
 				if err != nil {
 					t.Error(err)
+				}
+				if resp.FirstOutputNs <= 0 || resp.RequestNs < resp.FirstOutputNs || resp.RequestNs != resp.NativeRequestDuration {
+					t.Errorf("native attempt timing = %d/%d ns; want the receipt's own first output and duration", resp.FirstOutputNs, resp.RequestNs)
 				}
 				recorded = append(recorded, resp.Usage.InputTokens)
 				if failReceipt {

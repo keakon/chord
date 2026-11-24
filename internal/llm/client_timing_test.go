@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -55,12 +56,70 @@ func TestVisibleStreamTrackerFirstContent(t *testing.T) {
 		t.Fatal("hidden reasoning must not start the content clock")
 	}
 	tracker.Callback(message.StreamDelta{Type: message.StreamDeltaText, Text: "hi"})
-	if tracker.FirstContentAt().IsZero() {
+	first := tracker.FirstContentAt()
+	if first.IsZero() {
 		t.Fatal("content delta must start the content clock")
 	}
 	tracker.Callback(message.StreamDelta{Type: message.StreamDeltaRollback, Rollback: &message.RollbackDelta{Reason: "retry"}})
-	if !tracker.FirstContentAt().IsZero() {
-		t.Fatal("rollback must reset the content clock")
+	if tracker.FirstContentAt() != first {
+		t.Fatal("UI rollback erased the first output of the request")
+	}
+}
+
+func TestClientDiscardedFirstOutput(t *testing.T) {
+	const text = `data: {"choices":[{"index":0,"delta":{"content":"hello"}}]}` + "\n\n"
+	const streamError = `data: {"error":{"code":"server_error","message":"stream failed"}}` + "\n\n"
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		cancel bool
+		sample bool
+	}{
+		{name: "HTTP error", status: http.StatusServiceUnavailable, body: text},
+		{name: "stream error without output", status: http.StatusOK, body: streamError},
+		{name: "stream error after output", status: http.StatusOK, body: text + streamError, sample: true},
+		{name: "EOF after output", status: http.StatusOK, body: text, sample: true},
+		{name: "cancellation after output", status: http.StatusOK, body: text + streamError, cancel: true, sample: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg := NewProviderConfig("sample", config.ProviderConfig{
+					Type:   config.ProviderTypeChatCompletions,
+					APIURL: "https://example.invalid/v1/chat/completions",
+					Models: map[string]config.ModelConfig{"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+				}, []string{"test-key"})
+				provider := &OpenAIProvider{provider: cfg, client: &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+					time.Sleep(100 * time.Millisecond)
+					return &http.Response{StatusCode: tc.status, Header: make(http.Header), Request: req, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+				})}}
+				client := NewClient(cfg, provider, "test-model", 1024, "")
+				client.SetStreamRetryRounds(1)
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				var samples []int64
+				_, err := client.CompleteStreamWithOptions(ctx, []message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, func(d message.StreamDelta) {
+					if tc.cancel && d.Type == message.StreamDeltaText {
+						cancel()
+					}
+				}, CompleteStreamOptions{OnDiscardedFirstOutput: func(modelRef string, latencyNs int64) {
+					if modelRef != "sample/test-model" {
+						t.Errorf("sample came from %q", modelRef)
+					}
+					samples = append(samples, latencyNs)
+				}})
+				if err == nil {
+					t.Fatal("expected failed request")
+				}
+				if tc.sample {
+					if len(samples) != 1 || samples[0] != int64(100*time.Millisecond) {
+						t.Fatalf("discarded timing = %v, want one 100ms sample", samples)
+					}
+				} else if len(samples) != 0 {
+					t.Fatalf("discarded timing without output = %v", samples)
+				}
+			})
+		})
 	}
 }
 
@@ -118,7 +177,6 @@ func TestRecordResponseTiming(t *testing.T) {
 	}
 
 	contentAt := start.Add(250 * time.Millisecond)
-	tracker.hasContent = true
 	tracker.firstContentAt = contentAt
 	resp = &message.Response{}
 	recordResponseTiming(resp, start, tracker)
@@ -131,7 +189,7 @@ func TestRecordResponseTiming(t *testing.T) {
 
 	// A content timestamp before the start point (clock anomaly) must not
 	// produce a negative latency.
-	early := &visibleStreamTracker{hasContent: true, firstContentAt: start.Add(-time.Second)}
+	early := &visibleStreamTracker{firstContentAt: start.Add(-time.Second)}
 	resp = &message.Response{}
 	recordResponseTiming(resp, start, early)
 	if resp.FirstOutputNs != 0 {
@@ -168,13 +226,13 @@ func TestContinuationHopTiming(t *testing.T) {
 
 	failed := completed
 	failed.Err = io.ErrUnexpectedEOF
-	if requestNs, latencyNsGot := continuationHopTiming(failed); requestNs != 0 || latencyNsGot != 0 {
-		t.Fatalf("failed hop timing = (%d, %d), want (0, 0)", requestNs, latencyNsGot)
+	if requestNs, latencyNsGot := continuationHopTiming(failed); requestNs != 0 || latencyNsGot != latencyNs {
+		t.Fatalf("failed hop timing = (%d, %d), want (0, %d)", requestNs, latencyNsGot, latencyNs)
 	}
 
 	unfinished := completed
 	unfinished.FinishReason = ""
-	if requestNs, latencyNsGot := continuationHopTiming(unfinished); requestNs != 0 || latencyNsGot != 0 {
-		t.Fatalf("unfinished hop timing = (%d, %d), want (0, 0)", requestNs, latencyNsGot)
+	if requestNs, latencyNsGot := continuationHopTiming(unfinished); requestNs != 0 || latencyNsGot != latencyNs {
+		t.Fatalf("unfinished hop timing = (%d, %d), want (0, %d)", requestNs, latencyNsGot, latencyNs)
 	}
 }

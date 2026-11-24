@@ -15,14 +15,18 @@ import (
 
 func TestFocusedModelSpeedUsesRecordedRequestRef(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		worker   bool
-		fallback bool
+		name         string
+		worker       bool
+		fallback     bool
+		failedOutput bool
+		missingUsage bool
 	}{
 		{name: "main variant"},
-		{name: "main fallback variant", fallback: true},
+		{name: "main fallback after HTTP rejection", fallback: true},
+		{name: "main fallback after first output", fallback: true, failedOutput: true},
+		{name: "main without usage", missingUsage: true},
 		{name: "worker variant", worker: true},
-		{name: "worker fallback variant", worker: true, fallback: true},
+		{name: "worker fallback after first output", worker: true, fallback: true, failedOutput: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -44,13 +48,23 @@ func TestFocusedModelSpeedUsesRecordedRequestRef(t *testing.T) {
 					Usage:      &message.TokenUsage{InputTokens: 100, OutputTokens: 50},
 				},
 			}
+			if tc.missingUsage {
+				success.resp.Usage = nil
+			}
 			primary := &blockingStreamProvider{calls: []scriptedStreamCall{success}}
 			if tc.fallback {
 				primary.calls = []scriptedStreamCall{{err: &llm.APIError{StatusCode: 500, Message: "unavailable"}}}
+				if tc.failedOutput {
+					primary.calls[0] = scriptedStreamCall{
+						streams: []message.StreamDelta{{Type: message.StreamDeltaThinking, Text: "thinking"}},
+						err:     &llm.APIError{StatusCode: 500, Origin: llm.APIErrorOriginSSEEvent, Message: "stream failed"},
+					}
+				}
 			}
 			client := llm.NewClient(provider, primary, "model-1", 4096, "system")
 			client.SetVariant("high")
-			wantRef := "provider-a/model-1@high"
+			const primaryRef = "provider-a/model-1@high"
+			wantRef := primaryRef
 			if tc.fallback {
 				fallback := llm.NewProviderConfig("provider-b", config.ProviderConfig{
 					Type: config.ProviderTypeChatCompletions,
@@ -142,18 +156,42 @@ func TestFocusedModelSpeedUsesRecordedRequestRef(t *testing.T) {
 			if event.RequestNs <= 0 || event.RequestNs != resp.RequestNs || event.FirstOutputNs <= 0 {
 				t.Fatalf("request timing = %+v, response = %+v", event, resp)
 			}
+			var failedLatency int64
+			if tc.failedOutput {
+				evt := waitForAgentEventType(t, a.eventCh, eventRequestUsage)
+				payload := evt.Payload.(requestUsagePayload)
+				failed := payload.event
+				if !failed.FirstOutputOnly || failed.FirstOutputNs <= 0 || failed.AgentID != agentID ||
+					failed.TaskID != event.TaskID || failed.RunningModelRef != primaryRef {
+					t.Fatalf("discarded attempt = %+v, want the primary's first output", failed)
+				}
+				failedLatency = failed.FirstOutputNs
+				a.handleRequestUsage(payload)
+			}
 			state := a.FocusedModelState()
 			if state.DisplayRef != wantRef {
 				t.Fatalf("settled display = %q, want successful sticky target %q", state.DisplayRef, wantRef)
 			}
 			stats := a.GetSidebarUsageStats()
 			model := stats.ByModel[state.DisplayRef]
-			if model == nil || model.ThroughputTokens != 50 || model.ThroughputSamples != 1 ||
-				model.ThroughputNs != event.RequestNs || model.FirstOutputTotalNs != event.FirstOutputNs || model.FirstOutputSamples != 1 {
+			wantTokens, wantNs, wantSamples := int64(50), event.RequestNs, int64(1)
+			if tc.missingUsage {
+				wantTokens, wantNs, wantSamples = 0, 0, 0
+			}
+			if model == nil || model.ThroughputTokens != wantTokens || model.ThroughputNs != wantNs ||
+				model.ThroughputSamples != wantSamples || model.FirstOutputTotalNs != event.FirstOutputNs || model.FirstOutputSamples != 1 {
 				t.Fatalf("sidebar model %q = %+v, want the recorded request sample", state.DisplayRef, model)
 			}
-			if len(stats.ByModel) != 1 {
-				t.Fatalf("sidebar models = %+v, want only the successful target", stats.ByModel)
+			wantModels := 1
+			if tc.failedOutput {
+				wantModels++
+				if failed := stats.ByModel[primaryRef]; failed == nil ||
+					*failed != (analytics.ModelStats{FirstOutputTotalNs: failedLatency, FirstOutputSamples: 1}) {
+					t.Fatalf("primary model stats = %+v, want only the failed attempt's latency", failed)
+				}
+			}
+			if stats.LLMCalls != 1 || len(stats.ByModel) != wantModels {
+				t.Fatalf("sidebar stats = %+v, want one billed call across %d models", stats, wantModels)
 			}
 			if !tc.worker {
 				// An idle display follows the next target, not necessarily the
@@ -199,8 +237,8 @@ func TestFocusedModelSpeedUsesRecordedRequestRef(t *testing.T) {
 			if restoredState.DisplayRef != event.RunningModelRef || restored.focusedAgent.Load() != nil {
 				t.Fatalf("restored parked display = %+v, want durable usage ref without a live worker", restoredState)
 			}
-			if got := restored.GetSidebarUsageStats().ByModel[restoredState.DisplayRef]; got == nil || *got != *model {
-				t.Fatalf("restored sidebar sample = %+v, want live sample %+v", got, model)
+			if got := restored.GetSidebarUsageStats(); !reflect.DeepEqual(got, stats) {
+				t.Fatalf("restored sidebar stats = %+v, want live stats %+v", got, stats)
 			}
 		})
 	}

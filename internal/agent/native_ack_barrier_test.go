@@ -51,14 +51,14 @@ func TestNativeReceiptPreflightWaitsForAcknowledgement(t *testing.T) {
 				if sub != nil {
 					sub.turn.SubAgentTerminalRecoveryCount = 1
 					sub.handleLLMResponse(&llmResult{turnID: sub.turn.ID, resp: &message.Response{Content: "Complete", StopReason: "stop", NativeTools: receipt}})
-					policy = sub.nativeRequestPolicy(sub.turn)
+					policy = sub.nativeRequestPolicy(sub.turn, nil)
 				} else {
 					a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: &LLMResponsePayload{Content: "Complete", StopReason: "stop", NativeTools: receipt}})
 					if a.turn != nil {
 						t.Fatal("receipt persistence blocked the idle transition")
 					}
 					a.newTurn("")
-					policy = a.nativeRequestPolicy(a.turn)
+					policy = a.nativeRequestPolicy(a.turn, nil)
 				}
 				ctx, cancel := context.WithCancel(t.Context())
 				cancelled := make(chan error, 1)
@@ -114,7 +114,7 @@ func TestNativeReceiptPreflightFailsClosedOnAcknowledgementError(t *testing.T) {
 	a.newTurn("")
 	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: &LLMResponsePayload{Content: "Complete", StopReason: "stop", NativeTools: &message.NativeToolHistory{RequestIDs: []string{"missing-request"}}}})
 	a.newTurn("")
-	policy := a.nativeRequestPolicy(a.turn)
+	policy := a.nativeRequestPolicy(a.turn, nil)
 	err := policy.Preflight(t.Context())
 	if err == nil || !strings.Contains(err.Error(), "persist native receipt") || llm.IsNativeToolError(err) {
 		t.Fatalf("persistence failure misclassified: %v", err)

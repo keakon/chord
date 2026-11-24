@@ -14,7 +14,6 @@ type visibleStreamTracker struct {
 	visible          bool
 	toolStreamStated bool      // a tool-call delta reached the UI in the current attempt
 	textStated       bool      // a non-blank text delta reached the UI; only this is resumable body text
-	hasContent       bool      // a content-bearing delta arrived in the current attempt window
 	firstContentAt   time.Time // wall clock of the first content-bearing delta; zero before it
 	pendingRollback  string    // non-empty: a prior attempt's partial output is still rendered; its rollback must precede this attempt's first visible delta
 	rollbackFired    bool      // the armed pendingRollback was emitted to the UI
@@ -70,8 +69,7 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 				t.onVisibleStart()
 			}
 		}
-		if !t.hasContent && deltaCarriesContent(delta) {
-			t.hasContent = true
+		if t.firstContentAt.IsZero() && deltaCarriesContent(delta) {
 			t.firstContentAt = time.Now()
 		}
 	case message.StreamDeltaRollback:
@@ -85,8 +83,6 @@ func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
 		t.visible = false
 		t.toolStreamStated = false
 		t.textStated = false
-		t.hasContent = false
-		t.firstContentAt = time.Time{}
 	}
 	if t.inner != nil {
 		t.inner(delta)
@@ -166,11 +162,10 @@ func (t *visibleStreamTracker) HadTextDelta() bool {
 }
 
 // FirstContentAt returns the wall-clock time of the attempt's first
-// content-bearing delta, or the zero time when none arrived. It is the
-// measurement point for the first-visible-output latency; a mid-attempt
-// rollback resets it, matching the output the UI actually kept.
+// content-bearing delta, or the zero time when none arrived. A UI rollback
+// does not undo the output already received from the physical request.
 func (t *visibleStreamTracker) FirstContentAt() time.Time {
-	if t == nil || !t.hasContent {
+	if t == nil {
 		return time.Time{}
 	}
 	return t.firstContentAt

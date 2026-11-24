@@ -135,9 +135,8 @@ func (t *UsageTracker) RecordForAgent(agentID, model string, cost *config.ModelC
 	t.applyRecordLocked(agentID, model, cost, usage)
 }
 
-// usageContribution is one billed LLM call, already normalized into
-// mutually-exclusive billing buckets with its recorded cost. Live recording
-// and ledger replay both fold this shape so their totals cannot drift.
+// usageContribution is the measured timing and any billed usage for an
+// attempt, shared by live recording and ledger replay.
 type usageContribution struct {
 	agentID string
 	taskID  string
@@ -146,9 +145,8 @@ type usageContribution struct {
 	raw     UsageSnapshot
 	billing BillingUsage
 	cost    float64
-	// requestNs and firstOutputNs carry the client-measured per-attempt
-	// timing from the event; zero marks "not measured" (failed attempts and
-	// pre-timing historical events).
+	calls   int64
+	// Zero timing means "not measured."
 	requestNs     int64
 	firstOutputNs int64
 }
@@ -178,17 +176,21 @@ func (c usageContribution) isFirstOutputSample() bool {
 // live tracking, replay, and the session summary must all report what was
 // billed at event time instead of re-pricing with the current config.
 func eventContribution(event UsageEvent) usageContribution {
-	return usageContribution{
+	c := usageContribution{
 		agentID:       event.AgentID,
 		taskID:        event.TaskID,
 		model:         usageModelKey(event),
 		purpose:       event.Purpose,
-		raw:           event.UsageRaw,
-		billing:       event.BillingUsage,
-		cost:          event.Cost.TotalCost,
-		requestNs:     event.RequestNs,
 		firstOutputNs: event.FirstOutputNs,
 	}
+	if !event.FirstOutputOnly {
+		c.raw = event.UsageRaw
+		c.billing = event.BillingUsage
+		c.cost = event.Cost.TotalCost
+		c.requestNs = event.RequestNs
+		c.calls = 1
+	}
+	return c
 }
 
 func (t *UsageTracker) applyRecordLocked(agentID, model string, cost *config.ModelCost, usage message.TokenUsage) {
@@ -200,6 +202,7 @@ func (t *UsageTracker) applyRecordLocked(agentID, model string, cost *config.Mod
 		raw:     raw,
 		billing: billing,
 		cost:    CalculateUsageCost(cost, billing, config.ServiceTierStandard).TotalCost,
+		calls:   1,
 	})
 }
 
@@ -216,7 +219,7 @@ func (s *SessionStats) applyUsage(contribution usageContribution) {
 	s.CacheReadTokens += billing.CacheReadTokens
 	s.CacheWriteTokens += billing.CacheWriteTokens
 	s.ReasoningTokens += raw.ReasoningTokens
-	s.LLMCalls++
+	s.LLMCalls += contribution.calls
 	s.EstimatedCost += cost
 	agentID := normalizeAgentID(contribution.agentID)
 	addModelUsage(s.ByModel, contribution, agentID == identity.MainAgentID)
@@ -251,7 +254,7 @@ func addModelUsage(group map[string]*ModelStats, contribution usageContribution,
 		ms = &ModelStats{}
 		group[contribution.model] = ms
 	}
-	ms.Calls++
+	ms.Calls += contribution.calls
 	ms.InputTokens += contribution.billing.InputTokens
 	ms.OutputTokens += contribution.raw.OutputTokens
 	ms.CacheReadTokens += contribution.billing.CacheReadTokens
@@ -293,7 +296,7 @@ func addAgentUsageStats(as *AgentStats, contribution usageContribution) {
 	as.CacheReadTokens += contribution.billing.CacheReadTokens
 	as.CacheWriteTokens += contribution.billing.CacheWriteTokens
 	as.ReasoningTokens += contribution.raw.ReasoningTokens
-	as.LLMCalls++
+	as.LLMCalls += contribution.calls
 	as.EstimatedCost += contribution.cost
 	addModelUsage(as.ByModel, contribution, true)
 }

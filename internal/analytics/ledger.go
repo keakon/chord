@@ -48,13 +48,14 @@ type UsageEvent struct {
 	Cost             UsageCost       `json:"cost"`
 	PricingSnapshot  PricingSnapshot `json:"pricing_snapshot"`
 	// RequestNs is the successful attempt's wall-clock duration and
-	// FirstOutputNs the first-visible-output latency, both int64 nanoseconds
-	// measured by the LLM client. Zero marks "not measured": failed attempts
-	// and pre-timing historical events carry zero, so they never contribute
-	// throughput or latency samples (events before these fields existed).
-	RequestNs     int64             `json:"request_ns,omitzero"`
-	FirstOutputNs int64             `json:"first_output_ns,omitzero"`
-	Diagnostic    map[string]string `json:"diagnostic,omitempty"`
+	// FirstOutputNs the first-visible-output latency, both int64 nanoseconds.
+	// A failed attempt can carry FirstOutputNs without a request duration.
+	RequestNs     int64 `json:"request_ns,omitzero"`
+	FirstOutputNs int64 `json:"first_output_ns,omitzero"`
+	// FirstOutputOnly records timing for a discarded attempt without changing
+	// usage, call counts, or the agent's last known model.
+	FirstOutputOnly bool              `json:"first_output_only,omitzero"`
+	Diagnostic      map[string]string `json:"diagnostic,omitempty"`
 }
 
 // AgentModelRefs is the last known selected and effective model for an agent.
@@ -436,14 +437,16 @@ func (l *UsageLedger) scanSessionEvidence() (*sessionScanResult, error) {
 	err := scanUsageEvents(l.usagePath(), func(evt UsageEvent) {
 		res.count++
 		agentID := normalizeAgentID(evt.AgentID)
-		ref := res.refs[agentID]
-		if selected := strings.TrimSpace(evt.SelectedModelRef); selected != "" {
-			ref.Selected = selected
+		if !evt.FirstOutputOnly {
+			ref := res.refs[agentID]
+			if selected := strings.TrimSpace(evt.SelectedModelRef); selected != "" {
+				ref.Selected = selected
+			}
+			if running := strings.TrimSpace(evt.RunningModelRef); running != "" {
+				ref.Running = running
+			}
+			res.refs[agentID] = ref
 		}
-		if running := strings.TrimSpace(evt.RunningModelRef); running != "" {
-			ref.Running = running
-		}
-		res.refs[agentID] = ref
 		// Walltime events are diagnostic bookkeeping: fold into walltime, do
 		// not count as LLM calls.
 		if IsWalltimePurpose(evt.Purpose) {
@@ -1129,7 +1132,7 @@ func addUsageAggregate(dst *UsageAggregate, contribution usageContribution) {
 	if dst == nil {
 		return
 	}
-	dst.LLMCalls++
+	dst.LLMCalls += contribution.calls
 	billing := contribution.billing
 	dst.InputTokens += billing.InputTokens
 	dst.OutputTokens += contribution.raw.OutputTokens

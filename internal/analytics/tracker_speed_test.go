@@ -235,6 +235,11 @@ func TestSpeedSamplesSurviveLedgerReplayAndTrackerRestore(t *testing.T) {
 	})
 	live := NewUsageTracker()
 	main := speedSampleEvent(speedTestModel, 100, secondNs, latencyA)
+	failedMain := UsageEvent{
+		EventID: "discarded-main", AgentID: main.AgentID, Purpose: UsagePurposeChat,
+		SelectedModelRef: main.SelectedModelRef, RunningModelRef: "provider/model-2@high",
+		FirstOutputOnly: true, FirstOutputNs: latencyB,
+	}
 	sub := speedSampleEvent(speedTestModel, 500, 2*secondNs, latencyB)
 	sub.EventID = "sub-chat"
 	sub.AgentID = "sub-1"
@@ -242,13 +247,15 @@ func TestSpeedSamplesSurviveLedgerReplayAndTrackerRestore(t *testing.T) {
 	compaction := sub
 	compaction.EventID = "sub-compaction"
 	compaction.Purpose = UsagePurposeCompaction
-	for _, event := range []UsageEvent{main, sub, compaction} {
+	failedSub := failedMain
+	failedSub.EventID, failedSub.AgentID, failedSub.TaskID = "discarded-sub", sub.AgentID, sub.TaskID
+	for _, event := range []UsageEvent{main, sub, compaction, failedMain, failedSub} {
 		live.AddUsageEvent(event)
 		if err := ledger.AppendEvent(event); err != nil {
 			t.Fatalf("append usage: %v", err)
 		}
 	}
-	stats, _, err := ledger.BuildSessionStats()
+	stats, count, refs, err := ledger.BuildSessionStatsWithAgentModelRefs()
 	if err != nil {
 		t.Fatalf("replay usage: %v", err)
 	}
@@ -259,6 +266,25 @@ func TestSpeedSamplesSurviveLedgerReplayAndTrackerRestore(t *testing.T) {
 	}
 	if got := restored.SessionStatsForAgent(sub.AgentID).ByModel[speedTestModel]; got.ThroughputTokens != 500 || got.ThroughputSamples != 1 {
 		t.Fatalf("restored worker model = %+v, want its own chat sample", got)
+	}
+	if count != 5 || stats.LLMCalls != 3 || refs[main.AgentID].Running != speedTestModel || refs[sub.AgentID].Running != speedTestModel {
+		t.Fatalf("replayed events=%d calls=%d model refs=%+v; discarded attempts must not change calls or refs", count, stats.LLMCalls, refs)
+	}
+	failedRef := failedMain.RunningModelRef
+	want := ModelStats{FirstOutputSamples: 1, FirstOutputTotalNs: latencyB}
+	if got := stats.ByModel[failedRef]; got == nil || *got != want {
+		t.Fatalf("replayed failed model = %+v, want %+v", got, want)
+	}
+	if got := stats.ByTask[sub.TaskID].ByModel[failedRef]; got == nil || *got != want {
+		t.Fatalf("replayed failed worker model = %+v, want %+v", got, want)
+	}
+	summary, err := ledger.Summary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAggregate := UsageAggregate{FirstOutputSamples: 1, FirstOutputTotalNs: latencyB}
+	if got := summary.ByModelRef[failedRef]; got == nil || *got != wantAggregate {
+		t.Fatalf("summary failed model = %+v, want %+v", got, wantAggregate)
 	}
 }
 

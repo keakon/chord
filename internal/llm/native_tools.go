@@ -32,17 +32,20 @@ type NativeToolPolicy struct {
 }
 
 type NativeRequestRecord struct {
-	Tuning        RequestTuning                   `json:"tuning"`
-	ServiceTier   config.ServiceTier              `json:"service_tier"`
-	Target        string                          `json:"target"`
-	Protocol      string                          `json:"protocol"`
-	APIURL        string                          `json:"api_url"`
-	Authorization message.NativeToolAuthorization `json:"authorization"`
-	System        string                          `json:"system"`
-	Messages      []message.Message               `json:"messages"`
-	Tools         []message.ToolDefinition        `json:"tools"`
-	MaxTokens     int                             `json:"max_tokens"`
-	Continuation  int                             `json:"continuation"`
+	Tuning      RequestTuning      `json:"tuning"`
+	ServiceTier config.ServiceTier `json:"service_tier"`
+	Target      string             `json:"target"`
+	// RunningModelRef includes the active variant for usage accounting.
+	// Target remains the model bound by the request journal.
+	RunningModelRef string                          `json:"-"`
+	Protocol        string                          `json:"protocol"`
+	APIURL          string                          `json:"api_url"`
+	Authorization   message.NativeToolAuthorization `json:"authorization"`
+	System          string                          `json:"system"`
+	Messages        []message.Message               `json:"messages"`
+	Tools           []message.ToolDefinition        `json:"tools"`
+	MaxTokens       int                             `json:"max_tokens"`
+	Continuation    int                             `json:"continuation"`
 }
 
 type nativePolicyContextKey struct{}
@@ -144,6 +147,11 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 	}()
 	var text strings.Builder
 	var lastResponse *message.Response
+	timing := responseTimingFromContext(ctx)
+	modelRef := target
+	if timing != nil {
+		modelRef = timing.modelRef
+	}
 	for continuation := 0; continuation <= 4; continuation++ {
 		if err := executiongate.Check(ctx); err != nil {
 			if lastResponse != nil {
@@ -163,7 +171,7 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 				return nil, &NativeToolError{Cause: fmt.Errorf("native request authorization was revoked")}
 			}
 		}
-		id, err := policy.Begin(ctx, NativeRequestRecord{Tuning: tuning, ServiceTier: serviceTier, Target: target, Protocol: provider.Type(), APIURL: provider.APIURL(), Authorization: authorization, System: system, Messages: messages, Tools: defs, MaxTokens: maxTokens, Continuation: continuation})
+		id, err := policy.Begin(ctx, NativeRequestRecord{Tuning: tuning, ServiceTier: serviceTier, Target: target, RunningModelRef: modelRef, Protocol: provider.Type(), APIURL: provider.APIURL(), Authorization: authorization, System: system, Messages: messages, Tools: defs, MaxTokens: maxTokens, Continuation: continuation})
 		if err != nil {
 			return nil, &NativeToolError{Cause: fmt.Errorf("persist native request authorization: %w", err)}
 		}
@@ -234,6 +242,12 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 			resp.NativeTools = history
 		}
 		outcome := nativeRequestOutcome(dispatch, callErr)
+		if timing != nil {
+			resp.FirstOutputNs = firstOutputLatencyNs(started, timing.takeFirstOutput())
+			if callErr == nil {
+				resp.RequestNs = resp.NativeRequestDuration
+			}
+		}
 		if outcome.Unexecuted() {
 			resp.NativeTools = nil
 		}
@@ -256,6 +270,7 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 						return nil, &NativeToolError{Cause: fmt.Errorf("local image fallback is unavailable or its decision could not be persisted")}
 					}
 					tuning.nativeTool = nil
+					restartResponseTiming(ctx)
 					fallbackResp, fallbackErr := completeObservedProvider(ctx, impl, provider, key, model, system, messages, nativeImageFallbackDefinitions(clientDefs, provider, model, messages), maxTokens, tuning, cb)
 					if fallbackErr != nil {
 						return nil, &NativeToolError{Cause: fallbackErr}

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/identity"
@@ -16,24 +17,31 @@ func TestNativeUsageRecorderCapturesTaskAttribution(t *testing.T) {
 	var events []analytics.UsageEvent
 	a.SetUsageEventSink(func(event analytics.UsageEvent) { events = append(events, event) })
 
-	mainRecorder := a.nativeUsageRecorder(usageAttribution{
+	mainRecorder := a.nativeUsageRecorder(a.walltime.captureAt(identity.MainAgentID, "builder", 3), usageAttribution{
 		AgentID: identity.MainAgentID, AgentKind: identity.MainAgentID, AgentName: "builder",
 		Purpose: analytics.UsagePurposeChat, TurnID: 3,
 	})
-	mainRecorder(llm.NativeRequestRecord{Target: "provider/model-1"}, &message.Response{Usage: &message.TokenUsage{InputTokens: 10, OutputTokens: 2}}, nil)
+	mainRecorder(llm.NativeRequestRecord{Target: "provider/model-1", RunningModelRef: "provider/model-1@high"}, &message.Response{
+		Usage: &message.TokenUsage{InputTokens: 10, OutputTokens: 2}, FirstOutputNs: int64(300 * time.Millisecond), RequestNs: int64(time.Second),
+	}, nil)
 
-	subRecorder := a.nativeUsageRecorder(usageAttribution{
+	subRecorder := a.nativeUsageRecorder(a.walltime.captureAt("worker-1", "worker", 4), usageAttribution{
 		AgentID: "worker-1", AgentKind: agentKindSub, AgentName: "worker", TaskID: "task-1",
 		Purpose: analytics.UsagePurposeChat, TurnID: 4,
 	})
 	subRecorder(llm.NativeRequestRecord{Target: "provider/model-1"}, &message.Response{Usage: &message.TokenUsage{InputTokens: 5, OutputTokens: 1}}, nil)
 
+	for range 2 {
+		evt := waitForAgentEventType(t, a.eventCh, eventRequestUsage)
+		a.handleRequestUsage(evt.Payload.(requestUsagePayload))
+	}
 	if len(events) != 2 {
 		t.Fatalf("events = %d, want 2", len(events))
 	}
 	mainEvent := events[0]
 	if mainEvent.AgentID != identity.MainAgentID || mainEvent.TaskID != "" || mainEvent.Purpose != analytics.UsagePurposeChat ||
-		mainEvent.TurnID != 3 || mainEvent.RunningModelRef != "provider/model-1" {
+		mainEvent.TurnID != 3 || mainEvent.RunningModelRef != "provider/model-1@high" ||
+		mainEvent.FirstOutputNs != int64(300*time.Millisecond) || mainEvent.RequestNs != int64(time.Second) {
 		t.Fatalf("main native event = %+v", mainEvent)
 	}
 	subEvent := events[1]

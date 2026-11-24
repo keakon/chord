@@ -849,19 +849,22 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 		defer wallReq.finish()
 		wallReq.wireStreamReducer(streamReducer)
 	}
+	usageTarget := requestUsageTarget(wallReq)
+	usageAttr := usageAttribution{
+		AgentID:          identity.MainAgentID,
+		AgentKind:        identity.MainAgentID,
+		AgentName:        a.currentAgentName(),
+		Purpose:          analytics.UsagePurposeChat,
+		TurnID:           turnID,
+		SelectedModelRef: selectedRef,
+	}
 	requestOptions := llm.CompleteStreamOptions{
-		OnContinuationUsage: a.continuationUsageObserver(llmClient, requestUsageTarget(wallReq), usageAttribution{
-			AgentID:          identity.MainAgentID,
-			AgentKind:        identity.MainAgentID,
-			AgentName:        a.currentAgentName(),
-			Purpose:          analytics.UsagePurposeChat,
-			TurnID:           turnID,
-			SelectedModelRef: selectedRef,
-		}),
-		Diagnostics:     observer,
-		PrepareAttempt:  prepareDirectoryInstructionAttempt(a.directoryInstructions.Load(), requestSeq),
-		NativeTools:     a.nativeRequestPolicy(turn),
-		MCPDeclarations: a.effectiveRuntimeMCPDeclarations(),
+		OnContinuationUsage:    a.continuationUsageObserver(llmClient, usageTarget, usageAttr),
+		OnDiscardedFirstOutput: a.discardedFirstOutputObserver(usageTarget, usageAttr),
+		Diagnostics:            observer,
+		PrepareAttempt:         prepareDirectoryInstructionAttempt(a.directoryInstructions.Load(), requestSeq),
+		NativeTools:            a.nativeRequestPolicy(turn, usageTarget),
+		MCPDeclarations:        a.effectiveRuntimeMCPDeclarations(),
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) (*llm.RequestSnapshot, error) {
 			requestMessages = a.releasePendingMCPMounts(requestMessages)
 			tailOverlayCount = trailingTurnOverlayCount(requestMessages)

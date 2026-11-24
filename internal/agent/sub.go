@@ -1229,7 +1229,24 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 			}
 			s.signalWake()
 		})
-		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{OnContinuationUsage: s.parent.continuationUsageObserver(llmClient, requestUsageTarget(wallReq), usageAttribution{AgentID: s.instanceID, AgentKind: agentKindSub, AgentName: s.agentDefName, TaskID: s.taskID, Purpose: analytics.UsagePurposeChat, TurnID: turn.ID, SelectedModelRef: llmClient.PrimaryModelRef()}), NativeTools: s.nativeRequestPolicy(turn), Diagnostics: observer, PrepareAttempt: prepareDirectoryInstructionAttempt(s.directoryInstructions.Load(), requestSeq)})
+		usageTarget := requestUsageTarget(wallReq)
+		usageAttr := usageAttribution{
+			AgentID:          s.instanceID,
+			AgentKind:        agentKindSub,
+			AgentName:        s.agentDefName,
+			TaskID:           s.taskID,
+			Purpose:          analytics.UsagePurposeChat,
+			TurnID:           turn.ID,
+			SelectedModelRef: llmClient.PrimaryModelRef(),
+		}
+		discardedFirstOutput := s.parent.discardedFirstOutputObserver(usageTarget, usageAttr)
+		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{
+			OnContinuationUsage:    s.parent.continuationUsageObserver(llmClient, usageTarget, usageAttr),
+			OnDiscardedFirstOutput: discardedFirstOutput,
+			NativeTools:            s.nativeRequestPolicy(turn, usageTarget),
+			Diagnostics:            observer,
+			PrepareAttempt:         prepareDirectoryInstructionAttempt(s.directoryInstructions.Load(), requestSeq),
+		})
 		// Settle the walltime segment before the flush events so the TUI
 		// re-render they trigger sees the updated TIME buckets; finishing at
 		// return would leave the sidebar stale until the next unrelated
@@ -1252,6 +1269,9 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 		}
 		s.parent.emitToTUI(RequestProgressEvent{AgentID: s.instanceID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 		if turn.Ctx.Err() != nil {
+			if err == nil && resp != nil && resp.NativeTools == nil && !resp.UsageReported && resp.FirstOutputNs > 0 {
+				discardedFirstOutput(llmClient.LastCallStatus().RunningModelRef, resp.FirstOutputNs)
+			}
 			return // turn cancelled
 		}
 

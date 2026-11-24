@@ -213,8 +213,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleSessionControlEvent(evt)
 	case EventModelPoolSwitch:
 		a.handleModelPoolSwitchEvent(evt)
-	case eventContinuationUsage:
-		a.handleContinuationUsage(evt.Payload.(continuationUsagePayload))
+	case eventRequestUsage:
+		a.handleRequestUsage(evt.Payload.(requestUsagePayload))
 	case EventNativeReceipt:
 		a.handleNativeReceipt(evt)
 	case EventMCPAuthControl:

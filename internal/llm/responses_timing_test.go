@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +41,7 @@ func TestResponsesPhysicalRequestTiming(t *testing.T) {
 					if (scenario != "first request" && wsCalls == 1) || scenario == "retry then http" {
 						time.Sleep(2 * time.Second)
 						cb(message.StreamDelta{Type: message.StreamDeltaText, Text: "discarded"})
+						cb(message.StreamDelta{Type: message.StreamDeltaRollback})
 						if scenario == "chain reset" || scenario == "no visible output" {
 							return nil, false, &APIError{StatusCode: http.StatusBadRequest, Message: "No tool call found for function call output with call_id call_sample."}
 						}
@@ -56,7 +58,15 @@ func TestResponsesPhysicalRequestTiming(t *testing.T) {
 					return &message.Response{Content: "hello", StopReason: "end_turn", Usage: &message.TokenUsage{OutputTokens: 100}}, false, nil
 				}
 				client := NewClient(cfg, provider, "test-model", 1024, "")
-				resp, err := client.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hello"}}, nil, func(message.StreamDelta) {})
+				var discarded []int64
+				resp, err := client.CompleteStreamWithOptions(context.Background(), []message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, func(message.StreamDelta) {}, CompleteStreamOptions{
+					OnDiscardedFirstOutput: func(modelRef string, latencyNs int64) {
+						if modelRef != "openai/test-model" {
+							t.Errorf("sample came from %q", modelRef)
+						}
+						discarded = append(discarded, latencyNs)
+					},
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -81,6 +91,16 @@ func TestResponsesPhysicalRequestTiming(t *testing.T) {
 				}
 				if resp.RequestNs != int64(time.Second) || resp.FirstOutputNs != int64(wantFirst) {
 					t.Fatalf("timing = %v/%v, want 1s/%v", time.Duration(resp.RequestNs), time.Duration(resp.FirstOutputNs), wantFirst)
+				}
+				var wantDiscarded []int64
+				if scenario != "first request" {
+					wantDiscarded = []int64{int64(2 * time.Second)}
+					if scenario == "retry then http" {
+						wantDiscarded = append(wantDiscarded, wantDiscarded[0])
+					}
+				}
+				if !slices.Equal(discarded, wantDiscarded) {
+					t.Fatalf("discarded timing samples = %v, want %v", discarded, wantDiscarded)
 				}
 			})
 		})

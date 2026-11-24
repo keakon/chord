@@ -53,6 +53,15 @@ func (g *GeminiProvider) runGeminiContinuation(ctx context.Context, frozen gemin
 	state := &geminiDecodeState{cb: cb}
 	ledger := geminiUsageLedger{known: true}
 	reported := false
+	if timing := responseTimingFromContext(ctx); timing != nil {
+		defer func() {
+			if reported {
+				// Hop receipts already own the timing. Checkpoint replay can
+				// emit old content after the last receipt.
+				timing.takeFirstOutput()
+			}
+		}()
+	}
 	accepted := false
 	recoveries, samePoint := 0, 0
 	var waited time.Duration
@@ -120,8 +129,7 @@ func (g *GeminiProvider) runGeminiContinuation(ctx context.Context, frozen gemin
 			}
 		}
 		// A final hop is validated before its receipt lands: a rejected empty
-		// response is a failed attempt, so the billing receipt still lands but
-		// drops its speed timing and never contributes a throughput sample.
+		// response keeps its billing receipt but cannot contribute throughput.
 		isFinalHop := result.Err == nil && result.FinishReason != "" && result.FinishReason != geminiContinuationFinish
 		var finalResponse *message.Response
 		var finalizeErr error
@@ -138,18 +146,16 @@ func (g *GeminiProvider) runGeminiContinuation(ctx context.Context, frozen gemin
 				if finalizeErr == nil {
 					firstToolAt := publishGeminiFinalTools(finalResponse, cb)
 					if result.FirstOutputNs == 0 && !firstToolAt.IsZero() {
-						result.FirstOutputNs = firstToolAt.Sub(result.startedAt).Nanoseconds()
+						result.FirstOutputNs = firstOutputLatencyNs(result.startedAt, firstToolAt)
 					}
 					result.RequestNs = time.Since(result.startedAt).Nanoseconds()
 					finalizeErr = ctx.Err()
 				}
 			}
 		}
-		// Usage completeness gates throughput, while first-output latency only
-		// needs successful visible output. Keep billing even if finalization fails.
 		hopRequestNs, hopFirstOutputNs := continuationHopTiming(result)
 		if finalizeErr != nil {
-			hopRequestNs, hopFirstOutputNs = 0, 0
+			hopRequestNs = 0
 		}
 		reported = reportGeminiContinuationUsage(ctx, g.provider, chain, request, outcome, result.usageState(), result.Usage, hopRequestNs, hopFirstOutputNs) || reported
 		if err := ctx.Err(); err != nil {

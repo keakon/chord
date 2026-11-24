@@ -25,14 +25,14 @@ func TestContinuationUsagePinsLedgerAndIgnoresLateUI(t *testing.T) {
 	observer := agent.continuationUsageObserver(client, target, usageAttribution{AgentID: "worker-1", AgentKind: agentKindSub, AgentName: "worker", TaskID: "task-1", Purpose: analytics.UsagePurposeChat, SelectedModelRef: "sample/model-1", TurnID: 7})
 	source.Input = 99
 	observer(llm.ContinuationUsage{ChainID: "chain", Request: 1, ModelRef: "sample/model-1", Outcome: "checkpoint", UsageState: contextdiag.Partial, Usage: &message.TokenUsage{InputTokens: 1000000}})
-	first := (<-agent.eventCh).Payload.(continuationUsagePayload)
+	first := (<-agent.eventCh).Payload.(requestUsagePayload)
 	if first.event.Cost.TotalCost != 1 || first.event.Diagnostic["usage_state"] != contextdiag.Partial {
 		t.Fatalf("receipt=%+v", first)
 	}
 	if first.event.TaskID != "task-1" || first.event.AgentID != "worker-1" || first.event.TurnID != 7 {
 		t.Fatalf("continuation attribution = %+v", first.event)
 	}
-	agent.handleContinuationUsage(first)
+	agent.handleRequestUsage(first)
 	if len(visible) != 1 {
 		t.Fatal("missing current receipt")
 	}
@@ -40,9 +40,9 @@ func TestContinuationUsagePinsLedgerAndIgnoresLateUI(t *testing.T) {
 	newLedger := analytics.NewUsageLedger(newDir, "")
 	recorder.repointLedger(newLedger)
 	observer(llm.ContinuationUsage{ChainID: "chain", Request: 2, ModelRef: "sample/model-1", Outcome: "checkpoint", UsageState: contextdiag.Partial, Usage: &message.TokenUsage{InputTokens: 100}})
-	second := (<-agent.eventCh).Payload.(continuationUsagePayload)
+	second := (<-agent.eventCh).Payload.(requestUsagePayload)
 
-	agent.handleContinuationUsage(second)
+	agent.handleRequestUsage(second)
 	if len(visible) != 1 {
 		t.Fatal("late receipt modified new session")
 	}
@@ -75,7 +75,7 @@ func TestContinuationUsageCarriesHopTiming(t *testing.T) {
 	hopNs := int64(2 * time.Second)
 	latencyNs := int64(300 * time.Millisecond)
 	observer(llm.ContinuationUsage{ChainID: "chain", Request: 1, ModelRef: "sample/model-1", Outcome: "completed", UsageState: contextdiag.Reported, Usage: &message.TokenUsage{InputTokens: 100, OutputTokens: 50}, RequestNs: hopNs, FirstOutputNs: latencyNs})
-	payload := (<-agent.eventCh).Payload.(continuationUsagePayload)
+	payload := (<-agent.eventCh).Payload.(requestUsagePayload)
 	if payload.event.RequestNs != hopNs {
 		t.Fatalf("event request ns = %d, want %d", payload.event.RequestNs, hopNs)
 	}
@@ -83,7 +83,7 @@ func TestContinuationUsageCarriesHopTiming(t *testing.T) {
 		t.Fatalf("event first output ns = %d, want %d", payload.event.FirstOutputNs, latencyNs)
 	}
 
-	agent.handleContinuationUsage(payload)
+	agent.handleRequestUsage(payload)
 	// The timing rides the event, but the worker is a sub agent, so the
 	// speed-sample gate keeps it out of the per-model throughput columns.
 	stats := agent.usageTracker.SessionStats().ByModel["sample/model-1"]

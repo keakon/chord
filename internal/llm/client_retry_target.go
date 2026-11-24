@@ -265,6 +265,7 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 	var resp *message.Response
 	var err error
 	var tracker *visibleStreamTracker
+	reportDiscarded, _ := ctx.Value(discardedFirstOutputKey{}).(func(string, int64))
 	replayEchoRetried := false
 	ambiguousReplayRetried := false
 	modelDone := false
@@ -317,7 +318,7 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 
 		hadEarlierAttempt := result.hadRequestAttempt
 		result.hadRequestAttempt = true
-		attemptStartedAt := time.Now()
+		timing := &responseTiming{startedAt: time.Now(), tracker: tracker, modelRef: modelRef, report: reportDiscarded}
 		attemptCtx := ctx
 		if prepareAttempt != nil {
 			inputBudget := t.inputLimit
@@ -354,11 +355,7 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 		})
 		choiceRequest := &toolChoiceRequest{}
 		attemptCtx = context.WithValue(attemptCtx, toolChoiceRequestKey{}, choiceRequest)
-		attemptCtx = context.WithValue(attemptCtx, responseTimingResetKey{}, func() {
-			attemptStartedAt = time.Now()
-			tracker.hasContent = false
-			tracker.firstContentAt = time.Time{}
-		})
+		attemptCtx = context.WithValue(attemptCtx, responseTimingKey{}, timing)
 		resp, err = completeWithNativeTools(
 			attemptCtx,
 			t.impl,
@@ -384,6 +381,9 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 				tracker.Callback(delta)
 			},
 		)
+		if err != nil || (resp != nil && resp.StopReason == "interrupted") {
+			timing.discard()
+		}
 		result.connectPhaseFailure = result.connectPhaseFailure || isConnectPhaseFailure(err)
 		if _, apiResponse := errors.AsType[*APIError](err); resp != nil || apiResponse {
 			result.reachedServer = true
@@ -442,6 +442,7 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 		}
 		if err == nil {
 			if resp != nil && resp.NativeTools == nil && modelcompat.IsReplayEvidenceEcho(resp.Content, targetMessages) {
+				timing.discard()
 				echoErr := &ReplayEvidenceEchoError{}
 				if tracker.EmitRollback(echoErr.Error()) {
 					pendingRollback = ""
@@ -472,9 +473,13 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 			// interrupted branch applies below would restart at its base wait
 			// every round and never grow for a gateway that keeps truncating.
 			if resp.StopReason != "interrupted" {
-				recordResponseTiming(resp, attemptStartedAt, tracker)
 				if responseHasUsableOutput(resp) {
+					if resp.NativeTools == nil && !resp.UsageReported {
+						recordResponseTiming(resp, timing.startedAt, tracker)
+					}
 					result.roundHadUsableReply = true
+				} else {
+					timing.discard()
 				}
 				t.provider.MarkKeySuccess(apiKey)
 				// The reply ran to completion, so the credential is not the
@@ -495,7 +500,7 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 			log.Debugf("LLM request completed provider=%v model=%v input_tokens=%v output_tokens=%v stop_reason=%v", t.provider.Name(), t.modelID, inputTok, outputTok, resp.StopReason)
 			updateSuccessfulCallStatus(status, t)
 			if status != nil {
-				status.RunningAttemptAt = attemptStartedAt
+				status.RunningAttemptAt = timing.startedAt
 			}
 			modelDone = true
 			break
@@ -813,16 +818,11 @@ func (c *Client) completeStreamTarget(a streamTargetAttempt) (result streamTarge
 // first-visible-output latency onto a successfully completed response. The
 // start point is the attempt loop's pre-submission moment (connection setup
 // included, so HTTP and WebSocket transports share one definition). Both
-// figures are int64 nanoseconds where zero means "not measured": failed
-// attempts, interruptions, and bypass returns never carry timing, so they
-// cannot contribute throughput or latency samples downstream.
+// figures are int64 nanoseconds; zero means "not measured".
 func recordResponseTiming(resp *message.Response, startedAt time.Time, tracker *visibleStreamTracker) {
 	if resp == nil || startedAt.IsZero() {
 		return
 	}
 	resp.RequestNs = time.Since(startedAt).Nanoseconds()
-	firstContentAt := tracker.FirstContentAt()
-	if !firstContentAt.IsZero() && firstContentAt.After(startedAt) {
-		resp.FirstOutputNs = firstContentAt.Sub(startedAt).Nanoseconds()
-	}
+	resp.FirstOutputNs = firstOutputLatencyNs(startedAt, tracker.FirstContentAt())
 }

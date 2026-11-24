@@ -804,12 +804,11 @@ type Response struct {
 	// RequestNs is the wall-clock duration of the successfully completed
 	// physical request attempt, measured from just before the transport
 	// submission (including connection setup) to the client's success
-	// terminal. Zero marks "not measured": failed attempts, interruptions,
-	// and responses that bypass the attempt success branch carry no timing.
+	// terminal. Failed attempts and interruptions have no request duration.
 	RequestNs int64 `json:"request_ns,omitzero"`
-	// FirstOutputNs is the latency from the same start point to the first
-	// non-empty visible content delta (non-blank text or summary thinking,
-	// or a tool-use delta carrying actual payload). Zero marks "not
+	// FirstOutputNs is the latency to the first visible content delta
+	// (non-blank text or summary thinking, or a tool-use delta carrying
+	// actual payload), even for a failed attempt. Zero timing means "not
 	// measured"; hidden-mode reasoning deltas never count as content.
 	FirstOutputNs   int64 `json:"first_output_ns,omitzero"`
 	NativeTools     *NativeToolHistory

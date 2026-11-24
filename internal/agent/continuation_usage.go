@@ -17,9 +17,9 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-const eventContinuationUsage = "continuation_usage"
+const eventRequestUsage = "request_usage"
 
-type continuationUsagePayload struct {
+type requestUsagePayload struct {
 	target *walltimeTarget
 	event  analytics.UsageEvent
 }
@@ -50,14 +50,7 @@ func (a *MainAgent) continuationUsageObserver(client *llm.Client, target *wallti
 			}
 		}
 	}
-	if attr.AgentID == "" {
-		attr.AgentID = identity.MainAgentID
-	}
-	if target != nil {
-		attr.AgentID = target.agentID
-		attr.AgentName = target.agentName
-		attr.TurnID = target.turnID
-	}
+	attr = requestUsageAttribution(target, attr)
 	return func(receipt llm.ContinuationUsage) {
 		var usage message.TokenUsage
 		if receipt.Usage != nil {
@@ -71,17 +64,51 @@ func (a *MainAgent) continuationUsageObserver(client *llm.Client, target *wallti
 			state = contextdiag.Missing
 		}
 		evt := analytics.UsageEvent{EventID: fmt.Sprintf("continuation:%s:%d", receipt.ChainID, receipt.Request), OccurredAt: time.Now(), AgentID: attr.AgentID, AgentKind: attr.AgentKind, AgentName: attr.AgentName, TaskID: attr.TaskID, Purpose: attr.Purpose, TurnID: attr.TurnID, SelectedModelRef: attr.SelectedModelRef, RunningModelRef: receipt.ModelRef, UsageRaw: raw, BillingUsage: billing, Cost: analytics.CalculateUsageCost(price, billing, receipt.ServiceTier), PricingSnapshot: analytics.PricingSnapshotFromCost(price, billing, receipt.ServiceTier), RequestNs: receipt.RequestNs, FirstOutputNs: receipt.FirstOutputNs, Diagnostic: map[string]string{"chain": receipt.ChainID, "request": fmt.Sprint(receipt.Request), "outcome": receipt.Outcome, "usage_state": state}}
-		payload := continuationUsagePayload{target: target, event: evt}
-		if target != nil && target.ledger != nil {
-			err := target.ledger.AppendEvent(evt)
-			if err != nil {
-				log.Warnf("failed to append continuation usage: %v", err)
-			}
-		}
-		a.sendEvent(Event{Type: eventContinuationUsage, Payload: payload})
+		a.publishRequestUsage(target, evt)
 	}
 }
-func (a *MainAgent) handleContinuationUsage(payload continuationUsagePayload) {
+
+func (a *MainAgent) discardedFirstOutputObserver(target *walltimeTarget, attr usageAttribution) func(string, int64) {
+	attr = requestUsageAttribution(target, attr)
+	return func(modelRef string, latencyNs int64) {
+		a.publishRequestUsage(target, analytics.UsageEvent{
+			EventID:          makeRequestID(),
+			OccurredAt:       time.Now(),
+			AgentID:          attr.AgentID,
+			AgentKind:        attr.AgentKind,
+			AgentName:        attr.AgentName,
+			TaskID:           attr.TaskID,
+			Purpose:          attr.Purpose,
+			TurnID:           attr.TurnID,
+			SelectedModelRef: attr.SelectedModelRef,
+			RunningModelRef:  modelRef,
+			FirstOutputNs:    latencyNs,
+			FirstOutputOnly:  true,
+		})
+	}
+}
+
+func requestUsageAttribution(target *walltimeTarget, attr usageAttribution) usageAttribution {
+	if target != nil {
+		attr.AgentID = target.agentID
+		attr.AgentName = target.agentName
+		attr.TurnID = target.turnID
+	} else if attr.AgentID == "" {
+		attr.AgentID = identity.MainAgentID
+	}
+	return attr
+}
+
+func (a *MainAgent) publishRequestUsage(target *walltimeTarget, event analytics.UsageEvent) {
+	if target != nil && target.ledger != nil {
+		if err := target.ledger.AppendEvent(event); err != nil {
+			log.Warnf("failed to append request usage: %v", err)
+		}
+	}
+	a.sendEvent(Event{Type: eventRequestUsage, Payload: requestUsagePayload{target: target, event: event}})
+}
+
+func (a *MainAgent) handleRequestUsage(payload requestUsagePayload) {
 	if payload.target != nil && !a.walltime.isCurrentTarget(payload.target) {
 		return
 	}

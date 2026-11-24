@@ -20,8 +20,8 @@ type ContinuationUsage struct {
 	// RequestNs is the hop's wall-clock duration, reported only when the hop
 	// finished successfully and its usage counts are complete, so a receipt
 	// with non-zero timing is an eligible throughput sample. FirstOutputNs is
-	// the hop's first-visible-output latency, reported for any successfully
-	// finished hop that streamed content (independent of usage completeness).
+	// the hop's first-visible-output latency, independent of completion and
+	// usage.
 	// Both are int64 nanoseconds; zero marks "not measured".
 	RequestNs     int64
 	FirstOutputNs int64
@@ -137,16 +137,10 @@ func (l *geminiUsageLedger) usage() *message.TokenUsage {
 }
 
 // continuationHopTiming picks the timing values that may ride a hop's usage
-// receipt. Only successfully finished hops carry timing (failed and
-// interrupted hops never contribute speed samples); the wall clock
-// additionally requires complete usage counts, because an incomplete output
-// numerator would overstate the rate, while the first-visible-output
-// latency is independent of usage completeness.
+// receipt. Throughput needs a finished hop with complete usage. A measured
+// first-output latency remains valid even if the hop fails.
 func continuationHopTiming(result geminiHopResult) (requestNs, firstOutputNs int64) {
-	if result.Err != nil || result.FinishReason == "" {
-		return 0, 0
-	}
-	if result.Usage != nil && result.UsageComplete {
+	if result.Err == nil && result.FinishReason != "" && result.Usage != nil && result.UsageComplete {
 		requestNs = result.RequestNs
 	}
 	return requestNs, result.FirstOutputNs

@@ -305,18 +305,15 @@ type usageAttribution struct {
 const agentKindSub = "sub"
 
 // usageTiming carries the per-attempt wall-clock duration and the
-// first-visible-output latency measured by the LLM client for one
-// successfully completed request, in int64 nanoseconds. Zero values mean
-// "not measured": only successfully completed attempts carry timing, so
-// failed requests never contribute throughput or latency samples.
+// first-visible-output latency measured by the LLM client, in nanoseconds.
+// A failed request can carry latency without a request duration.
 type usageTiming struct {
 	RequestNs     int64
 	FirstOutputNs int64
 }
 
-// responseUsageTiming extracts the client-measured timing from a completed
-// response. Responses produced outside the attempt success branch (Gemini
-// continuation chains report per-hop receipts instead) carry zero timing.
+// responseUsageTiming extracts the client-measured timing. Gemini
+// continuation chains record timing on their per-hop receipts instead.
 func responseUsageTiming(resp *message.Response) usageTiming {
 	if resp == nil {
 		return usageTiming{}
@@ -331,6 +328,16 @@ func (a *MainAgent) recordUsage(
 	diagnostic map[string]string,
 	timing usageTiming,
 ) {
+	a.emitUsageEvent(a.requestUsageEvent(attr, usage, serviceTier, diagnostic, timing))
+}
+
+func (a *MainAgent) requestUsageEvent(
+	attr usageAttribution,
+	usage *message.TokenUsage,
+	serviceTier config.ServiceTier,
+	diagnostic map[string]string,
+	timing usageTiming,
+) analytics.UsageEvent {
 	attr.RunningModelRef = strings.TrimSpace(attr.RunningModelRef)
 	if attr.RunningModelRef == "" {
 		attr.RunningModelRef = attr.SelectedModelRef
@@ -345,7 +352,7 @@ func (a *MainAgent) recordUsage(
 
 	rawUsage := analytics.UsageSnapshotFromTokenUsage(u)
 	billingUsage := analytics.NormalizeBillingUsage(rawUsage)
-	a.emitUsageEvent(analytics.UsageEvent{
+	return analytics.UsageEvent{
 		AgentID:          attr.AgentID,
 		AgentKind:        attr.AgentKind,
 		AgentName:        attr.AgentName,
@@ -361,5 +368,5 @@ func (a *MainAgent) recordUsage(
 		RequestNs:        timing.RequestNs,
 		FirstOutputNs:    timing.FirstOutputNs,
 		Diagnostic:       diagnostic,
-	})
+	}
 }

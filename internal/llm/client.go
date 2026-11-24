@@ -195,11 +195,14 @@ type RequestSnapshot struct {
 // rotation within a round or for provider-internal continuation requests.
 type CompleteStreamOptions struct {
 	OnContinuationUsage func(ContinuationUsage)
-	Diagnostics         *RequestDiagnostics
-	PrepareAttempt      func(context.Context, RequestAttempt) (context.Context, error)
-	NativeTools         *NativeToolPolicy
-	BeforeFallback      func(context.Context, []message.Message, FallbackModel) (*RequestSnapshot, error)
-	BeforeRetryRound    func(context.Context, []message.Message) (*RequestSnapshot, error)
+	// OnDiscardedFirstOutput receives the measured latency of an attempt
+	// whose timing will not be carried by a completed response or usage receipt.
+	OnDiscardedFirstOutput func(modelRef string, latencyNs int64)
+	Diagnostics            *RequestDiagnostics
+	PrepareAttempt         func(context.Context, RequestAttempt) (context.Context, error)
+	NativeTools            *NativeToolPolicy
+	BeforeFallback         func(context.Context, []message.Message, FallbackModel) (*RequestSnapshot, error)
+	BeforeRetryRound       func(context.Context, []message.Message) (*RequestSnapshot, error)
 	// MCPDeclarations is the request's currently effective incremental MCP
 	// tool set. A target that cannot accept the dynamic declaration shape
 	// inlines exactly this set into its top-level tools instead of replaying
@@ -1173,6 +1176,9 @@ func (c *Client) CompleteStreamWithOptions(
 	}
 	if options.OnContinuationUsage != nil {
 		ctx = context.WithValue(ctx, continuationObserverKey{}, options.OnContinuationUsage)
+	}
+	if options.OnDiscardedFirstOutput != nil {
+		ctx = context.WithValue(ctx, discardedFirstOutputKey{}, options.OnDiscardedFirstOutput)
 	}
 	if options.Diagnostics != nil {
 		ctx = context.WithValue(ctx, diagnosticsContextKey{}, options.Diagnostics)

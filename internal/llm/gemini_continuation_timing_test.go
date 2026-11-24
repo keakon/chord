@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -213,7 +214,7 @@ func TestGeminiContinuationTimingMatchesVisiblePublication(t *testing.T) {
 	}
 }
 
-func TestGeminiContinuationCancelledDuringPublicationKeepsBillingOnly(t *testing.T) {
+func TestGeminiContinuationCancelledDuringPublicationKeepsFirstOutput(t *testing.T) {
 	p, _ := continuationProvider(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{"q":"x"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":5}}`+"\n\n")
 	})
@@ -229,8 +230,65 @@ func TestGeminiContinuationCancelledDuringPublicationKeepsBillingOnly(t *testing
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err=%v, want cancellation", err)
 	}
-	if receipt.Usage == nil || receipt.Usage.OutputTokens != 5 || receipt.RequestNs != 0 || receipt.FirstOutputNs != 0 {
-		t.Fatalf("cancelled publication receipt=%+v, want billing without timing", receipt)
+	if receipt.Usage == nil || receipt.Usage.OutputTokens != 5 || receipt.RequestNs != 0 || receipt.FirstOutputNs <= 0 {
+		t.Fatalf("cancelled publication receipt=%+v, want billing and latency without throughput", receipt)
+	}
+}
+
+func TestGeminiContinuationFailedHopReportsFirstOutputOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		body   string
+		cancel bool
+	}{
+		{"parse error after output", continuationChunk("hello", "", "", -1, 0) + "data: invalid\n\n", false},
+		{"cancel with checkpoint", continuationChunk("hello", "checkpoint", "", 100, 1) + continuationChunk("tail", "", "", -1, 0), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg := NewProviderConfig("sample", config.ProviderConfig{
+					Type:   config.ProviderTypeGenerateContent,
+					APIURL: "https://generativelanguage.googleapis.com/v1beta",
+					Models: map[string]config.ModelConfig{"test-model": {
+						Compat: &config.ModelCompatConfig{GenerateContent: &config.GenerateContentCompatConfig{AutomaticContinuation: new(true)}},
+						Limit:  config.ModelLimit{Context: 8192, Output: 1024},
+					}},
+				}, []string{"test-key"})
+				provider, err := NewGeminiProviderWithClient(cfg, &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+					time.Sleep(100 * time.Millisecond)
+					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Request: req, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+				})}, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				client := NewClient(cfg, provider, "test-model", 1024, "")
+				client.SetStreamRetryRounds(1)
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				var receipts []ContinuationUsage
+				_, err = client.CompleteStreamWithOptions(ctx, []message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, func(d message.StreamDelta) {
+					if tc.cancel && d.Type == message.StreamDeltaText && d.Text == "tail" {
+						cancel()
+					}
+				}, CompleteStreamOptions{
+					OnContinuationUsage: func(receipt ContinuationUsage) { receipts = append(receipts, receipt) },
+					OnDiscardedFirstOutput: func(modelRef string, latencyNs int64) {
+						t.Errorf("duplicate attempt latency %d for %q", latencyNs, modelRef)
+					},
+				})
+				if tc.cancel {
+					if !errors.Is(err, context.Canceled) {
+						t.Fatalf("err = %v, want cancellation", err)
+					}
+				} else if _, ok := errors.AsType[*GeminiContinuationError](err); !ok {
+					t.Fatalf("err = %v, want a continuation failure", err)
+				}
+				if len(receipts) != 1 || receipts[0].FirstOutputNs != int64(100*time.Millisecond) ||
+					receipts[0].RequestNs != 0 || receipts[0].ModelRef != "sample/test-model" {
+					t.Fatalf("receipts = %+v, want one 100ms latency sample and no throughput", receipts)
+				}
+			})
+		})
 	}
 }
 

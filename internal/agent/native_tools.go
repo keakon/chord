@@ -79,7 +79,7 @@ func nativePolicy(journal recovery.NativeRequestJournal, permitted func(string) 
 		},
 	}
 }
-func (a *MainAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
+func (a *MainAgent) nativeRequestPolicy(turn *Turn, target *walltimeTarget) *llm.NativeToolPolicy {
 	if a.recoveryManager() == nil || turn == nil {
 		return nil
 	}
@@ -87,7 +87,7 @@ func (a *MainAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
 	// Server-side native tool pre-authorization always evaluates the configured
 	// ruleset: the YOLO transformation only lifts local execution friction, it
 	// never widens what a hosted request may do.
-	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(a.tools, a.effectiveRuleset(), a.hookEngine, name) }, a.nativeUsageRecorder(usageAttribution{AgentID: identity.MainAgentID, AgentKind: identity.MainAgentID, AgentName: a.currentAgentName(), Purpose: analytics.UsagePurposeChat, TurnID: turn.ID}))
+	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(a.tools, a.effectiveRuleset(), a.hookEngine, name) }, a.nativeUsageRecorder(target, usageAttribution{AgentID: identity.MainAgentID, AgentKind: identity.MainAgentID, AgentName: a.currentAgentName(), Purpose: analytics.UsagePurposeChat, TurnID: turn.ID}))
 	policy.Preflight = nativeReceiptPreflight(policy.Preflight, a.nativeReceipt.Load())
 	a.configureNativeImagePolicy(policy, turn, a.tools, journal, a.instanceID)
 	policy.Failed = func(receipt *message.NativeToolHistory) {
@@ -95,7 +95,7 @@ func (a *MainAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
 	}
 	return policy
 }
-func (s *SubAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
+func (s *SubAgent) nativeRequestPolicy(turn *Turn, target *walltimeTarget) *llm.NativeToolPolicy {
 	if s.recoveryManager() == nil || turn == nil {
 		return nil
 	}
@@ -105,7 +105,7 @@ func (s *SubAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
 	}
 	var recorder func(llm.NativeRequestRecord, *message.Response, error)
 	if s.parent != nil {
-		recorder = s.parent.nativeUsageRecorder(usageAttribution{AgentID: s.instanceID, AgentKind: agentKindSub, AgentName: s.agentDefName, TaskID: s.taskID, Purpose: analytics.UsagePurposeChat, TurnID: turn.ID})
+		recorder = s.parent.nativeUsageRecorder(target, usageAttribution{AgentID: s.instanceID, AgentKind: agentKindSub, AgentName: s.agentDefName, TaskID: s.taskID, Purpose: analytics.UsagePurposeChat, TurnID: turn.ID})
 	}
 	journal := s.nativeJournal()
 	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(s.tools, s.currentRuleset(), hooks, name) }, recorder)
@@ -160,7 +160,8 @@ func (a *MainAgent) handleNativeReceipt(evt Event) {
 	}
 }
 
-func (a *MainAgent) nativeUsageRecorder(attr usageAttribution) func(llm.NativeRequestRecord, *message.Response, error) {
+func (a *MainAgent) nativeUsageRecorder(target *walltimeTarget, attr usageAttribution) func(llm.NativeRequestRecord, *message.Response, error) {
+	attr = requestUsageAttribution(target, attr)
 	return func(record llm.NativeRequestRecord, resp *message.Response, err error) {
 		var usage *message.TokenUsage
 		attempt := hostedWireAttempt{response: resp, err: err, reason: hostedAttemptInitial}
@@ -175,8 +176,8 @@ func (a *MainAgent) nativeUsageRecorder(attr usageAttribution) func(llm.NativeRe
 		diagnostic["native_contract"] = record.Authorization.Contract
 		call := attr
 		call.SelectedModelRef = record.Target
-		call.RunningModelRef = record.Target
-		a.recordUsage(call, usage, record.ServiceTier, diagnostic, usageTiming{})
+		call.RunningModelRef = record.RunningModelRef
+		a.publishRequestUsage(target, a.requestUsageEvent(call, usage, record.ServiceTier, diagnostic, responseUsageTiming(resp)))
 	}
 }
 
