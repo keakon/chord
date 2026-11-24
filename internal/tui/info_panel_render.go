@@ -153,6 +153,10 @@ func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIn
 		appendInt64(speed.ThroughputNs)
 		appendSep()
 		appendInt64(speed.ThroughputSamples)
+		appendSep()
+		appendInt64(speed.FirstOutputTotalNs)
+		appendSep()
+		appendInt64(speed.FirstOutputSamples)
 	}
 	appendSep()
 

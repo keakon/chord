@@ -21,6 +21,7 @@ func TestFormatUsageThroughput(t *testing.T) {
 		{"no duration", 100, 0, "—"},
 		{"integer range", 80, second, "80"},
 		{"large", 100, second, "100"},
+		{"ten threshold", 10, second, "10"},
 		{"one decimal below ten", 5, second, "5.0"},
 		{"slow one decimal", 1, 2 * second, "0.5"},
 	}

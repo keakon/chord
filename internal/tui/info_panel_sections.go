@@ -922,10 +922,33 @@ func renderUsageCallsLine(lineW int, stats analytics.SessionStats) string {
 
 func renderModelSpeedLine(lineW int, stats analytics.SessionStats, modelRef string) string {
 	ms := stats.ByModel[modelRef]
-	if ms == nil || ms.ThroughputSamples <= 0 {
+	if ms == nil {
 		return ""
 	}
-	return renderInfoPanelKVLine(lineW, "tok/s", currentStyles.InfoPanelValue.Render(formatUsageThroughput(ms.ThroughputTokens, ms.ThroughputNs)))
+	lines := make([]string, 0, 2)
+	if ms.ThroughputSamples > 0 {
+		lines = append(lines, renderInfoPanelKVLine(lineW, "tok/s", currentStyles.InfoPanelValue.Render(formatUsageThroughput(ms.ThroughputTokens, ms.ThroughputNs))))
+	}
+	if ttft := formatSidebarTTFT(ms.FirstOutputTotalNs, ms.FirstOutputSamples); ttft != "" {
+		lines = append(lines, renderInfoPanelKVLine(lineW, "TTFT", currentStyles.InfoPanelValue.Render(ttft)))
+	}
+	return joinInfoPanelBlockLines(lines)
+}
+
+func formatSidebarTTFT(totalNs, samples int64) string {
+	if samples <= 0 {
+		return ""
+	}
+	average := time.Duration(totalNs / samples)
+	switch {
+	case average < time.Millisecond:
+		return ""
+	case average < 100*time.Millisecond:
+		return strconv.FormatInt(average.Milliseconds(), 10) + "ms"
+	default:
+		seconds := float64(totalNs) / float64(samples) / float64(time.Second)
+		return formatUsageMetricValue(seconds) + "s"
+	}
 }
 
 func renderUsageCostLine(lineW int, stats analytics.SessionStats) string {

@@ -205,10 +205,14 @@ func formatUsageThroughput(tokens, requestNs int64) string {
 	if tps < 0 {
 		return "—"
 	}
-	if tps >= 10 {
-		return fmt.Sprintf("%.0f", tps)
+	return formatUsageMetricValue(tps)
+}
+
+func formatUsageMetricValue(value float64) string {
+	if value >= 10 {
+		return fmt.Sprintf("%.0f", value)
 	}
-	return fmt.Sprintf("%.1f", tps)
+	return fmt.Sprintf("%.1f", value)
 }
 
 // formatUsageFirstOutput renders the average first-visible-output latency:
