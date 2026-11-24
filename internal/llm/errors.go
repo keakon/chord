@@ -451,7 +451,7 @@ func isAmbiguousReplayRecoveryCandidate(err error, provider *ProviderConfig, rep
 	if apiErr.StatusCode == 400 && hasResponsesClientContractSignal(apiErr) {
 		return false
 	}
-	if hasTransientProviderCapacitySignal(apiErr) {
+	if hasServerRequestShapeRejection(apiErr) || hasTransientProviderCapacitySignal(apiErr) {
 		return false
 	}
 	if hasUpstreamFailureSignal(apiErr) {
@@ -732,8 +732,8 @@ func isInterruptedStreamError(err error) bool {
 	}
 	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		// Only in-band stream error events describe an interruption; HTTP
-		// status failures reject the request before it produced output.
-		return apiErr.isStreamEvent()
+		// status failures and explicit request defects are not resumable.
+		return apiErr.isStreamEvent() && !hasServerRequestShapeRejection(apiErr)
 	}
 	if _, ok := errors.AsType[*ChunkTimeoutError](err); ok {
 		return true
@@ -859,7 +859,7 @@ func isRetriable(err error) bool {
 	// takes precedence over generic capacity wording: rotating credentials
 	// cannot repair the request.
 	if apiErr.StatusCode >= 500 && apiErr.StatusCode < 600 {
-		if hasStructuredRequestShapeSignal(apiErr) || hasStrongRequestShapeTextSignal(apiErr) {
+		if hasServerRequestShapeRejection(apiErr) || hasStrongRequestShapeTextSignal(apiErr) {
 			return false
 		}
 		if apiErrorSignalContains(apiErr, "invalid_request") &&
@@ -942,6 +942,10 @@ func hasStructuredRequestShapeSignal(apiErr *APIError) bool {
 	)
 }
 
+func hasServerRequestShapeRejection(apiErr *APIError) bool {
+	return apiErr.StatusCode >= 500 && apiErr.StatusCode < 600 && hasStructuredRequestShapeSignal(apiErr)
+}
+
 func hasStrongRequestShapeTextSignal(apiErr *APIError) bool {
 	return apiErrMessageContainsAny(apiErr,
 		"missing required parameter",
@@ -1012,13 +1016,11 @@ func hasTerminalStructural400Signal(apiErr *APIError) bool {
 // incompatible gateway responses (where retrying will keep failing the same
 // way). Other non-official 400s remain retryable across pool passes because
 // compatible gateways often mis-map upstream overload/rate-limit/provider
-// failures to 400. An explicit Responses contract code remains terminal for
-// 5xx responses, while generic capacity failures can still reach another key.
+// failures to 400. A 5xx needs an explicit request-shape code or type to
+// stop the pool; generic gateway wrappers can still describe transient failures.
 //
-// 404/405/410/414/415 are terminal regardless of provider: no upstream
-// overload maps to them, so they mean the model or endpoint does not exist,
-// the method or media type is wrong, or the resource is gone — another round
-// over the same pool can only repeat the same deterministic failures. 422
+// 404/405/410/414/415 exhaust the affected target regardless of provider:
+// they are endpoint failures, not a reason to stop retrying other targets. 422
 // follows the 400 discipline (official/trusted or explicit terminal signal):
 // request-shape validation is deterministic, but aggregating gateways have
 // been known to collapse upstream failures into generic 4xx bodies.
@@ -1039,6 +1041,6 @@ func isTerminalModelPoolFailureForProvider(provider *ProviderConfig, err error) 
 	case 400, 422:
 		return providerTrustsHTTP400(provider) || hasTerminalNonRetriable400Signal(apiErr)
 	default:
-		return hasServerResponsesContractRefusal(apiErr)
+		return hasServerRequestShapeRejection(apiErr)
 	}
 }

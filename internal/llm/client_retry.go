@@ -21,10 +21,6 @@ type streamRoundAttemptSummary struct {
 	retryWaitTargets             []roundRetryWaitTarget
 	lastRelayRejectionErr        error
 	lastRelayRejectionProvider   *ProviderConfig
-	// Request defects prevent another round only after every target has failed.
-	requestDefectTargets      int
-	lastRequestDefectErr      error
-	lastRequestDefectProvider *ProviderConfig
 }
 
 type roundRetryWaitTarget struct {
@@ -48,11 +44,11 @@ func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) (te
 		return false
 	}
 	if !result.hadRequestAttempt {
-		// A cooling target never reached the wire, but its sibling can recover
-		// once the window passes; it still counts as a retriable sibling when
-		// deciding whether to withhold a relay-scoped terminal rejection.
+		// A cooling target never reached the wire, so let it recover before
+		// treating request or relay defects from its siblings as pool-wide.
 		if isAllKeysCoolingError(result.lastErr) {
 			s.retriableTargets++
+			s.deferredTargets++
 		}
 		return false
 	}
@@ -72,10 +68,9 @@ func (s *streamRoundAttemptSummary) record(result streamTargetAttemptResult) (te
 		return false
 	}
 	if requestDefect(result.lastErrProvider, result.lastErr) {
-		s.requestDefectTargets++
-		s.lastRequestDefectErr = result.lastErr
-		s.lastRequestDefectProvider = result.lastErrProvider
-	} else if relayScopedRequestRejection(result.lastErrProvider, result.lastErr) {
+		return true
+	}
+	if relayScopedRequestRejection(result.lastErrProvider, result.lastErr) {
 		s.lastRelayRejectionErr = result.lastErr
 		s.lastRelayRejectionProvider = result.lastErrProvider
 	} else {
@@ -176,6 +171,8 @@ func (c *Client) completeStreamWithRetry(
 	var withheldTerminalSince time.Time
 	var withheldTerminalErr error
 	var withheldTerminalProvider *ProviderConfig
+	var requestDefectErr error
+	var requestDefectProvider *ProviderConfig
 	// pendingRollbackReason is non-empty while preserved partial output is
 	// still on screen across targets and rounds. On any non-cancel exit the
 	// preserved text must leave the screen: the turn failed, so a dangling
@@ -473,6 +470,10 @@ func (c *Client) completeStreamWithRetry(
 				if terminalTarget {
 					lastTerminalTargetErr = lastErr
 				}
+				if requestDefect(targetResult.lastErrProvider, targetResult.lastErr) {
+					requestDefectErr = targetResult.lastErr
+					requestDefectProvider = targetResult.lastErrProvider
+				}
 				if _, repeatedEcho := errors.AsType[*ReplayEvidenceEchoError](lastErr); repeatedEcho {
 					replayEchoRejectedTargets[replayTarget] = struct{}{}
 				} else if terminalTarget || targetResult.continuationExhausted {
@@ -513,6 +514,9 @@ func (c *Client) completeStreamWithRetry(
 			if fallbackEnabled && status != nil && status.FallbackTriggered {
 				status.FallbackExhausted = true
 			}
+			if requestDefectErr != nil {
+				return nil, requestDefectErr
+			}
 			return nil, lastErr
 		}
 
@@ -537,9 +541,9 @@ func (c *Client) completeStreamWithRetry(
 			}
 			log.Warnf("model pool exhausted with no usable keys; retrying full pool provider=%v model=%v had_request_attempt=%v error=%v", startProvider.Name(), startModelID, roundHadRequestAttempt, lastErr)
 		}
-		if roundAttemptSummary.requestDefectTargets > 0 {
-			log.Infof("request defect ended the round despite retriable siblings provider=%v error=%v request_defect_targets=%v retriable_targets=%v", providerLogName(roundAttemptSummary.lastRequestDefectProvider), roundAttemptSummary.lastRequestDefectErr, roundAttemptSummary.requestDefectTargets, roundAttemptSummary.retriableTargets)
-			return nil, roundAttemptSummary.lastRequestDefectErr
+		if requestDefectErr != nil && roundAttemptSummary.deferredTargets == 0 {
+			log.Infof("request defect ended the retry walk after recoverable siblings were exhausted provider=%v error=%v", providerLogName(requestDefectProvider), requestDefectErr)
+			return nil, requestDefectErr
 		}
 		if IsContextLengthExceeded(lastErr) && roundAttemptSummary.deferredTargets == 0 {
 			return nil, lastErr
@@ -556,7 +560,7 @@ func (c *Client) completeStreamWithRetry(
 		}
 		// Key selection can overwrite the endpoint error without providing
 		// another retry candidate. Preserve the error that exhausted the target.
-		if lastTerminalTargetErr != nil && len(retryAt) == 0 && len(roundAttemptSummary.retryWaitTargets) == 0 {
+		if requestDefectErr == nil && lastTerminalTargetErr != nil && len(retryAt) == 0 && len(roundAttemptSummary.retryWaitTargets) == 0 {
 			return nil, lastTerminalTargetErr
 		}
 		// A transient-only later round must not erase an earlier relay rejection
@@ -572,5 +576,8 @@ func (c *Client) completeStreamWithRetry(
 	} // end attempts loop
 
 	log.Errorf("LLM all retries exhausted max_attempts=%v provider=%v model=%v error=%v", maxAttempts, startProvider.Name(), startModelID, lastErr)
+	if requestDefectErr != nil {
+		return nil, requestDefectErr
+	}
 	return nil, lastErr
 }

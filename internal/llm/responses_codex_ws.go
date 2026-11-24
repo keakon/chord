@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,6 +47,7 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 	var frame struct {
 		Status int `json:"status"`
 		Error  struct {
+			Code            string `json:"code"`
 			Type            string `json:"type"`
 			Message         string `json:"message"`
 			ResetsInSeconds *int64 `json:"resets_in_seconds"`
@@ -63,7 +65,8 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 		StatusCode: frame.Status,
 		Origin:     APIErrorOriginWebSocketEvent,
 		Message:    msgText,
-		Code:       frame.Error.Type,
+		Code:       cmp.Or(frame.Error.Code, frame.Error.Type),
+		Type:       frame.Error.Type,
 	}
 	if frame.Status == http.StatusTooManyRequests && frame.Error.ResetsInSeconds != nil && *frame.Error.ResetsInSeconds > 0 {
 		apiErr.RetryAfter = durationFromPositiveSecondsClamped(*frame.Error.ResetsInSeconds, 0)

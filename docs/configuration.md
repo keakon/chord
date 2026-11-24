@@ -1280,6 +1280,12 @@ Provider HTTP 400 handling is intentionally conservative:
   `missing required parameter`,
   `Store must be set to false`, or `Stream must be set to true`.
 
+For HTTP 5xx responses, a specific request-shape `code` or `type`, such as
+`missing_required_parameter`, stops key rotation for that model. Chord can try
+other available models in the current pass. If none succeeds, it returns the
+request error without starting another pass. A generic `invalid_request_error`
+from a gateway does not trigger this rule.
+
 - `0` keeps the default behavior: retry until success, cancellation, or a terminal failure.
 - Positive values stop after that many rounds, even for cooling / concurrent-request retry classes.
 - This is mainly useful for automation or headless environments that prefer bounded latency over maximum persistence.

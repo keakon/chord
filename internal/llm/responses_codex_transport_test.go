@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -104,39 +105,48 @@ func TestResponsesProvider_CodexOAuth429EmitsRateLimitDelta(t *testing.T) {
 	}
 }
 
-func TestResponsesProvider_CodexWSUsageLimitSkipsHTTPFallback(t *testing.T) {
-	var httpCalls int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		httpCalls++
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	responsesWSOn := true
-	providerCfg := NewProviderConfig("codex", config.ProviderConfig{
-		Type:               config.ProviderTypeResponses,
-		Preset:             config.ProviderPresetCodex,
-		APIURL:             server.URL + "/v1/responses",
-		ResponsesWebsocket: &responsesWSOn,
-		Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
-	}, []string{"oauth-key"})
-	providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
-
-	r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
-	r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
-		return nil, false, &APIError{StatusCode: http.StatusInternalServerError, Code: "usage_limit_reached", Message: "The usage limit has been reached"}
-	}
-
-	_, err := r.CompleteStream(
-		context.Background(), "oauth-key", "gpt-5", "system",
-		[]message.Message{{Role: "user", Content: "hello"}},
-		nil, 128, RequestTuning{}, func(message.StreamDelta) {},
-	)
-	if err == nil || !strings.Contains(err.Error(), "usage limit") {
-		t.Fatalf("CompleteStream error = %v, want usage limit error", err)
-	}
-	if httpCalls != 0 {
-		t.Fatalf("http calls = %d, want 0 after terminal Codex WebSocket error", httpCalls)
+func TestResponsesProvider_CodexWSTerminalServerErrorSkipsTransportRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		wire string
+		code string
+	}{
+		{"usage limit", `{"type":"error","status":500,"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`, "usage_limit_reached"},
+		{"request defect", `{"type":"error","status":503,"error":{"type":"invalid_request_error","code":"missing_required_parameter","message":"request rejected"}}`, "missing_required_parameter"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var httpCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				httpCalls.Add(1)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+			providerCfg := NewProviderConfig("codex", config.ProviderConfig{
+				Type:               config.ProviderTypeResponses,
+				Preset:             config.ProviderPresetCodex,
+				APIURL:             server.URL + "/v1/responses",
+				ResponsesWebsocket: new(true),
+				Models:             map[string]config.ModelConfig{"gpt-5": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+			}, []string{"oauth-key"})
+			providerCfg.SetOAuthRefresher(config.OpenAIOAuthTokenURL, config.OpenAIOAuthClientID, "", "", &config.AuthConfig{}, &sync.Mutex{}, map[string]OAuthKeySetup{"oauth-key": {CredentialIndex: 0, AccountID: "acc-test", Expires: 32503680000000}}, "")
+			r := &ResponsesProvider{provider: providerCfg, client: server.Client()}
+			wsErr, _ := parseCodexWebSocketErrorJSON([]byte(tc.wire))
+			wsCalls := 0
+			r.codexWSCompleteFn = func(_ context.Context, _ string, _ string, _ string, _ *responsesRequest, _ []responsesInputItem, _ StreamCallback, _ time.Time, _ codexWSCompleteOptions) (*message.Response, bool, error) {
+				wsCalls++
+				return nil, wsCalls == 1, wsErr
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			_, err := r.CompleteStream(ctx, "oauth-key", "gpt-5", "system",
+				[]message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, 128, RequestTuning{}, nil)
+			if wsCalls != 1 || httpCalls.Load() != 0 {
+				t.Errorf("WS/HTTP calls = %d/%d, want 1/0 for terminal error %v", wsCalls, httpCalls.Load(), wsErr)
+			}
+			if !errors.Is(err, wsErr) || wsErr == nil || wsErr.Code != tc.code {
+				t.Fatalf("CompleteStream error = %v, WS error = %+v; want original WS error with code %q", err, wsErr, tc.code)
+			}
+		})
 	}
 }
 

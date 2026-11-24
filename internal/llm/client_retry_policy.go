@@ -130,7 +130,7 @@ func requestDefect(provider *ProviderConfig, err error) bool {
 	case 400, 422:
 		return providerTrustsHTTP400(provider) || hasTerminalNonRetriable400Signal(apiErr)
 	default:
-		return hasServerResponsesContractRefusal(apiErr)
+		return hasServerRequestShapeRejection(apiErr)
 	}
 }
 

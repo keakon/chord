@@ -294,37 +294,68 @@ func TestRequestDefectClassification(t *testing.T) {
 	}
 }
 
-// After a failed full round, prefer the request defect to a sibling's transient error.
-func TestCompleteStreamRequestDefectStopsDespiteLaterRetriableSibling(t *testing.T) {
-	startCfg := testCompatibleResponsesProviderConfigWithKeys("relay-a", "gpt-test", []string{"k1"})
-	disableRetryDelayForTest(startCfg)
-	fallbackCfg := testCompatibleResponsesProviderConfigWithKeys("relay-b", "gpt-test", []string{"k2"})
-	disableRetryDelayForTest(fallbackCfg)
-	startImpl := &constantErrProvider{err: &APIError{StatusCode: 400, Message: "invalid tool schema"}}
-	fallbackImpl := &constantErrProvider{err: &APIError{StatusCode: 503, Message: "temporary overload"}}
-	c := NewClient(startCfg, startImpl, "gpt-test", 4096, "sys")
-	c.SetFallbackModels([]FallbackModel{{
-		ProviderConfig: fallbackCfg,
-		ProviderImpl:   fallbackImpl,
-		ModelID:        "gpt-test",
-		MaxTokens:      4096,
-		ContextLimit:   128000,
-	}})
+// After a request defect, wait for recoverable siblings but do not retry that target.
+func TestCompleteStreamRequestDefectWaitsForSiblingBeforeReturning(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const model = "test-model"
+		startCfg := testProviderConfigWithKeys("sample-a", model, []string{"a"})
+		fallbackCfg := testProviderConfigWithKeys("sample-b", model, []string{"b"})
+		disableRetryDelayForTest(startCfg)
+		disableRetryDelayForTest(fallbackCfg)
+		fallbackCfg.MarkCooldown("b", time.Second)
+		requestDefect := &APIError{StatusCode: 503, Code: "missing_required_parameter", Message: "missing required parameter"}
+		startImpl := &constantErrProvider{err: requestDefect}
+		fallbackImpl := &recordingProvider{calls: []scriptedCall{{
+			err: &APIError{StatusCode: 404, Message: "model not found"},
+		}}}
+		c := NewClient(startCfg, startImpl, model, 4096, "sys")
+		defer c.Close()
+		c.SetFallbackModels([]FallbackModel{{
+			ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: model, MaxTokens: 4096,
+		}})
 
-	// A regression here loops rounds instead of returning, so bound the request.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	resp, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
-	if err == nil {
-		t.Fatalf("CompleteStream err = nil, want the structural 400; resp=%#v", resp)
-	}
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.StatusCode != 400 || apiErr.Message != "invalid tool schema" {
-		t.Fatalf("CompleteStream err = %v, want the structural 400 rather than the sibling's 503", err)
-	}
-	if startImpl.calls != 1 || fallbackImpl.calls != 1 {
-		t.Fatalf("provider calls = (%d, %d), want (1, 1): a request defect must not wait for rounds", startImpl.calls, fallbackImpl.calls)
-	}
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		resp, err := c.CompleteStream(ctx, []message.Message{{Role: message.RoleUser, Content: "hi"}}, nil, nil)
+		if !errors.Is(err, requestDefect) || resp != nil {
+			t.Fatalf("CompleteStream response=%+v error=%v, want the original request defect", resp, err)
+		}
+		if startImpl.calls != 1 || fallbackImpl.CallCount() != 1 {
+			t.Fatalf("provider calls=(%d,%d), want (1,1): skip the defective target and try the deferred sibling once", startImpl.calls, fallbackImpl.CallCount())
+		}
+	})
+}
+
+func TestCompleteStreamRequestDefectWaitsForCoolingSibling(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const model = "test-model"
+		startCfg := testProviderConfigWithKeys("sample-a", model, []string{"a"})
+		fallbackCfg := testProviderConfigWithKeys("sample-b", model, []string{"b"})
+		disableRetryDelayForTest(startCfg)
+		disableRetryDelayForTest(fallbackCfg)
+		fallbackCfg.MarkCooldown("b", time.Second)
+		startImpl := &constantErrProvider{err: &APIError{
+			StatusCode: 503, Code: "missing_required_parameter", Message: "missing required parameter",
+		}}
+		fallbackImpl := &recordingProvider{calls: []scriptedCall{{
+			resp: &message.Response{Content: "recovered"},
+		}}}
+		c := NewClient(startCfg, startImpl, model, 4096, "sys")
+		defer c.Close()
+		c.SetFallbackModels([]FallbackModel{{
+			ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: model, MaxTokens: 4096,
+		}})
+
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		resp, err := c.CompleteStream(ctx, []message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, nil)
+		if err != nil || resp == nil || resp.Content != "recovered" {
+			t.Fatalf("response=%+v error=%v, want recovery from the cooling sibling", resp, err)
+		}
+		if startImpl.calls != 1 || fallbackImpl.CallCount() != 1 {
+			t.Fatalf("provider calls=(%d,%d), want (1,1)", startImpl.calls, fallbackImpl.CallCount())
+		}
+	})
 }
 
 // Withholding a relay-scoped rejection is bounded: once the sibling recovery

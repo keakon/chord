@@ -801,10 +801,13 @@ func shouldStopCodexWSHTTPFallback(err error) bool {
 	if !ok || apiErr == nil {
 		return false
 	}
+	if hasServerRequestShapeRejection(apiErr) {
+		return true
+	}
 
 	code := strings.ToLower(strings.TrimSpace(apiErr.Code))
 	typ := strings.ToLower(strings.TrimSpace(apiErr.Type))
-	if code == "websocket_connection_limit_reached" {
+	if code == "websocket_connection_limit_reached" || typ == "websocket_connection_limit_reached" {
 		return false
 	}
 	if code == "rate_limit_exceeded" || typ == "rate_limit_exceeded" {
@@ -816,7 +819,8 @@ func shouldStopCodexWSHTTPFallback(err error) bool {
 		return true
 	}
 
-	if code == "account_invalidated" || code == "account_deactivated" || confirmedCodexUsageLimitError(apiErr) {
+	if code == "account_invalidated" || typ == "account_invalidated" ||
+		code == "account_deactivated" || typ == "account_deactivated" || confirmedCodexUsageLimitError(apiErr) {
 		return true
 	}
 	return false

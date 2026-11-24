@@ -989,6 +989,8 @@ Provider HTTP 400 的处理是有意保守的：
 - 非官方兼容网关有时会把并发限制、上游容量不足等临时状态映射成 400。这类非请求形态的 400 会冷却当前 key、轮换到下一个 key，并在所有 key 都冷却时等待后继续；
 - 请求参数/模型不兼容类 400 仍会停止，避免无限重试，例如结构化 `code`/`type` 为 `invalid_request_error`、`invalid_request` 或 `missing_required_parameter`，或仅消息文本包含 `missing required parameter`、`Store must be set to false` 或 `Stream must be set to true`。
 
+HTTP 5xx 的 `code` 或 `type` 如果明确指出请求格式有误（例如 `missing_required_parameter`），Chord 不会为该模型换 key。本轮仍可尝试其他可用模型；如果都未成功，则返回请求错误，不再开始下一轮。网关返回的通用 `invalid_request_error` 不触发这条规则。
+
 - `0` 保持默认行为：一直重试，直到成功、被取消，或遇到终态失败；
 - 正整数表示最多重试这么多轮，即使是 cooling / 并发 429 这类通常会继续等待的错误，也会在达到上限后停止；
 - 这个选项更适合自动化或 headless 场景：用可预测时延换取更明确的退出边界。

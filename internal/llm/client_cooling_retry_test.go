@@ -301,37 +301,37 @@ func TestCompleteStream503RequestErrorBodyFallsBack(t *testing.T) {
 }
 
 func TestCompleteStream503MissingRequiredParameterDoesNotRotateKeys(t *testing.T) {
-	primaryCfg := testProviderConfigWithKeys("primary", "model-primary", []string{"k1", "k2"})
-	fallbackCfg := testProviderConfig("fallback", "model-fallback")
-	primaryImpl := &constantErrProvider{err: &APIError{
-		StatusCode: 503,
-		Code:       "missing_required_parameter",
-		Message:    "missing required parameter: capacity",
-	}}
-	fallbackImpl := &recordingProvider{calls: []scriptedCall{
-		{resp: &message.Response{Content: "fallback response"}},
-	}}
-	c := NewClient(primaryCfg, primaryImpl, "model-primary", 4096, "sys")
-	c.SetFallbackModels([]FallbackModel{{
-		ProviderConfig: fallbackCfg,
-		ProviderImpl:   fallbackImpl,
-		ModelID:        "model-fallback",
-		MaxTokens:      4096,
-		ContextLimit:   128000,
-	}})
+	defect := &APIError{StatusCode: 503, Code: "missing_required_parameter", Message: "missing required parameter: capacity"}
+	for _, tc := range []struct {
+		name     string
+		fallback scriptedCall
+		wantErr  error
+	}{
+		{"fallback succeeds in the first round", scriptedCall{resp: &message.Response{Content: "fallback response"}}, nil},
+		{"fallback also fails", scriptedCall{err: &APIError{StatusCode: 503, Message: "temporary overload"}}, defect},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			primaryCfg := testProviderConfigWithKeys("primary", "model-primary", []string{"k1", "k2"})
+			fallbackCfg := testProviderConfig("fallback", "model-fallback")
+			disableRetryDelayForTest(primaryCfg)
+			disableRetryDelayForTest(fallbackCfg)
+			primaryImpl := &constantErrProvider{err: defect}
+			fallbackImpl := &recordingProvider{calls: []scriptedCall{tc.fallback, tc.fallback}}
+			c := NewClient(primaryCfg, primaryImpl, "model-primary", 4096, "sys")
+			defer c.Close()
+			c.SetFallbackModels([]FallbackModel{{
+				ProviderConfig: fallbackCfg, ProviderImpl: fallbackImpl, ModelID: "model-fallback", MaxTokens: 4096, ContextLimit: 128000,
+			}})
+			c.SetStreamRetryRounds(2)
 
-	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, nil)
-	if err != nil {
-		t.Fatalf("CompleteStream returned error: %v", err)
-	}
-	if resp == nil || resp.Content != "fallback response" {
-		t.Fatalf("unexpected response: %#v", resp)
-	}
-	if got := primaryImpl.calls; got != 1 {
-		t.Fatalf("primary calls = %d, want 1 for a request-shape failure", got)
-	}
-	if got := fallbackImpl.CallCount(); got != 1 {
-		t.Fatalf("fallback calls = %d, want 1", got)
+			resp, err := c.CompleteStream(t.Context(), []message.Message{{Role: message.RoleUser, Content: "hello"}}, nil, nil)
+			if !errors.Is(err, tc.wantErr) || (resp != nil) != (tc.fallback.resp != nil) || resp != nil && resp.Content != tc.fallback.resp.Content {
+				t.Errorf("response = %+v, error = %v; want %+v, %v", resp, err, tc.fallback.resp, tc.wantErr)
+			}
+			if primaryImpl.calls != 1 || fallbackImpl.CallCount() != 1 {
+				t.Errorf("calls = (%d, %d), want (1, 1): do not retry the defective target or the already-attempted sibling", primaryImpl.calls, fallbackImpl.CallCount())
+			}
+		})
 	}
 }
 

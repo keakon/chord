@@ -355,6 +355,13 @@ func TestAmbiguousReplayRecoveryCandidateRequiresUnclassifiedReplayExposure(t *t
 			t.Fatalf("structured transient capacity error %#v must not enter an ambiguous replay probe", apiErr)
 		}
 	}
+	defect := &APIError{Origin: APIErrorOriginWebSocketEvent, StatusCode: 503, Code: "missing_required_parameter", Message: "request was rejected"}
+	if isAmbiguousReplayRecoveryCandidate(defect, provider, report) {
+		t.Fatal("explicit request-shape rejection must not enter an ambiguous replay probe")
+	}
+	if isInterruptedStreamError(defect) {
+		t.Fatal("explicit request-shape rejection must not trigger stream continuation")
+	}
 	if !isAmbiguousReplayRecoveryCandidate(&APIError{StatusCode: 400, Message: "bad request"}, provider, report) {
 		t.Fatal("diagnostic-free compatible-gateway 400 should allow request-scoped replay recovery")
 	}
